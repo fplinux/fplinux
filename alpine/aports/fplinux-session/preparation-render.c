@@ -35,7 +35,6 @@ bool fplinux_preparation_render(
 	resources.theme = fplinux_ui_theme_spec(FPLINUX_UI_SESSION_THEME_DARK);
 	resources.body = fplinux_status_font_by_id(profile->font_body);
 	resources.title = fplinux_status_font_by_id(profile->font_title);
-	resources.legend = fplinux_status_font_by_id(profile->font_legend);
 	resources.mark = NULL;
 	resources.activity = fplinux_activity_mask(
 		(unsigned int)profile->spinner_size,

@@ -45,10 +45,9 @@
 #define RETRY_MS 1000U
 #define PRIORITY 5
 /* An underrun burst ends after a second of output without one. */
-#define CLEAN_FRAMES FPLINUX_AUDIO_MIXER_RATE
 #define NEVER UINT64_MAX
 
-enum { OPTION_DIR, OPTION_DEVICE, OPTION_PERIOD, OPTION_BUFFER };
+enum { OPTION_DIR, OPTION_DEVICE, OPTION_PERIOD, OPTION_BUFFER, OPTION_STATUS };
 
 enum {
 	POLL_SIGNAL,
@@ -56,6 +55,10 @@ enum {
 	POLL_CONTROL,
 	POLL_MANAGER,
 	POLL_STREAM,
+	POLL_STATUS,
+	POLL_RADIO_LISTEN,
+	POLL_RADIO,
+	POLL_CONTROLS,
 	POLL_CONNECTIONS,
 	POLL_DEVICE = POLL_CONNECTIONS + FPLINUX_AUDIO_CONNECTIONS,
 	POLL_COUNT = POLL_DEVICE + FPLINUX_AUDIO_DEVICE_FDS,
@@ -70,16 +73,23 @@ struct options {
 struct audio_service {
 	char control_path[sizeof(((struct sockaddr_un *)0)->sun_path)];
 	char stream_path[sizeof(((struct sockaddr_un *)0)->sun_path)];
+	char status_path[sizeof(((struct sockaddr_un *)0)->sun_path)];
+	char radio_path[sizeof(((struct sockaddr_un *)0)->sun_path)];
 	int signals;
 	int timer;
 	int control;
 	int manager;
 	int stream;
+	int status;
+	int radio_listen;
+	int radio;
+	bool radio_requested;
+	bool radio_announced;
 	uint64_t timer_ms;
 	struct fplinux_audio_device device;
 	struct fplinux_audio_streams streams;
-	struct fplinux_audio_mixer_gain master;
-	bool manager_announced;
+	uint64_t clipped_samples;
+	int device_error;
 	int32_t *mix;
 	int16_t *output;
 	/* Frames at the end of output not yet written to the card. */
@@ -90,12 +100,69 @@ struct audio_service {
 	bool underrun;
 };
 
+static void close_device(struct audio_service *service);
+
 static uint64_t now_ms(void)
 {
 	struct timespec now;
 
 	clock_gettime(CLOCK_MONOTONIC, &now);
 	return (uint64_t)now.tv_sec * 1000 + (uint64_t)now.tv_nsec / 1000000;
+}
+
+static int show_status(const char *directory)
+{
+	struct sockaddr_un address = { .sun_family = AF_UNIX };
+	struct pollfd ready;
+	char state[512];
+	uint64_t deadline = now_ms() + 500;
+	ssize_t length;
+	int fd, result, error;
+
+	snprintf(address.sun_path, sizeof(address.sun_path), "%s%s", directory,
+		 strrchr(FPLINUX_AUDIO_STATUS_SOCKET, '/'));
+	fd = socket(AF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC | SOCK_NONBLOCK, 0);
+	if (fd < 0)
+		goto fail;
+	if (connect(fd, (struct sockaddr *)&address, sizeof(address)) < 0)
+		goto close_failed;
+	ready = (struct pollfd){ .fd = fd, .events = POLLIN };
+	for (;;) {
+		uint64_t now = now_ms();
+
+		if (now >= deadline) {
+			errno = ETIMEDOUT;
+			goto close_failed;
+		}
+		result = poll(&ready, 1, (int)(deadline - now));
+		if (result < 0 && errno == EINTR)
+			continue;
+		if (result <= 0) {
+			if (!result)
+				errno = ETIMEDOUT;
+			goto close_failed;
+		}
+		break;
+	}
+	length = recv(fd, state, sizeof(state), MSG_DONTWAIT | MSG_TRUNC);
+	if (length < 6 || (size_t)length >= sizeof(state) ||
+	    memcmp(state, "STATE ", 6) || memchr(state, '\0', (size_t)length)) {
+		errno = EPROTO;
+		goto close_failed;
+	}
+	close(fd);
+	if (fwrite(state, 1, (size_t)length, stdout) != (size_t)length ||
+	    putchar('\n') == EOF)
+		goto fail;
+	return 0;
+
+close_failed:
+	error = errno;
+	close(fd);
+	errno = error;
+fail:
+	fprintf(stderr, "fplinux-audiod: status: %s\n", strerror(errno));
+	return 1;
 }
 
 static const char *parse_option(size_t option, const char *value, void *data)
@@ -160,12 +227,13 @@ static void drop_manager(struct audio_service *service)
 {
 	close(service->manager);
 	service->manager = -1;
-	service->manager_announced = false;
 	fplinux_audio_streams_manager(&service->streams, false, 0);
+	if (service->device.pcm)
+		close_device(service);
 	printf("fplinux-audiod: manager disconnected; streams paused\n");
 }
 
-/* One manager at a time, with audiod's own user; a new one replaces it. */
+/* A second peer cannot replace the trusted manager. */
 static void accept_manager(struct audio_service *service, uint64_t now)
 {
 	struct ucred credentials;
@@ -177,8 +245,10 @@ static void accept_manager(struct audio_service *service, uint64_t now)
 			close(fd);
 			continue;
 		}
-		if (service->manager >= 0)
-			drop_manager(service);
+		if (service->manager >= 0) {
+			close(fd);
+			continue;
+		}
 		service->manager = fd;
 		fplinux_audio_streams_manager(&service->streams, true, now);
 		printf("fplinux-audiod: manager connected\n");
@@ -209,44 +279,167 @@ static void read_manager(struct audio_service *service)
 		command[length] = '\0';
 		if (!strncmp(command, FPLINUX_AUDIO_CONTROL_VOLUME " ",
 			     sizeof(FPLINUX_AUDIO_CONTROL_VOLUME))) {
-			unsigned int level;
-			char expected[32], reply[32];
+			unsigned int level, alarm;
+			char expected[32];
 			ssize_t sent;
 
-			for (level = 0; level <= FPLINUX_AUDIO_VOLUME_MAX;
-			     ++level) {
-				snprintf(expected, sizeof(expected),
-					 FPLINUX_AUDIO_CONTROL_VOLUME " %u",
-					 level);
-				if (!strcmp(command, expected))
+			for (alarm = 0; alarm < 2; ++alarm) {
+				for (level = 0;
+				     level <= FPLINUX_AUDIO_VOLUME_MAX;
+				     ++level) {
+					snprintf(expected, sizeof(expected),
+						 "VOLUME %s %u",
+						 alarm ? "ALARM" : "MEDIA",
+						 level);
+					if (!strcmp(command, expected))
+						break;
+				}
+				if (level <= FPLINUX_AUDIO_VOLUME_MAX)
 					break;
 			}
-			if (level > FPLINUX_AUDIO_VOLUME_MAX)
+			if (alarm == 2)
 				continue;
-			service->master.target =
-				(int32_t)(level * FPLINUX_AUDIO_MIXER_UNITY /
-					  FPLINUX_AUDIO_VOLUME_MAX);
-			if (!service->manager_announced) {
-				service->master.current =
-					service->master.target;
-				fplinux_audio_streams_manager(&service->streams,
-							      true, now_ms());
+			if (!alarm && service->device.fm_enabled) {
+				int error = fplinux_audio_device_fm(
+					&service->device, true, level);
+
+				if (error < 0) {
+					service->device_error = error;
+					drop_manager(service);
+					return;
+				}
 			}
-			snprintf(reply, sizeof(reply),
-				 FPLINUX_AUDIO_CONTROL_VOLUME " %u", level);
+			fplinux_audio_streams_volume(&service->streams,
+						     alarm != 0, level);
 			do {
-				sent = send(service->manager, reply,
-					    strlen(reply),
+				sent = send(service->manager, command,
+					    strlen(command),
 					    MSG_DONTWAIT | MSG_NOSIGNAL);
 			} while (sent < 0 && errno == EINTR);
-			if (sent != (ssize_t)strlen(reply)) {
+			if (sent != (ssize_t)strlen(command)) {
 				drop_manager(service);
 				return;
 			}
 			continue;
 		}
-		service->manager_announced = true;
+		if (!strncmp(command, "OUTPUT ", 7)) {
+			const char *names[] = { "AUTO", "SPEAKER",
+						"HEADPHONES" };
+			unsigned int route;
+			char reply[48];
+			int error;
+
+			for (route = 0;
+			     route < sizeof(names) / sizeof(names[0]); ++route)
+				if (!strcmp(command + 7, names[route]))
+					break;
+			if (route == sizeof(names) / sizeof(names[0]))
+				continue;
+			error = fplinux_audio_device_route(
+				&service->device,
+				(enum fplinux_audio_route)route);
+			service->device_error = error;
+			if (error < 0)
+				snprintf(reply, sizeof(reply),
+					 "OUTPUT ERROR %d", -error);
+			else
+				snprintf(reply, sizeof(reply), "OUTPUT %s",
+					 names[route]);
+			if (send(service->manager, reply, strlen(reply),
+				 MSG_DONTWAIT | MSG_NOSIGNAL) !=
+			    (ssize_t)strlen(reply)) {
+				drop_manager(service);
+				return;
+			}
+			continue;
+		}
 		fplinux_audio_streams_command(&service->streams, command);
+	}
+}
+
+enum playback_activity {
+	ACTIVITY_NONE,
+	ACTIVITY_PAUSED,
+	ACTIVITY_HELD,
+	ACTIVITY_UNAVAILABLE,
+	ACTIVITY_PLAYING,
+};
+
+static enum playback_activity
+process_activity(const struct audio_service *service,
+		 const struct fplinux_audio_process *process)
+{
+	enum playback_activity activity = ACTIVITY_NONE;
+
+	for (unsigned int i = 0; i < FPLINUX_AUDIO_APP_STREAMS; ++i) {
+		const struct fplinux_audio_stream *stream =
+			&service->streams.streams[i];
+		const struct fplinux_audio_connection *connection;
+		enum playback_activity current;
+
+		if (!stream->ring)
+			continue;
+		connection = &service->streams.connections[stream->connection];
+		if (connection->pid != process->pid ||
+		    connection->uid != process->uid || connection->clock)
+			continue;
+		if (stream->user_paused)
+			current = ACTIVITY_PAUSED;
+		else if (atomic_load(&stream->ring->write) ==
+			 stream->mixer.heard)
+			continue;
+		else if (stream->route_paused ||
+			 service->streams.private_unavailable ||
+			 stream->state == FPLINUX_AUDIO_RING_UNAVAILABLE)
+			current = ACTIVITY_UNAVAILABLE;
+		else if (stream->mixer.paused)
+			current = ACTIVITY_HELD;
+		else if (service->streams.output == FPLINUX_AUDIO_OUTPUT_OPEN)
+			current = ACTIVITY_PLAYING;
+		else
+			continue;
+		if (current > activity)
+			activity = current;
+	}
+	return activity;
+}
+
+static void announce_activity(struct audio_service *service)
+{
+	static const char *const names[] = {
+		"none", "paused", "held", "unavailable", "playing",
+	};
+
+	if (service->manager < 0 || !service->streams.manager_ready)
+		return;
+	for (unsigned int i = 0; i < FPLINUX_AUDIO_PROCESSES; ++i) {
+		struct fplinux_audio_process *process =
+			&service->streams.processes[i];
+		enum playback_activity activity;
+		char packet[FPLINUX_AUDIO_CONTROL_BYTES];
+		ssize_t sent;
+		size_t length;
+
+		if (!process->pid || process->clock)
+			continue;
+		activity = process_activity(service, process);
+		if (process->activity_known && process->activity == activity)
+			continue;
+		snprintf(packet, sizeof(packet),
+			 FPLINUX_AUDIO_CONTROL_ACTIVITY " %ld %lu %s",
+			 (long)process->pid, (unsigned long)process->uid,
+			 names[activity]);
+		length = strlen(packet);
+		do {
+			sent = send(service->manager, packet, length,
+				    MSG_DONTWAIT | MSG_NOSIGNAL);
+		} while (sent < 0 && errno == EINTR);
+		if (sent != (ssize_t)length) {
+			drop_manager(service);
+			return;
+		}
+		process->activity = activity;
+		process->activity_known = true;
 	}
 }
 
@@ -262,6 +455,117 @@ static void accept_streams(struct audio_service *service, uint64_t now)
 						  credentials.pid,
 						  credentials.uid, now))
 			close(fd);
+}
+
+static void diagnostic(struct audio_service *service)
+{
+	struct fplinux_audio_device *device = &service->device;
+	char state[512];
+	int fd;
+
+	snprintf(
+		state, sizeof(state),
+		"STATE media=%u alarm=%u rate=%u output=%u applied=%u speaker=%u headphones=%u jack=%u plugged=%u fm=%u fm_active=%u clock=%u foreground=%u pcm=%u clipped=%llu error=%d",
+		service->streams.media_volume, service->streams.alarm_volume,
+		device->rate, device->route, device->applied_route,
+		device->speaker_id != 0 || device->fixed_speaker,
+		device->headphone_id != 0, device->jack_id != 0,
+		device->jack_present, fplinux_audio_device_fm_available(device),
+		device->fm_enabled, service->streams.clock_active,
+		service->streams.foreground_active, device->pcm != NULL,
+		(unsigned long long)service->clipped_samples,
+		service->device_error < 0 ? -service->device_error : 0);
+	while ((fd = accept4(service->status, NULL, NULL,
+			     SOCK_CLOEXEC | SOCK_NONBLOCK)) >= 0) {
+		/* This endpoint never reads commands and never changes policy. */
+		send(fd, state, strlen(state), MSG_DONTWAIT | MSG_NOSIGNAL);
+		close(fd);
+	}
+}
+
+static void drop_radio(struct audio_service *service)
+{
+	int error;
+
+	if (service->radio >= 0)
+		close(service->radio);
+	service->radio = -1;
+	service->radio_requested = false;
+	service->radio_announced = false;
+	service->streams.fm_active = false;
+	error = fplinux_audio_device_radio_close(&service->device);
+	if (error < 0)
+		service->device_error = error;
+}
+
+static void accept_radio(struct audio_service *service)
+{
+	struct ucred credentials;
+	int fd;
+
+	while ((fd = accept4(service->radio_listen, NULL, NULL,
+			     SOCK_CLOEXEC | SOCK_NONBLOCK)) >= 0) {
+		if (!peer(fd, &credentials) || credentials.uid != geteuid() ||
+		    service->radio >= 0) {
+			close(fd);
+			continue;
+		}
+		service->radio = fd;
+	}
+}
+
+static bool private_output_missing(const struct audio_service *service)
+{
+	bool headphones =
+		service->device.route == FPLINUX_AUDIO_ROUTE_HEADPHONES ||
+		(service->device.route == FPLINUX_AUDIO_ROUTE_AUTO &&
+		 !service->device.speaker_id && !service->device.fixed_speaker);
+
+	return headphones && service->device.jack_id &&
+	       !service->device.jack_present;
+}
+
+static void read_radio(struct audio_service *service)
+{
+	char command[32];
+	unsigned int frequency;
+	ssize_t length = recv(service->radio, command, sizeof(command),
+			      MSG_DONTWAIT | MSG_TRUNC);
+	int error;
+
+	if (length < 0 && (errno == EAGAIN || errno == EINTR))
+		return;
+	if (length <= 0 || (size_t)length >= sizeof(command) ||
+	    memchr(command, '\0', (size_t)length) || service->radio_announced) {
+		drop_radio(service);
+		return;
+	}
+	command[length] = '\0';
+	if (!strcmp(command, "SCAN")) {
+		service->radio_announced = true;
+		if (send(service->radio, "READY", 5,
+			 MSG_DONTWAIT | MSG_NOSIGNAL) != 5)
+			drop_radio(service);
+		return;
+	}
+	if (strncmp(command, "PLAY ", 5) ||
+	    !fplinux_cli_unsigned(command + 5, 875, 1080, &frequency)) {
+		drop_radio(service);
+		return;
+	}
+	error = private_output_missing(service) ?
+			-ENODEV :
+			fplinux_audio_device_tune(&service->device, frequency);
+	if (error < 0) {
+		char reply[32];
+
+		snprintf(reply, sizeof(reply), "ERROR %d", -error);
+		send(service->radio, reply, strlen(reply),
+		     MSG_DONTWAIT | MSG_NOSIGNAL);
+		drop_radio(service);
+		return;
+	}
+	service->radio_requested = true;
 }
 
 static void close_device(struct audio_service *service)
@@ -325,7 +629,7 @@ static void fill(struct audio_service *service, uint64_t now)
 			}
 			service->pending -= (uint32_t)result;
 			service->clean += (uint64_t)result;
-			if (service->clean >= CLEAN_FRAMES)
+			if (service->clean >= device->rate)
 				service->underrun = false;
 			if (service->pending)
 				break;
@@ -341,8 +645,9 @@ static void fill(struct audio_service *service, uint64_t now)
 		if (fplinux_audio_streams_mix(&service->streams, service->mix,
 					      device->period))
 			service->audible_ms = now;
-		fplinux_audio_mixer_master(service->mix, device->period,
-					   &service->master);
+		for (uint32_t i = 0; i < device->period * 2; ++i)
+			if (service->mix[i] > 32767 || service->mix[i] < -32768)
+				++service->clipped_samples;
 		fplinux_audio_mixer_output(service->mix, service->output,
 					   device->period);
 		service->pending = device->period;
@@ -370,7 +675,7 @@ static void open_device(struct audio_service *service, uint64_t now)
 }
 
 /*
- * The policy first, so that AUDIBLE 0 takes effect before the next period;
+ * The policy first, so that eligibility changes precede the next period;
  * then the card: write, release after silence, open for audible frames.
  * Returns whether a stream waits for the card.
  */
@@ -379,8 +684,50 @@ static bool advance(struct audio_service *service, uint64_t now,
 {
 	enum fplinux_audio_output *output = &service->streams.output;
 	bool wanted;
+	int error;
 
+	service->streams.private_unavailable = private_output_missing(service);
+	if (service->streams.private_unavailable && service->radio_requested)
+		drop_radio(service);
 	fplinux_audio_streams_refresh(&service->streams);
+	if (service->streams.private_unavailable &&
+	    !service->device.alarm_active && service->device.pcm)
+		close_device(service);
+	error = fplinux_audio_device_alarm(&service->device,
+					   service->streams.clock_active);
+	if (error < 0) {
+		service->device_error = error;
+		if (service->device.pcm)
+			close_device(service);
+		make_unavailable(service, now);
+		return fplinux_audio_streams_refresh(&service->streams);
+	}
+	if (service->radio_requested) {
+		bool enable = !service->streams.clock_active;
+
+		if (enable && service->device.pcm)
+			close_device(service);
+		error = fplinux_audio_device_fm(&service->device, enable,
+						service->streams.media_volume);
+		if (error < 0) {
+			char reply[32];
+
+			service->device_error = error;
+			snprintf(reply, sizeof(reply), "ERROR %d", -error);
+			send(service->radio, reply, strlen(reply),
+			     MSG_DONTWAIT | MSG_NOSIGNAL);
+			drop_radio(service);
+		} else {
+			service->streams.fm_active = enable;
+			if (!service->radio_announced) {
+				service->radio_announced = true;
+				if (send(service->radio, "READY", 5,
+					 MSG_DONTWAIT | MSG_NOSIGNAL) != 5)
+					drop_radio(service);
+			}
+		}
+		fplinux_audio_streams_refresh(&service->streams);
+	}
 	if (*output == FPLINUX_AUDIO_OUTPUT_OPEN && card_ready)
 		fill(service, now);
 	if (*output == FPLINUX_AUDIO_OUTPUT_OPEN &&
@@ -425,6 +772,12 @@ static void watch(struct audio_service *service, struct pollfd *fds)
 	fds[POLL_CONTROL] = (struct pollfd){ service->control, POLLIN, 0 };
 	fds[POLL_MANAGER] = (struct pollfd){ service->manager, POLLIN, 0 };
 	fds[POLL_STREAM] = (struct pollfd){ service->stream, POLLIN, 0 };
+	fds[POLL_STATUS] = (struct pollfd){ service->status, POLLIN, 0 };
+	fds[POLL_RADIO_LISTEN] =
+		(struct pollfd){ service->radio_listen, POLLIN, 0 };
+	fds[POLL_RADIO] = (struct pollfd){ service->radio, POLLIN, 0 };
+	fds[POLL_CONTROLS] =
+		(struct pollfd){ service->device.control_fd, POLLIN, 0 };
 	for (i = 0; i < FPLINUX_AUDIO_CONNECTIONS; ++i) {
 		const struct fplinux_audio_connection *connection =
 			&service->streams.connections[i];
@@ -474,6 +827,48 @@ static int serve(struct audio_service *service)
 			drop_manager(service);
 		if (fds[POLL_CONTROL].revents & POLLIN)
 			accept_manager(service, now);
+		if (fds[POLL_STATUS].revents & POLLIN)
+			diagnostic(service);
+		if (fds[POLL_RADIO].revents) {
+			if (fds[POLL_RADIO].revents & POLLIN)
+				read_radio(service);
+			else
+				drop_radio(service);
+		}
+		if (fds[POLL_RADIO_LISTEN].revents & POLLIN)
+			accept_radio(service);
+		if (fds[POLL_CONTROLS].revents) {
+			bool private_output = service->device.applied_route ==
+					      FPLINUX_AUDIO_ROUTE_HEADPHONES;
+			int changed =
+				fplinux_audio_device_events(&service->device);
+
+			service->device_error = changed < 0 ? changed : 0;
+			if (changed > 0) {
+				if ((changed &
+				     FPLINUX_AUDIO_DEVICE_PRIVATE_LOST) &&
+				    private_output) {
+					fplinux_audio_streams_private_output_lost(
+						&service->streams);
+					if (service->device.pcm)
+						close_device(service);
+					if (service->radio_requested)
+						drop_radio(service);
+				}
+				if (service->device.route ==
+					    FPLINUX_AUDIO_ROUTE_AUTO &&
+				    !service->device.fm_enabled)
+					service->device_error =
+						fplinux_audio_device_route(
+							&service->device,
+							service->device.route);
+			}
+			if (service->device_error < 0)
+				fprintf(stderr,
+					"fplinux-audiod: route update: %s\n",
+					fplinux_audio_device_error(
+						service->device_error));
+		}
 		for (i = 0; i < FPLINUX_AUDIO_CONNECTIONS; ++i) {
 			short revents = fds[POLL_CONNECTIONS + i].revents;
 
@@ -497,6 +892,7 @@ static int serve(struct audio_service *service)
 				&service->device, &fds[POLL_DEVICE]);
 		next = fplinux_audio_streams_expire(&service->streams, now);
 		wanted = advance(service, now, card_ready);
+		announce_activity(service);
 		if (service->streams.output == FPLINUX_AUDIO_OUTPUT_OPEN &&
 		    service->audible_ms + IDLE_MS < next)
 			next = service->audible_ms + IDLE_MS;
@@ -525,12 +921,18 @@ static int start(struct audio_service *service, const char *directory)
 {
 	const char *control = strrchr(FPLINUX_AUDIO_CONTROL_SOCKET, '/');
 	const char *stream = strrchr(FPLINUX_AUDIO_STREAM_SOCKET, '/');
+	const char *status = strrchr(FPLINUX_AUDIO_STATUS_SOCKET, '/');
+	const char *radio = strrchr(FPLINUX_AUDIO_RADIO_SOCKET, '/');
 	sigset_t stops;
 
 	snprintf(service->control_path, sizeof(service->control_path), "%s%s",
 		 directory, control);
 	snprintf(service->stream_path, sizeof(service->stream_path), "%s%s",
 		 directory, stream);
+	snprintf(service->status_path, sizeof(service->status_path), "%s%s",
+		 directory, status);
+	snprintf(service->radio_path, sizeof(service->radio_path), "%s%s",
+		 directory, radio);
 	sigemptyset(&stops);
 	sigaddset(&stops, SIGTERM);
 	sigaddset(&stops, SIGINT);
@@ -550,7 +952,12 @@ static int start(struct audio_service *service, const char *directory)
 	if (service->control < 0)
 		return -1;
 	service->stream = listen_at(service->stream_path, 0660);
-	return service->stream < 0 ? -1 : 0;
+	service->status = listen_at(service->status_path, 0660);
+	service->radio_listen = listen_at(service->radio_path, 0600);
+	return service->stream < 0 || service->status < 0 ||
+			       service->radio_listen < 0 ?
+		       -1 :
+		       0;
 }
 
 int main(int argc, char **argv)
@@ -568,6 +975,8 @@ int main(int argc, char **argv)
 		[OPTION_BUFFER] = { .name = "buffer-frames",
 				    .metavar = "N",
 				    .help = "Keep N frames in the card." },
+		[OPTION_STATUS] = { .name = "status",
+				    .help = "Print the running service's read-only state." },
 	};
 	struct options options = {
 		.directory = FPLINUX_AUDIO_DIR,
@@ -588,17 +997,26 @@ int main(int argc, char **argv)
 		.control = -1,
 		.manager = -1,
 		.stream = -1,
+		.status = -1,
+		.radio_listen = -1,
+		.radio = -1,
 		.timer_ms = NEVER,
-		.master = { .current = FPLINUX_AUDIO_MIXER_UNITY,
-			    .target = FPLINUX_AUDIO_MIXER_UNITY },
 	};
 	enum fplinux_cli_result parsed = fplinux_cli_parse(&cli, argc, argv);
-	int result = 1;
+	int result = 1, device_error;
 
 	if (parsed != FPLINUX_CLI_READY)
 		return parsed;
 	if (arguments[OPTION_DIR].count)
 		options.directory = arguments[OPTION_DIR].value;
+	if (arguments[OPTION_STATUS].count) {
+		if (arguments[OPTION_DEVICE].count ||
+		    arguments[OPTION_PERIOD].count ||
+		    arguments[OPTION_BUFFER].count)
+			return fplinux_cli_error(&cli,
+						 "--status accepts only --dir");
+		return show_status(options.directory);
+	}
 	if (options.buffer < 2 * options.period ||
 	    options.buffer > (FPLINUX_AUDIO_MIXER_HISTORY - 2) * options.period)
 		return fplinux_cli_error(
@@ -615,6 +1033,18 @@ int main(int argc, char **argv)
 	signal(SIGPIPE, SIG_IGN);
 	umask(077);
 	fplinux_audio_streams_init(&service.streams);
+	device_error = fplinux_audio_device_init(&service.device);
+	if (device_error < 0) {
+		fprintf(stderr,
+			"fplinux-audiod: initialize the sound card: %s\n",
+			fplinux_audio_device_error(device_error));
+		goto done;
+	}
+	service.streams.rate = service.device.rate;
+	if (service.device.rate == 44100) {
+		service.device.period = options.period / 480 * 441;
+		service.device.buffer = options.buffer / 480 * 441;
+	}
 	raise_priority();
 	if (start(&service, options.directory) < 0) {
 		fprintf(stderr, "fplinux-audiod: startup in %s: %s\n",
@@ -631,8 +1061,8 @@ int main(int argc, char **argv)
 done:
 	/* Ending the streams hangs up on every application. */
 	fplinux_audio_streams_stop(&service.streams);
-	if (service.device.pcm)
-		fplinux_audio_device_close(&service.device);
+	drop_radio(&service);
+	fplinux_audio_device_cleanup(&service.device);
 	if (service.manager >= 0)
 		close(service.manager);
 	if (service.timer >= 0)
@@ -646,6 +1076,14 @@ done:
 	if (service.stream >= 0) {
 		close(service.stream);
 		unlink(service.stream_path);
+	}
+	if (service.status >= 0) {
+		close(service.status);
+		unlink(service.status_path);
+	}
+	if (service.radio_listen >= 0) {
+		close(service.radio_listen);
+		unlink(service.radio_path);
 	}
 	free(service.mix);
 	free(service.output);

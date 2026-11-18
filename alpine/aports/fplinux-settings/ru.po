@@ -199,3 +199,403 @@ msgstr "Недоступно"
 
 msgid "Year must be between 1980 and 2099."
 msgstr "Год должен быть от 1980 до 2099."
+
+msgid "Sound"
+msgstr "Звук"
+
+msgid "Media volume"
+msgstr "Громкость медиа"
+
+#, c-format
+msgid "Media: %u/10"
+msgstr "Медиа: %u/10"
+
+msgid "Alarm volume"
+msgstr "Громкость будильника"
+
+msgid "Output"
+msgstr "Выход звука"
+
+msgid "Automatic"
+msgstr "Автоматически"
+
+msgid "Speaker"
+msgstr "Динамик"
+
+msgid "Headphones"
+msgstr "Наушники"
+
+msgid "Left/Right: volume. Save keeps the level."
+msgstr "Влево/вправо: громкость. Сохранить — оставить."
+
+msgid "Power"
+msgstr "Питание"
+
+msgid "Visibility"
+msgstr "Видимость"
+
+msgid "Phone name"
+msgstr "Имя телефона"
+
+msgid "Nearby devices"
+msgstr "Устройства рядом"
+
+msgid "Paired devices"
+msgstr "Сопряжённые устройства"
+
+msgid "Send file"
+msgstr "Отправить файл"
+
+msgid "Receive files"
+msgstr "Принять файлы"
+
+msgid "File transfer"
+msgstr "Передача файлов"
+
+msgid "Transfer history"
+msgstr "История передач"
+
+msgid "Hidden"
+msgstr "Скрыт"
+
+msgid "2 minutes"
+msgstr "2 минуты"
+
+msgid "Always visible"
+msgstr "Всегда виден"
+
+msgid "In progress"
+msgstr "Выполняется"
+
+msgid "Idle"
+msgstr "Нет передачи"
+
+msgid "Search"
+msgstr "Поиск"
+
+msgid "Stop search"
+msgstr "Остановить поиск"
+
+msgid "Searching…"
+msgstr "Поиск…"
+
+msgid "Starting search…"
+msgstr "Запуск поиска…"
+
+msgid "Stopping search…"
+msgstr "Остановка поиска…"
+
+msgid "Bluetooth is off"
+msgstr "Bluetooth выключен"
+
+msgid "No nearby devices"
+msgstr "Рядом нет устройств"
+
+msgid "No paired devices"
+msgstr "Нет сопряжённых устройств"
+
+msgid "Choose Search to find devices."
+msgstr "Чтобы найти устройства, выберите «Поиск»."
+
+msgid "Turn Bluetooth on to search."
+msgstr "Для поиска включите Bluetooth."
+
+msgid "Turn Bluetooth on first."
+msgstr "Сначала включите Bluetooth."
+
+msgid "Device"
+msgstr "Устройство"
+
+msgid "Device unavailable"
+msgstr "Устройство недоступно"
+
+msgid "The device is no longer known to Bluetooth."
+msgstr "Устройство больше не доступно в Bluetooth."
+
+msgid "Address"
+msgstr "Адрес"
+
+msgid "Status"
+msgstr "Состояние"
+
+msgid "Connected"
+msgstr "Подключено"
+
+msgid "Paired"
+msgstr "Сопряжено"
+
+msgid "Not paired"
+msgstr "Не сопряжено"
+
+msgid "Signal"
+msgstr "Сигнал"
+
+#, c-format
+msgid "%d dBm"
+msgstr "%d дБм"
+
+msgid "Battery"
+msgstr "Батарея"
+
+msgid "Services"
+msgstr "Службы"
+
+msgid "Not resolved"
+msgstr "Не определены"
+
+msgid "Pair"
+msgstr "Сопрячь"
+
+msgid "Connect"
+msgstr "Подключить"
+
+msgid "Disconnect"
+msgstr "Отключить"
+
+msgid "Trusted"
+msgstr "Доверенное"
+
+msgid "Yes"
+msgstr "Да"
+
+msgid "No"
+msgstr "Нет"
+
+msgid "Rename device"
+msgstr "Переименовать устройство"
+
+msgid "Forget device"
+msgstr "Забыть устройство"
+
+msgid "Forget"
+msgstr "Забыть"
+
+msgid "Remove this device and its pairing? Pair it again to reconnect."
+msgstr "Удалить устройство и его сопряжение? Для подключения понадобится новое сопряжение."
+
+msgid "Forgetting device…"
+msgstr "Удаление устройства…"
+
+msgid "Object Push"
+msgstr "Обмен файлами"
+
+msgid "Audio source"
+msgstr "Источник звука"
+
+msgid "Audio sink"
+msgstr "Приёмник звука"
+
+msgid "Hands-free"
+msgstr "Гарнитура"
+
+msgid "Input device"
+msgstr "Устройство ввода"
+
+msgid "Battery service"
+msgstr "Служба батареи"
+
+msgid "Bluetooth service"
+msgstr "Служба Bluetooth"
+
+msgid "No services reported"
+msgstr "Нет сведений о службах"
+
+msgid "Connect the device to resolve services."
+msgstr "Подключите устройство, чтобы определить службы."
+
+msgid "Connecting service…"
+msgstr "Подключение службы…"
+
+msgid "Connecting…"
+msgstr "Подключение…"
+
+msgid "Disconnecting…"
+msgstr "Отключение…"
+
+msgid "Changing trust…"
+msgstr "Изменение доверия…"
+
+msgid "Changing visibility…"
+msgstr "Изменение видимости…"
+
+msgid "Name"
+msgstr "Имя"
+
+msgid "Enter a name."
+msgstr "Введите имя."
+
+msgid "The name is too long."
+msgstr "Слишком длинное имя."
+
+msgid "Saving name…"
+msgstr "Сохранение имени…"
+
+msgid "Pairing"
+msgstr "Сопряжение"
+
+msgid "Pairing…"
+msgstr "Сопряжение…"
+
+msgid "Pairing is unavailable. Try again."
+msgstr "Сопряжение недоступно. Повторите попытку."
+
+msgid "PIN"
+msgstr "PIN"
+
+msgid "Passkey"
+msgstr "Код доступа"
+
+msgid "Enter the code."
+msgstr "Введите код."
+
+msgid "The code is too long."
+msgstr "Слишком длинный код."
+
+msgid "Enter on the other device"
+msgstr "Введите на другом устройстве"
+
+#, c-format
+msgid "%06u · %u entered"
+msgstr "%06u · введено %u"
+
+#, c-format
+msgid "Does this code match on %s?\n%06u"
+msgstr "Код на устройстве %s совпадает?\n%06u"
+
+#, c-format
+msgid "Allow pairing with %s?"
+msgstr "Разрешить сопряжение с %s?"
+
+#, c-format
+msgid "Allow %s to use this service?\n%s"
+msgstr "Разрешить устройству %s использовать службу?\n%s"
+
+msgid "Accept"
+msgstr "Принять"
+
+msgid "Reject"
+msgstr "Отклонить"
+
+msgid "Bluetooth is unavailable."
+msgstr "Bluetooth недоступен."
+
+msgid "Another Bluetooth operation is in progress."
+msgstr "Другая операция Bluetooth ещё выполняется."
+
+msgid "The Bluetooth request was refused."
+msgstr "Запрос Bluetooth отклонён."
+
+msgid "This Bluetooth service is unavailable."
+msgstr "Эта служба Bluetooth недоступна."
+
+msgid "The device did not respond. Try again."
+msgstr "Устройство не ответило. Попробуйте ещё раз."
+
+msgid "Not enough memory."
+msgstr "Недостаточно памяти."
+
+msgid "Finishing…"
+msgstr "Завершение…"
+
+msgid "Bluetooth operation failed. Try again."
+msgstr "Операция Bluetooth не выполнена. Попробуйте ещё раз."
+
+msgid "No application can open this file type."
+msgstr "Нет приложения для открытия файлов этого типа."
+
+msgid "Cannot open this file."
+msgstr "Не удалось открыть файл."
+
+msgid "Send to"
+msgstr "Отправить на"
+
+msgid "Receive from"
+msgstr "Принять от"
+
+msgid "Receive into"
+msgstr "Папка приёма"
+
+msgid "Receive here"
+msgstr "Принять сюда"
+
+msgid "Incoming file"
+msgstr "Входящий файл"
+
+msgid "Receive"
+msgstr "Принять"
+
+#, c-format
+msgid "Receive %s from %s?"
+msgstr "Принять файл %s от %s?"
+
+msgid "File exists"
+msgstr "Файл существует"
+
+#, c-format
+msgid "%s already exists. Keep both files or replace it?"
+msgstr "%s уже существует. Сохранить оба файла или заменить?"
+
+msgid "Keep both"
+msgstr "Сохранить оба"
+
+msgid "Replace"
+msgstr "Заменить"
+
+msgid "File"
+msgstr "Файл"
+
+msgid "Transferred"
+msgstr "Передано"
+
+msgid "Location"
+msgstr "Расположение"
+
+msgid "Waiting for a file · 2 minutes"
+msgstr "Ожидание файла · 2 минуты"
+
+msgid "Waiting for consent…"
+msgstr "Ожидание согласия…"
+
+msgid "Transferring…"
+msgstr "Передача…"
+
+msgid "Saving file…"
+msgstr "Сохранение файла…"
+
+#, c-format
+msgid "%llu / %llu bytes"
+msgstr "%llu / %llu байт"
+
+#, c-format
+msgid "%llu bytes · total unknown"
+msgstr "%llu байт · размер неизвестен"
+
+msgid "Complete"
+msgstr "Завершено"
+
+msgid "Cancelled"
+msgstr "Отменено"
+
+msgid "Failed"
+msgstr "Ошибка"
+
+msgid "The file is visible. Saving was not confirmed."
+msgstr "Файл виден. Сохранение не подтверждено."
+
+msgid "Cancel transfer"
+msgstr "Отменить передачу"
+
+msgid "No file transfers in this session."
+msgstr "В этом сеансе ещё не было передач."
+
+msgid "Transfer details"
+msgstr "Сведения о передаче"
+
+msgid "Open file"
+msgstr "Открыть файл"
+
+msgid "Cancel the current file transfer and close Settings?"
+msgstr "Отменить текущую передачу файлов и закрыть настройки?"
+
+msgid "Cancel and close"
+msgstr "Отменить и закрыть"

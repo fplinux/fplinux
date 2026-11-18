@@ -6,6 +6,8 @@ extend-exclude = [
   "node_modules/",
   "third-party-licenses/",
   "*.bin",
+  # Encoded binary test vectors are not prose.
+  "*.base64.fixture",
   "*.jpg",
   "*.png",
   "*.zip",
@@ -14,6 +16,8 @@ extend-exclude = [
 [default]
 extend-ignore-re = [
   "\\b[0-9a-f]{7,}\\b",
+  # NAND reports encode manufacturer and device bytes as hexadecimal text.
+  "id_bytes=[0-9a-f]+",
   # The upstream BusyBox patch filename cannot be corrected locally.
   "0004-Avoid-redefined-warnings-when-buiding-with-utmps\\.patch",
 ]
@@ -37,6 +41,8 @@ PnP = "PnP"
 PnPDeviceID = "PnPDeviceID"
 SC2720_AUD_CLK_PN_MASK = "SC2720_AUD_CLK_PN_MASK"
 SC2720_AUD_CLK_PN_VALUE = "SC2720_AUD_CLK_PN_VALUE"
+# ID3v2 artist-frame identifier.
+TPE1 = "TPE1"
 UMS9117 = "UMS9117"
 WIPHY_FLAG_HAVE_AP_SME = "WIPHY_FLAG_HAVE_AP_SME"
 _paeth = "_paeth"
@@ -54,6 +60,9 @@ ki_filp = "ki_filp"
 mke2fs = "mke2fs"
 msg_controllen = "msg_controllen"
 parm = "parm"
+# Identifier retained in the SoundFont patch context.
+pigen = "pigen"
+pigenEnd = "pigenEnd"
 # This spelling is part of Linux's power_supply_desc interface.
 property_is_writeable = "property_is_writeable"
 secur32 = "secur32"
@@ -116,3 +125,10 @@ pmu_commom_config = "pmu_commom_config"
 [type.qin-loader-patch.extend-words]
 # Pin names abbreviate external interrupt.
 EXTINT = "EXTINT"
+
+[type.windows-driver-patch]
+extend-glob = ["driver-cli.patch"]
+
+[type.windows-driver-patch.extend-identifiers]
+# Preserve the Windows CRT flag in unchanged patch context.
+_O_WRONLY = "_O_WRONLY"

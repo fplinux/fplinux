@@ -45,10 +45,6 @@ bool fplinux_settings_date_time_detail(const char *date, const char *clock,
 				       char *detail, size_t size);
 
 /* Read-only system facts; false when the source cannot supply the value. */
-bool fplinux_settings_read_os_name(const char *path, char *name, size_t size);
-bool fplinux_settings_read_os_field(const char *path, const char *field,
-				    char *value, size_t size);
-bool fplinux_settings_read_line(const char *path, char *line, size_t size);
 bool fplinux_settings_read_memory(const char *path,
 				  unsigned long *available_kib,
 				  unsigned long *total_kib);

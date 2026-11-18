@@ -89,6 +89,44 @@ def test_desktop_reader_admits_installed_application(
     assert result["mode"] == expected
 
 
+@pytest.mark.parametrize(("field", "expected"), [("", "0"), ("false", "0"), ("true", "1")])
+def test_background_audio_is_an_explicit_installed_permission(
+    desktop_reader: Path, tmp_path: Path, field: str, expected: str
+) -> None:
+    fields = f"X-FPLinux-BackgroundAudio={field}\n" if field else ""
+    write_entry(tmp_path, desktop_reader, fields=fields)
+    result = read_entry(desktop_reader, tmp_path)
+    assert result["valid"] == "1"
+    assert result["background_audio"] == expected
+
+
+def test_background_audio_rejects_unknown_permission_value(
+    desktop_reader: Path, tmp_path: Path
+) -> None:
+    write_entry(tmp_path, desktop_reader, fields="X-FPLinux-BackgroundAudio=enabled\n")
+    assert read_entry(desktop_reader, tmp_path)["valid"] == "0"
+
+
+@pytest.mark.parametrize(("value", "expected"), [("", "0"), ("false", "0"), ("true", "1")])
+def test_light_effects_require_explicit_installed_opt_in(
+    desktop_reader: Path, tmp_path: Path, value: str, expected: str
+) -> None:
+    fields = f"X-FPLinux-LightEffects={value}\n" if value else ""
+    write_entry(tmp_path, desktop_reader, fields=fields)
+    result = read_entry(desktop_reader, tmp_path)
+    assert result["valid"] == "1"
+    assert result["light_effects"] == expected
+    assert result["extra_fields"] == "0"
+
+
+@pytest.mark.parametrize("value", ["enabled", "1", "True"])
+def test_light_effects_reject_unknown_opt_in_values(
+    desktop_reader: Path, tmp_path: Path, value: str
+) -> None:
+    write_entry(tmp_path, desktop_reader, fields=f"X-FPLinux-LightEffects={value}\n")
+    assert read_entry(desktop_reader, tmp_path)["valid"] == "0"
+
+
 @pytest.mark.parametrize(
     "fields",
     ["Name=Notes\nName[ru]=Заметки\n", "Name[ru]=Заметки\nName=Notes\n"],

@@ -4,6 +4,7 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 
 #include "fplinux-ui-screen.h"
 #include "fplinux-ui-session.h"
@@ -32,6 +33,8 @@ struct fplinux_launcher_tasks {
 	/* Confirmation keeps the instance selected before later snapshots. */
 	struct fplinux_ui_session_task confirmed;
 	size_t count;
+	size_t focused_row;
+	uint32_t focused_token;
 	bool known;
 	bool querying;
 	bool request_pending;

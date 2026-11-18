@@ -59,11 +59,13 @@ def launcher_tasks(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
         "resume",
         "late-error",
         "states",
+        "playback",
         "refresh",
         "icons",
         "localized-names",
         "interruptions",
         "errors",
+        "restore-focus",
     ],
 )
 def test_tasks_callbacks_preserve_instance_identity_and_visible_actions(

@@ -183,7 +183,15 @@ bool fplinux_desktop_entry_read(const char *directory, const char *id,
 			entry->hidden = !strcmp(value, "true");
 		else if (!strcmp(line, "NoDisplay"))
 			entry->no_display = !strcmp(value, "true");
-		else if (!strcmp(line, "X-FPLinux-FileExtensions"))
+		else if (!strcmp(line, "X-FPLinux-BackgroundAudio")) {
+			valid &= !strcmp(value, "true") ||
+				 !strcmp(value, "false");
+			entry->background_audio = !strcmp(value, "true");
+		} else if (!strcmp(line, "X-FPLinux-LightEffects")) {
+			valid &= !strcmp(value, "true") ||
+				 !strcmp(value, "false");
+			entry->light_effects = !strcmp(value, "true");
+		} else if (!strcmp(line, "X-FPLinux-FileExtensions"))
 			valid &= read_extensions(entry->extensions, value);
 		else if (!strcmp(line, "X-FPLinux-Mode")) {
 			has_mode = true;

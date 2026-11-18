@@ -28,7 +28,7 @@ A short press and release of <Key>Red</Key> returns to Home and keeps the applic
 
 Press <Key>Dial</Key> on Home to open [Quick settings](#quick-settings).
 
-Press <Key>Left soft</Key> on Home to open **Tasks** and return to an application's previous screen, or choose **Close app** and confirm to close it. Unlike opening from the catalog, returning through Tasks keeps the current page, selection and scroll position. An application that needs a save decision returns to the foreground. See [saving and storage errors](#saving-and-storage-errors) before discarding changes.
+Press <Key>Left soft</Key> on Home to open **Tasks** and return to an application's previous screen, or choose **Close app** and confirm to close it. After the application closes, Tasks stays open; it shows **No open apps** when the last application has closed. Unlike opening from the catalog, returning through Tasks keeps the current page, selection and scroll position. An application that needs a save decision returns to the foreground. Confirming its close returns to Tasks; cancelling leaves the application open. Pressing <Key>Red</Key> during that decision returns Home instead. See [saving and storage errors](#saving-and-storage-errors) before discarding changes.
 
 An external keyboard uses arrows, <Key>Enter</Key> and <Key>Esc</Key> for navigation. <Key>Tab</Key> opens Tasks from Home or switches the catalog view. Available Bluetooth and forwarded USB keyboards depend on the phone's [input support](/fplinux/use/connect/#type-with-your-computers-keyboard).
 
@@ -67,7 +67,7 @@ In **Display → Brightness**, use Left and Right to preview a level. **Save** k
 
 In **Time & language → Date and time**, select Date or Time and press Centre to edit it. Enter digits directly, use Left and Right to select a part, and Up and Down to change it. Times are in UTC. Return to the form and choose **Save** to set the clock. The form stays open until the change is confirmed; a failed attempt keeps your entered values and shows the current clock. Leaving an edited form asks whether to stay or leave without saving. Returning Home keeps the draft.
 
-The available languages come from installed language packages. The standard image includes English and Russian. Changing a theme or interface language closes other graphical applications and reloads Home, so save your work first. The selection marker changes after confirmation; **Applying…** means the change is still pending. See [Clock and alarms](/fplinux/use/power/#clock-and-alarms) for clock synchronization and battery-backed time.
+The available languages come from installed language packages. The standard image includes English and Russian, with English as the default for the interface and keypad input. Saved language choices take precedence over these defaults. Changing a theme or interface language closes other graphical applications and reloads Home, so save your work first. The selection marker changes after confirmation; **Applying…** means the change is still pending. See [Clock and alarms](/fplinux/use/power/#clock-and-alarms) for clock synchronization and battery-backed time.
 
 ## Quick settings
 
@@ -77,6 +77,8 @@ Press <Key>Dial</Key> on Home to open Quick settings. **Back**, <Key>Dial</Key> 
 - **Volume** controls application audio through the FPLinux audio service. Direct ALSA playback and FM radio use their own controls.
 - **Wi-Fi** turns the wireless interface on or off when available. Connecting to a network is a separate step.
 - **Bluetooth** turns Bluetooth on and off as in [Settings](/fplinux/use/bluetooth/#turn-bluetooth-on-and-off). The row is shown only while Bluetooth is available.
+
+Where the phone's keymap provides dedicated volume keys, they change application volume while the keypad is unlocked. External keyboard volume keys work the same way. Hold a key to keep adjusting. During a Volume edit in Quick settings, they adjust the preview; **Save** keeps the level and **Cancel** restores it. A press that wakes a dark screen only wakes it, as with other keys.
 
 ## Keeping data
 
@@ -108,7 +110,7 @@ Collect food to increase the score. Hitting the wall or your own body ends the g
 
 ## Direct-display applications
 
-ARMADA, TyrQuake, Brightness control and the image presentation tools use DRM directly. Run them with the graphical session stopped. Save your work, open a [USB shell](/fplinux/use/connect/) and stop the service:
+TyrQuake and the image presentation tools use DRM directly. Run them with the graphical session stopped. Save your work, open a [USB shell](/fplinux/use/connect/) and stop the service:
 
 ```sh title="Phone"
 rc-service fplinux-session stop

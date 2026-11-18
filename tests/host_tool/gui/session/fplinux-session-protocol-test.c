@@ -500,6 +500,107 @@ static void check_state_packets(int sender, int receiver)
 	      "BUSY names the operation and explicit busy phase");
 }
 
+static void check_tasks_view(int sender, int receiver)
+{
+	struct fplinux_ui_session_message sent = {
+		.type = FPLINUX_UI_SESSION_ACTIVE,
+		.tasks_view = true,
+	};
+	struct fplinux_ui_session_message received;
+	char packet[2048];
+	struct iovec iov = { .iov_base = packet,
+			     .iov_len = sizeof(packet) - 1 };
+	struct msghdr header = { .msg_iov = &iov, .msg_iovlen = 1 };
+	ssize_t bytes;
+
+	check(fplinux_ui_session_send(sender, &sent) &&
+		      fplinux_ui_session_receive(receiver, &received) == 1 &&
+		      received.tasks_view,
+	      "ACTIVE preserves the manager-owned Tasks subview");
+	sent.tasks_view = false;
+	check(fplinux_ui_session_send(sender, &sent) &&
+		      fplinux_ui_session_receive(receiver, &received) == 1 &&
+		      !received.tasks_view,
+	      "ACTIVE round-trips the base launcher view");
+	check(fplinux_ui_session_send(sender, &sent),
+	      "ACTIVE serializes the base launcher view");
+	bytes = recvmsg(receiver, &header, 0);
+	check(bytes > 0 && bytes < (ssize_t)sizeof(packet),
+	      "serialized base ACTIVE is available for wire inspection");
+	if (bytes > 0 && bytes < (ssize_t)sizeof(packet)) {
+		packet[bytes] = '\0';
+		check(strstr(packet, "\"tasks_view\":false"),
+		      "ACTIVE explicitly serializes a false Tasks subview");
+	}
+	sent.type = FPLINUX_UI_SESSION_TITLE;
+	check(fplinux_ui_session_send(sender, &sent),
+	      "non-ACTIVE messages do not serialize the Tasks subview");
+	bytes = recvmsg(receiver, &header, 0);
+	check(bytes > 0 && bytes < (ssize_t)sizeof(packet),
+	      "serialized TITLE is available for wire inspection");
+	if (bytes > 0 && bytes < (ssize_t)sizeof(packet)) {
+		packet[bytes] = '\0';
+		check(!strstr(packet, "tasks_view"),
+		      "non-ACTIVE wire messages omit the Tasks subview");
+	}
+	sent.tasks_view = true;
+	check(!fplinux_ui_session_send(sender, &sent) && errno == EINVAL,
+	      "sender rejects a true Tasks subview outside ACTIVE");
+}
+
+static void check_playback(int sender, int receiver)
+{
+	static const struct {
+		const char *name;
+		enum fplinux_ui_session_playback state;
+	} cases[] = {
+		{ "none", FPLINUX_UI_SESSION_PLAYBACK_NONE },
+		{ "paused", FPLINUX_UI_SESSION_PLAYBACK_PAUSED },
+		{ "held", FPLINUX_UI_SESSION_PLAYBACK_HELD },
+		{ "unavailable", FPLINUX_UI_SESSION_PLAYBACK_UNAVAILABLE },
+		{ "playing", FPLINUX_UI_SESSION_PLAYBACK_PLAYING },
+	};
+	struct fplinux_ui_session_message message;
+	char packet[512];
+	static const char *const invalid[] = {
+		"{\"type\":\"ACTIVE\",\"background_playing\":1}",
+		"{\"type\":\"TITLE\",\"background_playing\":false}",
+		"{\"type\":\"TASKS\",\"tasks\":[{\"app_id\":\"org.test.music\","
+		"\"title\":\"Music\",\"lifecycle\":\"background\",\"token\":1,\"playback\":\"loud\"}]}",
+	};
+
+	for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i) {
+		snprintf(
+			packet, sizeof(packet),
+			"{\"type\":\"TASKS\",\"tasks\":[{\"app_id\":\"org.test.music\","
+			"\"title\":\"Music\",\"lifecycle\":\"background\",\"token\":1,\"playback\":\"%s\"}]}",
+			cases[i].name);
+		check(receive_raw(sender, receiver, packet, &message) == 1 &&
+			      message.tasks[0].playback == cases[i].state,
+		      "literal service-owned playback state has typed meaning");
+		check(fplinux_ui_session_send(sender, &message) &&
+			      fplinux_ui_session_receive(receiver, &message) ==
+				      1 &&
+			      message.tasks[0].playback == cases[i].state,
+		      "task playback round-trips independently of lifecycle");
+	}
+	check(receive_raw(sender, receiver,
+			  "{\"type\":\"ACTIVE\",\"background_playing\":true}",
+			  &message) == 1 &&
+		      message.background_playing,
+	      "ACTIVE carries the background playback indicator");
+	check(fplinux_ui_session_send(sender, &message) &&
+		      fplinux_ui_session_receive(receiver, &message) == 1 &&
+		      message.background_playing,
+	      "background playback round-trips through ACTIVE");
+	message.type = FPLINUX_UI_SESSION_TITLE;
+	check(!fplinux_ui_session_send(sender, &message) && errno == EINVAL,
+	      "other messages cannot announce background playback");
+	for (size_t i = 0; i < sizeof(invalid) / sizeof(invalid[0]); ++i)
+		check(receive_raw(sender, receiver, invalid[i], &message) < 0,
+		      "invalid or misplaced playback is rejected");
+}
+
 static void check_clock_presentation(int sender, int receiver)
 {
 	static const char *const invalid[] = {
@@ -735,6 +836,21 @@ static void check_simple_packets(int sender, int receiver)
 			      received.type == cases[i].type,
 		      "simple message type survives the round trip");
 	}
+	check(receive_raw(sender, receiver,
+			  "{\"type\":\"SOFTKEYS\",\"visible\":true}",
+			  &received) == 1 &&
+		      received.visible,
+	      "SOFTKEYS reports an occupied local bar independently of its text");
+	struct fplinux_ui_session_message local_bar = {
+		.type = FPLINUX_UI_SESSION_SOFTKEYS,
+		.visible = true,
+	};
+
+	check(fplinux_ui_session_send(sender, &local_bar) &&
+		      fplinux_ui_session_receive(receiver, &received) == 1 &&
+		      received.type == FPLINUX_UI_SESSION_SOFTKEYS &&
+		      received.visible,
+	      "local softkey visibility survives the wire round trip");
 }
 
 static void check_tasks(int sender, int receiver)
@@ -776,7 +892,7 @@ static void check_tasks(int sender, int receiver)
 		      sender, receiver,
 		      "{\"type\":\"TASKS\",\"tasks\":["
 		      "{\"app_id\":\"org.example.notes\",\"title\":\"Заметки\","
-		      "\"lifecycle\":\"background\",\"token\":7},"
+		      "\"lifecycle\":\"background\",\"playback\":\"playing\",\"token\":7},"
 		      "{\"app_id\":\"org.example.editor\",\"title\":\"Editor\","
 		      "\"lifecycle\":\"closing\",\"token\":4294967295}]}",
 		      &received) == 1 &&
@@ -784,9 +900,13 @@ static void check_tasks(int sender, int receiver)
 		      !strcmp(received.tasks[0].app_id, "org.example.notes") &&
 		      !strcmp(received.tasks[0].title, "Заметки") &&
 		      received.tasks[0].token == 7 &&
+		      received.tasks[0].playback ==
+			      FPLINUX_UI_SESSION_PLAYBACK_PLAYING &&
 		      received.tasks[0].lifecycle ==
 			      FPLINUX_UI_SESSION_BACKGROUND &&
 		      received.tasks[1].token == UINT32_MAX &&
+		      received.tasks[1].playback ==
+			      FPLINUX_UI_SESSION_PLAYBACK_NONE &&
 		      received.tasks[1].lifecycle == FPLINUX_UI_SESSION_CLOSING,
 	      "literal task snapshot preserves titles, identities and lifecycle");
 	sent = received;
@@ -1174,6 +1294,169 @@ static void check_volumes(int sender, int receiver)
 	      "an unmounted volume cannot expose the empty mount directory");
 }
 
+static void check_system_levels(int sender, int receiver)
+{
+	static const char *const invalid_levels[] = {
+		"{}",
+		"{\"status\":\"ready\",\"minimum\":0,\"maximum\":10,\"value\":11,\"pending\":false}",
+		"{\"status\":\"ready\",\"minimum\":-1,\"maximum\":10,\"value\":7,\"pending\":false}",
+		"{\"status\":\"ready\",\"minimum\":10,\"maximum\":10,\"value\":10,\"pending\":false}",
+		"{\"status\":\"ready\",\"minimum\":0,\"maximum\":65536,\"value\":7,\"pending\":false}",
+		"{\"status\":\"ready\",\"minimum\":0,\"maximum\":10,\"value\":7,\"pending\":1}",
+		"{\"status\":\"ready\",\"minimum\":0,\"maximum\":10,\"value\":\"7\",\"pending\":false}",
+		"{\"status\":\"ready\",\"minimum\":0,\"maximum\":10,\"value\":7,\"pending\":false,\"extra\":0}",
+		"{\"status\":\"unknown\",\"minimum\":0,\"maximum\":10,\"value\":7,\"pending\":false}",
+		"{\"status\":\"unavailable\",\"minimum\":0,\"maximum\":10,\"value\":0,\"pending\":true}",
+		"{\"status\":\"\",\"minimum\":0,\"maximum\":10,\"value\":0,\"pending\":false}",
+		"{\"status\":\"muted\",\"minimum\":0,\"maximum\":10,\"value\":0,\"pending\":false}",
+	};
+	struct fplinux_ui_session_message sent = {
+		.type = FPLINUX_UI_SESSION_SYSTEM_LEVELS,
+		.system_levels.level = {
+			[FPLINUX_SYSTEM_LEVEL_MEDIA] = {
+				.availability = FPLINUX_SYSTEM_LEVEL_READY,
+				.maximum = 10,
+				.value = 7,
+			},
+			[FPLINUX_SYSTEM_LEVEL_ALARM] = {
+				.availability = FPLINUX_SYSTEM_LEVEL_UNKNOWN,
+				.maximum = 10,
+				.pending = true,
+			},
+			[FPLINUX_SYSTEM_LEVEL_BRIGHTNESS] = {
+				.availability = FPLINUX_SYSTEM_LEVEL_UNAVAILABLE,
+				.minimum = 1,
+				.maximum = 10,
+			},
+		},
+	};
+	struct fplinux_ui_session_message received;
+	char packet[1024];
+
+	check(fplinux_ui_session_send(sender, &sent) &&
+		      fplinux_ui_session_receive(receiver, &received) == 1 &&
+		      received.type == FPLINUX_UI_SESSION_SYSTEM_LEVELS &&
+		      received.system_levels.level[FPLINUX_SYSTEM_LEVEL_MEDIA]
+				      .value == 7 &&
+		      received.system_levels.level[FPLINUX_SYSTEM_LEVEL_ALARM]
+				      .availability ==
+			      FPLINUX_SYSTEM_LEVEL_UNKNOWN &&
+		      received.system_levels.level[FPLINUX_SYSTEM_LEVEL_ALARM]
+			      .pending &&
+		      received.system_levels
+				      .level[FPLINUX_SYSTEM_LEVEL_BRIGHTNESS]
+				      .availability ==
+			      FPLINUX_SYSTEM_LEVEL_UNAVAILABLE &&
+		      received.system_levels
+				      .level[FPLINUX_SYSTEM_LEVEL_BRIGHTNESS]
+				      .minimum == 1,
+	      "confirmed, pending and unavailable levels survive the session boundary");
+	check(receive_raw(
+		      sender, receiver,
+		      "{\"type\":\"SYSTEM_LEVELS\",\"levels\":{\"media\":{\"status\":\"ready\",\"minimum\":0,\"maximum\":10,\"value\":0,\"pending\":true},\"alarm\":{\"status\":\"ready\",\"minimum\":0,\"maximum\":10,\"value\":10,\"pending\":false},\"brightness\":{\"status\":\"ready\",\"minimum\":1,\"maximum\":10,\"value\":1,\"pending\":false}}}",
+		      &received) == 1 &&
+		      received.system_levels.level[FPLINUX_SYSTEM_LEVEL_MEDIA]
+				      .value == 0 &&
+		      received.system_levels.level[FPLINUX_SYSTEM_LEVEL_MEDIA]
+			      .pending &&
+		      received.system_levels.level[FPLINUX_SYSTEM_LEVEL_ALARM]
+				      .value == 10,
+	      "wire endpoints retain the confirmed value while a request is pending");
+	for (size_t i = 0;
+	     i < sizeof(invalid_levels) / sizeof(invalid_levels[0]); ++i) {
+		snprintf(
+			packet, sizeof(packet),
+			"{\"type\":\"SYSTEM_LEVELS\",\"levels\":{\"media\":%s,\"alarm\":{\"status\":\"unknown\",\"minimum\":0,\"maximum\":10,\"value\":0,\"pending\":false},\"brightness\":{\"status\":\"ready\",\"minimum\":1,\"maximum\":10,\"value\":5,\"pending\":false}}}",
+			invalid_levels[i]);
+		check(receive_raw(sender, receiver, packet, &received) == -1 &&
+			      errno == EPROTO,
+		      "malformed level states cannot become a confirmed snapshot");
+	}
+	check(receive_raw(sender, receiver, "{\"type\":\"SYSTEM_LEVELS\"}",
+			  &received) == -1 &&
+		      errno == EPROTO,
+	      "a level event requires its complete snapshot");
+	check(receive_raw(sender, receiver,
+			  "{\"type\":\"SYSTEM_LEVELS\",\"levels\":{}}",
+			  &received) == -1 &&
+		      errno == EPROTO,
+	      "an empty snapshot cannot erase all controls");
+	check(receive_raw(sender, receiver,
+			  "{\"type\":\"ACTIVE\",\"levels\":{}}",
+			  &received) == -1 &&
+		      errno == EPROTO,
+	      "level state is restricted to its own message type");
+	sent.system_levels.level[FPLINUX_SYSTEM_LEVEL_MEDIA].value = 11;
+	check(!fplinux_ui_session_send(sender, &sent) && errno == EINVAL,
+	      "a sender cannot publish an out-of-range confirmed level");
+}
+
+static void check_light_effects(int sender, int receiver)
+{
+	static const char *const invalid[] = {
+		"{\"type\":\"CONFIG\",\"light_effects\":4}",
+		"{\"type\":\"CONFIG\",\"light_effects\":-1}",
+		"{\"type\":\"CONFIG\",\"light_effects\":true}",
+		"{\"type\":\"ACTIVE\",\"light_effects\":0}",
+		"{\"type\":\"ACTIVE\",\"light_effect\":{\"resources\":0,\"display_level\":0,\"keypad_on\":false}}",
+		"{\"type\":\"LIGHT_EFFECT\",\"serial\":1}",
+		"{\"type\":\"LIGHT_EFFECT\",\"serial\":0,\"light_effect\":{\"resources\":0,\"display_level\":0,\"keypad_on\":false}}",
+		"{\"type\":\"LIGHT_EFFECT\",\"light_effect\":{\"resources\":0,\"display_level\":0,\"keypad_on\":false}}",
+		"{\"type\":\"LIGHT_EFFECT\",\"serial\":1,\"light_effect\":{\"resources\":4,\"display_level\":0,\"keypad_on\":false}}",
+		"{\"type\":\"LIGHT_EFFECT\",\"serial\":1,\"light_effect\":{\"resources\":1,\"display_level\":0,\"keypad_on\":false}}",
+		"{\"type\":\"LIGHT_EFFECT\",\"serial\":1,\"light_effect\":{\"resources\":1,\"display_level\":11,\"keypad_on\":false}}",
+		"{\"type\":\"LIGHT_EFFECT\",\"serial\":1,\"light_effect\":{\"resources\":2,\"display_level\":1,\"keypad_on\":true}}",
+		"{\"type\":\"LIGHT_EFFECT\",\"serial\":1,\"light_effect\":{\"resources\":0,\"display_level\":0,\"keypad_on\":true}}",
+		"{\"type\":\"LIGHT_EFFECT\",\"serial\":1,\"light_effect\":{\"resources\":3,\"display_level\":1,\"keypad_on\":1}}",
+		"{\"type\":\"LIGHT_EFFECT\",\"serial\":1,\"light_effect\":{\"resources\":3,\"display_level\":1}}",
+		"{\"type\":\"LIGHT_EFFECT\",\"serial\":1,\"light_effect\":{\"resources\":3,\"display_level\":1,\"keypad_on\":true,\"path\":\"/dev/null\"}}",
+	};
+	struct fplinux_ui_session_message received;
+	struct fplinux_ui_session_message sent = {
+		.type = FPLINUX_UI_SESSION_LIGHT_EFFECT,
+		.serial = 42,
+		.light_effect = { .resources = 3,
+				  .display_level = 2,
+				  .keypad_on = true },
+	};
+
+	check(receive_raw(sender, receiver, "{\"type\":\"CONFIG\"}",
+			  &received) == 1 &&
+		      received.light_effects == 0,
+	      "absent capability grants no light resources");
+	check(receive_raw(sender, receiver,
+			  "{\"type\":\"CONFIG\",\"light_effects\":3}",
+			  &received) == 1 &&
+		      received.light_effects == 3,
+	      "CONFIG accepts both configured resources");
+	check(fplinux_ui_session_send(sender, &sent) &&
+		      fplinux_ui_session_receive(receiver, &received) == 1 &&
+		      received.type == FPLINUX_UI_SESSION_LIGHT_EFFECT &&
+		      received.serial == 42 &&
+		      received.light_effect.resources == 3 &&
+		      received.light_effect.display_level == 2 &&
+		      received.light_effect.keypad_on,
+	      "effect intent and acknowledgement retain state and serial");
+	memset(&sent.light_effect, 0, sizeof(sent.light_effect));
+	sent.serial = 43;
+	check(fplinux_ui_session_send(sender, &sent) &&
+		      fplinux_ui_session_receive(receiver, &received) == 1 &&
+		      received.serial == 43 && !received.light_effect.resources,
+	      "zero mask clears an effect");
+	for (size_t i = 0; i < sizeof(invalid) / sizeof(invalid[0]); ++i)
+		check(receive_raw(sender, receiver, invalid[i], &received) ==
+				      -1 &&
+			      errno == EPROTO,
+		      "invalid light fields are rejected");
+	sent.serial = 0;
+	check(!fplinux_ui_session_send(sender, &sent) && errno == EINVAL,
+	      "serializer requires a nonzero effect serial");
+	sent.type = FPLINUX_UI_SESSION_ACTIVE;
+	sent.light_effects = 1;
+	check(!fplinux_ui_session_send(sender, &sent) && errno == EINVAL,
+	      "serializer rejects capability outside CONFIG");
+}
+
 int main(void)
 {
 	static const char *const invalid[] = {
@@ -1181,6 +1464,9 @@ int main(void)
 		"{\"type\":\"ACTIVE\",\"display\":\"bright\"}",
 		"{\"type\":\"ACTIVE\",\"display\":1}",
 		"{\"type\":\"ACTIVE\",\"locked\":\"yes\"}",
+		"{\"type\":\"ACTIVE\",\"tasks_view\":null}",
+		"{\"type\":\"ACTIVE\",\"tasks_view\":\"true\"}",
+		"{\"type\":\"TITLE\",\"tasks_view\":false}",
 		"{\"type\":\"ACTIVE_ACK\"}",
 		"{\"type\":\"ACTIVE_ACK\",\"serial\":0}",
 		"{\"type\":\"ACTIVE_ACK\",\"serial\":-1}",
@@ -1211,7 +1497,8 @@ int main(void)
 		"{\"type\":\"control\",\"name\":\"volume\"}",
 		"{\"type\":\"ACTIVE\",\"control_centre\":false}",
 		"{\"type\":\"CONFIG\",\"audio\":\"false\"}",
-		"{\"type\":\"CONFIG\",\"background_audio\":false}",
+		"{\"type\":\"CONFIG\",\"background_audio\":\"false\"}",
+		"{\"type\":\"ACTIVE\",\"background_audio\":true}",
 		"{\"type\":\"CONFIG\",\"vibration\":null}",
 		"{\"type\":\"ACTIVE\",\"pattern\":[]}",
 	};
@@ -1223,6 +1510,21 @@ int main(void)
 		return 1;
 	}
 	check_state_packets(pair[0], pair[1]);
+	check(receive_raw(
+		      pair[0], pair[1],
+		      "{\"type\":\"CONFIG\",\"audio\":true,\"background_audio\":true,\"vibration\":false}",
+		      &received) == 1 &&
+		      received.audio && received.background_audio &&
+		      !received.vibration,
+	      "background audio does not imply vibration authority");
+	check(receive_raw(
+		      pair[0], pair[1],
+		      "{\"type\":\"CONFIG\",\"audio\":true,\"background_audio\":false}",
+		      &received) == 1 &&
+		      received.audio && !received.background_audio,
+	      "CONFIG can revoke a background audio grant");
+	check_tasks_view(pair[0], pair[1]);
+	check_playback(pair[0], pair[1]);
 	check_simple_packets(pair[0], pair[1]);
 	check_clock_packets(pair[0], pair[1]);
 	check_clock_presentation(pair[0], pair[1]);
@@ -1231,6 +1533,8 @@ int main(void)
 	check_activation(pair[0], pair[1]);
 	check_documents(pair[0], pair[1]);
 	check_volumes(pair[0], pair[1]);
+	check_system_levels(pair[0], pair[1]);
+	check_light_effects(pair[0], pair[1]);
 	check_tasks(pair[0], pair[1]);
 	check_close_preparation(pair[0], pair[1]);
 	check_storage_results(pair[0], pair[1]);

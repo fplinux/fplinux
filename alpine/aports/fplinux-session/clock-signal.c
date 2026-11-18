@@ -113,7 +113,8 @@ static void generate_tone(int16_t *samples, unsigned int frequency_hz)
 				   fade_frames;
 		phase = 6.283185307179586 * frequency_hz * position /
 			SIGNAL_RATE_HZ;
-		samples[position] = (int16_t)(3000.0 * envelope * sin(phase));
+		samples[position] =
+			(int16_t)(INT16_MAX * envelope * sin(phase));
 	}
 }
 

@@ -138,6 +138,9 @@ const void *apidemo_glyph(struct apidemo *app, const char *name);
 void apidemo_style_scroll(struct apidemo *app, lv_obj_t *object);
 /* A delayed manager error updates the request screen or opens an alert. */
 void apidemo_vibration_error(struct apidemo *app, const char *reason);
+struct fplinux_ui_session_message;
+void apidemo_sound_setting(struct apidemo *app,
+			   const struct fplinux_ui_session_message *message);
 /* Keep a saving failure visible until its explicit Close command. */
 void apidemo_protect_error(struct apidemo *app,
 			   struct fplinux_ui_screen *alert);

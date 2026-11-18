@@ -164,7 +164,7 @@ def test_unavailable_outputs_retry_without_log_flood_and_return_failure(
     assert result.stderr.count("clock-signal: vibration unavailable:") == 1
 
 
-def test_clock_tones_reach_service_pcm_alongside_app_and_dismiss_keeps_app_playing(
+def test_clock_tones_preempt_app_pcm_and_dismiss_resumes_the_app(
     clock_signal: Path, clock_audio: ClockAudioService
 ) -> None:
     result: subprocess.CompletedProcess[str] | None = None
@@ -185,7 +185,7 @@ def test_clock_tones_reach_service_pcm_alongside_app_and_dismiss_keeps_app_playi
                         abs(left - 500) > 500
                         for left, _ in clock_audio.played_frames()[first_frame:]
                     ),
-                    "Clock signal did not join the application's PCM output",
+                    "Clock signal did not preempt the application's PCM output",
                     tick=application.refill,
                 )
                 frames = clock_audio.played_frames()
@@ -199,6 +199,14 @@ def test_clock_tones_reach_service_pcm_alongside_app_and_dismiss_keeps_app_playi
                     "Clock signal did not produce both alert tones",
                     tick=application.refill,
                 )
+                assert application.field(28) == 1, "app PCM was not held for the alarm"
+                held = application.field(24)
+                clock_audio.wait(
+                    lambda: len(clock_audio.played_frames()) >= tone_start + 30000,
+                    "Clock signal did not keep the output while active",
+                    tick=application.refill,
+                )
+                assert application.field(24) == held
                 stop_signal(process)
                 heard = application.field(24)
                 clock_audio.wait(
@@ -213,7 +221,7 @@ def test_clock_tones_reach_service_pcm_alongside_app_and_dismiss_keeps_app_playi
 
             result = run_process(
                 [str(clock_signal)],
-                name="mix both Clock alert tones with an application and dismiss only the alert",
+                name="preempt application PCM with both Clock tones and resume after dismissal",
                 timeout=5,
                 env=audio_environment(clock_audio.work),
                 while_running=dismiss_after_tones,
@@ -231,11 +239,11 @@ def test_clock_tones_reach_service_pcm_alongside_app_and_dismiss_keeps_app_playi
     second = left[tone_start + 17280 : tone_start + 22080]
     assert len(first) == len(second) == 4800
     for tone, crossings in ((first, 66), (second, 88)):
-        rising = sum(before <= 500 < after for before, after in pairwise(tone))
+        rising = sum(before <= 0 < after for before, after in pairwise(tone))
         assert abs(rising - crossings) <= 1
-        assert 3490 <= max(tone) <= 3500
-        assert -2500 <= min(tone) <= -2490
-    assert all(sample == 500 for sample in left[tone_start + 10560 : tone_start + 15360])
+        assert 32700 <= max(tone) <= 32767
+        assert -32767 <= min(tone) <= -32700
+    assert all(sample == 0 for sample in left[tone_start + 10560 : tone_start + 15360])
     assert clock_audio.card_events().count("open default") == 1
 
 
@@ -305,8 +313,8 @@ def test_busy_service_keeps_vibration_bounded_then_plays_preserved_clock_frames(
     ):
         rising = sum(before <= 0 < after for before, after in pairwise(tone))
         assert abs(rising - crossings) <= 1
-        assert 2990 <= max(tone) <= 3000
-        assert -3000 <= min(tone) <= -2990
+        assert 32700 <= max(tone) <= 32767
+        assert -32767 <= min(tone) <= -32700
 
 
 def test_service_restart_reconnects_clock_within_the_existing_alert(

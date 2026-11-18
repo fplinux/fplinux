@@ -134,6 +134,8 @@ def ui_icon_resources(
                 str(ROOT / "lib/fplinux/fplinux-ui-profile.json"),
                 "--out",
                 str(installed),
+                "--masks-header",
+                str(directory / "fplinux-indicator-masks.h"),
             ],
             name="generate the actual pinned system glyphs for native UI consumers",
             timeout=60,

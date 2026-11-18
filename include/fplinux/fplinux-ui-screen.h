@@ -400,9 +400,30 @@ enum fplinux_ui_date_mode {
 
 struct fplinux_ui_screen *fplinux_ui_form_new(struct fplinux_ui *ui,
 					      const char *title);
-/* A read-only label and text; either may be NULL. */
+/*
+ * A read-only label above wrapped text; either may be NULL. A captionless
+ * empty plain string takes no space and retains its item index.
+ */
 size_t fplinux_ui_form_append_string(struct fplinux_ui_screen *form,
 				     const char *label, const char *text);
+/*
+ * A stacked read-only property with the same text and appearance contract
+ * as a string. Adjacent visible plain properties share full-width dividers;
+ * the last property has none. Change its text with set_string().
+ */
+size_t fplinux_ui_form_append_property(struct fplinux_ui_screen *form,
+				       const char *label, const char *text);
+/*
+ * A compact label and value: left and right on one line when both fit,
+ * otherwise stacked and fully wrapped. NULL strings are empty. Read-only
+ * until it has item commands, then OK runs its first command by priority.
+ * Commands and focus do not change its geometry; long actions scroll their
+ * complete text before Up/Down leave them. set_value() remains for gauges.
+ */
+size_t fplinux_ui_form_append_value(struct fplinux_ui_screen *form,
+				    const char *label, const char *value);
+bool fplinux_ui_form_set_value_text(struct fplinux_ui_screen *form, size_t item,
+				    const char *value);
 /*
  * Form text fields are single-line; a TextBox is the multi-line editor.
  * constraint is a type of fplinux-ui-text.h, optionally with

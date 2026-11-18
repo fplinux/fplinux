@@ -39,7 +39,6 @@ struct fplinux_status_resources {
 	const struct fplinux_ui_theme_spec *theme;
 	const struct fplinux_status_font *body;
 	const struct fplinux_status_font *title;
-	const struct fplinux_status_font *legend;
 	const struct fplinux_status_mark *mark;
 	const struct fplinux_status_mask *activity;
 };
@@ -47,7 +46,6 @@ struct fplinux_status_resources {
 enum fplinux_status_layout {
 	FPLINUX_STATUS_BOOT,
 	FPLINUX_STATUS_PREPARATION,
-	FPLINUX_STATUS_BRIGHTNESS,
 };
 
 enum fplinux_status_indicator {
@@ -60,14 +58,11 @@ enum fplinux_status_indicator {
 struct fplinux_status_view {
 	enum fplinux_status_layout layout;
 	enum fplinux_status_indicator indicator;
-	const char *header;
 	const char *heading;
 	const char *detail;
 	const char *progress_percent;
 	const char *progress_bytes;
-	const char *action;
 	uint64_t completed, total;
-	unsigned int level;
 	int error;
 };
 
@@ -92,5 +87,18 @@ unsigned int fplinux_status_scale(uint64_t completed, uint64_t total,
 /* Initialise a canvas over a caller-owned RGB565 surface with byte stride. */
 int fplinux_status_surface_canvas(struct fplinux_status_canvas *canvas,
 				  struct fplinux_status_surface *surface);
+
+/* Raster primitives shared by the status screens and compact shell feedback. */
+void fplinux_status_fill(const struct fplinux_status_canvas *canvas, uint32_t x,
+			 uint32_t y, uint32_t width, uint32_t height,
+			 uint16_t colour);
+uint16_t fplinux_status_blend(uint16_t foreground, uint16_t background,
+			      unsigned int alpha, unsigned int scale);
+unsigned int fplinux_status_text_width(const struct fplinux_status_font *font,
+				       const char *text);
+void fplinux_status_text_draw(const struct fplinux_status_canvas *canvas,
+			      const struct fplinux_status_font *font, int x,
+			      int y, const char *text, uint16_t colour,
+			      uint16_t background);
 
 #endif

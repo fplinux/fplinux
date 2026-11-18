@@ -359,6 +359,32 @@ def test_stored_status_row_keeps_emphasis_detail_and_borrowed_icon_inside_viewpo
     ("width", "height", "pitch"),
     [(128, 128, 36), (128, 160, 35), (176, 220, 38), (240, 320, 43), (320, 240, 43)],
 )
+@pytest.mark.parametrize("presentation", ["stored", "virtual"])
+def test_mixed_list_centres_single_line_rows_through_detail_changes_and_reuse(
+    ui_lists: Path, width: int, height: int, pitch: int, presentation: str
+) -> None:
+    result = run_process(
+        [str(ui_lists), f"mixed-centres-{presentation}", str(width), str(height), str(pitch), "0"],
+        name=f"native {presentation} mixed row centres at {width}x{height}",
+        timeout=10,
+        check=True,
+    )
+    if (width, height) == (128, 160):
+        # Literal profile examples: the 34 px cell holds one 14 px line
+        # at 10..23 or two adjacent 14 px lines at 3..30.
+        rows = result.stdout.splitlines()
+        assert "body\t10\t23\t35" in rows
+        assert "detail\t3\t30\t35" in rows
+        assert "removed\t10\t23\t35" in rows
+        if presentation == "stored":
+            assert "emphasis\t8\t24\t35" in rows
+            assert "emphasis-detail\t1\t31\t35" in rows
+
+
+@pytest.mark.parametrize(
+    ("width", "height", "pitch"),
+    [(128, 128, 36), (128, 160, 35), (176, 220, 38), (240, 320, 43), (320, 240, 43)],
+)
 @pytest.mark.parametrize("theme", ["light", "dark"])
 def test_stored_controls_render_levels_and_values_at_each_profile(
     ui_lists: Path, width: int, height: int, pitch: int, theme: str

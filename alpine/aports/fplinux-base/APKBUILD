@@ -13,6 +13,7 @@ replaces="alpine-baselayout-data alpine-release"
 replaces_priority=100
 options="!check"
 source="fstab inittab interfaces hostname issue os-release fplinux-zram.initd
+	fplinux-devices.initd
 	fplinux-brightness.initd
 	fplinux-kmsg.c fplinux-cli.c fplinux-cli.h
 	fplinux-brightness.c fplinux-brightnessd.c
@@ -53,6 +54,8 @@ package() {
 		"$pkgdir/etc/init.d/fplinux-zram"
 	install -Dm755 "$srcdir/fplinux-brightness.initd" \
 		"$pkgdir/etc/init.d/fplinux-brightness"
+	install -Dm755 "$srcdir/fplinux-devices.initd" \
+		"$pkgdir/etc/init.d/fplinux-devices"
 
 	mkdir -p "$pkgdir/sbin"
 	ln -s /bin/busybox "$pkgdir/sbin/ifup"
@@ -65,6 +68,8 @@ package() {
 	done
 	ln -s /etc/init.d/fplinux-zram \
 		"$pkgdir/etc/runlevels/sysinit/fplinux-zram"
+	ln -s /etc/init.d/fplinux-devices \
+		"$pkgdir/etc/runlevels/boot/fplinux-devices"
 	ln -s /etc/init.d/fplinux-brightness \
 		"$pkgdir/etc/runlevels/default/fplinux-brightness"
 	for service in bootmisc hostname networking; do
@@ -82,6 +87,7 @@ d4f32b008bfadf39d86f04cd29e3d39a2124d3c3cd59481f61f573caee2be2ff5b074e9959a02543
 49021c0bcdfe0034ccafc330ca63886aa0a00a8e9100e2ecae21678178e4df98775932be6195067e944a79b8620a420484b9d70e1b41e095696a9358f3cbc4f9  issue
 c78d6b9b4995a018827d2a36fec591310cc90fe3e1e31d9ac9ca3c1dbac7d10445e46f19cce2c312ec6d19135d3009388d75ff405c16180ebb70ce29cc001b1b  os-release
 16130cfd79c17d372d18f4a47a27d1355a387e73b67e6bfe1f925131dbc6dd4ce66e394409265ccde74ad7fe001a1f5fcfc82a8db3b23428138111d477edfb59  fplinux-zram.initd
+42f67162ab433b31b3561f120c8c47ec2beb7130ec58056e19e7b0f910067818c22868243ac6064c97fb263eeef0a28bbacf1e102d560a2bdfb8116afe5a9ade  fplinux-devices.initd
 14adb002d72cc77bdf106c2d3ec4e655c20ed34710af77e6c613a4f3cd1543eca381ff99946c8cba68a27883ffee537839dae1603b135498f856a331cf1a8240  fplinux-brightness.initd
 61ac67c34c4879c58956b59ca4ba3806b11bb04be2200c9010f1c8772b223a947678c2450611a69ea23d4eb0afa2508a6ca75c8eee5842dd5b1ae3dbbd25a596  fplinux-kmsg.c
 60be1ccccf0215ea13bc64fd442a0498e7db203234ce74f92cec502295e8ac703a089438848b9a1850102836855537f561e9bd8313751574a069eb0ec6dcf31a  fplinux-cli.c

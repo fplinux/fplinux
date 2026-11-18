@@ -3,11 +3,13 @@
 #include "fplinux-bluez-adapter.h"
 #include "fplinux-language.h"
 #include "settings-session-boundary.h"
+#include "settings-bluetooth.h"
 
 #include <fplinux/fplinux-ui.h>
 #include <fplinux/fplinux-ui-locale.h>
 #include <fplinux/fplinux-ui-screen.h>
 #include <fplinux/fplinux-ui-session.h>
+#include <fplinux/fplinux-ui-system.h>
 
 #include <assert.h>
 #include <errno.h>
@@ -81,6 +83,8 @@ struct fplinux_ui {
 	void *close_context;
 	enum fplinux_ui_close_response close_response;
 	enum fplinux_ui_lifecycle lifecycle;
+	struct fplinux_system_levels system_levels;
+	bool system_levels_received;
 };
 
 struct lv_timer_t {
@@ -200,6 +204,14 @@ static void deliver_reply(struct fplinux_ui *ui,
 		.type = FPLINUX_UI_EVENT_SESSION,
 		.session = message,
 	};
+	if (message->type == FPLINUX_UI_SESSION_SYSTEM_LEVELS) {
+		ui->system_levels = message->system_levels;
+		ui->system_levels_received = true;
+		event.type = FPLINUX_UI_EVENT_SYSTEM_LEVELS;
+		event.session = NULL;
+		ui->event(ui, &event, ui->context);
+		return;
+	}
 
 	if (message->applied) {
 		if (!strcmp(message->name, "input_locale"))
@@ -230,7 +242,45 @@ static void reply(struct fplinux_ui *ui,
 	copy_text(message.name, sizeof(message.name), name);
 	copy_text(message.value, sizeof(message.value), value);
 	copy_text(message.reason, sizeof(message.reason), reason);
+	enum fplinux_system_level_kind kind =
+		!strcmp(name, "volume") || !strcmp(name, "volume_preview") ?
+			FPLINUX_SYSTEM_LEVEL_MEDIA :
+		!strcmp(name, "alarm_volume") ||
+				!strcmp(name, "alarm_volume_preview") ?
+			FPLINUX_SYSTEM_LEVEL_ALARM :
+		!strcmp(name, "brightness") ||
+				!strcmp(name, "brightness_preview") ?
+			FPLINUX_SYSTEM_LEVEL_BRIGHTNESS :
+			FPLINUX_SYSTEM_LEVEL_COUNT;
+
+	if (kind != FPLINUX_SYSTEM_LEVEL_COUNT && value[0] && message.applied &&
+	    ui->lifecycle == FPLINUX_UI_FOREGROUND) {
+		struct fplinux_ui_session_message levels = {
+			.type = FPLINUX_UI_SESSION_SYSTEM_LEVELS,
+			.system_levels = ui->system_levels,
+		};
+
+		levels.system_levels.level[kind].availability =
+			FPLINUX_SYSTEM_LEVEL_READY;
+		levels.system_levels.level[kind].value =
+			(unsigned int)atoi(value);
+		deliver_reply(ui, &levels);
+	}
 	deliver_reply(ui, &message);
+}
+
+bool fplinux_ui_system_level_get(struct fplinux_ui *ui,
+				 enum fplinux_system_level_kind kind,
+				 struct fplinux_system_level_state *state)
+{
+	assert(ui && state && kind >= FPLINUX_SYSTEM_LEVEL_MEDIA &&
+	       kind < FPLINUX_SYSTEM_LEVEL_COUNT);
+	if (!ui->system_levels_received) {
+		errno = EAGAIN;
+		return false;
+	}
+	*state = ui->system_levels.level[kind];
+	return true;
 }
 
 static void set_lifecycle(struct fplinux_ui *ui,
@@ -350,6 +400,7 @@ static void test_errors(struct fplinux_ui *ui)
 		alert = current(ui, cases[i].title);
 		assert(!strcmp(alert->message, cases[i].text));
 		if (strcmp(cases[i].name, "time") &&
+		    strcmp(cases[i].name, "brightness") &&
 		    strcmp(cases[i].reason, "save-failed")) {
 			assert(ui->sent_count == sent + 1);
 			expect_sent(ui, sent, cases[i].name, "");
@@ -606,6 +657,56 @@ static void test_brightness_save_retries_current_value(struct fplinux_ui *ui)
 	expect_sent(ui, sent, "brightness", "8");
 }
 
+static void test_sound_controls(struct fplinux_ui *ui, bool headphones)
+{
+	size_t sent = ui->sent_count;
+	struct fplinux_ui_screen *form;
+
+	open_row(ui, "Sound");
+	expect_sent(ui, sent, "audio_output", "");
+	expect_sent(ui, sent + 1, "audio_outputs", "");
+	reply(ui, FPLINUX_UI_SESSION_SETTING, "volume", "0", "");
+	reply(ui, FPLINUX_UI_SESSION_SETTING, "alarm_volume", "8", "");
+	reply(ui, FPLINUX_UI_SESSION_SETTING, "audio_output", "AUTO", "");
+	reply(ui, FPLINUX_UI_SESSION_SETTING, "audio_outputs",
+	      headphones ? "AUTO,HEADPHONES" : "AUTO,SPEAKER", "");
+	assert(!strcmp(detail(ui, "Sound", "Media volume"), "0"));
+	assert(!strcmp(detail(ui, "Sound", "Alarm volume"), "8"));
+	open_row(ui, "Media volume");
+	form = current(ui, "Media volume");
+	assert(form->rows[0].value == 0);
+	form->rows[0].value = 1;
+	form->change(ui, form, 0, form->context);
+	expect_sent(ui, ui->sent_count - 1, "volume_preview", "1");
+	reply(ui, FPLINUX_UI_SESSION_SETTING, "volume_preview", "2", "");
+	assert(form->rows[0].value == 2);
+	command(ui, FPLINUX_UI_COMMAND_OK);
+	expect_sent(ui, ui->sent_count - 1, "volume_commit", "");
+	assert(current(ui, "Media volume") == form);
+	reply(ui, FPLINUX_UI_SESSION_SETTING, "volume", "2", "");
+	current(ui, "Sound");
+	open_row(ui, "Alarm volume");
+	form = current(ui, "Alarm volume");
+	assert(form->rows[0].value == 8);
+	form->rows[0].value = 0;
+	form->change(ui, form, 0, form->context);
+	expect_sent(ui, ui->sent_count - 1, "alarm_volume_preview", "0");
+	command(ui, FPLINUX_UI_COMMAND_CANCEL);
+	expect_sent(ui, ui->sent_count - 1, "alarm_volume_preview", "");
+	current(ui, "Sound");
+	open_row(ui, "Output");
+	form = current(ui, "Output");
+	assert(form->count == 2 && has_row(form, "Automatic"));
+	assert(has_row(form, headphones ? "Headphones" : "Speaker"));
+	assert(!has_row(form, headphones ? "Speaker" : "Headphones"));
+	select_row(ui, headphones ? "Headphones" : "Speaker");
+	expect_sent(ui, ui->sent_count - 1, "audio_output",
+		    headphones ? "HEADPHONES" : "SPEAKER");
+	reply(ui, FPLINUX_UI_SESSION_SETTING, "audio_output",
+	      headphones ? "HEADPHONES" : "SPEAKER", "");
+	current(ui, "Sound");
+}
+
 static void
 test_save_failure_preserves_state_and_cause(struct fplinux_ui *ui,
 					    enum fplinux_storage_state state,
@@ -733,7 +834,8 @@ void settings_session_receive(struct fplinux_ui *ui,
 	} else if (message->type == FPLINUX_UI_SESSION_VISIBILITY) {
 		set_visible(ui, message->visible);
 	} else if (message->type == FPLINUX_UI_SESSION_SETTING ||
-		   message->type == FPLINUX_UI_SESSION_ERROR) {
+		   message->type == FPLINUX_UI_SESSION_ERROR ||
+		   message->type == FPLINUX_UI_SESSION_SYSTEM_LEVELS) {
 		deliver_reply(ui, message);
 	}
 }
@@ -936,6 +1038,9 @@ struct fplinux_ui *fplinux_ui_open(const char *app_id,
 	ui->metrics.profile = selected_profile;
 	ui->visible = true;
 	ui->lifecycle = FPLINUX_UI_FOREGROUND;
+	for (unsigned int i = 0; i < FPLINUX_SYSTEM_LEVEL_COUNT; ++i)
+		ui->system_levels.level[i].maximum = 10;
+	ui->system_levels.level[FPLINUX_SYSTEM_LEVEL_BRIGHTNESS].minimum = 1;
 	return ui;
 }
 
@@ -980,7 +1085,10 @@ static void test_date_save_retains_draft(struct fplinux_ui *ui,
 						       "failed");
 	deliver_reply(ui, &message);
 	assert(ui->lifecycle == FPLINUX_UI_BACKGROUND && !ui->visible);
+	assert(ui->sent_count == sent + 1);
 	set_lifecycle(ui, FPLINUX_UI_FOREGROUND);
+	assert(ui->sent_count == sent + 1);
+	sent = ui->sent_count;
 	set_visible(ui, true);
 	if (editing) {
 		assert(current(ui, "Date and time") == form && form->editing);
@@ -989,7 +1097,7 @@ static void test_date_save_retains_draft(struct fplinux_ui *ui,
 		       FPLINUX_UI_CLOSE_READY);
 		command(ui, FPLINUX_UI_COMMAND_SCREEN);
 		current(ui, "Time & language");
-		assert(ui->sent_count == sent + 1);
+		assert(ui->sent_count == sent);
 		return;
 	}
 	if (!strcmp(outcome, "success")) {
@@ -1001,7 +1109,7 @@ static void test_date_save_retains_draft(struct fplinux_ui *ui,
 	assert(form->rows[0].date == 1709164800);
 	assert(form->rows[1].date == 1704098700 && form->focused == 1);
 	command(ui, FPLINUX_UI_COMMAND_SCREEN);
-	expect_sent(ui, sent + 1, "time", "2024-02-29 08:45:00");
+	expect_sent(ui, sent, "time", "2024-02-29 08:45:00");
 	reply(ui, FPLINUX_UI_SESSION_SETTING, "time", "2024-02-29 08:45:00",
 	      "");
 	current(ui, "Time & language");
@@ -1065,6 +1173,8 @@ static void test_activation_navigation(struct fplinux_ui *ui)
 	set_lifecycle(ui, FPLINUX_UI_BACKGROUND);
 	set_visible(ui, false);
 	set_lifecycle(ui, FPLINUX_UI_FOREGROUND);
+	assert(ui->sent_count == sent);
+	sent = ui->sent_count;
 	set_visible(ui, true);
 	activate(ui, FPLINUX_UI_ACTIVATION_RESUME);
 	assert(current(ui, "Auto-lock") == selector && selector->focused == 2);
@@ -1237,6 +1347,12 @@ static void test_activation_pending_choice(struct fplinux_ui *ui, bool theme,
 int fplinux_ui_run(struct fplinux_ui *ui)
 {
 	struct fplinux_ui_event close = { .type = FPLINUX_UI_EVENT_CLOSE };
+	struct fplinux_ui_session_message levels = {
+		.type = FPLINUX_UI_SESSION_SYSTEM_LEVELS,
+		.system_levels = ui->system_levels,
+	};
+
+	deliver_reply(ui, &levels);
 
 	if (!strcmp(scenario, "activation-navigation"))
 		test_activation_navigation(ui);
@@ -1280,6 +1396,9 @@ int fplinux_ui_run(struct fplinux_ui *ui)
 		test_input_language(ui);
 	else if (!strcmp(scenario, "brightness-retry-current"))
 		test_brightness_save_retries_current_value(ui);
+	else if (!strcmp(scenario, "sound-speaker") ||
+		 !strcmp(scenario, "sound-headphones"))
+		test_sound_controls(ui, !strcmp(scenario, "sound-headphones"));
 	else if (!strcmp(scenario, "save-failed-no-space"))
 		test_save_failure_preserves_state_and_cause(
 			ui, FPLINUX_STORAGE_UNPUBLISHED, ENOSPC,
@@ -1630,19 +1749,84 @@ bool fplinux_bluez_adapter_powered(const struct fplinux_bluez_adapter *adapter)
 	return false;
 }
 
-bool fplinux_bluez_adapter_pending(const struct fplinux_bluez_adapter *adapter)
+/* The Bluetooth controller is exercised by the native private-bus tests. */
+struct fplinux_settings_bluetooth *
+fplinux_settings_bluetooth_new(struct fplinux_ui *ui,
+			       struct fplinux_bluez_adapter *adapter)
 {
+	(void)ui;
 	no_adapter(adapter);
+	return NULL;
+}
+
+void fplinux_settings_bluetooth_free(
+	struct fplinux_settings_bluetooth *bluetooth)
+{
+	no_adapter(bluetooth);
+}
+
+void fplinux_settings_bluetooth_show(
+	struct fplinux_settings_bluetooth *bluetooth)
+{
+	no_adapter(bluetooth);
+}
+
+bool fplinux_settings_bluetooth_shown(
+	const struct fplinux_settings_bluetooth *bluetooth)
+{
+	no_adapter(bluetooth);
 	return false;
 }
 
-bool fplinux_bluez_adapter_set_powered(struct fplinux_bluez_adapter *adapter,
-				       bool powered, int timeout_ms)
+void fplinux_settings_bluetooth_changed(
+	struct fplinux_settings_bluetooth *bluetooth)
 {
-	(void)powered;
-	(void)timeout_ms;
-	no_adapter(adapter);
-	return false;
+	no_adapter(bluetooth);
+}
+
+void fplinux_settings_bluetooth_finished(
+	struct fplinux_settings_bluetooth *bluetooth, bool applied)
+{
+	(void)applied;
+	no_adapter(bluetooth);
+}
+
+void fplinux_settings_bluetooth_event(
+	struct fplinux_settings_bluetooth *bluetooth,
+	const struct fplinux_ui_event *event)
+{
+	(void)event;
+	no_adapter(bluetooth);
+}
+
+void fplinux_settings_bluetooth_storage_result(
+	struct fplinux_settings_bluetooth *bluetooth,
+	const struct fplinux_volume_result *result)
+{
+	(void)result;
+	no_adapter(bluetooth);
+}
+
+void fplinux_settings_bluetooth_reset(
+	struct fplinux_settings_bluetooth *bluetooth)
+{
+	no_adapter(bluetooth);
+}
+
+enum fplinux_ui_close_response fplinux_settings_bluetooth_prepare_close(
+	struct fplinux_settings_bluetooth *bluetooth)
+{
+	no_adapter(bluetooth);
+	return FPLINUX_UI_CLOSE_CANCEL;
+}
+
+void fplinux_ui_set_storage_handler(struct fplinux_ui *ui,
+				    fplinux_ui_storage_cb callback,
+				    void *context)
+{
+	(void)ui;
+	(void)callback;
+	(void)context;
 }
 
 bool fplinux_ui_watch_fd(struct fplinux_ui *ui, int fd, short events,
@@ -1651,29 +1835,6 @@ bool fplinux_ui_watch_fd(struct fplinux_ui *ui, int fd, short events,
 	(void)fd;
 	(void)events;
 	(void)callback;
-	(void)context;
-	no_adapter(ui);
-	return false;
-}
-
-struct fplinux_ui_screen *fplinux_ui_wait_begin(struct fplinux_ui *ui,
-						const char *title,
-						const char *text,
-						fplinux_ui_wait_cb cancel,
-						void *context)
-{
-	(void)title;
-	(void)text;
-	(void)cancel;
-	(void)context;
-	no_adapter(ui);
-	return NULL;
-}
-
-bool fplinux_ui_wait_end(struct fplinux_ui *ui, fplinux_ui_wait_cb done,
-			 void *context)
-{
-	(void)done;
 	(void)context;
 	no_adapter(ui);
 	return false;
@@ -1769,7 +1930,7 @@ size_t fplinux_ui_form_append_gauge(struct fplinux_ui_screen *form,
 {
 	size_t index = fplinux_ui_list_append(form, label, NULL);
 
-	assert(minimum == 1 && maximum == 10 && interactive);
+	assert((minimum == 0 || minimum == 1) && maximum == 10 && interactive);
 	form->rows[index].value = value;
 	return index;
 }
@@ -1778,6 +1939,12 @@ size_t fplinux_ui_form_append_string(struct fplinux_ui_screen *form,
 				     const char *label, const char *text)
 {
 	return fplinux_ui_list_append(form, label, text);
+}
+
+size_t fplinux_ui_form_append_property(struct fplinux_ui_screen *form,
+				       const char *label, const char *text)
+{
+	return fplinux_ui_form_append_string(form, label, text);
 }
 
 bool fplinux_ui_form_set_string(struct fplinux_ui_screen *form, size_t item,

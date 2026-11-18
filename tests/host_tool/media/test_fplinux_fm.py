@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-2.0-only
-"""Host checks for FM command parsing and observable device cleanup."""
+"""FM frontend parsing, service lease lifetime and silent V4L2 seek."""
 
 from __future__ import annotations
 
@@ -8,152 +8,112 @@ from typing import TYPE_CHECKING
 import pytest
 
 from tests import ROOT
-from tests.c_harness import c_build_directory, compile_c
+from tests.c_harness import compile_c
 from tests.process import run_process
 
 if TYPE_CHECKING:
     import subprocess
-    from collections.abc import Iterator
     from pathlib import Path
 
-SOURCE = ROOT / "alpine/aports/fplinux-fm/fplinux-fm.c"
-BOUNDARY = ROOT / "tests/host_tool/media/fixtures/fplinux-fm/boundary.c"
 
-
-class FPLinuxFMHostToolTests:
-    """Run the real command with test-owned V4L2 and ALSA boundaries."""
-
-    @pytest.fixture(scope="class")
-    @classmethod
-    def executable(cls, tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
-        """Build the command with a narrow hardware double for this host."""
-        with c_build_directory(tmp_path_factory, "fplinux-fm") as directory:
-            executable = directory / "fplinux-fm"
-            compile_c(
-                executable,
-                [
-                    "-std=c11",
-                    "-Wall",
-                    "-Wextra",
-                    "-Werror",
-                    "-I",
-                    str(ROOT / "tests/host_tool/media/fixtures/fplinux-fm"),
-                    "-I",
-                    str(ROOT / "include/fplinux"),
-                    str(SOURCE),
-                    str(ROOT / "lib/fplinux-shared/fplinux-cli.c"),
-                    str(BOUNDARY),
-                ],
-                name="compile fplinux-fm with hardware double",
-                check=True,
-            )
-            yield executable
-
-    def run_fm(
-        self, executable: Path, arguments: list[str], *, scenario: str | None = None
-    ) -> subprocess.CompletedProcess[str]:
-        """Run one bounded CLI scenario."""
-        environment = {"LC_ALL": "C"}
-        if scenario:
-            environment[scenario] = "1"
-        return run_process(
-            [str(executable), *arguments],
-            name="run fplinux-fm",
-            timeout=5,
-            env=environment,
-        )
-
-    @pytest.mark.parametrize(
-        ("arguments", "status", "message"),
+@pytest.fixture(scope="module")
+def fm(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    executable = tmp_path_factory.mktemp("fplinux-fm") / "fm"
+    compile_c(
+        executable,
         [
-            pytest.param(["--help"], 0, "Usage:", id="root-help"),
-            pytest.param(["scan", "--help"], 0, "Usage:", id="scan-help"),
-            pytest.param(["play", "--help"], 0, "Usage:", id="play-help"),
-            pytest.param(["play", "87.4"], 2, "0.1 MHz steps", id="below-band"),
-            pytest.param(["play", "108.1"], 2, "0.1 MHz steps", id="above-band"),
-            pytest.param(["play", "98.25"], 2, "0.1 MHz steps", id="half-step"),
-            pytest.param(["play", "98.3x"], 2, "0.1 MHz steps", id="trailing-text"),
-            pytest.param(["play", "98."], 2, "0.1 MHz steps", id="incomplete-decimal"),
+            "-std=c11",
+            "-Wall",
+            "-Wextra",
+            "-Werror",
+            f"-I{ROOT / 'include/fplinux'}",
+            str(ROOT / "alpine/aports/fplinux-fm/fplinux-fm.c"),
+            str(ROOT / "lib/fplinux-shared/fplinux-cli.c"),
+            str(ROOT / "tests/host_tool/media/fixtures/fplinux-fm/boundary.c"),
         ],
+        name="compile FM frontend with service and tuner boundaries",
     )
-    def test_help_and_invalid_frequency_do_not_access_radio(
-        self, executable: Path, arguments: list[str], status: int, message: str
-    ) -> None:
-        """Parsing resolves help and exact 100 kHz steps before opening devices."""
-        result = self.run_fm(executable, arguments)
-        assert result.returncode == status
-        assert message in (result.stdout if status == 0 else result.stderr)
-        assert "RADIO_OPEN" not in result.stderr
+    return executable
 
-    def test_scan_emits_distinct_candidates_without_audio(self, executable: Path) -> None:
-        """Inclusive seek scans both band edges without enabling audio."""
-        result = self.run_fm(executable, ["scan"])
-        assert (result.returncode) == (0)
-        assert (result.stdout.splitlines()) == (
-            [
-                "candidate 87.5 MHz",
-                "candidate 88.1 MHz",
-                "candidate 93.4 MHz",
-                "candidate 108.0 MHz",
-            ]
-        )
-        assert ("FM_ON") not in (result.stderr)
-        assert result.stderr.endswith("RADIO_CLOSE\n")
 
-    def test_no_channel_scan_is_bounded(self, executable: Path) -> None:
-        """The documented no-channel result ends normally without audio."""
-        result = self.run_fm(executable, ["scan"], scenario="FM_TEST_NO_CHANNEL")
-        assert (result.returncode) == (0)
-        assert (result.stdout) == ("No FM candidates found.\n")
-        assert ("FM_ON") not in (result.stderr)
-
-    def test_signal_mutes_before_disabling_alsa_and_closing_radio(self, executable: Path) -> None:
-        """A signal after radio unmute takes the ordered cleanup path."""
-        result = self.run_fm(executable, ["play", "98.3"], scenario="FM_TEST_SIGNAL")
-        assert (result.returncode) == (143)
-        assert (result.stderr.splitlines()[-5:]) == (
-            ["FM_ON", "V4L2_UNMUTE", "V4L2_MUTE", "FM_OFF", "RADIO_CLOSE"]
-        )
-
-    def test_decimal_frequency_and_bounded_playback(self, executable: Path) -> None:
-        """An exact decimal maps to V4L2 LOW units and stops at the deadline."""
-        result = self.run_fm(
-            executable, ["play", "98.30", "--seconds=1"], scenario="FM_TEST_EXPECT_983"
-        )
-        assert (result.returncode) == (0)
-        assert ("Playing 98.3 MHz") in (result.stdout)
-        assert (result.stderr.splitlines()[-5:]) == (
-            ["FM_ON", "V4L2_UNMUTE", "V4L2_MUTE", "FM_OFF", "RADIO_CLOSE"]
-        )
-
-    def test_failed_tune_never_enables_audio(self, executable: Path) -> None:
-        """A timed out tune closes radio without unmuting either audio path."""
-        result = self.run_fm(executable, ["play", "98.3"], scenario="FM_TEST_FAIL_TUNE")
-        assert (result.returncode) == (1)
-        assert ("VIDIOC_S_FREQUENCY") in (result.stderr)
-        assert ("FM_ON") not in (result.stderr)
-        assert result.stderr.endswith("RADIO_CLOSE\n")
-
-    @pytest.mark.parametrize(
-        ("scenario", "message"),
-        [
-            ("FM_TEST_FAIL_FM_ON", "set FM Playback Switch on:"),
-            ("FM_TEST_FAIL_V4L2_UNMUTE", "set V4L2 audio mute off:"),
-            ("FM_TEST_FAIL_V4L2_MUTE", "set V4L2 audio mute on:"),
-            ("FM_TEST_FAIL_FM_OFF", "set FM Playback Switch off:"),
-        ],
-        ids=[
-            "FM_TEST_FAIL_FM_ON",
-            "FM_TEST_FAIL_V4L2_UNMUTE",
-            "FM_TEST_FAIL_V4L2_MUTE",
-            "FM_TEST_FAIL_FM_OFF",
-        ],
+def run_fm(fm: Path, arguments: list[str], **scenario: str) -> subprocess.CompletedProcess[str]:
+    return run_process(
+        [str(fm), *arguments],
+        name="run FM frontend",
+        timeout=5,
+        env={"LC_ALL": "C", **scenario},
     )
-    def test_failed_audio_changes_identify_requested_state(
-        self, executable: Path, scenario: str, message: str
-    ) -> None:
-        """A failed route or mute operation names the state that did not apply."""
-        result = self.run_fm(executable, ["play", "98.3", "--seconds=1"], scenario=scenario)
-        assert (result.returncode) == (1)
-        assert (message) in (result.stderr)
-        assert result.stderr.endswith("RADIO_CLOSE\n")
+
+
+@pytest.mark.parametrize(
+    ("arguments", "status"),
+    [
+        (["--help"], 0),
+        (["scan", "--help"], 0),
+        (["play", "--help"], 0),
+        (["play", "87.4"], 2),
+        (["play", "108.1"], 2),
+        (["play", "98.25"], 2),
+        (["play", "98.3x"], 2),
+        (["play", "98."], 2),
+    ],
+)
+def test_help_and_invalid_frequency_do_not_contact_service(
+    fm: Path, arguments: list[str], status: int
+) -> None:
+    result = run_fm(fm, arguments)
+    assert result.returncode == status
+    assert "SERVICE_CONNECT" not in result.stderr
+
+
+def test_scan_uses_lease_and_emits_distinct_silent_candidates(fm: Path) -> None:
+    result = run_fm(fm, ["scan"])
+    assert result.returncode == 0
+    assert result.stdout.splitlines() == [
+        "candidate 87.5 MHz",
+        "candidate 88.1 MHz",
+        "candidate 93.4 MHz",
+        "candidate 108.0 MHz",
+    ]
+    assert result.stderr.splitlines() == [
+        "SERVICE_CONNECT",
+        "REQUEST SCAN",
+        "RADIO_OPEN",
+        "RADIO_CLOSE",
+        "LEASE_CLOSE",
+    ]
+
+
+def test_no_channel_scan_is_bounded_and_releases_lease(fm: Path) -> None:
+    result = run_fm(fm, ["scan"], FM_TEST_NO_CHANNEL="1")
+    assert result.returncode == 0
+    assert result.stdout == "No FM candidates found.\n"
+    assert result.stderr.endswith("RADIO_CLOSE\nLEASE_CLOSE\n")
+
+
+def test_decimal_playback_requests_service_frequency_and_releases_on_deadline(fm: Path) -> None:
+    result = run_fm(fm, ["play", "98.30", "--seconds=1"], FM_TEST_EXPECT_983="1")
+    assert result.returncode == 0
+    assert result.stdout == "Playing 98.3 MHz; press Ctrl-C to stop.\n"
+    assert result.stderr.splitlines() == ["SERVICE_CONNECT", "REQUEST PLAY 983", "LEASE_CLOSE"]
+
+
+def test_signal_releases_service_lease(fm: Path) -> None:
+    result = run_fm(fm, ["play", "98.3"], FM_TEST_SIGNAL="1")
+    assert result.returncode == 143
+    assert result.stderr.endswith("LEASE_CLOSE\n")
+
+
+def test_service_refusal_does_not_open_tuner(fm: Path) -> None:
+    result = run_fm(fm, ["play", "98.3"], FM_TEST_SERVICE_ERROR="1")
+    assert result.returncode == 1
+    assert "audio service:" in result.stderr
+    assert "RADIO_OPEN" not in result.stderr
+    assert "LEASE_CLOSE" in result.stderr
+
+
+def test_lost_service_ends_frontend_and_releases_lease(fm: Path) -> None:
+    result = run_fm(fm, ["play", "98.3"], FM_TEST_SERVICE_GONE="1")
+    assert result.returncode == 1
+    assert "wait:" in result.stderr
+    assert "LEASE_CLOSE" in result.stderr

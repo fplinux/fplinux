@@ -46,6 +46,13 @@ struct fplinux_ui_listview {
 	bool icons;
 	/* Details sit at the right of the text, not under it. */
 	bool inline_detail;
+	/* A Form popup owns one row whose height follows its complete pair. */
+	bool popup_choice;
+	bool popup_layout;
+	lv_point_t popup_name_size;
+	lv_point_t popup_value_size;
+	/* A following group of rows needs this list's final divider. */
+	bool trailing_divider;
 	/* Every row has a text column and the detail pitch. */
 	bool details;
 	int32_t pitch;
@@ -306,6 +313,12 @@ static void delete_cb(lv_event_t *event)
 
 static void size_changed_cb(lv_event_t *event);
 static void mark(struct fplinux_ui_listview *list, size_t index, bool marked);
+static void layout_popup_choice(struct fplinux_ui_listview *list);
+
+static void popup_choice_resized(lv_event_t *event)
+{
+	layout_popup_choice(lv_event_get_user_data(event));
+}
 
 struct fplinux_ui_listview *
 fplinux_ui_listview_create(struct fplinux_ui *ui, lv_obj_t *parent,
@@ -364,6 +377,24 @@ void fplinux_ui_listview_set_inline_detail(struct fplinux_ui_listview *list,
 					   bool inline_detail)
 {
 	list->inline_detail = inline_detail;
+}
+
+void fplinux_ui_listview_set_popup_choice(struct fplinux_ui_listview *list)
+{
+	list->popup_choice = true;
+	list->inline_detail = true;
+}
+
+void fplinux_ui_listview_set_trailing_divider(struct fplinux_ui_listview *list,
+					      bool visible)
+{
+	if (list->is_virtual)
+		return;
+	list->trailing_divider = visible;
+	if (list->count)
+		lv_obj_set_style_border_opa(
+			row_at(list, list->count - 1),
+			visible ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
 }
 
 static void update_level_hint(struct fplinux_ui_listview *list, lv_obj_t *row);
@@ -439,6 +470,90 @@ static void set_pitch(struct fplinux_ui_listview *list, int32_t pitch)
 	lv_obj_report_style_change(&list->row_style);
 }
 
+/* Measure the source strings before DOTS replaces letters in label text. */
+static void measure_popup_choice(struct fplinux_ui_listview *list,
+				 lv_obj_t *row, const char *text,
+				 const char *detail)
+{
+	lv_obj_t *name = row_text(list, row);
+	lv_obj_t *value = row_detail(list, row);
+
+	if (!list->popup_choice)
+		return;
+	lv_text_get_size(&list->popup_name_size, text,
+			 lv_obj_get_style_text_font(name, 0),
+			 lv_obj_get_style_text_letter_space(name, 0), 0,
+			 LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+	list->popup_value_size = (lv_point_t){ 0, 0 };
+	if (value)
+		lv_text_get_size(&list->popup_value_size, detail,
+				 lv_obj_get_style_text_font(value, 0),
+				 lv_obj_get_style_text_letter_space(value, 0),
+				 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+}
+
+/* The popup keeps list selection and marquee ownership in either layout. */
+static void layout_popup_choice(struct fplinux_ui_listview *list)
+{
+	lv_obj_t *row, *text, *detail;
+	lv_point_t name_size, value_size;
+	int32_t width, line, height, y, gap;
+	bool inline_pair;
+
+	if (!list->popup_choice || !list->count || list->popup_layout)
+		return;
+	list->popup_layout = true;
+	row = row_at(list, 0);
+	text = row_text(list, row);
+	detail = row_detail(list, row);
+	width = lv_obj_get_content_width(row);
+	if (width < 1)
+		goto done;
+	line = lv_font_get_line_height(list->theme->font);
+	name_size = list->popup_name_size;
+	value_size = list->popup_value_size;
+	gap = name_size.x && detail ? list->spec->row_gap : 0;
+	inline_pair = !detail || (name_size.x + gap + value_size.x <= width &&
+				  name_size.y <= line && value_size.y <= line);
+	height = inline_pair ? list->spec->row_height :
+			       list->spec->row_height_detail;
+	y = (height - list->spec->divider_width -
+	     (inline_pair ? line : 2 * line)) /
+	    2;
+	lv_obj_set_style_flex_grow(text, 0, 0);
+	lv_obj_set_width(text,
+			 inline_pair ? width - value_size.x - gap : width);
+	lv_obj_set_pos(text, 0, y);
+	if (!detail)
+		goto height;
+	lv_obj_set_style_max_width(detail, width, 0);
+	lv_obj_set_width(detail, inline_pair ? value_size.x : width);
+	lv_obj_set_pos(detail, inline_pair ? width - value_size.x : 0,
+		       inline_pair ? y : y + line);
+	lv_obj_set_style_text_align(
+		detail, inline_pair ? LV_TEXT_ALIGN_RIGHT : LV_TEXT_ALIGN_LEFT,
+		0);
+height:
+	if (list->pitch != height)
+		set_pitch(list, height);
+	lv_obj_set_height(list->object, height);
+	lv_obj_set_height(lv_obj_get_parent(list->object), height);
+done:
+	list->popup_layout = false;
+}
+
+/* The row centres only the lines this column actually contains. */
+static void size_column(struct fplinux_ui_listview *list, lv_obj_t *column)
+{
+	lv_obj_t *text = lv_obj_get_child(column, 0);
+	int32_t height =
+		lv_font_get_line_height(lv_obj_get_style_text_font(text, 0));
+
+	if (lv_obj_get_child(column, 1))
+		height += lv_font_get_line_height(list->theme->font);
+	lv_obj_set_height(column, height);
+}
+
 /* Puts the row's text label into a column for a detail under it. */
 static void add_column(struct fplinux_ui_listview *list, lv_obj_t *row,
 		       lv_obj_t *text)
@@ -453,15 +568,7 @@ static void add_column(struct fplinux_ui_listview *list, lv_obj_t *row,
 	/* One line high in the column, not grown to the column's height. */
 	lv_obj_set_style_flex_grow(text, 0, 0);
 	lv_obj_set_width(text, lv_pct(100));
-	lv_obj_set_height(
-		column,
-		lv_font_get_line_height(lv_obj_get_style_text_font(text, 0)) +
-			lv_font_get_line_height(list->theme->font));
-	if (row_trailing(row) &&
-	    lv_obj_check_type(row_trailing(row), &lv_label_class))
-		lv_obj_set_height(column,
-				  lv_font_get_line_height(
-					  lv_obj_get_style_text_font(text, 0)));
+	size_column(list, column);
 }
 
 /*
@@ -482,15 +589,7 @@ static void use_details(struct fplinux_ui_listview *list)
 			lv_obj_set_parent(detail, row_body(list, row));
 			lv_obj_remove_style(detail, &list->detail_style, 0);
 			lv_obj_add_style(detail, &list->detail_line_style, 0);
-			lv_obj_set_height(
-				row_body(list, row),
-				lv_font_get_line_height(
-					lv_obj_get_style_text_font(
-						lv_obj_get_child(
-							row_body(list, row), 0),
-						0)) +
-					lv_font_get_line_height(
-						list->theme->font));
+			size_column(list, row_body(list, row));
 		}
 	}
 	list->details = true;
@@ -515,6 +614,8 @@ static void set_detail(struct fplinux_ui_listview *list, lv_obj_t *row,
 			fplinux_ui_marquee_blur(list->ui, label);
 			lv_obj_delete(label);
 		}
+		if (list->details)
+			size_column(list, row_body(list, row));
 		return;
 	}
 	if (!label) {
@@ -533,6 +634,8 @@ static void set_detail(struct fplinux_ui_listview *list, lv_obj_t *row,
 				 lv_obj_has_state(row, ROW_SELECTED));
 	}
 	lv_label_set_text(label, detail);
+	if (list->details)
+		size_column(list, row_body(list, row));
 }
 
 static void update_level_hint(struct fplinux_ui_listview *list, lv_obj_t *row)
@@ -674,14 +777,7 @@ bool fplinux_ui_listview_set_emphasis(struct fplinux_ui_listview *list,
 	lv_obj_set_style_text_font(text, font, 0);
 	lv_obj_set_height(text, line);
 	if (list->details)
-		lv_obj_set_height(row_body(list, row),
-				  line + ((row_trailing(row) &&
-					   lv_obj_check_type(row_trailing(row),
-							     &lv_label_class) &&
-					   !row_detail(list, row)) ?
-						  0 :
-						  lv_font_get_line_height(
-							  list->theme->font)));
+		size_column(list, row_body(list, row));
 	fplinux_ui_marquee_changed(list->ui, text, row_detail(list, row));
 	return true;
 }
@@ -698,12 +794,6 @@ static void clear_trailing(struct fplinux_ui_listview *list, lv_obj_t *row)
 		set_detail(list, row, NULL);
 	lv_obj_remove_state(row, ROW_TRAILING);
 	lv_obj_delete(trailing);
-	if (list->details)
-		lv_obj_set_height(
-			row_body(list, row),
-			lv_font_get_line_height(lv_obj_get_style_text_font(
-				row_text(list, row), 0)) +
-				lv_font_get_line_height(list->theme->font));
 }
 
 bool fplinux_ui_listview_set_trailing_icon(struct fplinux_ui_listview *list,
@@ -776,12 +866,6 @@ bool fplinux_ui_listview_set_trailing_value(struct fplinux_ui_listview *list,
 					 lv_obj_has_state(row, ROW_SELECTED));
 		}
 		lv_label_set_text(label, value);
-		if (list->details && !row_detail(list, row))
-			lv_obj_set_height(
-				row_body(list, row),
-				lv_font_get_line_height(
-					lv_obj_get_style_text_font(
-						row_text(list, row), 0)));
 	}
 	fplinux_ui_marquee_changed(list->ui, row_text(list, row),
 				   row_detail(list, row));
@@ -886,6 +970,11 @@ static lv_obj_t *make_row(struct fplinux_ui_listview *list, const char *text)
 	lv_obj_add_style(row, &list->selected_style, ROW_SELECTED);
 	lv_obj_set_scrollable(row, false);
 	lv_obj_add_event_cb(row, highlight_draw, LV_EVENT_DRAW_MAIN, list);
+	if (list->popup_choice) {
+		lv_obj_set_layout(row, LV_LAYOUT_NONE);
+		lv_obj_add_event_cb(row, popup_choice_resized,
+				    LV_EVENT_SIZE_CHANGED, list);
+	}
 	if (list->marker != FPLINUX_UI_LISTVIEW_PLAIN) {
 		lv_obj_t *marker = lv_obj_create(row);
 
@@ -938,9 +1027,12 @@ size_t fplinux_ui_listview_add(struct fplinux_ui_listview *list,
 	if (index)
 		lv_obj_set_style_border_opa(row_at(list, index - 1),
 					    LV_OPA_COVER, 0);
-	lv_obj_set_style_border_opa(row, LV_OPA_TRANSP, 0);
+	lv_obj_set_style_border_opa(
+		row, list->trailing_divider ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
 	++list->count;
 	set_detail(list, row, detail);
+	measure_popup_choice(list, row, text, detail);
+	layout_popup_choice(list);
 	if (!index && list->marker == FPLINUX_UI_LISTVIEW_RADIO)
 		fplinux_ui_listview_set_marked(list, 0, true);
 	if (!index && list->selectable)
@@ -991,8 +1083,10 @@ bool fplinux_ui_listview_remove(struct fplinux_ui_listview *list, size_t index)
 	lv_obj_delete(row_at(list, index));
 	--list->count;
 	if (list->count)
-		lv_obj_set_style_border_opa(row_at(list, list->count - 1),
-					    LV_OPA_TRANSP, 0);
+		lv_obj_set_style_border_opa(
+			row_at(list, list->count - 1),
+			list->trailing_divider ? LV_OPA_COVER : LV_OPA_TRANSP,
+			0);
 	place_rows(list, index);
 	list->selected =
 		fplinux_ui_focus_deleted(focus, index, 1, list->count + 1);
@@ -1027,17 +1121,9 @@ bool fplinux_ui_listview_set_text(struct fplinux_ui_listview *list,
 	row = row_at(list, index);
 	lv_label_set_text(row_text(list, row), text);
 	set_detail(list, row, detail);
+	measure_popup_choice(list, row, text, detail);
+	layout_popup_choice(list);
 	update_level_hint(list, row);
-	if (list->details && row_trailing(row) &&
-	    lv_obj_check_type(row_trailing(row), &lv_label_class))
-		lv_obj_set_height(
-			row_body(list, row),
-			lv_font_get_line_height(lv_obj_get_style_text_font(
-				row_text(list, row), 0)) +
-				(row_detail(list, row) ?
-					 lv_font_get_line_height(
-						 list->theme->font) :
-					 0));
 	/* A focused row's marquee starts over with the new text. */
 	fplinux_ui_marquee_changed(list->ui, row_text(list, row),
 				   row_detail(list, row));

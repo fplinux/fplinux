@@ -77,7 +77,7 @@ enum fplinux_ui_modal {
 	FPLINUX_UI_MODAL_MENU = 1 << 0,
 	/*
 	 * The top screen: an alert, a popup choice, the date editor, or a
-	 * non-Canvas high-level screen in Launcher mode.
+	 * non-Canvas high-level screen covering the full display.
 	 */
 	FPLINUX_UI_MODAL_SCREEN = 1 << 1,
 	/* A text field's symbol grid. */

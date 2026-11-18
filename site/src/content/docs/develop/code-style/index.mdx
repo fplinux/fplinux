@@ -70,13 +70,31 @@ Python tests use pytest and its native assertions, fixtures and parameterization
 
 Each test protects a consumer-visible behavior, invariant, error, safety property or public artifact. Its name should state the operation, material scenario and expected result. Before adding a case, identify the concrete regression that would stop being detected if the test were removed.
 
+Choose inputs that exercise distinct decisions or consequences. Cover normal operation, a boundary value or a failure when each protects a different requirement. Parameterize cases that share one contract. Add another target, profile or format when it exercises a different policy, boundary value or relevant execution path. For a rejection test, supply otherwise valid inputs so the intended validation is the reason for rejection. Use coverage to find gaps and add cases for behaviors that matter to a consumer.
+
+Check effects at the boundary that owns them. A command that rejects an input before writing should return the expected error and leave the selected destination untouched. A failed replacement should preserve the previous usable result. A cache test should observe reuse with valid inputs, a miss after a relevant change, and reuse after an unrelated change. Select the transitions that matter to the behavior under test.
+
 Exercise production code through a normal import, object link, process, public entry point or built artifact appropriate to the claim. Do not extract private functions with source or AST surgery, include a production C file directly in a harness, or parse source text and patches as a substitute for behavior.
 
-Regression tests require a reachable failing scenario or direct causal proof, the violated contract and the observable harm before the fix. Test the restored behavior, not the spelling of the patch.
+Regression tests require a reachable failing scenario or direct causal proof, the violated contract and the observable harm before the fix. Where the scenario can be reproduced, verify that it fails for the expected reason before the fix and passes after it.
+
+### Choose the test boundary
+
+Use the smallest test that can expose the regression. Add a test at a wider boundary when it verifies a different contract, such as argument dispatch, a process lifecycle, package contents or compatibility with another component.
+
+| Tier | What to exercise |
+| --- | --- |
+| `small` | A focused host component through its normal import, with controlled inputs and temporary files as needed. For example, parse a manifest and check the expected values or the error for one invalid field. |
+| `host_process` | A real host process or process interaction. For example, verify child exit status, signal handling, complete log output or cleanup after failure. |
+| `host_tool` | A native tool or linked C component running on the host. For example, feed fixed input to a renderer and check the resulting pixels. Follow the [C harness rules](/fplinux/develop/code-style/c/#c-test-harnesses). |
+| `artifact` | A produced artifact read at the boundary that consumes it. For example, open a generated archive and check member names, modes and bytes. |
+| `public_workflow` | A supported operation through `./fplinux`. For example, verify that a command selects the requested data directory and reports the right error before creating state. |
 
 ### Keep the oracle independent
 
 Expected results come from a specification, literal example, independently trusted implementation or separately measured result. Do not calculate expected values with the production constant, registry, helper or algorithm that produces the actual value.
+
+Check the property named by the test. If a log must preserve all output, check that all expected output arrived. The presence of an early fragment only shows that some output reached the log. For a round trip, check an independent example of the format when compatibility with other readers matters.
 
 Share fixture construction, process control and comparison mechanics when that makes scenarios clearer, but keep decisive expected data independent. Binary FDT fixtures, for example, are constructed by test-owned format code rather than the production parser. Small C transformation cases use reviewable literal maps instead of copying the production transformation algorithm.
 
@@ -88,12 +106,19 @@ Keep short decisive inputs and expectations beside the case. Store substantial c
 
 A fixture states the resource it owns or the external boundary it replaces and exposes the values that matter to the assertion. Express its consumers through explicit fixture arguments instead of hidden test-instance state or setup mixins. A fixture may depend on another fixture when that relationship represents real preparation or lifetime. Keep automatic fixtures for invariants that apply to every case in their scope, and avoid a global fixture framework.
 
-For process-heavy cases, use named preparation, execution and collection steps when they make resource ownership and failures easier to follow. Control paths, environment, locale, time, randomness and subprocess lifetime. Use unique temporary resources, support independent and parallel runs, and clean up only resources owned by the case.
+For process-heavy cases, use named preparation, execution and collection steps when they make resource ownership and failures easier to follow. Control paths, environment, locale, time, randomness and subprocess lifetime. Use unique temporary resources, support independent and parallel runs, and clean up only resources owned by the case. Wait for a readiness or completion event with a deadline. If timing is part of the contract, measure the relevant events or use a controlled clock.
 
-Prefer real temporary files, processes, locks and production objects when they are deterministic and practical. Mock external, expensive, unavailable or nondeterministic boundaries. Do not mock the central subject and then assert that the mock was called; assert observable values, files, state transitions, messages, artifacts or effects instead.
+Prefer real temporary files, processes, locks and production objects when they are deterministic and practical. Use test doubles at external, expensive, unavailable or nondeterministic boundaries. Run the production code that owns the decision and check its observable result or effect. Assert call order or count when it is part of the contract, such as when a validation failure must prevent a write.
 
 ### State the evidence level
 
 Pure units, host components, mocked integrations, package inspections, public workflows and physical hardware runs establish different facts. Test names, docstrings and reports must describe the boundary actually exercised. A host C harness is not a framebuffer or phone test, and a successful build is not a hardware test.
 
 Keep tests hermetic and deterministic unless their declared purpose is to exercise an external integration. Tests must not silently depend on ambient credentials, a developer home directory, live network access, incidental cache, execution order or previous test results.
+
+### Review existing tests
+
+- `KEEP` a test that protects a current contract with a meaningful observation.
+- `RENAME` a test whose name or description overstates the behavior or boundary it exercises.
+- `REWRITE` a useful scenario whose inputs, expected result or observation can miss the regression it claims to catch or fail when the contract still holds.
+- `DELETE` a test that freezes implementation details without protecting a supported contract, exercises an obsolete scenario or duplicates an existing check. Before deleting a duplicate, identify the remaining test and preserve any unique inputs, outcomes or effects.

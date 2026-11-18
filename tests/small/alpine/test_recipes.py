@@ -232,7 +232,7 @@ class AlpineRecipesTests:
         ("consumer", "source_path", "header_path", "unrelated"),
         [
             pytest.param(
-                "fplinux-brightness-ui",
+                "fplinux-session",
                 "lib/fplinux-shared/fplinux-status-screen.c",
                 "include/fplinux/fplinux-status-screen.h",
                 "fplinux-showcase",
@@ -242,7 +242,7 @@ class AlpineRecipesTests:
                 "fplinux-showcase",
                 "lib/fplinux-shared/fplinux-font.c",
                 "include/fplinux/fplinux-font.h",
-                "fplinux-brightness-ui",
+                "fplinux-session",
                 id="psf-reader",
             ),
         ],
@@ -257,17 +257,8 @@ class AlpineRecipesTests:
         unrelated: str,
     ) -> None:
         """Each display's selected text implementation is causal and reaches its stage."""
-        consumers = ("fplinux-brightness-ui", "fplinux-showcase")
-        packages = (
-            *consumers,
-            "fplinux-present",
-            "fplinux-expat-dev",
-            "fplinux-font-terminus",
-            "fplinux-libdrm",
-            "fplinux-libtsm",
-            "fplinux-libxkbcommon",
-            "fplinux-mesa-gbm",
-        )
+        consumers = ("fplinux-session", "fplinux-terminal", "fplinux-showcase")
+        packages = alpine_selection.aport_build_order(consumers)
         for name in packages:
             alpine_source.write(f"alpine/aports/{name}/APKBUILD", f"pkgname={name}\n".encode())
         for name in packages:

@@ -36,7 +36,8 @@ def audio_client(tmp_path_factory: pytest.TempPathFactory) -> Path:
 
 
 @pytest.mark.parametrize(
-    "scenario", ["ring", "limits", "disconnect", "error", "malformed", "late-answer"]
+    "scenario",
+    ["ring", "pause-state", "limits", "disconnect", "error", "malformed", "late-answer"],
 )
 def test_audio_client_stream_contract(audio_client: Path, tmp_path: Path, scenario: str) -> None:
     result = run_process(

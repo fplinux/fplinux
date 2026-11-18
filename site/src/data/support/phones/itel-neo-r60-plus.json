@@ -214,12 +214,8 @@
     "note": "FPLinux reboot is not supported on this phone."
   },
   "fplinux-armada": {
-    "status": "unsupported",
-    "note": "No force-feedback device is enabled in this image."
-  },
-  "brightness-control": {
     "status": "untested",
-    "note": "Brightness control has not been tested on the physical phone."
+    "note": "Display, keypad backlight and force-feedback interfaces are configured; the demo has not been tested on this phone."
   },
   "tyrquake": {
     "status": "untested",

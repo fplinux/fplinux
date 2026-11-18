@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import os
 import shlex
+import tarfile
 import tempfile
 from pathlib import Path, PurePosixPath
 
@@ -214,6 +215,25 @@ def run_userspace_analysis(output: Path, sources: list[tuple[str, bool]]) -> Non
     output.mkdir(parents=True, exist_ok=True)
     if any(source == _UI_RUNTIME_SOURCE for source, _libusb in sources):
         generate_ui_protocol_header(output / "xdg-shell-client-protocol.h")
+    indicator = "alpine/aports/fplinux-session/session-indicator-render.c"
+    if any(source == indicator for source, _libusb in sources):
+        archives = list(Path("/opt/quality/src/ui-icons").iterdir())
+        if len(archives) != 1:
+            fail("system indicator requires the single declared icon archive")
+        icon_sources = output / "indicator-icons"
+        with tarfile.open(archives[0]) as archive:
+            archive.extractall(icon_sources, filter="data")
+        source_commands.run(
+            [
+                "python3",
+                "alpine/aports/fplinux-icons/generate-icons.py",
+                "--tabler",
+                str(icon_sources / "package/icons"),
+                "--masks-header",
+                str(output / "fplinux-indicator-masks.h"),
+            ],
+            env=os.environ | {"NODE_PATH": "/opt/quality/node-tools/node_modules"},
+        )
     activity = "lib/fplinux-shared/fplinux-activity.c"
     activity_consumers: tuple[tuple[str, str, tuple[str, ...]], ...] = (
         (activity, "fplinux-activity-masks.h", ()),
@@ -258,7 +278,7 @@ def run_userspace_analysis(output: Path, sources: list[tuple[str, bool]]) -> Non
     ]
     for index, (source, requires_libusb) in enumerate(sources):
         flags = [*common_flags, *userspace_c_include_flags(source)]
-        if source in {_UI_RUNTIME_SOURCE, activity, "lib/fplinux/fplinux-ui-screen.c"}:
+        if source in {_UI_RUNTIME_SOURCE, activity, "lib/fplinux/fplinux-ui-screen.c", indicator}:
             flags.extend(("-I", str(output)))
         if requires_libusb:
             flags.extend(libusb_flags)

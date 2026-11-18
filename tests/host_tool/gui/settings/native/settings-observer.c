@@ -12,9 +12,23 @@
 #include <string.h>
 #include <sys/socket.h>
 #include <sys/utsname.h>
+#include <time.h>
 
 static struct fplinux_ui *application_ui;
 static unsigned int completed_frames;
+
+time_t __real_time(time_t *result);
+
+time_t __wrap_time(time_t *result)
+{
+	const time_t fixed = 1704164645;
+
+	if (!getenv("FPLINUX_SETTINGS_TEST_FIXED_TIME"))
+		return __real_time(result);
+	if (result)
+		*result = fixed;
+	return fixed;
+}
 
 struct fplinux_ui *__real_fplinux_ui_open(const char *app_id,
 					  fplinux_ui_event_cb callback,
@@ -38,23 +52,25 @@ char *__wrap_libintl_bindtextdomain(const char *domain, const char *directory)
 								  directory);
 }
 
-bool __real_fplinux_settings_read_os_name(const char *path, char *value,
-					  size_t size);
+bool __real_fplinux_system_info_read_os_name(const char *path, char *value,
+					     size_t size);
 
-bool __wrap_fplinux_settings_read_os_name(const char *path, char *value,
-					  size_t size)
+bool __wrap_fplinux_system_info_read_os_name(const char *path, char *value,
+					     size_t size)
 {
 	const char *name = getenv("FPLINUX_SETTINGS_TEST_SYSTEM_NAME");
 
 	if (!name)
-		return __real_fplinux_settings_read_os_name(path, value, size);
+		return __real_fplinux_system_info_read_os_name(path, value,
+							       size);
 	return snprintf(value, size, "%s", name) < (int)size;
 }
 
-bool __real_fplinux_settings_read_os_field(const char *path, const char *field,
-					   char *value, size_t size);
-bool __real_fplinux_settings_read_line(const char *path, char *value,
-				       size_t size);
+bool __real_fplinux_system_info_read_os_field(const char *path,
+					      const char *field, char *value,
+					      size_t size);
+bool __real_fplinux_system_info_read_line(const char *path, char *value,
+					  size_t size);
 bool __real_fplinux_settings_read_memory(const char *path,
 					 unsigned long *available,
 					 unsigned long *total);
@@ -62,16 +78,18 @@ bool __real_fplinux_settings_about_logo(int profile, bool dark, char *path,
 					size_t size);
 int __real_uname(struct utsname *system);
 
-bool __wrap_fplinux_settings_read_os_field(const char *path, const char *field,
-					   char *value, size_t size)
+bool __wrap_fplinux_system_info_read_os_field(const char *path,
+					      const char *field, char *value,
+					      size_t size)
 {
 	if (getenv("FPLINUX_SETTINGS_TEST_ABOUT") && !strcmp(field, "BUILD_ID"))
 		return snprintf(value, size, "97b175e5e2e9") < (int)size;
-	return __real_fplinux_settings_read_os_field(path, field, value, size);
+	return __real_fplinux_system_info_read_os_field(path, field, value,
+							size);
 }
 
-bool __wrap_fplinux_settings_read_line(const char *path, char *value,
-				       size_t size)
+bool __wrap_fplinux_system_info_read_line(const char *path, char *value,
+					  size_t size)
 {
 	if (getenv("FPLINUX_SETTINGS_TEST_ABOUT")) {
 		if (!strcmp(path, "/proc/device-tree/model"))
@@ -80,7 +98,7 @@ bool __wrap_fplinux_settings_read_line(const char *path, char *value,
 		if (!strcmp(path, "/etc/alpine-release"))
 			return snprintf(value, size, "3.24.2") < (int)size;
 	}
-	return __real_fplinux_settings_read_line(path, value, size);
+	return __real_fplinux_system_info_read_line(path, value, size);
 }
 
 bool __wrap_fplinux_settings_read_memory(const char *path,
@@ -200,6 +218,20 @@ static void collect_labels(lv_obj_t *object,
 			{ "Input", "Ввод" },
 			{ "About", "О системе" },
 		};
+		static const char *const sections[7][2] = {
+			{ "Brightness", "Яркость" },
+			{ "Screen timeout", "Отключение экрана" },
+			{ "Auto-lock", "Автоблокировка" },
+			{ "Theme", "Тема" },
+			{ "Date and time", "Дата и время" },
+			{ "Language", "Язык" },
+			{ "Input language", "Язык ввода" },
+		};
+		static const char *const sounds[3][2] = {
+			{ "Media volume", "Громкость медиа" },
+			{ "Alarm volume", "Громкость будильника" },
+			{ "Output", "Выход звука" },
+		};
 
 		for (size_t index = 0; index < 4; ++index)
 			if (!strcmp(text, roots[index][0]) ||
@@ -207,9 +239,24 @@ static void collect_labels(lv_obj_t *object,
 				screen_observe_list_value(
 					object,
 					&observation->root_values[index]);
+		if (!strcmp(text, "Sound") || !strcmp(text, "Звук"))
+			screen_observe_list_value(object,
+						  &observation->root_sound);
+		for (size_t index = 0; index < 7; ++index)
+			if (!strcmp(text, sections[index][0]) ||
+			    !strcmp(text, sections[index][1]))
+				screen_observe_list_value(
+					object,
+					&observation->section_values[index]);
 		if (!strcmp(text, "Bluetooth") && !observation->bluetooth.found)
 			screen_observe_list_value(object,
 						  &observation->bluetooth);
+		for (size_t index = 0; index < 3; ++index)
+			if (!strcmp(text, sounds[index][0]) ||
+			    !strcmp(text, sounds[index][1]))
+				screen_observe_list_value(
+					object,
+					&observation->sound_values[index]);
 
 		assert(*used + length + 2 < sizeof(observation->labels));
 		memcpy(observation->labels + *used, text, length);
@@ -237,7 +284,11 @@ void __wrap_lv_display_flush_ready(lv_display_t *display)
 		observation.theme = fplinux_ui_theme(application_ui)->kind;
 		struct fplinux_ui_screen *screen =
 			fplinux_ui_current(application_ui);
+		const char *text = fplinux_ui_form_get_text(screen, 0);
 
+		if (text)
+			snprintf(observation.form_text,
+				 sizeof(observation.form_text), "%s", text);
 		observation.date_value = fplinux_ui_form_get_date(screen, 0);
 		observation.time_value = fplinux_ui_form_get_date(screen, 1);
 		observation.focused_item = fplinux_ui_form_get_focus(screen);

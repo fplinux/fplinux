@@ -26,9 +26,11 @@ struct peer {
 	unsigned int opened;
 	unsigned int closed;
 	unsigned int kicked;
+	unsigned int pauses;
 	struct fplinux_audio_ring *rings[4];
 	size_t bytes[4];
 	pthread_mutex_t mutex;
+	pthread_cond_t changed;
 };
 
 static void answer_open(struct peer *peer,
@@ -133,6 +135,20 @@ static void *serve(void *data)
 			++peer->kicked;
 			pthread_mutex_unlock(&peer->mutex);
 			break;
+		case 7: /* PAUSE carries only the stream and a boolean flag. */
+			assert(request.stream == 1 && request.flags <= 1);
+			assert(!request.version && !request.rate &&
+			       !request.channels && !request.error &&
+			       !request.reserved);
+			pthread_mutex_lock(&peer->mutex);
+			assert(request.flags == (peer->pauses == 0 ? 1U : 0U));
+			atomic_store(&peer->rings[0]->reason,
+				     request.flags ? 1U : 4U);
+			atomic_store(&peer->rings[0]->state, 1U);
+			++peer->pauses;
+			pthread_cond_signal(&peer->changed);
+			pthread_mutex_unlock(&peer->mutex);
+			break;
 		default:
 			assert(false);
 		}
@@ -205,6 +221,53 @@ static void test_limits(struct fplinux_audio_client *client)
 	/* Client teardown owns all four still-open mappings and sends CLOSE. */
 }
 
+static void wait_pause(struct peer *peer, unsigned int count)
+{
+	struct timespec deadline;
+
+	assert(clock_gettime(CLOCK_REALTIME, &deadline) == 0);
+	deadline.tv_sec += 2;
+	pthread_mutex_lock(&peer->mutex);
+	while (peer->pauses < count)
+		assert(pthread_cond_timedwait(&peer->changed, &peer->mutex,
+					      &deadline) == 0);
+	pthread_mutex_unlock(&peer->mutex);
+}
+
+static void test_pause_state(struct fplinux_audio_client *client,
+			     struct peer *peer)
+{
+	struct fplinux_audio_stream *stream =
+		fplinux_audio_stream_open(client, 8000, 1);
+	int16_t frames[32] = { 1000 };
+	uint32_t state, reason;
+
+	assert(stream);
+	assert(fplinux_audio_stream_write(stream, frames, 32) == 32);
+	assert(fplinux_audio_stream_pause(stream, true));
+	wait_pause(peer, 1);
+	assert(fplinux_audio_stream_status(stream, &state, &reason));
+	assert(state == 1 && reason == 1);
+	assert(fplinux_audio_stream_queued(stream) == 32);
+	assert(fplinux_audio_stream_pause(stream, false));
+	wait_pause(peer, 2);
+	/* A resume request does not invent PLAYING while policy holds the ring. */
+	assert(fplinux_audio_stream_status(stream, &state, &reason));
+	assert(state == 1 && reason == 4);
+	atomic_store(&ring_at(peer, 0)->reason, 0U);
+	atomic_store(&ring_at(peer, 0)->state, 0U);
+	assert(fplinux_audio_stream_status(stream, &state, &reason));
+	assert(state == 0 && reason == 0);
+	assert(!fplinux_audio_stream_status(NULL, &state, &reason) &&
+	       errno == EINVAL);
+	assert(!fplinux_audio_stream_pause(NULL, false) && errno == EINVAL);
+	atomic_store(&ring_at(peer, 0)->state, 3U);
+	assert(fplinux_audio_stream_status(stream, &state, &reason) &&
+	       state == 3);
+	assert(!fplinux_audio_stream_pause(stream, false) && errno == EPIPE);
+	fplinux_audio_stream_close(stream);
+}
+
 static void test_disconnect(struct fplinux_audio_client *client,
 			    struct peer *peer)
 {
@@ -230,7 +293,9 @@ static void test_disconnect(struct fplinux_audio_client *client,
 int main(int argc, char **argv)
 {
 	struct sockaddr_un address = { .sun_family = AF_UNIX };
-	struct peer peer = { .fd = -1, .mutex = PTHREAD_MUTEX_INITIALIZER };
+	struct peer peer = { .fd = -1,
+			     .mutex = PTHREAD_MUTEX_INITIALIZER,
+			     .changed = PTHREAD_COND_INITIALIZER };
 	struct fplinux_audio_client *client;
 	pthread_t thread;
 
@@ -250,6 +315,8 @@ int main(int argc, char **argv)
 	assert(client && fplinux_audio_client_fd(client) == -1);
 	if (!strcmp(peer.scenario, "ring"))
 		test_ring(client, &peer);
+	else if (!strcmp(peer.scenario, "pause-state"))
+		test_pause_state(client, &peer);
 	else if (!strcmp(peer.scenario, "limits"))
 		test_limits(client);
 	else if (!strcmp(peer.scenario, "disconnect"))
@@ -285,6 +352,7 @@ int main(int argc, char **argv)
 	close(peer.listener);
 	unlink(argv[1]);
 	pthread_mutex_destroy(&peer.mutex);
+	pthread_cond_destroy(&peer.changed);
 	puts("audio client: OK");
 	return 0;
 }

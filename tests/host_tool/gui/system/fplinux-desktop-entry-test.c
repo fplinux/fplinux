@@ -33,10 +33,11 @@ int main(int argc, char **argv)
 	if (valid)
 		printf("app_id=%s\ntitle=%s\nexecutable=%s\nmode=%d\n"
 		       "hidden=%d\nno_display=%d\nicon=%s\nicon_valid=%d\n"
-		       "jar=%d\nvxp=%d\ntext=%d\n",
+		       "background_audio=%d\nlight_effects=%d\njar=%d\nvxp=%d\ntext=%d\n",
 		       entry.app_id, entry.title, entry.executable, entry.mode,
 		       entry.hidden, entry.no_display, entry.icon,
-		       entry.icon_valid,
+		       entry.icon_valid, entry.background_audio,
+		       entry.light_effects,
 		       fplinux_desktop_entry_handles(&entry,
 						     "/tmp/Игра one.JaR"),
 		       fplinux_desktop_entry_handles(&entry, "/tmp/other.VXP"),

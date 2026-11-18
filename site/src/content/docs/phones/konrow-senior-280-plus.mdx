@@ -1,0 +1,34 @@
+---
+---
+
+import PhoneIdentity from "../../../components/PhoneIdentity.astro";
+import PhoneBoot from "../../../components/PhoneBoot.astro";
+import PhoneChecklist from "../../../components/PhoneChecklist.astro";
+
+<PhoneIdentity />
+
+## Support checklist
+
+See [Support status](/fplinux/phones/#support-status) for the checklist labels and [common limitations](/fplinux/phones/#limitations-on-every-phone).
+
+<PhoneChecklist />
+
+## Boot
+
+Use the RAM profile from a [source checkout](/fplinux/start/run/). You can also [package a Linux archive locally](/fplinux/develop/packaging/). The graphical interface appears after Linux starts.
+
+<PhoneBoot />
+
+## Controls
+
+The green call key is OK. The side Volume − key moves left and Volume + moves right. To unlock, press the left soft key and then `*`. The complete keymap still needs testing. The torch has its own physical switch.
+
+## Storage and audio
+
+Insert the microSD card before boot and [unmount it before shutdown](/fplinux/use/power/#unmount-data-cards). The card is available for files during the RAM session. The internal NAND has an identification diagnostic. Full NAND backup and automatic phone-data preparation are unavailable.
+
+Wired headphones work with the default playback levels. Loudspeaker output, microphone input, automatic headset detection and Bluetooth are unavailable.
+
+## Power
+
+Disconnect the charger when checking [power-off](/fplinux/use/power/). The battery level is estimated from voltage and current readings.

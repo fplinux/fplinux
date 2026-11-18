@@ -46,6 +46,7 @@ enum screen_kind {
 
 enum item_kind {
 	ITEM_STRING,
+	ITEM_VALUE,
 	ITEM_TEXT,
 	ITEM_CHOICE,
 	ITEM_GAUGE,
@@ -142,6 +143,12 @@ struct form_item {
 	unsigned int duration_seconds;
 	/* Takes no space and never has focus. */
 	bool hidden;
+	/* A stacked read-only property, using the ordinary string contract. */
+	bool property;
+	/* The visible trailing line of a property or value row. */
+	bool divider;
+	/* A value's geometry callback may change its own height. */
+	bool value_layout;
 	/* A string or image item drawn as a link or button with commands. */
 	enum fplinux_ui_appearance appearance;
 	/* An image's decoded picture, and a copy that fits inside the box. */
@@ -414,24 +421,26 @@ static lv_obj_t *plain_object(lv_obj_t *parent)
 	return object;
 }
 
-/* Launcher Canvas owns its bars; other high-level screens use the local bar. */
-static bool launcher_legend_bar(const struct fplinux_ui_screen *screen)
+/* Canvas owns its chrome; other full-display screens use the local bar. */
+static bool local_legend_bar(const struct fplinux_ui_screen *screen)
 {
-	return fplinux_ui_is_launcher(screen->ui) &&
-	       screen->kind != SCREEN_CANVAS;
+	return screen->kind != SCREEN_CANVAS &&
+	       (fplinux_ui_is_launcher(screen->ui) ||
+		fplinux_ui_is_fullscreen(screen->ui));
 }
 
 static int32_t screen_top(const struct fplinux_ui_screen *screen)
 {
-	return launcher_legend_bar(screen) ? spec_of(screen)->status_height : 0;
+	return fplinux_ui_is_launcher(screen->ui) && local_legend_bar(screen) ?
+		       spec_of(screen)->status_height :
+		       0;
 }
 
 static int32_t screen_height(const struct fplinux_ui_screen *screen)
 {
-	return launcher_legend_bar(screen) ?
-		       fplinux_ui_modal_height(screen->ui) -
-			       screen_top(screen) :
-		       fplinux_ui_height(screen->ui);
+	return local_legend_bar(screen) ? fplinux_ui_modal_height(screen->ui) -
+						  screen_top(screen) :
+					  fplinux_ui_height(screen->ui);
 }
 
 static int32_t label_text_width(lv_obj_t *label, const char *text)
@@ -1514,6 +1523,17 @@ static void assign_keys(struct fplinux_ui_screen *screen,
 static void form_settle(struct fplinux_ui_screen *form);
 static void keep_focus_visible(struct fplinux_ui_screen *form);
 
+static void update_legend_owner(struct fplinux_ui_screens *layer)
+{
+	struct fplinux_ui_screen *screen = fplinux_ui_screens_active(layer);
+
+	fplinux_ui_modal_set(layer->ui, FPLINUX_UI_MODAL_SCREEN,
+			     screen && !layer->closing &&
+				     (screen->kind == SCREEN_ALERT ||
+				      screen->popup_choice || screen->editing ||
+				      local_legend_bar(screen)));
+}
+
 static void refresh(struct fplinux_ui_screens *layer)
 {
 	struct fplinux_ui_screen *screen = fplinux_ui_screens_active(layer);
@@ -1521,11 +1541,7 @@ static void refresh(struct fplinux_ui_screens *layer)
 	struct form_item *text;
 	struct soft_keys soft;
 
-	fplinux_ui_modal_set(layer->ui, FPLINUX_UI_MODAL_SCREEN,
-			     screen && !layer->closing &&
-				     (screen->kind == SCREEN_ALERT ||
-				      screen->popup_choice || screen->editing ||
-				      launcher_legend_bar(screen)));
+	update_legend_owner(layer);
 	if (!screen || layer->closing)
 		return;
 	form_settle(screen);
@@ -1781,6 +1797,8 @@ static bool has_item_commands(const struct form_item *item)
  */
 static bool actionable(const struct form_item *item)
 {
+	if (item->kind == ITEM_VALUE)
+		return has_item_commands(item);
 	return (item->kind == ITEM_STRING || item->kind == ITEM_IMAGE) &&
 	       item->appearance != FPLINUX_UI_APPEARANCE_PLAIN &&
 	       has_item_commands(item);
@@ -1795,6 +1813,19 @@ static void show_appearance_focus(struct form_item *item, bool focused)
 	const struct fplinux_ui_theme *theme = fplinux_ui_theme(item->form->ui);
 	lv_color_t colour = focused ? theme->accent_text : theme->accent;
 
+	if (item->kind == ITEM_VALUE) {
+		lv_obj_set_style_bg_color(item->box, theme->accent, 0);
+		lv_obj_set_style_bg_opa(
+			item->box, focused ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
+		if (item->label)
+			lv_obj_set_style_text_color(
+				item->label,
+				focused ? theme->accent_text : theme->muted, 0);
+		lv_obj_set_style_text_color(
+			item->value,
+			focused ? theme->accent_text : theme->foreground, 0);
+		return;
+	}
 	if (item->appearance == FPLINUX_UI_APPEARANCE_BUTTON) {
 		fplinux_ui_control_focus(item->form->ui, item->frame, focused);
 		if (item->kind == ITEM_IMAGE)
@@ -1837,7 +1868,7 @@ static void form_apply_focus(struct fplinux_ui_screen *form, bool active)
 			fplinux_ui_text_set_focused(item->field, focused);
 		else if (item->kind == ITEM_CHOICE)
 			fplinux_ui_listview_set_selectable(item->list, focused);
-		else if (actionable(item))
+		else if (item->kind == ITEM_VALUE || actionable(item))
 			show_appearance_focus(item, focused);
 		else if (item->frame &&
 			 (segmented(item) || item->interactive)) {
@@ -1886,6 +1917,20 @@ static void view_area(lv_obj_t *content, lv_area_t *view)
 	view->y2 -= lv_obj_get_style_pad_bottom(content, LV_PART_MAIN);
 }
 
+static bool item_visible(const struct form_item *item)
+{
+	return !lv_obj_is_hidden(item->box);
+}
+
+static lv_obj_t *reading_edge(const struct form_item *item, bool down)
+{
+	lv_obj_t *label = down ? item->value : item->label;
+
+	if (!label || lv_obj_is_hidden(label))
+		label = down ? item->label : item->value;
+	return label && !lv_obj_is_hidden(label) ? label : NULL;
+}
+
 /* Finish a partly clipped end line, including the content's edge padding. */
 static void settle_form_text_edge(struct fplinux_ui_screen *form, bool down)
 {
@@ -1897,14 +1942,15 @@ static void settle_form_text_edge(struct fplinux_ui_screen *form, bool down)
 	for (size_t n = 0; n < form->item_count; ++n) {
 		size_t i = down ? form->item_count - 1 - n : n;
 
-		if (!form->items[i]->hidden) {
+		if (item_visible(form->items[i])) {
 			item = form->items[i];
 			break;
 		}
 	}
-	if (!item || item->kind != ITEM_STRING || actionable(item))
+	if (!item || (item->kind != ITEM_STRING && item->kind != ITEM_VALUE) ||
+	    (item->kind == ITEM_STRING && actionable(item)))
 		return;
-	label = down || !item->label ? item->value : item->label;
+	label = reading_edge(item, down);
 	if (!label)
 		return;
 	lv_obj_update_layout(form->content);
@@ -1959,7 +2005,7 @@ static void item_area(const struct form_item *item, lv_area_t *area)
 
 static bool focusable(const struct form_item *item)
 {
-	return !item->hidden &&
+	return item_visible(item) &&
 	       (item->kind == ITEM_TEXT || item->kind == ITEM_CHOICE ||
 		segmented(item) ||
 		(item->kind == ITEM_GAUGE && item->interactive) ||
@@ -1979,6 +2025,13 @@ static void form_focus(struct fplinux_ui_screen *form, size_t index,
 	form_apply_focus(form, is_top(form));
 	lv_obj_update_layout(form->content);
 	item_area(item, &area);
+	if (item->kind == ITEM_VALUE && entry == ENTER_BOTTOM) {
+		lv_area_t view;
+
+		view_area(form->content, &view);
+		if (lv_area_get_height(&area) > lv_area_get_height(&view))
+			area.y1 = area.y2 - lv_area_get_height(&view) + 1;
+	}
 	reveal(form, &area);
 }
 
@@ -2049,7 +2102,7 @@ static long first_passed(const struct fplinux_ui_screen *form, bool down,
 	for (long n = 0; n < count; ++n) {
 		long i = down ? n : count - 1 - n;
 
-		if (form->items[i]->hidden)
+		if (!item_visible(form->items[i]))
 			continue;
 		lv_obj_get_coords(form->items[i]->box, &area);
 		if (down ? area.y2 > view->y1 : area.y1 < view->y2)
@@ -2069,7 +2122,7 @@ static bool unread(const struct fplinux_ui_screen *form, bool down, size_t next,
 
 	for (long i = first_passed(form, down, view); i != end;
 	     i += down ? 1 : -1) {
-		if (focusable(form->items[i]) || form->items[i]->hidden)
+		if (focusable(form->items[i]) || !item_visible(form->items[i]))
 			continue;
 		lv_obj_get_coords(form->items[i]->box, &area);
 		if (down ? area.y2 > view->y2 : area.y1 < view->y1)
@@ -2086,6 +2139,9 @@ static void blur_scrolled_item(struct fplinux_ui_screen *form,
 
 	lv_obj_get_coords(form->content, &view);
 	item_area(item, &area);
+	if (item->kind == ITEM_VALUE && area.y1 <= view.y2 &&
+	    area.y2 >= view.y1)
+		return;
 	if (area.y1 != previous_top &&
 	    (area.y1 < view.y1 || area.y2 > view.y2)) {
 		form->focus = NONE;
@@ -2107,6 +2163,18 @@ static void form_move(struct fplinux_ui_screen *form, bool down)
 
 	lv_obj_update_layout(content);
 	view_area(content, &view);
+	/* Read a wrapped action's hidden text before leaving its row. */
+	if (item && item->kind == ITEM_VALUE) {
+		lv_obj_t *label = reading_edge(item, down);
+
+		if (label)
+			lv_obj_get_coords(label, &area);
+		if (label && (down ? area.y2 > view.y2 : area.y1 < view.y1)) {
+			scroll_form(form, down ? -spec_of(form)->row_height :
+						 spec_of(form)->row_height);
+			return;
+		}
+	}
 	if (item && inline_choice(item)) {
 		size_t row = fplinux_ui_listview_selected(item->list);
 
@@ -3170,6 +3238,98 @@ static struct form_item *form_item(const struct fplinux_ui_screen *form,
 	return form->items[index];
 }
 
+static bool starts_with_row(const struct form_item *item)
+{
+	return item->kind == ITEM_VALUE ||
+	       (item->kind == ITEM_CHOICE && !item->label);
+}
+
+static bool readonly_property(const struct form_item *item)
+{
+	return item->property &&
+	       item->appearance == FPLINUX_UI_APPEARANCE_PLAIN;
+}
+
+static void set_property_divider(struct form_item *item, bool divider)
+{
+	const struct fplinux_ui_profile_spec *spec = spec_of(item->form);
+	int32_t width = divider ? spec->divider_width : 0;
+	int32_t padding = divider ? spec->gap_small : 0;
+
+	if (item->divider == divider)
+		return;
+	item->divider = divider;
+	lv_obj_set_style_pad_bottom(item->box, padding, 0);
+	lv_obj_set_style_border_width(item->box, width, 0);
+	lv_obj_set_style_border_side(item->box, LV_BORDER_SIDE_BOTTOM, 0);
+	lv_obj_set_style_border_color(
+		item->box, fplinux_ui_theme(item->form->ui)->border, 0);
+	lv_obj_set_style_border_opa(item->box, LV_OPA_COVER, 0);
+}
+
+/* Value rows reserve their divider so commands never change geometry. */
+static void set_value_divider(struct form_item *item, bool divider)
+{
+	if (item->divider == divider)
+		return;
+	item->divider = divider;
+	lv_obj_set_style_border_opa(item->box,
+				    divider ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
+}
+
+/* Cells keep their sizes; spacing belongs to their visible boundaries. */
+static void update_form_boundaries(struct fplinux_ui_screen *form)
+{
+	const struct fplinux_ui_profile_spec *spec = spec_of(form);
+	struct form_item *previous = NULL;
+	int32_t top = 0, bottom = 0;
+
+	for (size_t i = 0; i < form->item_count; ++i) {
+		struct form_item *item = form->items[i];
+		bool rows_meet;
+
+		if (!item_visible(item)) {
+			if (item->property)
+				set_property_divider(item, false);
+			if (item->kind == ITEM_VALUE)
+				set_value_divider(item, false);
+			continue;
+		}
+		rows_meet = previous &&
+			    (previous->kind == ITEM_CHOICE ||
+			     previous->kind == ITEM_VALUE) &&
+			    starts_with_row(item);
+		lv_obj_set_style_margin_top(
+			item->box, !previous || rows_meet ? 0 : spec->spacing,
+			0);
+		if (!previous)
+			top = starts_with_row(item) ? 0 : spec->content_padding;
+		else if (previous->kind == ITEM_CHOICE)
+			fplinux_ui_listview_set_trailing_divider(previous->list,
+								 rows_meet);
+		else if (previous->kind == ITEM_VALUE)
+			set_value_divider(previous, rows_meet);
+		else if (previous->property)
+			set_property_divider(previous,
+					     readonly_property(previous) &&
+						     readonly_property(item));
+		previous = item;
+	}
+	if (previous && previous->kind == ITEM_CHOICE) {
+		fplinux_ui_listview_set_trailing_divider(previous->list, false);
+		/* The line below the form supplies the final row's divider. */
+		bottom = -spec->divider_width;
+	} else if (previous) {
+		if (previous->property)
+			set_property_divider(previous, false);
+		else if (previous->kind == ITEM_VALUE)
+			set_value_divider(previous, false);
+		bottom = spec->content_padding;
+	}
+	lv_obj_set_style_pad_top(form->content, top, 0);
+	lv_obj_set_style_pad_bottom(form->content, bottom, 0);
+}
+
 struct fplinux_ui_screen *fplinux_ui_form_new(struct fplinux_ui *ui,
 					      const char *title)
 {
@@ -3181,8 +3341,8 @@ struct fplinux_ui_screen *fplinux_ui_form_new(struct fplinux_ui *ui,
 	content = form->content;
 	lv_obj_set_scrollable(content, true);
 	lv_obj_set_flex_flow(content, LV_FLEX_FLOW_COLUMN);
-	lv_obj_set_style_pad_ver(content, spec_of(form)->content_padding, 0);
-	lv_obj_set_style_pad_row(content, spec_of(form)->spacing, 0);
+	lv_obj_set_style_pad_ver(content, 0, 0);
+	lv_obj_set_style_pad_row(content, 0, 0);
 	style_scrollbar(content, ui);
 	lv_obj_add_event_cb(content, form_images_resized, LV_EVENT_SIZE_CHANGED,
 			    form);
@@ -3249,12 +3409,15 @@ static size_t drop_item(struct fplinux_ui_screen *form, int error)
 
 static size_t appended(struct fplinux_ui_screen *form, struct form_item *item)
 {
+	update_form_boundaries(form);
 	changed(form);
 	return item->index;
 }
 
-size_t fplinux_ui_form_append_string(struct fplinux_ui_screen *form,
-				     const char *label, const char *text)
+static void show_string(struct form_item *string);
+
+static size_t append_string(struct fplinux_ui_screen *form, const char *label,
+			    const char *text, bool property)
 {
 	struct form_item *item;
 
@@ -3265,21 +3428,163 @@ size_t fplinux_ui_form_append_string(struct fplinux_ui_screen *form,
 	item = add_item(form, ITEM_STRING, label);
 	if (!item)
 		return NONE;
+	item->property = property;
+	if (property && item->label)
+		lv_obj_set_style_text_color(
+			item->label, fplinux_ui_theme(form->ui)->foreground, 0);
 	item->value = lv_label_create(item->box);
 	lv_obj_set_width(item->value, lv_pct(100));
 	lv_label_set_long_mode(item->value, LV_LABEL_LONG_MODE_WRAP);
 	lv_label_set_text(item->value, text ? text : "");
-	lv_obj_set_hidden(item->value, !text || !text[0]);
+	show_string(item);
 	return appended(form, item);
 }
 
-static void keep_focus_visible(struct fplinux_ui_screen *form);
+size_t fplinux_ui_form_append_string(struct fplinux_ui_screen *form,
+				     const char *label, const char *text)
+{
+	return append_string(form, label, text, false);
+}
+
+size_t fplinux_ui_form_append_property(struct fplinux_ui_screen *form,
+				       const char *label, const char *text)
+{
+	return append_string(form, label, text, true);
+}
+
+/* Fit both complete strings on one line, otherwise wrap them vertically. */
+static void layout_value(struct form_item *item)
+{
+	const struct fplinux_ui_profile_spec *spec = spec_of(item->form);
+	const lv_font_t *font = lv_obj_get_style_text_font(item->value, 0);
+	const char *name = item->label ? lv_label_get_text(item->label) : "";
+	const char *value = lv_label_get_text(item->value);
+	int32_t letter_space =
+		lv_obj_get_style_text_letter_space(item->value, 0);
+	int32_t line_space = lv_obj_get_style_text_line_space(item->value, 0);
+	lv_point_t name_size, value_size;
+	int32_t width, height, content_height, value_y;
+	bool inline_pair;
+
+	if (item->value_layout)
+		return;
+	item->value_layout = true;
+	width = lv_obj_get_content_width(item->box);
+	if (width < 1) {
+		item->value_layout = false;
+		return;
+	}
+	lv_text_get_size(&name_size, name, font, letter_space, line_space,
+			 LV_COORD_MAX, 0);
+	lv_text_get_size(&value_size, value, font, letter_space, line_space,
+			 LV_COORD_MAX, 0);
+	if (!name[0])
+		name_size = (lv_point_t){ 0, 0 };
+	if (!value[0])
+		value_size = (lv_point_t){ 0, 0 };
+	lv_obj_set_hidden(item->value, !value[0]);
+	inline_pair =
+		!strchr(name, '\n') && !strchr(value, '\n') &&
+		name_size.x + value_size.x +
+				(name[0] && value[0] ? spec->row_gap : 0) <=
+			width;
+	if (inline_pair) {
+		content_height = name_size.y > value_size.y ? name_size.y :
+							      value_size.y;
+		height = content_height + 2 * spec->field_padding +
+			 spec->divider_width;
+		if (height < spec->row_height)
+			height = spec->row_height;
+		value_y = (height - spec->divider_width - content_height) / 2;
+		if (item->label) {
+			lv_obj_set_width(item->label, name_size.x);
+			lv_obj_set_pos(item->label, 0, value_y);
+		}
+		lv_obj_set_width(item->value, value_size.x);
+		lv_obj_set_pos(item->value, width - value_size.x, value_y);
+	} else {
+		lv_text_get_size(&name_size, name, font, letter_space,
+				 line_space, width, 0);
+		lv_text_get_size(&value_size, value, font, letter_space,
+				 line_space, width, 0);
+		if (!value[0])
+			value_size = (lv_point_t){ 0, 0 };
+		value_y = spec->field_padding;
+		if (item->label) {
+			lv_obj_set_width(item->label, width);
+			lv_obj_set_pos(item->label, 0, value_y);
+			value_y +=
+				name_size.y + (value[0] ? spec->gap_small : 0);
+		}
+		lv_obj_set_width(item->value, width);
+		lv_obj_set_pos(item->value, 0, value_y);
+		height = value_y + value_size.y + spec->field_padding +
+			 spec->divider_width;
+		if (height < spec->row_height)
+			height = spec->row_height;
+	}
+	lv_obj_set_height(item->box, height);
+	item->value_layout = false;
+}
+
+static void value_resized(lv_event_t *event)
+{
+	layout_value(lv_event_get_user_data(event));
+}
+
+size_t fplinux_ui_form_append_value(struct fplinux_ui_screen *form,
+				    const char *label, const char *text)
+{
+	struct form_item *item;
+
+	if (!is_form(form)) {
+		errno = EINVAL;
+		return NONE;
+	}
+	item = add_item(form, ITEM_VALUE, label && label[0] ? label : NULL);
+	if (!item)
+		return NONE;
+	lv_obj_set_layout(item->box, LV_LAYOUT_NONE);
+	lv_obj_set_style_border_width(item->box, spec_of(form)->divider_width,
+				      0);
+	lv_obj_set_style_border_side(item->box, LV_BORDER_SIDE_BOTTOM, 0);
+	lv_obj_set_style_border_color(item->box,
+				      fplinux_ui_theme(form->ui)->border, 0);
+	lv_obj_set_style_border_opa(item->box, LV_OPA_TRANSP, 0);
+	item->value = lv_label_create(item->box);
+	lv_label_set_long_mode(item->value, LV_LABEL_LONG_MODE_WRAP);
+	lv_label_set_text(item->value, text ? text : "");
+	lv_obj_add_event_cb(item->box, value_resized, LV_EVENT_SIZE_CHANGED,
+			    item);
+	lv_obj_update_layout(item->box);
+	layout_value(item);
+	return appended(form, item);
+}
+
+bool fplinux_ui_form_set_value_text(struct fplinux_ui_screen *form,
+				    size_t index, const char *text)
+{
+	struct form_item *item = form_item(form, index, ITEM_VALUE);
+
+	if (!item) {
+		errno = EINVAL;
+		return false;
+	}
+	lv_label_set_text(item->value, text ? text : "");
+	layout_value(item);
+	keep_focus_visible(form);
+	return true;
+}
 
 /* An empty text takes no space, except in the box of a link or button. */
 static void show_string(struct form_item *string)
 {
-	lv_obj_set_hidden(string->value, !lv_label_get_text(string->value)[0] &&
-						 !actionable(string));
+	bool empty = !lv_label_get_text(string->value)[0] &&
+		     !actionable(string);
+	bool caption = string->label && lv_label_get_text(string->label)[0];
+
+	lv_obj_set_hidden(string->value, empty);
+	lv_obj_set_hidden(string->box, string->hidden || (empty && !caption));
 }
 
 /* A new text above the focus moves it: the form keeps it in view. */
@@ -3287,13 +3592,17 @@ bool fplinux_ui_form_set_string(struct fplinux_ui_screen *form, size_t item,
 				const char *text)
 {
 	struct form_item *string = form_item(form, item, ITEM_STRING);
+	bool visible;
 
 	if (!string) {
 		errno = EINVAL;
 		return false;
 	}
+	visible = item_visible(string);
 	lv_label_set_text(string->value, text ? text : "");
 	show_string(string);
+	if (item_visible(string) != visible)
+		update_form_boundaries(form);
 	/* A focused link or button keeps its new text in view too. */
 	if (item <= form->focus)
 		keep_focus_visible(form);
@@ -3481,7 +3790,7 @@ static bool copy_choices(struct form_item *item, const char *const *choices)
 
 /*
  * Rows of the list component without list padding; a popup choice is one
- * row with its value at the right ("label ... value").
+ * row with its complete value at the right, or on a second line.
  */
 static bool make_choice_list(struct form_item *item, size_t rows,
 			     enum fplinux_ui_listview_marker marker, bool popup)
@@ -3493,7 +3802,8 @@ static bool make_choice_list(struct form_item *item, size_t rows,
 	item->list = fplinux_ui_listview_create(item->form->ui, holder, marker);
 	if (!item->list)
 		return false;
-	fplinux_ui_listview_set_inline_detail(item->list, popup);
+	if (popup)
+		fplinux_ui_listview_set_popup_choice(item->list);
 	fplinux_ui_listview_set_selectable(item->list, false);
 	fplinux_ui_listview_set_callbacks(item->list, choice_selected, NULL,
 					  item);
@@ -3772,16 +4082,23 @@ size_t fplinux_ui_form_append_gauge(struct fplinux_ui_screen *form,
 					 value;
 	item->interactive = interactive;
 	item->frame = make_frame(item, interactive);
+	if (!interactive) {
+		lv_obj_set_style_pad_all(item->frame, 0, 0);
+		lv_obj_set_style_bg_opa(item->frame, LV_OPA_TRANSP, 0);
+		lv_obj_set_style_border_width(item->frame, 0, 0);
+	}
 	heading = plain_object(item->frame);
 	lv_obj_set_size(heading, lv_pct(100), LV_SIZE_CONTENT);
 	lv_obj_set_flex_flow(heading, LV_FLEX_FLOW_ROW);
 	lv_obj_set_style_pad_column(heading, spec_of(form)->spacing, 0);
 	item->gauge_name = lv_label_create(heading);
 	lv_obj_set_flex_grow(item->gauge_name, 1);
-	/* One line high, so that a longer name ends with dots. */
 	lv_obj_set_height(item->gauge_name,
-			  lv_font_get_line_height(theme->font));
-	lv_label_set_long_mode(item->gauge_name, LV_LABEL_LONG_MODE_DOTS);
+			  interactive ? lv_font_get_line_height(theme->font) :
+					LV_SIZE_CONTENT);
+	lv_label_set_long_mode(item->gauge_name,
+			       interactive ? LV_LABEL_LONG_MODE_DOTS :
+					     LV_LABEL_LONG_MODE_WRAP);
 	lv_label_set_text(item->gauge_name, label ? label : "");
 	item->value = lv_label_create(heading);
 	lv_obj_set_style_text_color(item->value, theme->muted, 0);
@@ -4300,6 +4617,7 @@ bool fplinux_ui_form_move_item(struct fplinux_ui_screen *form, size_t from,
 		form->item_commands[i].index =
 			moved_index(form->item_commands[i].index, from, to);
 	menu_rows_moved(form, moved_index, from, to);
+	update_form_boundaries(form);
 	keep_focus_visible(form);
 	changed(form);
 	return true;
@@ -4324,6 +4642,7 @@ bool fplinux_ui_form_delete(struct fplinux_ui_screen *form, size_t item)
 	free_item(deleted);
 	renumber(form, item);
 	item_commands_deleted(form, item, 1);
+	update_form_boundaries(form);
 	if (focused) {
 		pass_focus(form, item);
 	} else {
@@ -4352,6 +4671,7 @@ void fplinux_ui_form_delete_all(struct fplinux_ui_screen *form)
 	form->focus = NONE;
 	form->editing = false;
 	form->settled = false;
+	update_form_boundaries(form);
 	lv_obj_scroll_to_y(form->content, 0, LV_ANIM_OFF);
 	changed(form);
 }
@@ -4371,7 +4691,11 @@ bool fplinux_ui_form_set_hidden(struct fplinux_ui_screen *form, size_t item,
 	if (hidden && form->editing && form->focus == item)
 		show_date(target, NULL);
 	target->hidden = hidden;
-	lv_obj_set_hidden(target->box, hidden);
+	if (target->kind == ITEM_STRING)
+		show_string(target);
+	else
+		lv_obj_set_hidden(target->box, hidden);
+	update_form_boundaries(form);
 	if (hidden && form->focus == item)
 		pass_focus(form, item);
 	else
@@ -4486,6 +4810,12 @@ static bool apply_appearance(struct form_item *item)
 	bool created = false;
 	lv_obj_t *frame;
 
+	if (item->kind == ITEM_VALUE) {
+		show_appearance_focus(item,
+				      actionable(item) && is_top(item->form) &&
+					      item->form->focus == item->index);
+		return true;
+	}
 	if (!actionable(item)) {
 		if ((item->kind != ITEM_STRING && !image) || !item->frame)
 			return false;
@@ -4558,11 +4888,14 @@ static bool apply_appearance(struct form_item *item)
 static void update_appearance(struct fplinux_ui_screen *screen, size_t index)
 {
 	struct form_item *item;
+	bool resized;
 
 	if (!is_form(screen))
 		return;
 	item = screen->items[index];
-	if (!apply_appearance(item))
+	resized = apply_appearance(item);
+	update_form_boundaries(screen);
+	if (!resized)
 		return;
 	if (screen->focus == index && !focusable(item))
 		pass_focus(screen, index);
@@ -4779,9 +5112,10 @@ static void layout_alert(struct fplinux_ui_screen *alert)
 			      alert->progress_text };
 
 	lv_obj_set_width(alert->band, lv_pct(100));
+	lv_obj_set_x(alert->band_label, spec->alert_padding);
 	lv_obj_set_width(alert->band_label, alert_box_width(alert->ui) -
 						    2 * spec->alert_border -
-						    2 * spec->margin);
+						    2 * spec->alert_padding);
 	lv_obj_update_layout(alert->box);
 	for (size_t i = 0; i < sizeof(parts) / sizeof(parts[0]); ++i) {
 		if (!parts[i] || lv_obj_is_hidden(parts[i]))
@@ -5539,6 +5873,7 @@ void fplinux_ui_screens_resize(struct fplinux_ui_screens *layer)
 	for (struct fplinux_ui_screen *screen = layer->all; screen;
 	     screen = screen->next)
 		resize_screen(screen);
+	update_legend_owner(layer);
 }
 
 void fplinux_ui_screens_delete(struct fplinux_ui_screens *layer)

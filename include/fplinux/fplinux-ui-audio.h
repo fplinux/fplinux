@@ -9,13 +9,36 @@
 struct fplinux_ui;
 struct fplinux_audio_stream;
 
+enum fplinux_ui_audio_state {
+	FPLINUX_UI_AUDIO_PLAYING,
+	FPLINUX_UI_AUDIO_PAUSED,
+	FPLINUX_UI_AUDIO_UNAVAILABLE,
+	FPLINUX_UI_AUDIO_ENDED,
+};
+
+enum fplinux_ui_audio_reason {
+	FPLINUX_UI_AUDIO_REASON_NONE,
+	FPLINUX_UI_AUDIO_REASON_USER,
+	FPLINUX_UI_AUDIO_REASON_POLICY,
+	FPLINUX_UI_AUDIO_REASON_FOREGROUND,
+	FPLINUX_UI_AUDIO_REASON_CLOCK,
+	FPLINUX_UI_AUDIO_REASON_DEVICE,
+	FPLINUX_UI_AUDIO_REASON_FM,
+};
+
+struct fplinux_ui_audio_status {
+	enum fplinux_ui_audio_state state;
+	enum fplinux_ui_audio_reason reason;
+};
+
 /*
  * Streams carry interleaved signed 16-bit native-endian mono or stereo
  * frames. The system resamples and mixes them at the system volume without
  * changing output routes. Applications never open the sound device.
  *
- * Hiding an application (Home, keyguard, display off or a system notice)
- * pauses its streams with their frames kept; showing it resumes them.
+ * Hiding an application pauses its streams with their frames kept unless
+ * Session granted its installed desktop entry background audio. Alarms and
+ * foreground playback can hold background media independently of visibility.
  * Exiting, CLOSE, a crash and session shutdown end them.
  * A busy output, including FM playback, holds queued frames until available.
  * Call these functions on the thread that called fplinux_ui_open();
@@ -49,6 +72,17 @@ long fplinux_ui_audio_write(struct fplinux_audio_stream *stream,
 			    const int16_t *frames, size_t count);
 /* Frames pending, including the output queue; -1 with EPIPE once ended. */
 long fplinux_ui_audio_queued(const struct fplinux_audio_stream *stream);
+/* Retains queued frames. Resuming does not override system audio policy. */
+bool fplinux_ui_audio_pause(struct fplinux_audio_stream *stream, bool paused);
+/* Reads the service's applied state; ENDED remains observable until close. */
+bool fplinux_ui_audio_status(const struct fplinux_audio_stream *stream,
+			     struct fplinux_ui_audio_status *status);
+/*
+ * Requests one persistent system Media volume step (-1 or +1). Acceptance
+ * arrives asynchronously as SETTING/ERROR named media_volume_step. An
+ * application cannot set Alarm volume or other system settings this way.
+ */
+bool fplinux_ui_audio_volume_step(struct fplinux_ui *ui, int step);
 /* Drops frames still in this stream. An already mixed output tail is bounded
  * by the system's output buffer. NULL is ignored.
  */

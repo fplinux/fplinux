@@ -1,0 +1,309 @@
+{
+  "ram-boot": {
+    "note": "Linux reached the graphical interface and an authenticated USB session.",
+    "status": "verified"
+  },
+  "persistent-boot": {
+    "note": "FPLinux starts in RAM through the PC's USB loader.",
+    "status": "unsupported"
+  },
+  "local-console": {
+    "note": "The graphical interface runs. The local terminal and full keypad map remain untested.",
+    "status": "untested"
+  },
+  "lcd-backlight": {
+    "hardware": "present",
+    "note": "The 240×320 display shows the graphical interface. Brightness adjustment, blanking and wake remain untested.",
+    "status": "partial",
+    "stock": "available"
+  },
+  "keypad-backlight": {
+    "hardware": "present",
+    "note": "Keypad illumination was observed. On and off transitions were not checked separately.",
+    "status": "partial",
+    "stock": "unknown"
+  },
+  "usb-networking": {
+    "hardware": "present",
+    "note": "USB networking carried the authenticated Linux session.",
+    "status": "verified"
+  },
+  "ssh-access": {
+    "note": "Authenticated SSH over USB was observed.",
+    "status": "verified"
+  },
+  "file-transfer": {
+    "note": "File transfer over USB has not been tested on this handset.",
+    "status": "untested"
+  },
+  "host-keyboard-bridge": {
+    "note": "Host keyboard input has not been tested on this handset.",
+    "status": "untested"
+  },
+  "cpu-clock-reporting": {
+    "note": "CPU clock reporting has not been tested on this handset.",
+    "status": "untested"
+  },
+  "manual-cpu-frequency-selection": {
+    "note": "CPU frequency selection has not been tested on this handset.",
+    "status": "untested"
+  },
+  "ap-dmaengine": {
+    "hardware": "present",
+    "note": "DMA is configured. Operation on the handset remains untested.",
+    "status": "untested"
+  },
+  "image-rotation-engine": {
+    "hardware": "present",
+    "note": "The rotation engine is configured. Hardware output remains untested.",
+    "status": "untested"
+  },
+  "jpeg-engine": {
+    "hardware": "present",
+    "note": "The JPEG engine is configured. Hardware output remains untested.",
+    "status": "untested"
+  },
+  "native-image-output": {
+    "hardware": "unknown",
+    "note": "Image presentation has not been tested on this handset.",
+    "status": "untested"
+  },
+  "image-rotation": {
+    "note": "Image rotation has not been tested on this handset.",
+    "status": "untested"
+  },
+  "jpeg-codec-and-scaling": {
+    "note": "JPEG codec and scaling have not been tested on this handset.",
+    "status": "untested"
+  },
+  "native-image-presentation": {
+    "note": "Native image presentation has not been tested on this handset.",
+    "status": "untested"
+  },
+  "usb-host-mode": {
+    "hardware": "unknown",
+    "note": "FPLinux uses USB in device mode.",
+    "status": "unsupported"
+  },
+  "removable-storage": {
+    "hardware": "present",
+    "note": "A card inserted before boot mounted and accepted test output files. Broader card compatibility remains untested.",
+    "status": "partial",
+    "stock": "available"
+  },
+  "microsd-hot-swap": {
+    "hardware": "present",
+    "note": "Insert the card before boot and leave it installed throughout the powered session.",
+    "status": "unsupported",
+    "stock": "unknown"
+  },
+  "sim-hot-swap": {
+    "hardware": "unknown",
+    "note": "FPLinux does not support SIM cards or cellular service.",
+    "status": "unsupported",
+    "stock": "unknown"
+  },
+  "removable-system-root": {
+    "note": "FPLinux has no microSD system-card profile for this phone.",
+    "status": "unsupported"
+  },
+  "internal-phone-storage": {
+    "hardware": "present",
+    "note": "A NAND identification diagnostic is available. Full backup and internal filesystem access are unavailable.",
+    "status": "unsupported"
+  },
+  "headphone-audio": {
+    "hardware": "present",
+    "note": "Wired headphone playback worked with the default levels. The full volume range remains untested.",
+    "status": "partial",
+    "stock": "unknown"
+  },
+  "speaker-audio": {
+    "hardware": "present",
+    "note": "The loudspeaker output is disabled.",
+    "status": "unsupported",
+    "stock": "unknown"
+  },
+  "phone-microphone": {
+    "hardware": "unknown",
+    "note": "Microphone input is disabled.",
+    "status": "unsupported",
+    "stock": "unknown"
+  },
+  "fm-radio": {
+    "hardware": "unknown",
+    "note": "FM radio is not configured.",
+    "status": "unsupported",
+    "stock": "unknown"
+  },
+  "modem-and-mobile-service": {
+    "hardware": "present",
+    "note": "FPLinux does not provide cellular service.",
+    "status": "unsupported",
+    "stock": "available"
+  },
+  "bluetooth": {
+    "hardware": "unknown",
+    "note": "Bluetooth is not enabled on this phone.",
+    "status": "unsupported",
+    "stock": "unknown"
+  },
+  "wi-fi": {
+    "hardware": "unknown",
+    "note": "Wi-Fi is not enabled on this phone.",
+    "status": "unsupported",
+    "stock": "unknown"
+  },
+  "camera": {
+    "hardware": "unknown",
+    "note": "Camera capture is not enabled on this phone.",
+    "status": "unsupported",
+    "stock": "unknown"
+  },
+  "charger-status": {
+    "hardware": "present",
+    "note": "Charger detection in FPLinux has not been tested.",
+    "status": "untested"
+  },
+  "battery-telemetry": {
+    "hardware": "present",
+    "note": "Voltage and current readings were available. The displayed battery level is an estimate.",
+    "status": "partial"
+  },
+  "soc-temperature": {
+    "hardware": "present",
+    "note": "The temperature sensor is configured. Readings remain untested.",
+    "status": "untested"
+  },
+  "auxiliary-adc": {
+    "hardware": "unknown",
+    "note": "Auxiliary ADC inputs have not been tested on this handset.",
+    "status": "untested"
+  },
+  "real-time-clock": {
+    "hardware": "present",
+    "note": "The loader reported writing the RTC. Time retention and alarm wake remain untested.",
+    "status": "partial"
+  },
+  "other-battery-functions": {
+    "hardware": "unknown",
+    "note": "Additional battery functions are not enabled.",
+    "status": "unsupported"
+  },
+  "vibration": {
+    "hardware": "unknown",
+    "note": "Vibration is not enabled on this phone.",
+    "status": "unsupported",
+    "stock": "unknown"
+  },
+  "indicator-leds": {
+    "hardware": "unknown",
+    "note": "Indicator LED control is not enabled.",
+    "status": "unsupported",
+    "stock": "unknown"
+  },
+  "power-off": {
+    "note": "Holding the red end-call key powered off the phone with the charger disconnected.",
+    "status": "verified"
+  },
+  "suspend": {
+    "note": "Suspend and wake have not been tested on this handset.",
+    "status": "untested"
+  },
+  "reboot": {
+    "note": "The RAM session ends at power-off. Start a fresh session with the USB loader.",
+    "status": "unsupported"
+  },
+  "fplinux-armada": {
+    "note": "ARMADA has not been tested on this handset.",
+    "status": "untested"
+  },
+  "tyrquake": {
+    "note": "TyrQuake has not been tested on this handset.",
+    "status": "untested"
+  },
+  "built-in-microphone": {
+    "hardware": "unknown",
+    "note": "Built-in microphone input is disabled.",
+    "status": "unsupported",
+    "stock": "unknown"
+  },
+  "headset-microphone": {
+    "hardware": "unknown",
+    "note": "Wired-headset microphone input is disabled.",
+    "status": "unsupported",
+    "stock": "unknown"
+  },
+  "automatic-audio-routing": {
+    "note": "Headphone detection and automatic routing are disabled.",
+    "status": "unsupported",
+    "stock": "unknown"
+  },
+  "bluetooth-pairing": {
+    "note": "Bluetooth is not enabled on this phone.",
+    "status": "unsupported",
+    "stock": "unknown"
+  },
+  "bluetooth-file-transfer": {
+    "note": "Bluetooth is not enabled on this phone.",
+    "status": "unsupported",
+    "stock": "unknown"
+  },
+  "bluetooth-pan-internet": {
+    "note": "Bluetooth is not enabled on this phone.",
+    "status": "unsupported"
+  },
+  "bluetooth-a2dp-linux-pc": {
+    "note": "Bluetooth is not enabled on this phone.",
+    "status": "unsupported"
+  },
+  "bluetooth-a2dp-headsets": {
+    "note": "Bluetooth is not enabled on this phone.",
+    "status": "unsupported",
+    "stock": "unknown"
+  },
+  "bluetooth-keyboard": {
+    "note": "Bluetooth is not enabled on this phone.",
+    "status": "unsupported"
+  },
+  "bluetooth-mouse": {
+    "note": "Bluetooth is not enabled on this phone.",
+    "status": "unsupported"
+  },
+  "mobile-calls": {
+    "note": "FPLinux does not support mobile calls.",
+    "status": "unsupported",
+    "stock": "available"
+  },
+  "sms": {
+    "note": "FPLinux does not support SMS.",
+    "status": "unsupported",
+    "stock": "unknown"
+  },
+  "mobile-data": {
+    "note": "FPLinux does not support mobile data.",
+    "status": "unsupported",
+    "stock": "unknown"
+  },
+  "ffmpeg": {
+    "note": "FFmpeg software video decoding has not been tested on this handset.",
+    "status": "untested"
+  },
+  "flashlight": {
+    "hardware": "present",
+    "note": "The torch uses its own physical switch.",
+    "status": "unsupported",
+    "stock": "available"
+  },
+  "infrared-transmitter": {
+    "hardware": "unknown",
+    "note": "Infrared control is not enabled.",
+    "status": "unsupported",
+    "stock": "unknown"
+  },
+  "gpu-rendering": {
+    "hardware": "unknown",
+    "note": "FPLinux does not provide GPU rendering on this phone.",
+    "status": "unsupported"
+  }
+}

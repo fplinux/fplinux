@@ -50,7 +50,6 @@ int main(int argc, char **argv)
 				FPLINUX_UI_SESSION_THEME_LIGHT),
 		.body = fplinux_status_font_by_id(profile->font_body),
 		.title = fplinux_status_font_by_id(profile->font_title),
-		.legend = fplinux_status_font_by_id(profile->font_legend),
 		.activity = fplinux_activity_mask(
 			profile->spinner_size, profile->spinner_width, phase),
 	};

@@ -50,3 +50,27 @@ ui_host_compile -I"$root/tests/host_tool/gui/support" -I"$common" -I"$root/inclu
 	"$ui_host_inputs/xdg-shell-protocol.c" \
 	$(pkg-config --libs wayland-server xkbcommon json-c dbus-1) \
 	-o "$work/launcher-screens"
+
+session=$root/alpine/aports/fplinux-session
+# The manager and Launcher share their real socket; only audio replies are controlled.
+# shellcheck disable=SC2046
+ui_host_compile -pthread -I"$common" -I"$screens_dir" -I"$session" \
+	-I"$root/include" -I"$root/include/fplinux" -I"$ui_host_inputs" \
+	$(pkg-config --cflags wayland-server xkbcommon json-c) \
+	"$screens_dir/launcher-session-volume.c" "$common/ui-frame-peer.c" \
+	"$session/session-core.c" "$session/session-child.c" \
+	"$session/session-storage.c" "$session/session-audio.c" \
+	"$session/session-vibration.c" "$session/session-vibrator.c" \
+	"$session/session-power.c" "$session/session-settings.c" \
+	"$session/session-battery.c" "$session/session-clock.c" \
+	"$session/session-wireless.c" \
+	"$ui_host_shared/fplinux-settings-values.c" \
+	"$ui_host_shared/fplinux-clock-model.c" "$ui_host_shared/fplinux-clock-wire.c" \
+	"$ui_host_shared/fplinux-brightness-client.c" "$ui_host_shared/fplinux-keypad-light.c" \
+	"$ui_host_shared/fplinux-desktop-entry.c" "$ui_host_ui/fplinux-ui-prefs.c" \
+	"$ui_host_ui/fplinux-ui-profile.c" "$ui_host_ui/fplinux-ui-session.c" \
+	"$ui_host_ui/fplinux-language.c" "$ui_host_ui/fplinux-utf8.c" \
+	"$ui_host_inputs/xdg-shell-protocol.c" \
+	-Wl,--wrap=fplinux_session_wireless_create \
+	$(pkg-config --libs wayland-server xkbcommon json-c) -lintl \
+	-o "$work/launcher-session-volume"

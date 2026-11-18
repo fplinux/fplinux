@@ -14,6 +14,11 @@
 
 #define BLUEZ_NAME "org.bluez"
 #define BLUEZ_ADAPTER "org.bluez.Adapter1"
+#define BLUEZ_DEVICE "org.bluez.Device1"
+#define BLUEZ_BATTERY "org.bluez.Battery1"
+#define BLUEZ_AGENT "org.bluez.Agent1"
+#define BLUEZ_AGENT_MANAGER "org.bluez.AgentManager1"
+#define AGENT_PATH "/org/fplinux/BluetoothAgent"
 #define OBJECT_MANAGER "org.freedesktop.DBus.ObjectManager"
 #define PROPERTIES "org.freedesktop.DBus.Properties"
 /* The D-Bus specification's system bus when the environment names none. */
@@ -25,7 +30,32 @@
 #define EVENT_COUNT 8
 /* epoll data above 32 bits marks a timeout slot rather than a socket. */
 #define TIMEOUT_TAG (UINT64_C(1) << 32)
-#define PATH_BYTES 256
+#define PATH_BYTES FPLINUX_BLUEZ_PATH_BYTES
+
+enum operation {
+	OP_NONE,
+	OP_POWER,
+	OP_CHANGE,
+	OP_VISIBILITY_TIMEOUT,
+	OP_PAIRABLE_TIMEOUT,
+	OP_PAIRABLE,
+	OP_VISIBILITY,
+	OP_DISCOVERY_START,
+	OP_DISCOVERY_STOP,
+	OP_PAIR,
+};
+
+struct inventory {
+	unsigned int adapters;
+	char path[PATH_BYTES];
+	char name[FPLINUX_BLUEZ_NAME_BYTES];
+	bool powered;
+	bool discoverable;
+	bool discovering;
+	uint32_t discoverable_timeout;
+	size_t device_count;
+	struct fplinux_bluez_device devices[FPLINUX_BLUEZ_DEVICE_COUNT];
+};
 
 struct timeout_slot {
 	DBusTimeout *timeout;
@@ -41,13 +71,26 @@ struct fplinux_bluez_adapter {
 	DBusWatch *watches[WATCH_COUNT];
 	struct timeout_slot timeouts[TIMEOUT_COUNT];
 	DBusPendingCall *hello;
+	DBusPendingCall *owner_query;
 	DBusPendingCall *snapshot;
-	DBusPendingCall *power;
+	DBusPendingCall *mutation;
+	DBusPendingCall *agent_call;
+	char owner[256];
+	struct inventory state;
+	enum operation operation;
 	bool requested;
-	/* BlueZ's adapters by the latest snapshot; the path of the only one. */
-	unsigned int adapters;
-	char path[PATH_BYTES];
-	bool powered;
+	int timeout_ms;
+	uint32_t visibility_timeout;
+	char operation_device[PATH_BYTES];
+	int error;
+	bool discovery_owned;
+	bool agent_enabled;
+	bool agent_registered;
+	bool agent_ready;
+	bool agent_default_pending;
+	uint64_t agent_serial;
+	struct fplinux_bluez_agent_request agent_request;
+	DBusMessage *agent_message;
 };
 
 static void changed(struct fplinux_bluez_adapter *adapter)
@@ -232,55 +275,136 @@ static bool send_call(struct fplinux_bluez_adapter *adapter,
 }
 
 /* The method return of a finished call, else NULL; consumes the call. */
-static DBusMessage *take_reply(DBusPendingCall **pending, const char *request)
+static int reply_error(const char *name)
+{
+	if (!strcmp(name, DBUS_ERROR_NO_REPLY) ||
+	    !strcmp(name, "org.bluez.Error.AuthenticationTimeout"))
+		return ETIMEDOUT;
+	if (!strcmp(name, "org.bluez.Error.NotReady"))
+		return ENETDOWN;
+	if (!strcmp(name, "org.bluez.Error.NotSupported") ||
+	    !strcmp(name, "org.bluez.Error.BREDR.ProfileUnavailable"))
+		return EOPNOTSUPP;
+	if (!strcmp(name, "org.bluez.Error.InProgress"))
+		return EBUSY;
+	if (!strcmp(name, "org.bluez.Error.Canceled") ||
+	    !strcmp(name, "org.bluez.Error.AuthenticationCanceled"))
+		return ECANCELED;
+	if (!strcmp(name, "org.bluez.Error.Rejected") ||
+	    !strcmp(name, "org.bluez.Error.AuthenticationRejected") ||
+	    !strcmp(name, "org.bluez.Error.AuthenticationFailed") ||
+	    !strcmp(name, "org.bluez.Error.NotAuthorized") ||
+	    !strcmp(name, DBUS_ERROR_ACCESS_DENIED))
+		return EACCES;
+	if (!strcmp(name, DBUS_ERROR_SERVICE_UNKNOWN) ||
+	    !strcmp(name, DBUS_ERROR_NAME_HAS_NO_OWNER) ||
+	    !strcmp(name, "org.bluez.Error.DoesNotExist"))
+		return ENODEV;
+	if (!strcmp(name, "org.bluez.Error.InvalidArguments") ||
+	    !strcmp(name, DBUS_ERROR_INVALID_ARGS))
+		return EINVAL;
+	return EIO;
+}
+
+static DBusMessage *take_reply(DBusPendingCall **pending, int *error)
 {
 	DBusMessage *reply = dbus_pending_call_steal_reply(*pending);
 
 	dbus_pending_call_unref(*pending);
 	*pending = NULL;
 	if (reply && dbus_message_get_type(reply) == DBUS_MESSAGE_TYPE_ERROR) {
-		const char *text = NULL;
-
-		dbus_message_get_args(reply, NULL, DBUS_TYPE_STRING, &text,
-				      DBUS_TYPE_INVALID);
-		/* A missing BlueZ is an expected answer to the snapshot. */
-		if (strcmp(dbus_message_get_error_name(reply),
-			   DBUS_ERROR_SERVICE_UNKNOWN) &&
-		    strcmp(dbus_message_get_error_name(reply),
-			   DBUS_ERROR_NAME_HAS_NO_OWNER))
-			fprintf(stderr,
-				"fplinux-bluez-adapter: %s failed: %s%s%s\n",
-				request, dbus_message_get_error_name(reply),
-				text ? ": " : "", text ? text : "");
+		if (error)
+			*error =
+				reply_error(dbus_message_get_error_name(reply));
 		dbus_message_unref(reply);
 		return NULL;
 	}
+	if (error)
+		*error = reply ? 0 : EIO;
 	return reply;
 }
 
-static void set_adapters(struct fplinux_bluez_adapter *adapter,
-			 unsigned int adapters, const char *path, bool powered)
+static void send_reply(struct fplinux_bluez_adapter *adapter,
+		       DBusMessage *reply)
 {
-	bool was_present = fplinux_bluez_adapter_present(adapter);
-	bool was_powered = adapter->powered;
-	bool moved = strcmp(adapter->path, adapters == 1 ? path : "");
+	if (!reply)
+		return;
+	dbus_connection_send(adapter->connection, reply, NULL);
+	dbus_message_unref(reply);
+}
 
-	adapter->adapters = adapters;
-	snprintf(adapter->path, sizeof(adapter->path), "%s",
-		 adapters == 1 ? path : "");
-	adapter->powered = adapters == 1 && powered;
-	/* A request for an adapter that is gone cannot be answered. */
-	if (adapter->power && (adapters != 1 || moved)) {
-		cancel_call(&adapter->power);
-		finished(adapter, false);
+static void clear_agent_request(struct fplinux_bluez_adapter *adapter,
+				const char *error)
+{
+	if (adapter->agent_message) {
+		if (error && adapter->connection)
+			send_reply(adapter,
+				   dbus_message_new_error(
+					   adapter->agent_message, error,
+					   "Pairing request ended"));
+		dbus_message_unref(adapter->agent_message);
+		adapter->agent_message = NULL;
 	}
-	if (was_present != fplinux_bluez_adapter_present(adapter) ||
-	    was_powered != adapter->powered || moved)
+	adapter->agent_request = (struct fplinux_bluez_agent_request){ 0 };
+}
+
+static void end_operation(struct fplinux_bluez_adapter *adapter, int error)
+{
+	adapter->operation = OP_NONE;
+	adapter->operation_device[0] = '\0';
+	adapter->error = error;
+	finished(adapter, !error);
+}
+
+static void replace_inventory(struct fplinux_bluez_adapter *adapter,
+			      const struct inventory *state)
+{
+	bool moved = strcmp(adapter->state.path, state->path);
+	bool different = memcmp(&adapter->state, state, sizeof(*state));
+
+	adapter->state = *state;
+	if (!state->powered || !state->discovering)
+		adapter->discovery_owned = false;
+	if (state->adapters != 1 || moved) {
+		adapter->discovery_owned = false;
+		clear_agent_request(adapter, "org.bluez.Error.Canceled");
+	}
+	if (adapter->mutation &&
+	    (state->adapters != 1 || moved ||
+	     (adapter->operation_device[0] &&
+	      !fplinux_bluez_adapter_device(adapter,
+					    adapter->operation_device)))) {
+		cancel_call(&adapter->mutation);
+		end_operation(adapter, ENODEV);
+	}
+	if (adapter->agent_request.device[0] &&
+	    !fplinux_bluez_adapter_device(adapter,
+					  adapter->agent_request.device))
+		clear_agent_request(adapter, "org.bluez.Error.Canceled");
+	if (different)
 		changed(adapter);
 }
 
-/* Reads Powered from an a{sv} property dictionary. */
-static void read_powered(DBusMessageIter *properties, bool *powered)
+static bool read_basic(DBusMessageIter *value, int type, void *result)
+{
+	if (dbus_message_iter_get_arg_type(value) != type)
+		return false;
+	dbus_message_iter_get_basic(value, result);
+	return true;
+}
+
+static void read_text(DBusMessageIter *value, char *result, size_t bytes)
+{
+	const char *text;
+
+	if (read_basic(value, DBUS_TYPE_STRING, &text))
+		snprintf(result, bytes, "%s", text);
+}
+
+static void read_properties(DBusMessageIter *properties,
+			    struct inventory *state,
+			    struct fplinux_bluez_device *device,
+			    const char *interface, char *device_adapter)
 {
 	DBusMessageIter entry;
 
@@ -291,21 +415,101 @@ static void read_powered(DBusMessageIter *properties, bool *powered)
 	     dbus_message_iter_next(&entry)) {
 		DBusMessageIter field, value;
 		const char *name;
-		dbus_bool_t on;
+		dbus_bool_t boolean;
 
 		dbus_message_iter_recurse(&entry, &field);
 		if (dbus_message_iter_get_arg_type(&field) != DBUS_TYPE_STRING)
 			continue;
 		dbus_message_iter_get_basic(&field, &name);
-		if (strcmp(name, "Powered") ||
-		    !dbus_message_iter_next(&field) ||
+		if (!dbus_message_iter_next(&field) ||
 		    dbus_message_iter_get_arg_type(&field) != DBUS_TYPE_VARIANT)
 			continue;
 		dbus_message_iter_recurse(&field, &value);
-		if (dbus_message_iter_get_arg_type(&value) != DBUS_TYPE_BOOLEAN)
-			continue;
-		dbus_message_iter_get_basic(&value, &on);
-		*powered = on;
+		if (!strcmp(interface, BLUEZ_ADAPTER)) {
+			if (!strcmp(name, "Alias"))
+				read_text(&value, state->name,
+					  sizeof(state->name));
+			else if (!strcmp(name, "Powered") &&
+				 read_basic(&value, DBUS_TYPE_BOOLEAN,
+					    &boolean))
+				state->powered = boolean;
+			else if (!strcmp(name, "Discoverable") &&
+				 read_basic(&value, DBUS_TYPE_BOOLEAN,
+					    &boolean))
+				state->discoverable = boolean;
+			else if (!strcmp(name, "Discovering") &&
+				 read_basic(&value, DBUS_TYPE_BOOLEAN,
+					    &boolean))
+				state->discovering = boolean;
+			else if (!strcmp(name, "DiscoverableTimeout"))
+				read_basic(&value, DBUS_TYPE_UINT32,
+					   &state->discoverable_timeout);
+		} else if (device && !strcmp(interface, BLUEZ_BATTERY)) {
+			if (!strcmp(name, "Percentage") &&
+			    read_basic(&value, DBUS_TYPE_BYTE,
+				       &device->battery))
+				device->battery_known = device->battery <= 100;
+		} else if (device && !strcmp(interface, BLUEZ_DEVICE)) {
+			if (!strcmp(name, "Adapter") && device_adapter) {
+				const char *path;
+
+				if (read_basic(&value, DBUS_TYPE_OBJECT_PATH,
+					       &path))
+					snprintf(device_adapter, PATH_BYTES,
+						 "%s", path);
+			} else if (!strcmp(name, "Address"))
+				read_text(&value, device->address,
+					  sizeof(device->address));
+			else if (!strcmp(name, "Name"))
+				read_text(&value, device->name,
+					  sizeof(device->name));
+			else if (!strcmp(name, "Alias"))
+				read_text(&value, device->alias,
+					  sizeof(device->alias));
+			else if (!strcmp(name, "Icon"))
+				read_text(&value, device->icon,
+					  sizeof(device->icon));
+			else if (!strcmp(name, "Paired") &&
+				 read_basic(&value, DBUS_TYPE_BOOLEAN,
+					    &boolean))
+				device->paired = boolean;
+			else if (!strcmp(name, "Trusted") &&
+				 read_basic(&value, DBUS_TYPE_BOOLEAN,
+					    &boolean))
+				device->trusted = boolean;
+			else if (!strcmp(name, "Connected") &&
+				 read_basic(&value, DBUS_TYPE_BOOLEAN,
+					    &boolean))
+				device->connected = boolean;
+			else if (!strcmp(name, "ServicesResolved") &&
+				 read_basic(&value, DBUS_TYPE_BOOLEAN,
+					    &boolean))
+				device->services_resolved = boolean;
+			else if (!strcmp(name, "RSSI") &&
+				 read_basic(&value, DBUS_TYPE_INT16,
+					    &device->rssi))
+				device->rssi_known = true;
+			else if (!strcmp(name, "UUIDs") &&
+				 dbus_message_iter_get_arg_type(&value) ==
+					 DBUS_TYPE_ARRAY) {
+				DBusMessageIter uuid;
+
+				device->uuid_count = 0;
+				dbus_message_iter_recurse(&value, &uuid);
+				for (; dbus_message_iter_get_arg_type(&uuid) ==
+				       DBUS_TYPE_STRING;
+				     dbus_message_iter_next(&uuid)) {
+					if (device->uuid_count ==
+					    FPLINUX_BLUEZ_UUID_COUNT)
+						break;
+					read_text(
+						&uuid,
+						device->uuids
+							[device->uuid_count++],
+						FPLINUX_BLUEZ_UUID_BYTES);
+				}
+			}
+		}
 	}
 }
 
@@ -314,51 +518,88 @@ static void read_snapshot(struct fplinux_bluez_adapter *adapter,
 			  DBusMessage *reply)
 {
 	DBusMessageIter objects, object;
-	unsigned int adapters = 0;
-	const char *first = "";
-	bool powered = false;
+	struct inventory *state = calloc(1, sizeof(*state));
 
-	if (reply && dbus_message_iter_init(reply, &objects) &&
-	    dbus_message_iter_get_arg_type(&objects) == DBUS_TYPE_ARRAY)
+	if (!state)
+		return;
+	if (!reply || !dbus_message_has_signature(reply, "a{oa{sa{sv}}}") ||
+	    !dbus_message_iter_init(reply, &objects)) {
+		replace_inventory(adapter, state);
+		free(state);
+		return;
+	}
+	/* Device1 and Battery1 may precede the adapter in the object map. */
+	for (int pass = 0; pass < 2; ++pass) {
 		dbus_message_iter_recurse(&objects, &object);
-	else
-		reply = NULL;
-	for (; reply &&
-	       dbus_message_iter_get_arg_type(&object) == DBUS_TYPE_DICT_ENTRY;
-	     dbus_message_iter_next(&object)) {
-		DBusMessageIter field, interfaces;
-		const char *path;
-
-		dbus_message_iter_recurse(&object, &field);
-		if (dbus_message_iter_get_arg_type(&field) !=
-		    DBUS_TYPE_OBJECT_PATH)
-			continue;
-		dbus_message_iter_get_basic(&field, &path);
-		if (!dbus_message_iter_next(&field) ||
-		    dbus_message_iter_get_arg_type(&field) != DBUS_TYPE_ARRAY)
-			continue;
-		dbus_message_iter_recurse(&field, &interfaces);
-		for (; dbus_message_iter_get_arg_type(&interfaces) ==
+		for (; dbus_message_iter_get_arg_type(&object) ==
 		       DBUS_TYPE_DICT_ENTRY;
-		     dbus_message_iter_next(&interfaces)) {
-			DBusMessageIter interface;
-			const char *name;
+		     dbus_message_iter_next(&object)) {
+			DBusMessageIter field, interfaces;
+			const char *path;
+			struct fplinux_bluez_device device = { 0 };
+			char device_adapter[PATH_BYTES] = "";
+			bool is_device = false;
 
-			dbus_message_iter_recurse(&interfaces, &interface);
-			if (dbus_message_iter_get_arg_type(&interface) !=
-			    DBUS_TYPE_STRING)
+			dbus_message_iter_recurse(&object, &field);
+			if (dbus_message_iter_get_arg_type(&field) !=
+			    DBUS_TYPE_OBJECT_PATH)
 				continue;
-			dbus_message_iter_get_basic(&interface, &name);
-			if (strcmp(name, BLUEZ_ADAPTER))
+			dbus_message_iter_get_basic(&field, &path);
+			if (!dbus_message_iter_next(&field) ||
+			    dbus_message_iter_get_arg_type(&field) !=
+				    DBUS_TYPE_ARRAY)
 				continue;
-			if (!adapters++) {
-				first = path;
-				dbus_message_iter_next(&interface);
-				read_powered(&interface, &powered);
+			dbus_message_iter_recurse(&field, &interfaces);
+			for (; dbus_message_iter_get_arg_type(&interfaces) ==
+			       DBUS_TYPE_DICT_ENTRY;
+			     dbus_message_iter_next(&interfaces)) {
+				DBusMessageIter interface;
+				const char *name;
+
+				dbus_message_iter_recurse(&interfaces,
+							  &interface);
+				if (dbus_message_iter_get_arg_type(
+					    &interface) != DBUS_TYPE_STRING)
+					continue;
+				dbus_message_iter_get_basic(&interface, &name);
+				if (!pass && !strcmp(name, BLUEZ_ADAPTER)) {
+					if (state->adapters++)
+						continue;
+					snprintf(state->path,
+						 sizeof(state->path), "%s",
+						 path);
+					dbus_message_iter_next(&interface);
+					read_properties(&interface, state, NULL,
+							name, NULL);
+				} else if (pass &&
+					   (!strcmp(name, BLUEZ_DEVICE) ||
+					    !strcmp(name, BLUEZ_BATTERY))) {
+					is_device |=
+						!strcmp(name, BLUEZ_DEVICE);
+					dbus_message_iter_next(&interface);
+					read_properties(&interface, state,
+							&device, name,
+							device_adapter);
+				}
+			}
+			if (pass && is_device && state->adapters == 1 &&
+			    !strcmp(device_adapter, state->path) &&
+			    strlen(path) < sizeof(device.path) &&
+			    state->device_count < FPLINUX_BLUEZ_DEVICE_COUNT) {
+				snprintf(device.path, sizeof(device.path), "%s",
+					 path);
+				state->devices[state->device_count++] = device;
 			}
 		}
 	}
-	set_adapters(adapter, adapters, first, powered);
+	if (state->adapters != 1) {
+		unsigned int count = state->adapters;
+
+		memset(state, 0, sizeof(*state));
+		state->adapters = count;
+	}
+	replace_inventory(adapter, state);
+	free(state);
 }
 
 static void snapshot_done(DBusPendingCall *call, void *data)
@@ -367,7 +608,7 @@ static void snapshot_done(DBusPendingCall *call, void *data)
 	DBusMessage *reply;
 
 	(void)call;
-	reply = take_reply(&adapter->snapshot, "query");
+	reply = take_reply(&adapter->snapshot, NULL);
 	read_snapshot(adapter, reply);
 	if (reply)
 		dbus_message_unref(reply);
@@ -377,30 +618,107 @@ static void snapshot_done(DBusPendingCall *call, void *data)
 static void query_adapters(struct fplinux_bluez_adapter *adapter)
 {
 	cancel_call(&adapter->snapshot);
+	if (!adapter->owner[0])
+		return;
 	if (!send_call(adapter,
-		       dbus_message_new_method_call(BLUEZ_NAME, "/",
+		       dbus_message_new_method_call(adapter->owner, "/",
 						    OBJECT_MANAGER,
 						    "GetManagedObjects"),
 		       REQUEST_TIMEOUT_MS, snapshot_done, &adapter->snapshot))
-		set_adapters(adapter, 0, "", false);
+		adapter->error = ENOMEM;
 }
 
-static void power_done(DBusPendingCall *call, void *data)
+static DBusMessage *property_message(struct fplinux_bluez_adapter *adapter,
+				     const char *path, const char *interface,
+				     const char *property, int type,
+				     const void *value)
+{
+	DBusMessage *message = dbus_message_new_method_call(
+		adapter->owner, path, PROPERTIES, "Set");
+	DBusMessageIter arguments, variant;
+	char signature[] = { (char)type, '\0' };
+
+	if (!message)
+		return NULL;
+	dbus_message_iter_init_append(message, &arguments);
+	if (!dbus_message_iter_append_basic(&arguments, DBUS_TYPE_STRING,
+					    &interface) ||
+	    !dbus_message_iter_append_basic(&arguments, DBUS_TYPE_STRING,
+					    &property) ||
+	    !dbus_message_iter_open_container(&arguments, DBUS_TYPE_VARIANT,
+					      signature, &variant)) {
+		dbus_message_unref(message);
+		return NULL;
+	}
+	if (!dbus_message_iter_append_basic(&variant, type, value) ||
+	    !dbus_message_iter_close_container(&arguments, &variant)) {
+		dbus_message_iter_abandon_container(&arguments, &variant);
+		dbus_message_unref(message);
+		return NULL;
+	}
+	return message;
+}
+
+static void mutation_done(DBusPendingCall *call, void *data);
+
+static bool advance_visibility(struct fplinux_bluez_adapter *adapter)
+{
+	dbus_bool_t enabled = TRUE;
+	DBusMessage *message;
+
+	if (adapter->operation == OP_VISIBILITY_TIMEOUT) {
+		message = property_message(adapter, adapter->state.path,
+					   BLUEZ_ADAPTER, "PairableTimeout",
+					   DBUS_TYPE_UINT32,
+					   &adapter->visibility_timeout);
+		adapter->operation = OP_PAIRABLE_TIMEOUT;
+	} else if (adapter->operation == OP_PAIRABLE_TIMEOUT) {
+		message = property_message(adapter, adapter->state.path,
+					   BLUEZ_ADAPTER, "Pairable",
+					   DBUS_TYPE_BOOLEAN, &enabled);
+		adapter->operation = OP_PAIRABLE;
+	} else {
+		message = property_message(adapter, adapter->state.path,
+					   BLUEZ_ADAPTER, "Discoverable",
+					   DBUS_TYPE_BOOLEAN, &enabled);
+		adapter->operation = OP_VISIBILITY;
+	}
+	return send_call(adapter, message, adapter->timeout_ms, mutation_done,
+			 &adapter->mutation);
+}
+
+static void mutation_done(DBusPendingCall *call, void *data)
 {
 	struct fplinux_bluez_adapter *adapter = data;
 	DBusMessage *reply;
+	int error;
 
 	(void)call;
-	reply = take_reply(&adapter->power, "power change");
+	reply = take_reply(&adapter->mutation, &error);
 	if (reply) {
 		dbus_message_unref(reply);
-		/* BlueZ answers once the adapter has the new power state. */
-		if (adapter->powered != adapter->requested) {
-			adapter->powered = adapter->requested;
+		if (adapter->operation == OP_VISIBILITY_TIMEOUT ||
+		    adapter->operation == OP_PAIRABLE_TIMEOUT ||
+		    adapter->operation == OP_PAIRABLE) {
+			if (advance_visibility(adapter))
+				return;
+			error = ENOMEM;
+		} else if (adapter->operation == OP_POWER &&
+			   adapter->state.powered != adapter->requested) {
+			adapter->state.powered = adapter->requested;
 			changed(adapter);
 		}
+		if (adapter->operation == OP_DISCOVERY_START)
+			adapter->discovery_owned = true;
+		else if (adapter->operation == OP_DISCOVERY_STOP ||
+			 (adapter->operation == OP_POWER &&
+			  !adapter->requested))
+			adapter->discovery_owned = false;
+		query_adapters(adapter);
 	}
-	finished(adapter, reply != NULL);
+	if (adapter->operation == OP_PAIR)
+		clear_agent_request(adapter, "org.bluez.Error.Canceled");
+	end_operation(adapter, error);
 }
 
 static void hello_done(DBusPendingCall *call, void *data)
@@ -410,7 +728,7 @@ static void hello_done(DBusPendingCall *call, void *data)
 	const char *name;
 
 	(void)call;
-	reply = take_reply(&adapter->hello, "bus registration");
+	reply = take_reply(&adapter->hello, NULL);
 	if (reply && dbus_message_get_args(reply, NULL, DBUS_TYPE_STRING, &name,
 					   DBUS_TYPE_INVALID))
 		dbus_bus_set_unique_name(adapter->connection, name);
@@ -419,6 +737,206 @@ static void hello_done(DBusPendingCall *call, void *data)
 	if (reply)
 		dbus_message_unref(reply);
 }
+
+static void agent_done(DBusPendingCall *call, void *data);
+
+static DBusMessage *agent_manager_message(struct fplinux_bluez_adapter *adapter,
+					  const char *method)
+{
+	DBusMessage *message = dbus_message_new_method_call(
+		adapter->owner, "/org/bluez", BLUEZ_AGENT_MANAGER, method);
+	const char *path = AGENT_PATH;
+	const char *capability = "KeyboardDisplay";
+	bool valid = message &&
+		     dbus_message_append_args(message, DBUS_TYPE_OBJECT_PATH,
+					      &path, DBUS_TYPE_INVALID);
+
+	if (valid && !strcmp(method, "RegisterAgent"))
+		valid = dbus_message_append_args(message, DBUS_TYPE_STRING,
+						 &capability,
+						 DBUS_TYPE_INVALID);
+	if (!valid && message) {
+		dbus_message_unref(message);
+		message = NULL;
+	}
+	return message;
+}
+
+static void register_agent(struct fplinux_bluez_adapter *adapter)
+{
+	if (!adapter->agent_enabled || !adapter->owner[0] ||
+	    adapter->agent_registered || adapter->agent_call)
+		return;
+	if (!send_call(adapter, agent_manager_message(adapter, "RegisterAgent"),
+		       REQUEST_TIMEOUT_MS, agent_done, &adapter->agent_call)) {
+		adapter->error = ENOMEM;
+		changed(adapter);
+	}
+}
+
+static void agent_done(DBusPendingCall *call, void *data)
+{
+	struct fplinux_bluez_adapter *adapter = data;
+	DBusMessage *reply;
+	int error;
+
+	(void)call;
+	reply = take_reply(&adapter->agent_call, &error);
+	if (reply)
+		dbus_message_unref(reply);
+	if (!error && !adapter->agent_default_pending) {
+		adapter->agent_registered = true;
+		adapter->agent_default_pending = true;
+		if (send_call(adapter,
+			      agent_manager_message(adapter,
+						    "RequestDefaultAgent"),
+			      REQUEST_TIMEOUT_MS, agent_done,
+			      &adapter->agent_call))
+			return;
+		error = ENOMEM;
+	} else if (!error) {
+		adapter->agent_ready = true;
+	}
+	adapter->agent_default_pending = false;
+	adapter->error = error;
+	changed(adapter);
+}
+
+static void abort_pair(struct fplinux_bluez_adapter *adapter)
+{
+	clear_agent_request(adapter, "org.bluez.Error.Canceled");
+	if (adapter->operation == OP_PAIR) {
+		cancel_call(&adapter->mutation);
+		end_operation(adapter, ECANCELED);
+	}
+}
+
+static DBusHandlerResult agent_message(DBusConnection *connection,
+				       DBusMessage *message, void *data)
+{
+	struct fplinux_bluez_adapter *adapter = data;
+	struct fplinux_bluez_agent_request request = { 0 };
+	const char *device = NULL, *text = NULL;
+	bool display = false, valid = false;
+
+	(void)connection;
+	if (dbus_message_get_type(message) != DBUS_MESSAGE_TYPE_METHOD_CALL ||
+	    !dbus_message_has_interface(message, BLUEZ_AGENT))
+		return DBUS_HANDLER_RESULT_NOT_YET_HANDLED;
+	if (!adapter->owner[0] ||
+	    !dbus_message_has_sender(message, adapter->owner)) {
+		send_reply(
+			adapter,
+			dbus_message_new_error(
+				message, DBUS_ERROR_ACCESS_DENIED,
+				"Only Bluetooth service may call the agent"));
+		return DBUS_HANDLER_RESULT_HANDLED;
+	}
+	if (dbus_message_is_method_call(message, BLUEZ_AGENT, "Cancel") ||
+	    dbus_message_is_method_call(message, BLUEZ_AGENT, "Release")) {
+		if (!dbus_message_has_signature(message, ""))
+			goto invalid;
+		abort_pair(adapter);
+		if (dbus_message_has_member(message, "Release")) {
+			cancel_call(&adapter->agent_call);
+			adapter->agent_registered = false;
+			adapter->agent_ready = false;
+			adapter->agent_default_pending = false;
+		}
+		send_reply(adapter, dbus_message_new_method_return(message));
+		changed(adapter);
+		return DBUS_HANDLER_RESULT_HANDLED;
+	}
+	if (!adapter->agent_enabled || !adapter->agent_registered ||
+	    !fplinux_bluez_adapter_present(adapter))
+		goto rejected;
+	if (dbus_message_has_member(message, "RequestPinCode")) {
+		request.kind = FPLINUX_BLUEZ_AGENT_PIN;
+		valid = dbus_message_get_args(message, NULL,
+					      DBUS_TYPE_OBJECT_PATH, &device,
+					      DBUS_TYPE_INVALID);
+	} else if (dbus_message_has_member(message, "RequestPasskey")) {
+		request.kind = FPLINUX_BLUEZ_AGENT_PASSKEY;
+		valid = dbus_message_get_args(message, NULL,
+					      DBUS_TYPE_OBJECT_PATH, &device,
+					      DBUS_TYPE_INVALID);
+	} else if (dbus_message_has_member(message, "RequestConfirmation")) {
+		request.kind = FPLINUX_BLUEZ_AGENT_CONFIRMATION;
+		valid = dbus_message_get_args(
+			message, NULL, DBUS_TYPE_OBJECT_PATH, &device,
+			DBUS_TYPE_UINT32, &request.passkey, DBUS_TYPE_INVALID);
+	} else if (dbus_message_has_member(message, "RequestAuthorization")) {
+		request.kind = FPLINUX_BLUEZ_AGENT_AUTHORIZATION;
+		valid = dbus_message_get_args(message, NULL,
+					      DBUS_TYPE_OBJECT_PATH, &device,
+					      DBUS_TYPE_INVALID);
+	} else if (dbus_message_has_member(message, "AuthorizeService")) {
+		request.kind = FPLINUX_BLUEZ_AGENT_SERVICE;
+		valid = dbus_message_get_args(message, NULL,
+					      DBUS_TYPE_OBJECT_PATH, &device,
+					      DBUS_TYPE_STRING, &text,
+					      DBUS_TYPE_INVALID);
+		if (valid)
+			snprintf(request.uuid, sizeof(request.uuid), "%s",
+				 text);
+	} else if (dbus_message_has_member(message, "DisplayPinCode")) {
+		display = true;
+		request.kind = FPLINUX_BLUEZ_AGENT_DISPLAY_PIN;
+		valid = dbus_message_get_args(message, NULL,
+					      DBUS_TYPE_OBJECT_PATH, &device,
+					      DBUS_TYPE_STRING, &text,
+					      DBUS_TYPE_INVALID);
+		if (valid && strlen(text) <= 16)
+			snprintf(request.pin, sizeof(request.pin), "%s", text);
+		else
+			valid = false;
+	} else if (dbus_message_has_member(message, "DisplayPasskey")) {
+		display = true;
+		request.kind = FPLINUX_BLUEZ_AGENT_DISPLAY_PASSKEY;
+		valid = dbus_message_get_args(
+			message, NULL, DBUS_TYPE_OBJECT_PATH, &device,
+			DBUS_TYPE_UINT32, &request.passkey, DBUS_TYPE_UINT16,
+			&request.entered, DBUS_TYPE_INVALID);
+	} else {
+		send_reply(adapter, dbus_message_new_error(
+					    message, DBUS_ERROR_UNKNOWN_METHOD,
+					    "Unknown agent method"));
+		return DBUS_HANDLER_RESULT_HANDLED;
+	}
+	if (!valid || request.passkey > 999999 || request.entered > 6)
+		goto invalid;
+	/* An incoming request can follow InterfacesAdded before its query returns. */
+	if (strlen(device) >= sizeof(request.device) ||
+	    strncmp(device, adapter->state.path, strlen(adapter->state.path)) ||
+	    device[strlen(adapter->state.path)] != '/')
+		goto rejected;
+	clear_agent_request(adapter, "org.bluez.Error.Canceled");
+	request.serial = ++adapter->agent_serial;
+	if (!request.serial)
+		request.serial = ++adapter->agent_serial;
+	snprintf(request.device, sizeof(request.device), "%s", device);
+	adapter->agent_request = request;
+	if (display)
+		send_reply(adapter, dbus_message_new_method_return(message));
+	else
+		adapter->agent_message = dbus_message_ref(message);
+	changed(adapter);
+	return DBUS_HANDLER_RESULT_HANDLED;
+invalid:
+	send_reply(adapter,
+		   dbus_message_new_error(message, DBUS_ERROR_INVALID_ARGS,
+					  "Invalid agent arguments"));
+	return DBUS_HANDLER_RESULT_HANDLED;
+rejected:
+	send_reply(adapter,
+		   dbus_message_new_error(message, "org.bluez.Error.Rejected",
+					  "No pairing interface available"));
+	return DBUS_HANDLER_RESULT_HANDLED;
+}
+
+static const DBusObjectPathVTable agent_vtable = {
+	.message_function = agent_message,
+};
 
 /* ---- Signals ---- */
 
@@ -441,10 +959,51 @@ static bool lists_adapter(DBusMessageIter *interfaces)
 		if (dbus_message_iter_get_arg_type(&name) != DBUS_TYPE_STRING)
 			continue;
 		dbus_message_iter_get_basic(&name, &text);
-		if (!strcmp(text, BLUEZ_ADAPTER))
+		if (!strcmp(text, BLUEZ_ADAPTER) ||
+		    !strcmp(text, BLUEZ_DEVICE) || !strcmp(text, BLUEZ_BATTERY))
 			return true;
 	}
 	return false;
+}
+
+static void set_owner(struct fplinux_bluez_adapter *adapter, const char *owner)
+{
+	bool requested = adapter->mutation != NULL;
+
+	if (!strcmp(adapter->owner, owner))
+		return;
+	cancel_call(&adapter->snapshot);
+	cancel_call(&adapter->mutation);
+	cancel_call(&adapter->agent_call);
+	clear_agent_request(adapter, NULL);
+	adapter->agent_registered = false;
+	adapter->agent_ready = false;
+	adapter->agent_default_pending = false;
+	adapter->discovery_owned = false;
+	snprintf(adapter->owner, sizeof(adapter->owner), "%s", owner);
+	memset(&adapter->state, 0, sizeof(adapter->state));
+	if (requested)
+		end_operation(adapter, ENODEV);
+	changed(adapter);
+	if (owner[0]) {
+		query_adapters(adapter);
+		register_agent(adapter);
+	}
+}
+
+static void owner_done(DBusPendingCall *call, void *data)
+{
+	struct fplinux_bluez_adapter *adapter = data;
+	DBusMessage *reply;
+	const char *owner;
+
+	(void)call;
+	reply = take_reply(&adapter->owner_query, NULL);
+	if (reply && dbus_message_get_args(reply, NULL, DBUS_TYPE_STRING,
+					   &owner, DBUS_TYPE_INVALID))
+		set_owner(adapter, owner);
+	if (reply)
+		dbus_message_unref(reply);
 }
 
 static void owner_changed(struct fplinux_bluez_adapter *adapter,
@@ -458,12 +1017,8 @@ static void owner_changed(struct fplinux_bluez_adapter *adapter,
 				   DBUS_TYPE_INVALID) ||
 	    strcmp(name, BLUEZ_NAME))
 		return;
-	if (new_owner[0]) {
-		query_adapters(adapter);
-		return;
-	}
-	cancel_call(&adapter->snapshot);
-	set_adapters(adapter, 0, "", false);
+	cancel_call(&adapter->owner_query);
+	set_owner(adapter, new_owner);
 }
 
 static void interfaces_changed(struct fplinux_bluez_adapter *adapter,
@@ -481,22 +1036,49 @@ static void properties_changed(struct fplinux_bluez_adapter *adapter,
 {
 	DBusMessageIter arguments;
 	const char *interface;
-	bool powered = adapter->powered;
+	const char *path = dbus_message_get_path(message);
+	struct inventory *state;
+	struct fplinux_bluez_device *device = NULL;
 
 	if (!fplinux_bluez_adapter_present(adapter) ||
-	    strcmp(dbus_message_get_path(message), adapter->path) ||
+	    !dbus_message_has_signature(message, "sa{sv}as") ||
 	    !dbus_message_iter_init(message, &arguments) ||
 	    dbus_message_iter_get_arg_type(&arguments) != DBUS_TYPE_STRING)
 		return;
 	dbus_message_iter_get_basic(&arguments, &interface);
-	if (strcmp(interface, BLUEZ_ADAPTER) ||
+	if ((strcmp(interface, BLUEZ_ADAPTER) &&
+	     strcmp(interface, BLUEZ_DEVICE) &&
+	     strcmp(interface, BLUEZ_BATTERY)) ||
 	    !dbus_message_iter_next(&arguments))
 		return;
-	read_powered(&arguments, &powered);
-	if (powered != adapter->powered) {
-		adapter->powered = powered;
-		changed(adapter);
+	if (!strcmp(interface, BLUEZ_ADAPTER) &&
+	    strcmp(path, adapter->state.path))
+		return;
+	state = malloc(sizeof(*state));
+	if (!state)
+		return;
+	*state = adapter->state;
+	if (!strcmp(interface, BLUEZ_ADAPTER) && !strcmp(path, state->path)) {
+		read_properties(&arguments, state, NULL, interface, NULL);
+	} else {
+		for (size_t i = 0; i < state->device_count; ++i)
+			if (!strcmp(path, state->devices[i].path))
+				device = &state->devices[i];
+		if (device)
+			read_properties(&arguments, state, device, interface,
+					NULL);
 	}
+	/* Invalidations require authoritative values, rather than old fields. */
+	if (dbus_message_iter_next(&arguments)) {
+		DBusMessageIter invalidated;
+
+		dbus_message_iter_recurse(&arguments, &invalidated);
+		if (dbus_message_iter_get_arg_type(&invalidated) !=
+		    DBUS_TYPE_INVALID)
+			query_adapters(adapter);
+	}
+	replace_inventory(adapter, state);
+	free(state);
 }
 
 static DBusHandlerResult filter(DBusConnection *connection,
@@ -508,9 +1090,13 @@ static DBusHandlerResult filter(DBusConnection *connection,
 	if (dbus_message_is_signal(message, DBUS_INTERFACE_LOCAL,
 				   "Disconnected"))
 		adapter->lost = true;
-	else if (dbus_message_is_signal(message, DBUS_INTERFACE_DBUS,
+	else if (dbus_message_has_sender(message, DBUS_SERVICE_DBUS) &&
+		 dbus_message_is_signal(message, DBUS_INTERFACE_DBUS,
 					"NameOwnerChanged"))
 		owner_changed(adapter, message);
+	else if (!adapter->owner[0] ||
+		 !dbus_message_has_sender(message, adapter->owner))
+		return DBUS_HANDLER_RESULT_NOT_YET_HANDLED;
 	else if (dbus_message_is_signal(message, OBJECT_MANAGER,
 					"InterfacesAdded") ||
 		 dbus_message_is_signal(message, OBJECT_MANAGER,
@@ -528,13 +1114,17 @@ static void disconnect(struct fplinux_bluez_adapter *adapter)
 {
 	DBusConnection *connection = adapter->connection;
 	bool was_present = fplinux_bluez_adapter_present(adapter);
-	bool requested = adapter->power != NULL;
+	bool requested = adapter->mutation != NULL;
 
 	if (!connection)
 		return;
 	cancel_call(&adapter->hello);
+	cancel_call(&adapter->owner_query);
 	cancel_call(&adapter->snapshot);
-	cancel_call(&adapter->power);
+	cancel_call(&adapter->mutation);
+	cancel_call(&adapter->agent_call);
+	clear_agent_request(adapter, NULL);
+	dbus_connection_unregister_object_path(connection, AGENT_PATH);
 	/* Removing the functions hands every watch and timeout back first. */
 	dbus_connection_set_watch_functions(connection, NULL, NULL, NULL, NULL,
 					    NULL);
@@ -545,11 +1135,14 @@ static void disconnect(struct fplinux_bluez_adapter *adapter)
 	dbus_connection_unref(connection);
 	adapter->connection = NULL;
 	adapter->lost = false;
-	adapter->adapters = 0;
-	adapter->path[0] = '\0';
-	adapter->powered = false;
+	memset(&adapter->state, 0, sizeof(adapter->state));
+	adapter->owner[0] = '\0';
+	adapter->discovery_owned = false;
+	adapter->agent_registered = false;
+	adapter->agent_ready = false;
+	adapter->agent_default_pending = false;
 	if (requested)
-		finished(adapter, false);
+		end_operation(adapter, ENODEV);
 	if (was_present)
 		changed(adapter);
 }
@@ -577,12 +1170,16 @@ static bool add_match(struct fplinux_bluez_adapter *adapter, const char *rule)
 void fplinux_bluez_adapter_connect(struct fplinux_bluez_adapter *adapter)
 {
 	const char *address = getenv("DBUS_SYSTEM_BUS_ADDRESS");
+	const char *name = BLUEZ_NAME;
+	DBusMessage *message;
 	DBusError error;
 
 	if (adapter->connection)
 		return;
 	if (!address || !address[0])
 		address = SYSTEM_BUS_ADDRESS;
+	if (!dbus_threads_init_default())
+		return;
 	dbus_error_init(&error);
 	/* A private connection authenticates and registers without waiting. */
 	adapter->connection = dbus_connection_open_private(address, &error);
@@ -598,6 +1195,8 @@ void fplinux_bluez_adapter_connect(struct fplinux_bluez_adapter *adapter)
 		    toggle_timeout, adapter, NULL) ||
 	    !dbus_connection_add_filter(adapter->connection, filter, adapter,
 					NULL) ||
+	    !dbus_connection_register_object_path(
+		    adapter->connection, AGENT_PATH, &agent_vtable, adapter) ||
 	    !send_call(adapter,
 		       dbus_message_new_method_call(
 			       DBUS_SERVICE_DBUS, DBUS_PATH_DBUS,
@@ -609,15 +1208,26 @@ void fplinux_bluez_adapter_connect(struct fplinux_bluez_adapter *adapter)
 		       "',member='NameOwnerChanged',arg0='" BLUEZ_NAME "'") ||
 	    !add_match(adapter, "type='signal',sender='" BLUEZ_NAME
 				"',interface='" OBJECT_MANAGER "'") ||
-	    !add_match(adapter,
-		       "type='signal',sender='" BLUEZ_NAME
-		       "',interface='" PROPERTIES
-		       "',member='PropertiesChanged',arg0='" BLUEZ_ADAPTER
-		       "'")) {
+	    !add_match(adapter, "type='signal',sender='" BLUEZ_NAME
+				"',interface='" PROPERTIES
+				"',member='PropertiesChanged'")) {
 		disconnect(adapter);
 		return;
 	}
-	query_adapters(adapter);
+	message = dbus_message_new_method_call(DBUS_SERVICE_DBUS,
+					       DBUS_PATH_DBUS,
+					       DBUS_INTERFACE_DBUS,
+					       "GetNameOwner");
+	if (!message || !dbus_message_append_args(message, DBUS_TYPE_STRING,
+						  &name, DBUS_TYPE_INVALID)) {
+		if (message)
+			dbus_message_unref(message);
+		disconnect(adapter);
+		return;
+	}
+	if (!send_call(adapter, message, REQUEST_TIMEOUT_MS, owner_done,
+		       &adapter->owner_query))
+		disconnect(adapter);
 }
 
 static void handle_socket(struct fplinux_bluez_adapter *adapter, int fd,
@@ -722,55 +1332,441 @@ int fplinux_bluez_adapter_fd(const struct fplinux_bluez_adapter *adapter)
 
 bool fplinux_bluez_adapter_present(const struct fplinux_bluez_adapter *adapter)
 {
-	return adapter->connection && adapter->adapters == 1;
+	return adapter->connection && adapter->state.adapters == 1;
 }
 
 bool fplinux_bluez_adapter_powered(const struct fplinux_bluez_adapter *adapter)
 {
-	return fplinux_bluez_adapter_present(adapter) && adapter->powered;
+	return fplinux_bluez_adapter_present(adapter) && adapter->state.powered;
 }
 
 bool fplinux_bluez_adapter_pending(const struct fplinux_bluez_adapter *adapter)
 {
-	return adapter->power != NULL;
+	return adapter->mutation != NULL;
+}
+
+static bool can_mutate(struct fplinux_bluez_adapter *adapter,
+		       const char *device)
+{
+	adapter->error =
+		!fplinux_bluez_adapter_present(adapter) ? ENODEV :
+		adapter->mutation			? EBUSY :
+		device && !fplinux_bluez_adapter_device(adapter, device) ?
+				    ENODEV :
+				    0;
+	return !adapter->error;
+}
+
+static bool start_mutation(struct fplinux_bluez_adapter *adapter,
+			   DBusMessage *message, enum operation operation,
+			   const char *device, int timeout_ms)
+{
+	if (timeout_ms <= 0) {
+		if (message)
+			dbus_message_unref(message);
+		adapter->error = EINVAL;
+		return false;
+	}
+	if (!send_call(adapter, message, timeout_ms, mutation_done,
+		       &adapter->mutation)) {
+		adapter->error = ENOMEM;
+		return false;
+	}
+	adapter->error = 0;
+	adapter->operation = operation;
+	adapter->timeout_ms = timeout_ms;
+	snprintf(adapter->operation_device, sizeof(adapter->operation_device),
+		 "%s", device ? device : "");
+	return true;
 }
 
 bool fplinux_bluez_adapter_set_powered(struct fplinux_bluez_adapter *adapter,
 				       bool powered, int timeout_ms)
 {
-	const char *interface = BLUEZ_ADAPTER;
-	const char *property = "Powered";
 	dbus_bool_t value = powered;
-	DBusMessage *message;
-	DBusMessageIter arguments, variant;
 
-	if (!fplinux_bluez_adapter_present(adapter) || adapter->power)
-		return false;
-	message = dbus_message_new_method_call(BLUEZ_NAME, adapter->path,
-					       PROPERTIES, "Set");
-	if (!message)
-		return false;
-	dbus_message_iter_init_append(message, &arguments);
-	if (!dbus_message_iter_append_basic(&arguments, DBUS_TYPE_STRING,
-					    &interface) ||
-	    !dbus_message_iter_append_basic(&arguments, DBUS_TYPE_STRING,
-					    &property) ||
-	    !dbus_message_iter_open_container(&arguments, DBUS_TYPE_VARIANT,
-					      DBUS_TYPE_BOOLEAN_AS_STRING,
-					      &variant)) {
-		dbus_message_unref(message);
-		return false;
-	}
-	if (!dbus_message_iter_append_basic(&variant, DBUS_TYPE_BOOLEAN,
-					    &value) ||
-	    !dbus_message_iter_close_container(&arguments, &variant)) {
-		dbus_message_iter_abandon_container(&arguments, &variant);
-		dbus_message_unref(message);
-		return false;
-	}
-	if (!send_call(adapter, message, timeout_ms, power_done,
-		       &adapter->power))
+	if (!can_mutate(adapter, NULL))
 		return false;
 	adapter->requested = powered;
+	return start_mutation(adapter,
+			      property_message(adapter, adapter->state.path,
+					       BLUEZ_ADAPTER, "Powered",
+					       DBUS_TYPE_BOOLEAN, &value),
+			      OP_POWER, NULL, timeout_ms);
+}
+
+const char *
+fplinux_bluez_adapter_name(const struct fplinux_bluez_adapter *adapter)
+{
+	return adapter->state.name;
+}
+
+enum fplinux_bluez_visibility
+fplinux_bluez_adapter_visibility(const struct fplinux_bluez_adapter *adapter)
+{
+	if (!adapter->state.discoverable)
+		return FPLINUX_BLUEZ_HIDDEN;
+	return adapter->state.discoverable_timeout ?
+		       FPLINUX_BLUEZ_VISIBLE_TIMED :
+		       FPLINUX_BLUEZ_VISIBLE_ALWAYS;
+}
+
+bool fplinux_bluez_adapter_discovering(
+	const struct fplinux_bluez_adapter *adapter)
+{
+	return adapter->state.discovering;
+}
+
+bool fplinux_bluez_adapter_discovery_owned(
+	const struct fplinux_bluez_adapter *adapter)
+{
+	return adapter->discovery_owned;
+}
+
+int fplinux_bluez_adapter_error(const struct fplinux_bluez_adapter *adapter)
+{
+	return adapter->error;
+}
+
+size_t
+fplinux_bluez_adapter_device_count(const struct fplinux_bluez_adapter *adapter)
+{
+	return adapter->state.device_count;
+}
+
+const struct fplinux_bluez_device *
+fplinux_bluez_adapter_device_at(const struct fplinux_bluez_adapter *adapter,
+				size_t index)
+{
+	return index < adapter->state.device_count ?
+		       &adapter->state.devices[index] :
+		       NULL;
+}
+
+const struct fplinux_bluez_device *
+fplinux_bluez_adapter_device(const struct fplinux_bluez_adapter *adapter,
+			     const char *path)
+{
+	if (!path)
+		return NULL;
+	for (size_t i = 0; i < adapter->state.device_count; ++i)
+		if (!strcmp(path, adapter->state.devices[i].path))
+			return &adapter->state.devices[i];
+	return NULL;
+}
+
+static bool set_text(struct fplinux_bluez_adapter *adapter, const char *path,
+		     const char *text, int timeout_ms)
+{
+	if (!can_mutate(adapter, path))
+		return false;
+	if (!text || strlen(text) >= FPLINUX_BLUEZ_NAME_BYTES ||
+	    !dbus_validate_utf8(text, NULL)) {
+		adapter->error = EINVAL;
+		return false;
+	}
+	return start_mutation(
+		adapter,
+		property_message(adapter, path ? path : adapter->state.path,
+				 path ? BLUEZ_DEVICE : BLUEZ_ADAPTER, "Alias",
+				 DBUS_TYPE_STRING, &text),
+		OP_CHANGE, path, timeout_ms);
+}
+
+bool fplinux_bluez_adapter_set_name(struct fplinux_bluez_adapter *adapter,
+				    const char *name, int timeout_ms)
+{
+	return set_text(adapter, NULL, name, timeout_ms);
+}
+
+bool fplinux_bluez_adapter_set_alias(struct fplinux_bluez_adapter *adapter,
+				     const char *path, const char *alias,
+				     int timeout_ms)
+{
+	if (!path) {
+		adapter->error = EINVAL;
+		return false;
+	}
+	return set_text(adapter, path, alias, timeout_ms);
+}
+
+bool fplinux_bluez_adapter_set_visibility(
+	struct fplinux_bluez_adapter *adapter,
+	enum fplinux_bluez_visibility visibility, int timeout_ms)
+{
+	dbus_bool_t visible = FALSE;
+	dbus_uint32_t seconds =
+		visibility == FPLINUX_BLUEZ_VISIBLE_TIMED ? 120 : 0;
+
+	if (!can_mutate(adapter, NULL))
+		return false;
+	if (visibility < FPLINUX_BLUEZ_HIDDEN ||
+	    visibility > FPLINUX_BLUEZ_VISIBLE_ALWAYS) {
+		adapter->error = EINVAL;
+		return false;
+	}
+	if (visibility == FPLINUX_BLUEZ_HIDDEN)
+		return start_mutation(
+			adapter,
+			property_message(adapter, adapter->state.path,
+					 BLUEZ_ADAPTER, "Discoverable",
+					 DBUS_TYPE_BOOLEAN, &visible),
+			OP_VISIBILITY, NULL, timeout_ms);
+	adapter->visibility_timeout = seconds;
+	return start_mutation(adapter,
+			      property_message(adapter, adapter->state.path,
+					       BLUEZ_ADAPTER,
+					       "DiscoverableTimeout",
+					       DBUS_TYPE_UINT32, &seconds),
+			      OP_VISIBILITY_TIMEOUT, NULL, timeout_ms);
+}
+
+bool fplinux_bluez_adapter_set_discovery(struct fplinux_bluez_adapter *adapter,
+					 bool discover, int timeout_ms)
+{
+	if (!can_mutate(adapter, NULL))
+		return false;
+	if (discover == adapter->discovery_owned) {
+		adapter->error = EALREADY;
+		return false;
+	}
+	return start_mutation(
+		adapter,
+		dbus_message_new_method_call(
+			adapter->owner, adapter->state.path, BLUEZ_ADAPTER,
+			discover ? "StartDiscovery" : "StopDiscovery"),
+		discover ? OP_DISCOVERY_START : OP_DISCOVERY_STOP, NULL,
+		timeout_ms);
+}
+
+static bool device_method(struct fplinux_bluez_adapter *adapter,
+			  const char *path, const char *method,
+			  const char *uuid, int timeout_ms)
+{
+	DBusMessage *message;
+
+	if (!path || !can_mutate(adapter, path)) {
+		if (!path)
+			adapter->error = EINVAL;
+		return false;
+	}
+	message = dbus_message_new_method_call(adapter->owner, path,
+					       BLUEZ_DEVICE, method);
+	if (uuid && message &&
+	    !dbus_message_append_args(message, DBUS_TYPE_STRING, &uuid,
+				      DBUS_TYPE_INVALID)) {
+		dbus_message_unref(message);
+		message = NULL;
+	}
+	return start_mutation(adapter, message,
+			      !strcmp(method, "Pair") ? OP_PAIR : OP_CHANGE,
+			      path, timeout_ms);
+}
+
+bool fplinux_bluez_adapter_pair(struct fplinux_bluez_adapter *adapter,
+				const char *path, int timeout_ms)
+{
+	if (!adapter->agent_registered) {
+		adapter->error = EACCES;
+		return false;
+	}
+	return device_method(adapter, path, "Pair", NULL, timeout_ms);
+}
+
+bool fplinux_bluez_adapter_connect_device(struct fplinux_bluez_adapter *adapter,
+					  const char *path, int timeout_ms)
+{
+	return device_method(adapter, path, "Connect", NULL, timeout_ms);
+}
+
+bool fplinux_bluez_adapter_disconnect_device(
+	struct fplinux_bluez_adapter *adapter, const char *path, int timeout_ms)
+{
+	return device_method(adapter, path, "Disconnect", NULL, timeout_ms);
+}
+
+bool fplinux_bluez_adapter_connect_profile(struct fplinux_bluez_adapter *adapter,
+					   const char *path, const char *uuid,
+					   int timeout_ms)
+{
+	if (!uuid || strlen(uuid) != 36 || !dbus_validate_utf8(uuid, NULL)) {
+		adapter->error = EINVAL;
+		return false;
+	}
+	return device_method(adapter, path, "ConnectProfile", uuid, timeout_ms);
+}
+
+bool fplinux_bluez_adapter_set_trusted(struct fplinux_bluez_adapter *adapter,
+				       const char *path, bool trusted,
+				       int timeout_ms)
+{
+	dbus_bool_t value = trusted;
+
+	if (!path || !can_mutate(adapter, path)) {
+		if (!path)
+			adapter->error = EINVAL;
+		return false;
+	}
+	return start_mutation(adapter,
+			      property_message(adapter, path, BLUEZ_DEVICE,
+					       "Trusted", DBUS_TYPE_BOOLEAN,
+					       &value),
+			      OP_CHANGE, path, timeout_ms);
+}
+
+bool fplinux_bluez_adapter_remove_device(struct fplinux_bluez_adapter *adapter,
+					 const char *path, int timeout_ms)
+{
+	DBusMessage *message;
+
+	if (!path || !can_mutate(adapter, path)) {
+		if (!path)
+			adapter->error = EINVAL;
+		return false;
+	}
+	message = dbus_message_new_method_call(adapter->owner,
+					       adapter->state.path,
+					       BLUEZ_ADAPTER, "RemoveDevice");
+	if (message && !dbus_message_append_args(message, DBUS_TYPE_OBJECT_PATH,
+						 &path, DBUS_TYPE_INVALID)) {
+		dbus_message_unref(message);
+		message = NULL;
+	}
+	return start_mutation(adapter, message, OP_CHANGE, NULL, timeout_ms);
+}
+
+bool fplinux_bluez_adapter_cancel_pairing(struct fplinux_bluez_adapter *adapter)
+{
+	const char *path = adapter->operation == OP_PAIR ?
+				   adapter->operation_device :
+				   adapter->agent_request.device;
+	DBusMessage *message;
+	bool queued;
+
+	if (!path[0] || !adapter->connection || !adapter->owner[0]) {
+		adapter->error = ENOENT;
+		return false;
+	}
+	message = dbus_message_new_method_call(adapter->owner, path,
+					       BLUEZ_DEVICE, "CancelPairing");
+	if (!message) {
+		adapter->error = ENOMEM;
+		return false;
+	}
+	dbus_message_set_no_reply(message, TRUE);
+	queued = dbus_connection_send(adapter->connection, message, NULL);
+	dbus_message_unref(message);
+	if (queued) {
+		abort_pair(adapter);
+		changed(adapter);
+	}
+	return queued;
+}
+
+bool fplinux_bluez_adapter_set_agent_enabled(
+	struct fplinux_bluez_adapter *adapter, bool enabled)
+{
+	bool was_enabled = adapter->agent_enabled;
+
+	adapter->agent_enabled = enabled;
+	if (enabled) {
+		register_agent(adapter);
+		return !adapter->owner[0] || adapter->agent_registered ||
+		       adapter->agent_call;
+	}
+	if (adapter->operation == OP_PAIR || adapter->agent_request.device[0])
+		fplinux_bluez_adapter_cancel_pairing(adapter);
+	abort_pair(adapter);
+	cancel_call(&adapter->agent_call);
+	if (was_enabled && adapter->connection && adapter->owner[0]) {
+		DBusMessage *message =
+			agent_manager_message(adapter, "UnregisterAgent");
+
+		if (message) {
+			dbus_message_set_no_reply(message, TRUE);
+			dbus_connection_send(adapter->connection, message,
+					     NULL);
+			dbus_message_unref(message);
+		}
+	}
+	adapter->agent_registered = false;
+	adapter->agent_ready = false;
+	adapter->agent_default_pending = false;
+	changed(adapter);
+	return true;
+}
+
+bool fplinux_bluez_adapter_agent_ready(
+	const struct fplinux_bluez_adapter *adapter)
+{
+	return adapter->agent_ready;
+}
+
+const struct fplinux_bluez_agent_request *
+fplinux_bluez_adapter_agent_request(const struct fplinux_bluez_adapter *adapter)
+{
+	return &adapter->agent_request;
+}
+
+bool fplinux_bluez_adapter_agent_reply(struct fplinux_bluez_adapter *adapter,
+				       uint64_t serial, bool allow,
+				       const char *code)
+{
+	DBusMessage *reply;
+	dbus_uint32_t passkey = 0;
+
+	if (!serial || serial != adapter->agent_request.serial ||
+	    !adapter->agent_message) {
+		adapter->error = ENOENT;
+		return false;
+	}
+	if (allow && adapter->agent_request.kind == FPLINUX_BLUEZ_AGENT_PIN &&
+	    (!code || !code[0] || strlen(code) > 16 ||
+	     !dbus_validate_utf8(code, NULL))) {
+		adapter->error = EINVAL;
+		return false;
+	}
+	if (allow &&
+	    adapter->agent_request.kind == FPLINUX_BLUEZ_AGENT_PASSKEY) {
+		if (!code || !code[0] || strlen(code) > 6) {
+			adapter->error = EINVAL;
+			return false;
+		}
+		for (const char *digit = code; *digit; ++digit) {
+			if (*digit < '0' || *digit > '9') {
+				adapter->error = EINVAL;
+				return false;
+			}
+			passkey = passkey * 10 + (unsigned int)(*digit - '0');
+		}
+	}
+	reply = allow ? dbus_message_new_method_return(adapter->agent_message) :
+			dbus_message_new_error(adapter->agent_message,
+					       "org.bluez.Error.Rejected",
+					       "Pairing declined");
+	if (!reply) {
+		adapter->error = ENOMEM;
+		return false;
+	}
+	if (allow &&
+	    ((adapter->agent_request.kind == FPLINUX_BLUEZ_AGENT_PIN &&
+	      !dbus_message_append_args(reply, DBUS_TYPE_STRING, &code,
+					DBUS_TYPE_INVALID)) ||
+	     (adapter->agent_request.kind == FPLINUX_BLUEZ_AGENT_PASSKEY &&
+	      !dbus_message_append_args(reply, DBUS_TYPE_UINT32, &passkey,
+					DBUS_TYPE_INVALID)))) {
+		dbus_message_unref(reply);
+		adapter->error = ENOMEM;
+		return false;
+	}
+	if (!dbus_connection_send(adapter->connection, reply, NULL)) {
+		dbus_message_unref(reply);
+		adapter->error = ENOMEM;
+		return false;
+	}
+	dbus_message_unref(reply);
+	clear_agent_request(adapter, NULL);
+	adapter->error = 0;
+	changed(adapter);
 	return true;
 }

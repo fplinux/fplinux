@@ -25,6 +25,11 @@ fplinux_audio_stream_write(struct fplinux_audio_stream *stream,
 			   const int16_t *frames, size_t count);
 FPLINUX_AUDIO_INTERNAL long
 fplinux_audio_stream_queued(const struct fplinux_audio_stream *stream);
+FPLINUX_AUDIO_INTERNAL bool
+fplinux_audio_stream_pause(struct fplinux_audio_stream *stream, bool paused);
+FPLINUX_AUDIO_INTERNAL bool
+fplinux_audio_stream_status(const struct fplinux_audio_stream *stream,
+			    uint32_t *state, uint32_t *reason);
 FPLINUX_AUDIO_INTERNAL void
 fplinux_audio_stream_close(struct fplinux_audio_stream *stream);
 FPLINUX_AUDIO_INTERNAL int

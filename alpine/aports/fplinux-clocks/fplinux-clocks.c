@@ -234,8 +234,6 @@ static void item_command(struct fplinux_ui *ui, struct clock_screen *view,
 		.icon = fplinux_ui_glyph(ui, "edit", FPLINUX_UI_GLYPH_ROW),
 	};
 
-	fplinux_ui_form_set_appearance(view->screen, item,
-				       FPLINUX_UI_APPEARANCE_BUTTON);
 	fplinux_ui_form_add_item_command(view->screen, item, &value);
 }
 
@@ -711,7 +709,8 @@ static void alarm_form_refresh(struct clock_app *app, struct clock_screen *view,
 							     _("Time"),
 							     FPLINUX_UI_TIME,
 							     app->alarm.time);
-		string_item(view, 1, _("Repeat"), repeat);
+		view->items[1] = fplinux_ui_form_append_value(
+			view->screen, _("Repeat"), repeat);
 		item_command(app->ui, view, view->items[1], CMD_REPEAT);
 		view->items[2] = SIZE_MAX;
 		if (app->alarm.spec.schedule == CLOCK_ALARM_ONCE)
@@ -719,9 +718,10 @@ static void alarm_form_refresh(struct clock_app *app, struct clock_screen *view,
 				view->screen, _("Date"), FPLINUX_UI_DATE,
 				app->alarm.date);
 		string_item(view, 3, NULL, summary);
-		string_item(view, 4, _("Name"),
-			    app->alarm.spec.label[0] ? app->alarm.spec.label :
-						       _("Alarm"));
+		view->items[4] = fplinux_ui_form_append_value(
+			view->screen, _("Name"),
+			app->alarm.spec.label[0] ? app->alarm.spec.label :
+						   _("Alarm"));
 		item_command(app->ui, view, view->items[4], CMD_LABEL);
 		string_item(view, 5, NULL, app->feedback);
 		view->items[6] = fplinux_ui_form_append_choice(
@@ -730,14 +730,14 @@ static void alarm_form_refresh(struct clock_app *app, struct clock_screen *view,
 		fplinux_ui_form_set_choice(view->screen, view->items[6],
 					   app->alarm.spec.enabled ? 1 : 0);
 	} else {
-		fplinux_ui_form_set_string(view->screen, view->items[1],
-					   repeat);
+		fplinux_ui_form_set_value_text(view->screen, view->items[1],
+					       repeat);
 		fplinux_ui_form_set_string(view->screen, view->items[3],
 					   summary);
-		fplinux_ui_form_set_string(view->screen, view->items[4],
-					   app->alarm.spec.label[0] ?
-						   app->alarm.spec.label :
-						   _("Alarm"));
+		fplinux_ui_form_set_value_text(view->screen, view->items[4],
+					       app->alarm.spec.label[0] ?
+						       app->alarm.spec.label :
+						       _("Alarm"));
 		fplinux_ui_form_set_string(view->screen, view->items[5],
 					   app->feedback);
 	}
@@ -1645,8 +1645,10 @@ static void open_view(struct clock_app *app, enum view_kind kind,
 		view = new_view(app, kind, subject, name, -1, false);
 		if (!view)
 			return;
-		string_item(view, 0, _("Time"), "");
-		string_item(view, 1, _("Date"), "");
+		view->items[0] = fplinux_ui_form_append_property(view->screen,
+								 _("Time"), "");
+		view->items[1] = fplinux_ui_form_append_property(view->screen,
+								 _("Date"), "");
 		add_command(app->ui, view, CMD_EDIT, FPLINUX_UI_COMMAND_OK,
 			    _("Edit"), "edit", 0, false);
 		add_command(app->ui, view, CMD_DELETE,
@@ -1659,6 +1661,7 @@ static void open_view(struct clock_app *app, enum view_kind kind,
 				FPLINUX_UI_LIST_IMPLICIT, false);
 		if (!view)
 			return;
+		fplinux_ui_list_set_value_details(view->screen);
 		fplinux_ui_list_append(view->screen, _("Clock face"), NULL);
 		fplinux_ui_list_append(view->screen, _("Snooze duration"),
 				       NULL);

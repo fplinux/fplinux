@@ -5,6 +5,7 @@
 #include "fplinux-bluez-adapter.h"
 
 #include <assert.h>
+#include <errno.h>
 #include <poll.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -13,6 +14,7 @@
 
 #define HCI0 "/org/bluez/hci0"
 #define HCI1 "/org/bluez/hci1"
+#define DEVICE HCI0 "/dev_10_20_30_40_50_60"
 
 struct observation {
 	unsigned int changes;
@@ -248,6 +250,334 @@ static void bus_loss(void)
 	puts("bluez-adapter: a lost bus leaves Bluetooth absent and idle");
 }
 
+static const struct fplinux_bluez_device *expect_device(struct driver *driver,
+							const char *path)
+{
+	uint64_t end = now_ms() + 2000;
+	const struct fplinux_bluez_device *device;
+
+	while (!(device =
+			 fplinux_bluez_adapter_device(driver->adapter, path)) &&
+	       now_ms() < end)
+		step(driver, 5);
+	assert(device);
+	return device;
+}
+
+static const struct fplinux_bluez_agent_request *
+expect_agent(struct driver *driver, enum fplinux_bluez_agent_kind kind)
+{
+	uint64_t end = now_ms() + 2000;
+	const struct fplinux_bluez_agent_request *request;
+
+	do {
+		request = fplinux_bluez_adapter_agent_request(driver->adapter);
+		if (request->kind == kind)
+			return request;
+		step(driver, 5);
+	} while (now_ms() < end);
+	assert(false);
+	return NULL;
+}
+
+static void expect_agent_answer(struct driver *driver, bool rejected)
+{
+	uint64_t end = now_ms() + 2000;
+
+	while (!bluez_fake_agent_answered(driver->fake) && now_ms() < end)
+		step(driver, 5);
+	assert(bluez_fake_agent_answered(driver->fake));
+	assert(bluez_fake_agent_rejected(driver->fake) == rejected);
+}
+
+static void settings_inventory(void)
+{
+	struct driver driver = { 0 };
+	const struct fplinux_bluez_device *device;
+	const char *const uuids[] = {
+		"00001105-0000-1000-8000-00805f9b34fb",
+		"0000110b-0000-1000-8000-00805f9b34fb",
+	};
+
+	open_driver(&driver);
+	driver.fake = bluez_fake_start();
+	bluez_fake_add_adapter(driver.fake, HCI0, true);
+	bluez_fake_add_device(driver.fake, DEVICE, "10:20:30:40:50:60",
+			      "Headphones", true);
+	fplinux_bluez_adapter_connect(driver.adapter);
+	expect_state(&driver, true, true);
+	device = expect_device(&driver, DEVICE);
+	assert(device->paired && !device->trusted && !device->connected);
+	assert(!strcmp(device->address, "10:20:30:40:50:60"));
+	assert(!strcmp(device->name, "Headphones") &&
+	       !strcmp(device->alias, "Headphones"));
+	assert(!device->rssi_known && !device->battery_known);
+	assert(!strcmp(fplinux_bluez_adapter_name(driver.adapter),
+		       "Test adapter"));
+	assert(fplinux_bluez_adapter_device_count(driver.adapter) == 1);
+	assert(!fplinux_bluez_adapter_device_at(driver.adapter, 1));
+	assert(!bluez_fake_agent_registered(driver.fake));
+
+	bluez_fake_set_device_rssi(driver.fake, DEVICE, -54, true);
+	bluez_fake_set_device_battery(driver.fake, DEVICE, 77, true);
+	bluez_fake_set_device_uuids(driver.fake, DEVICE, uuids, 2);
+	run_for(&driver, 100);
+	device = expect_device(&driver, DEVICE);
+	assert(device->rssi_known && device->rssi == -54);
+	assert(device->battery_known && device->battery == 77);
+	assert(device->uuid_count == 2 && !strcmp(device->uuids[0], uuids[0]));
+	/* A partial change must not reset the other properties of this device. */
+	bluez_fake_set_device_connected(driver.fake, DEVICE, true);
+	run_for(&driver, 100);
+	device = expect_device(&driver, DEVICE);
+	assert(device->connected && device->paired && device->uuid_count == 2);
+	assert(device->battery_known && device->rssi_known);
+	bluez_fake_set_device_rssi(driver.fake, DEVICE, 0, false);
+	bluez_fake_set_device_battery(driver.fake, DEVICE, 0, false);
+	run_for(&driver, 100);
+	device = expect_device(&driver, DEVICE);
+	assert(!device->rssi_known && !device->battery_known && device->paired);
+
+	assert(fplinux_bluez_adapter_set_name(driver.adapter, "Pocket", 1000));
+	expect_answer(&driver, true, 2000);
+	assert(!strcmp(fplinux_bluez_adapter_name(driver.adapter), "Pocket"));
+	assert(!bluez_fake_pairable(driver.fake, HCI0));
+	assert(fplinux_bluez_adapter_set_visibility(
+		driver.adapter, FPLINUX_BLUEZ_VISIBLE_TIMED, 1000));
+	expect_answer(&driver, true, 2000);
+	assert(fplinux_bluez_adapter_visibility(driver.adapter) ==
+	       FPLINUX_BLUEZ_VISIBLE_TIMED);
+	assert(bluez_fake_pairable(driver.fake, HCI0));
+	assert(bluez_fake_pairable_timeout(driver.fake, HCI0) == 120);
+	/* The pairing timer or another client can close the window while visible. */
+	bluez_fake_set_pairable(driver.fake, HCI0, false);
+	assert(fplinux_bluez_adapter_set_visibility(
+		driver.adapter, FPLINUX_BLUEZ_VISIBLE_TIMED, 1000));
+	expect_answer(&driver, true, 2000);
+	assert(bluez_fake_pairable(driver.fake, HCI0));
+	assert(bluez_fake_pairable_timeout(driver.fake, HCI0) == 120);
+	assert(fplinux_bluez_adapter_set_visibility(
+		driver.adapter, FPLINUX_BLUEZ_VISIBLE_ALWAYS, 1000));
+	expect_answer(&driver, true, 2000);
+	assert(fplinux_bluez_adapter_visibility(driver.adapter) ==
+	       FPLINUX_BLUEZ_VISIBLE_ALWAYS);
+	assert(bluez_fake_pairable(driver.fake, HCI0));
+	assert(bluez_fake_pairable_timeout(driver.fake, HCI0) == 0);
+	assert(fplinux_bluez_adapter_set_visibility(
+		driver.adapter, FPLINUX_BLUEZ_HIDDEN, 1000));
+	expect_answer(&driver, true, 2000);
+	assert(fplinux_bluez_adapter_visibility(driver.adapter) ==
+	       FPLINUX_BLUEZ_HIDDEN);
+	assert(bluez_fake_pairable(driver.fake, HCI0));
+	bluez_fake_set_pairable(driver.fake, HCI0, false);
+	assert(fplinux_bluez_adapter_set_visibility(
+		driver.adapter, FPLINUX_BLUEZ_HIDDEN, 1000));
+	expect_answer(&driver, true, 2000);
+	assert(!bluez_fake_pairable(driver.fake, HCI0));
+
+	bluez_fake_set_external_discovery(driver.fake, HCI0, true);
+	run_for(&driver, 100);
+	assert(fplinux_bluez_adapter_discovering(driver.adapter));
+	assert(!fplinux_bluez_adapter_set_discovery(driver.adapter, false,
+						    1000));
+	assert(bluez_fake_discovery_requests(driver.fake) == 0);
+	assert(fplinux_bluez_adapter_set_discovery(driver.adapter, true, 1000));
+	expect_answer(&driver, true, 2000);
+	assert(fplinux_bluez_adapter_discovery_owned(driver.adapter));
+	assert(fplinux_bluez_adapter_set_discovery(driver.adapter, false,
+						   1000));
+	expect_answer(&driver, true, 2000);
+	assert(!fplinux_bluez_adapter_discovery_owned(driver.adapter));
+	assert(bluez_fake_discovering(driver.fake, HCI0));
+	assert(fplinux_bluez_adapter_discovering(driver.adapter));
+	assert(bluez_fake_discovery_requests(driver.fake) == 2);
+
+	assert(fplinux_bluez_adapter_set_alias(driver.adapter, DEVICE, "Desk",
+					       1000));
+	expect_answer(&driver, true, 2000);
+	assert(!strcmp(bluez_fake_device_alias(driver.fake, DEVICE), "Desk"));
+	assert(fplinux_bluez_adapter_set_trusted(driver.adapter, DEVICE, true,
+						 1000));
+	expect_answer(&driver, true, 2000);
+	assert(bluez_fake_device_trusted(driver.fake, DEVICE));
+	assert(fplinux_bluez_adapter_disconnect_device(driver.adapter, DEVICE,
+						       1000));
+	expect_answer(&driver, true, 2000);
+	assert(!bluez_fake_device_connected(driver.fake, DEVICE));
+	assert(fplinux_bluez_adapter_connect_profile(driver.adapter, DEVICE,
+						     uuids[1], 1000));
+	expect_answer(&driver, true, 2000);
+	assert(bluez_fake_device_connected(driver.fake, DEVICE));
+	assert(fplinux_bluez_adapter_remove_device(driver.adapter, DEVICE,
+						   1000));
+	expect_answer(&driver, true, 2000);
+	run_for(&driver, 100);
+	assert(!fplinux_bluez_adapter_device(driver.adapter, DEVICE));
+	assert(!fplinux_bluez_adapter_connect_device(driver.adapter, DEVICE,
+						     1000));
+	assert(fplinux_bluez_adapter_error(driver.adapter) == ENODEV);
+	fplinux_bluez_adapter_close(driver.adapter);
+	bluez_fake_stop(driver.fake);
+	puts("bluez-adapter: real inventory properties and owned discovery sessions");
+}
+
+static void pairing_agent(void)
+{
+	struct driver driver = { 0 };
+	const struct fplinux_bluez_agent_request *request;
+	uint64_t serial, end;
+
+	open_driver(&driver);
+	driver.fake = bluez_fake_start();
+	bluez_fake_add_adapter(driver.fake, HCI0, true);
+	bluez_fake_add_device(driver.fake, DEVICE, "10:20:30:40:50:60",
+			      "Keyboard", false);
+	fplinux_bluez_adapter_connect(driver.adapter);
+	expect_state(&driver, true, true);
+	expect_device(&driver, DEVICE);
+	assert(!bluez_fake_agent_registered(driver.fake));
+	assert(fplinux_bluez_adapter_set_agent_enabled(driver.adapter, true));
+	end = now_ms() + 2000;
+	while (!fplinux_bluez_adapter_agent_ready(driver.adapter) &&
+	       now_ms() < end)
+		step(&driver, 5);
+	assert(fplinux_bluez_adapter_agent_ready(driver.adapter));
+
+	bluez_fake_forge_agent(driver.fake, DEVICE);
+	expect_agent_answer(&driver, true);
+	assert(fplinux_bluez_adapter_agent_request(driver.adapter)->kind ==
+	       FPLINUX_BLUEZ_AGENT_NONE);
+	bluez_fake_request_agent(driver.fake, BLUEZ_FAKE_AGENT_PIN, DEVICE, 0,
+				 0, NULL);
+	request = expect_agent(&driver, FPLINUX_BLUEZ_AGENT_PIN);
+	serial = request->serial;
+	assert(!fplinux_bluez_adapter_agent_reply(driver.adapter, serial + 1,
+						  true, "1234"));
+	assert(!fplinux_bluez_adapter_agent_reply(driver.adapter, serial, true,
+						  ""));
+	assert(!bluez_fake_agent_answered(driver.fake));
+	assert(fplinux_bluez_adapter_agent_reply(driver.adapter, serial, true,
+						 "42AB"));
+	expect_agent_answer(&driver, false);
+	assert(!strcmp(bluez_fake_agent_code(driver.fake), "42AB"));
+
+	bluez_fake_request_agent(driver.fake, BLUEZ_FAKE_AGENT_PASSKEY, DEVICE,
+				 0, 0, NULL);
+	request = expect_agent(&driver, FPLINUX_BLUEZ_AGENT_PASSKEY);
+	assert(!fplinux_bluez_adapter_agent_reply(
+		driver.adapter, request->serial, true, "12A"));
+	assert(fplinux_bluez_adapter_agent_reply(
+		driver.adapter, request->serial, true, "000123"));
+	expect_agent_answer(&driver, false);
+	assert(!strcmp(bluez_fake_agent_code(driver.fake), "000123"));
+
+	bluez_fake_request_agent(driver.fake, BLUEZ_FAKE_AGENT_AUTHORIZATION,
+				 DEVICE, 0, 0, NULL);
+	request = expect_agent(&driver, FPLINUX_BLUEZ_AGENT_AUTHORIZATION);
+	assert(fplinux_bluez_adapter_agent_reply(driver.adapter,
+						 request->serial, false, NULL));
+	expect_agent_answer(&driver, true);
+	assert(!bluez_fake_device_paired(driver.fake, DEVICE));
+
+	bluez_fake_request_agent(driver.fake, BLUEZ_FAKE_AGENT_SERVICE, DEVICE,
+				 0, 0, "00001105-0000-1000-8000-00805f9b34fb");
+	request = expect_agent(&driver, FPLINUX_BLUEZ_AGENT_SERVICE);
+	assert(!strcmp(request->uuid, "00001105-0000-1000-8000-00805f9b34fb"));
+	assert(fplinux_bluez_adapter_agent_reply(driver.adapter,
+						 request->serial, true, NULL));
+	expect_agent_answer(&driver, false);
+
+	bluez_fake_request_agent(driver.fake, BLUEZ_FAKE_AGENT_DISPLAY_PASSKEY,
+				 DEVICE, 4271, 3, NULL);
+	request = expect_agent(&driver, FPLINUX_BLUEZ_AGENT_DISPLAY_PASSKEY);
+	assert(request->passkey == 4271 && request->entered == 3);
+	assert(!fplinux_bluez_adapter_agent_reply(driver.adapter,
+						  request->serial, true, NULL));
+	expect_agent_answer(&driver, false);
+	assert(!bluez_fake_device_paired(driver.fake, DEVICE));
+	bluez_fake_cancel_agent(driver.fake, false);
+	expect_agent(&driver, FPLINUX_BLUEZ_AGENT_NONE);
+	bluez_fake_request_agent(driver.fake, BLUEZ_FAKE_AGENT_DISPLAY_PIN,
+				 DEVICE, 0, 0, "004271");
+	request = expect_agent(&driver, FPLINUX_BLUEZ_AGENT_DISPLAY_PIN);
+	assert(!strcmp(request->pin, "004271"));
+	expect_agent_answer(&driver, false);
+	bluez_fake_cancel_agent(driver.fake, false);
+	expect_agent(&driver, FPLINUX_BLUEZ_AGENT_NONE);
+
+	bluez_fake_set_pairing_request(driver.fake,
+				       BLUEZ_FAKE_AGENT_CONFIRMATION, 123456);
+	assert(fplinux_bluez_adapter_pair(driver.adapter, DEVICE, 2000));
+	request = expect_agent(&driver, FPLINUX_BLUEZ_AGENT_CONFIRMATION);
+	assert(request->passkey == 123456);
+	assert(fplinux_bluez_adapter_pending(driver.adapter));
+	assert(!bluez_fake_device_paired(driver.fake, DEVICE));
+	assert(fplinux_bluez_adapter_agent_reply(driver.adapter,
+						 request->serial, true, NULL));
+	expect_answer(&driver, true, 2000);
+	assert(bluez_fake_device_paired(driver.fake, DEVICE));
+
+	assert(fplinux_bluez_adapter_pair(driver.adapter, DEVICE, 2000));
+	request = expect_agent(&driver, FPLINUX_BLUEZ_AGENT_CONFIRMATION);
+	serial = request->serial;
+	bluez_fake_cancel_agent(driver.fake, true);
+	expect_answer(&driver, false, 2000);
+	assert(fplinux_bluez_adapter_error(driver.adapter) == ECANCELED);
+	assert(!fplinux_bluez_adapter_agent_ready(driver.adapter));
+	assert(!fplinux_bluez_adapter_agent_reply(driver.adapter, serial, true,
+						  NULL));
+	/* A new owner cannot inherit a previous owner's prompt or device state. */
+	assert(fplinux_bluez_adapter_set_agent_enabled(driver.adapter, true));
+	end = now_ms() + 2000;
+	while (!fplinux_bluez_adapter_agent_ready(driver.adapter) &&
+	       now_ms() < end)
+		step(&driver, 5);
+	assert(fplinux_bluez_adapter_agent_ready(driver.adapter));
+	assert(fplinux_bluez_adapter_pair(driver.adapter, DEVICE, 2000));
+	request = expect_agent(&driver, FPLINUX_BLUEZ_AGENT_CONFIRMATION);
+	serial = request->serial;
+	bluez_fake_stop(driver.fake);
+	driver.fake = NULL;
+	expect_answer(&driver, false, 2000);
+	expect_state(&driver, false, false);
+	assert(!fplinux_bluez_adapter_device_count(driver.adapter));
+	assert(!fplinux_bluez_adapter_agent_reply(driver.adapter, serial, true,
+						  NULL));
+	driver.fake = bluez_fake_start();
+	bluez_fake_add_adapter(driver.fake, HCI0, true);
+	expect_state(&driver, true, true);
+	end = now_ms() + 2000;
+	while (!fplinux_bluez_adapter_agent_ready(driver.adapter) &&
+	       now_ms() < end)
+		step(&driver, 5);
+	assert(fplinux_bluez_adapter_agent_ready(driver.adapter));
+	assert(!fplinux_bluez_adapter_device_count(driver.adapter));
+	assert(fplinux_bluez_adapter_agent_request(driver.adapter)->kind ==
+	       FPLINUX_BLUEZ_AGENT_NONE);
+	/* Leaving the UI must cancel a real Pair even before an agent prompt. */
+	bluez_fake_add_device(driver.fake, DEVICE, "10:20:30:40:50:60",
+			      "Keyboard", false);
+	expect_device(&driver, DEVICE);
+	bluez_fake_answer(driver.fake, BLUEZ_FAKE_SILENT, 0);
+	assert(fplinux_bluez_adapter_pair(driver.adapter, DEVICE, 2000));
+	run_for(&driver, 100);
+	assert(fplinux_bluez_adapter_pending(driver.adapter));
+	{
+		unsigned int answers = driver.seen.answers;
+
+		assert(fplinux_bluez_adapter_set_agent_enabled(driver.adapter,
+							       false));
+		assert(driver.seen.answers == answers + 1 &&
+		       !driver.seen.applied);
+	}
+	run_for(&driver, 100);
+	assert(!fplinux_bluez_adapter_pending(driver.adapter));
+	assert(bluez_fake_cancel_requests(driver.fake) == 1);
+	fplinux_bluez_adapter_close(driver.adapter);
+	bluez_fake_stop(driver.fake);
+	puts("bluez-adapter: authenticated pairing requests require real user replies");
+}
+
 int main(int argc, char **argv)
 {
 	assert(argc == 2);
@@ -257,6 +587,10 @@ int main(int argc, char **argv)
 		lifecycle();
 	else if (!strcmp(argv[1], "bus-loss"))
 		bus_loss();
+	else if (!strcmp(argv[1], "settings-inventory"))
+		settings_inventory();
+	else if (!strcmp(argv[1], "pairing-agent"))
+		pairing_agent();
 	else
 		return 2;
 	return 0;

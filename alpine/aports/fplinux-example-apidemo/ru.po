@@ -1876,3 +1876,21 @@ msgstr "отпущена"
 
 msgid "right soft key"
 msgstr "правая софт-клавиша"
+
+msgid "Signal level"
+msgstr "Уровень сигнала"
+
+msgid "System Media (0–10)"
+msgstr "Мультимедиа (0–10)"
+
+msgid "Output"
+msgstr "Выход"
+
+msgid "Speaker"
+msgstr "Динамик"
+
+msgid "Headphones"
+msgstr "Наушники"
+
+msgid "Unavailable"
+msgstr "Недоступно"

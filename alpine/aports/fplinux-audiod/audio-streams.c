@@ -18,11 +18,29 @@
 /* A flooding connection yields to the others after this many packets. */
 #define PACKETS_PER_ROUND 16U
 
+/* Media and Alarm share one Q15 curve: -27 dB through unity in 3 dB steps. */
+static const int32_t volume_gain[FPLINUX_AUDIO_VOLUME_MAX + 1] = {
+	0,
+	1464,
+	2068,
+	2920,
+	4125,
+	5827,
+	8231,
+	11627,
+	16423,
+	23198,
+	FPLINUX_AUDIO_MIXER_UNITY,
+};
+
 void fplinux_audio_streams_init(struct fplinux_audio_streams *streams)
 {
 	unsigned int i;
 
 	*streams = (struct fplinux_audio_streams){ 0 };
+	streams->rate = FPLINUX_AUDIO_MIXER_RATE;
+	streams->media_volume = FPLINUX_AUDIO_VOLUME_MAX;
+	streams->alarm_volume = FPLINUX_AUDIO_VOLUME_MAX;
 	for (i = 0; i < FPLINUX_AUDIO_CONNECTIONS; ++i)
 		streams->connections[i].fd = -1;
 }
@@ -142,16 +160,41 @@ static bool update(struct fplinux_audio_streams *streams,
 {
 	struct fplinux_audio_process *process =
 		find_process(streams, stream_pid(streams, stream));
-	bool paused = !process || !process->audible;
+	uint32_t reason = FPLINUX_AUDIO_REASON_NONE;
+	bool paused;
 	uint32_t state = FPLINUX_AUDIO_RING_PLAYING;
-	uint32_t sleeping = paused ||
-			    streams->output != FPLINUX_AUDIO_OUTPUT_OPEN;
+	uint32_t sleeping;
+	unsigned int level = process && process->clock ? streams->alarm_volume :
+							 streams->media_volume;
+
+	if (stream->user_paused)
+		reason = FPLINUX_AUDIO_REASON_USER;
+	else if (stream->route_paused)
+		reason = FPLINUX_AUDIO_REASON_DEVICE;
+	else if (!streams->manager_ready || !process ||
+		 (!process->eligible && !process->background))
+		reason = FPLINUX_AUDIO_REASON_POLICY;
+	else if (!process->clock && streams->private_unavailable)
+		reason = FPLINUX_AUDIO_REASON_DEVICE;
+	else if (!process->clock && streams->clock_active)
+		reason = FPLINUX_AUDIO_REASON_CLOCK;
+	else if (!process->clock && streams->fm_active)
+		reason = FPLINUX_AUDIO_REASON_FM;
+	else if (!process->clock && !process->eligible &&
+		 streams->foreground_active)
+		reason = FPLINUX_AUDIO_REASON_FOREGROUND;
+	paused = reason != FPLINUX_AUDIO_REASON_NONE;
+	sleeping = paused || streams->output != FPLINUX_AUDIO_OUTPUT_OPEN;
 
 	if (paused)
 		state = FPLINUX_AUDIO_RING_PAUSED;
-	else if (streams->output == FPLINUX_AUDIO_OUTPUT_UNAVAILABLE)
+	else if (streams->output == FPLINUX_AUDIO_OUTPUT_UNAVAILABLE) {
 		state = FPLINUX_AUDIO_RING_UNAVAILABLE;
+		reason = FPLINUX_AUDIO_REASON_DEVICE;
+	}
 	stream->mixer.paused = paused;
+	stream->mixer.gain.target = volume_gain[level];
+	atomic_store(&stream->ring->reason, reason);
 	if (stream->state != state) {
 		atomic_store(&stream->ring->state, state);
 		stream->state = state;
@@ -234,7 +277,9 @@ static bool open_stream(struct fplinux_audio_streams *streams,
 					fplinux_audio_ring_frames(ring),
 					capacity, request->rate,
 					request->channels, streams->mixed);
+	stream->mixer.step = ((uint64_t)request->rate << 32) / streams->rate;
 	update(streams, stream);
+	stream->mixer.gain.current = stream->mixer.gain.target;
 	answer.stream = stream->id;
 	sent = reply(connection->fd, &answer, fd);
 	close(fd);
@@ -303,14 +348,22 @@ static bool handle(struct fplinux_audio_streams *streams, unsigned int index,
 		return open_stream(streams, index, message);
 	case FPLINUX_AUDIO_CLOSE:
 	case FPLINUX_AUDIO_KICK:
+	case FPLINUX_AUDIO_PAUSE:
 		if (connection->state != FPLINUX_AUDIO_CONNECTION_READY ||
 		    message->version || message->rate || message->channels ||
-		    message->flags)
+		    (message->type == FPLINUX_AUDIO_PAUSE ?
+			     message->flags > 1 :
+			     message->flags != 0))
 			return false;
 		/* A KICK only wakes the poll loop, which looks at the ring. */
 		stream = find_stream(streams, index, message->stream);
 		if (stream && message->type == FPLINUX_AUDIO_CLOSE)
 			end_stream(streams, stream);
+		if (stream && message->type == FPLINUX_AUDIO_PAUSE) {
+			stream->user_paused = message->flags != 0;
+			if (!message->flags)
+				stream->route_paused = false;
+		}
 		return true;
 	default:
 		return false;
@@ -367,7 +420,7 @@ bool fplinux_audio_streams_accept(struct fplinux_audio_streams *streams, int fd,
 }
 
 static void announce(struct fplinux_audio_streams *streams, pid_t pid,
-		     uid_t uid, bool clock)
+		     uid_t uid, bool clock, bool background)
 {
 	struct fplinux_audio_process *process = find_process(streams, pid);
 	pid_t *gone = find_gone(streams, pid);
@@ -392,11 +445,15 @@ static void announce(struct fplinux_audio_streams *streams, pid_t pid,
 		       (int)pid);
 		return;
 	}
-	/* Streams start paused, until AUDIBLE 1. */
+	if (background)
+		for (i = 0; i < FPLINUX_AUDIO_PROCESSES; ++i)
+			streams->processes[i].background = false;
+	/* Foreground eligibility is replayed separately by the manager. */
 	*process = (struct fplinux_audio_process){
 		.pid = pid,
 		.uid = uid,
 		.clock = clock,
+		.background = background,
 	};
 	for (i = 0; i < FPLINUX_AUDIO_CONNECTIONS; ++i) {
 		struct fplinux_audio_connection *connection =
@@ -464,23 +521,30 @@ static unsigned int split(char *command, char **words, unsigned int capacity)
 void fplinux_audio_streams_command(struct fplinux_audio_streams *streams,
 				   char *command)
 {
-	char *words[4];
-	unsigned int count = split(command, words, 4);
-	unsigned int pid, uid, audible;
+	char *words[5];
+	unsigned int count = split(command, words, 5);
+	unsigned int pid, uid, eligible, background;
 
+	if (!strcmp(words[0], FPLINUX_AUDIO_CONTROL_SYNC) && count == 1) {
+		streams->manager_ready = true;
+		return;
+	}
 	if (!strcmp(words[0], FPLINUX_AUDIO_CONTROL_APP)) {
-		if (count == 4 &&
+		if (count == 5 &&
 		    fplinux_cli_unsigned(words[1], 1, INT_MAX, &pid) &&
 		    fplinux_cli_unsigned(words[2], 0, UINT_MAX - 1, &uid) &&
-		    *words[3]) {
-			announce(streams, (pid_t)pid, (uid_t)uid, false);
+		    *words[3] &&
+		    fplinux_cli_unsigned(words[4], 0, 1, &background) &&
+		    !words[4][1]) {
+			announce(streams, (pid_t)pid, (uid_t)uid, false,
+				 background != 0);
 			return;
 		}
 	} else if (!strcmp(words[0], FPLINUX_AUDIO_CONTROL_CLOCK)) {
 		if (count == 3 &&
 		    fplinux_cli_unsigned(words[1], 1, INT_MAX, &pid) &&
 		    fplinux_cli_unsigned(words[2], 0, UINT_MAX - 1, &uid)) {
-			announce(streams, (pid_t)pid, (uid_t)uid, true);
+			announce(streams, (pid_t)pid, (uid_t)uid, true, false);
 			return;
 		}
 	} else if (!strcmp(words[0], FPLINUX_AUDIO_CONTROL_GONE)) {
@@ -489,16 +553,16 @@ void fplinux_audio_streams_command(struct fplinux_audio_streams *streams,
 			forget(streams, (pid_t)pid);
 			return;
 		}
-	} else if (!strcmp(words[0], FPLINUX_AUDIO_CONTROL_AUDIBLE)) {
+	} else if (!strcmp(words[0], FPLINUX_AUDIO_CONTROL_ELIGIBLE)) {
 		struct fplinux_audio_process *process;
 
 		if (count == 3 &&
 		    fplinux_cli_unsigned(words[1], 1, INT_MAX, &pid) &&
-		    fplinux_cli_unsigned(words[2], 0, 1, &audible) &&
+		    fplinux_cli_unsigned(words[2], 0, 1, &eligible) &&
 		    !words[2][1]) {
 			process = find_process(streams, (pid_t)pid);
 			if (process)
-				process->audible = audible;
+				process->eligible = eligible != 0;
 			return;
 		}
 	} else {
@@ -511,15 +575,57 @@ void fplinux_audio_streams_command(struct fplinux_audio_streams *streams,
 		words[0]);
 }
 
+void fplinux_audio_streams_volume(struct fplinux_audio_streams *streams,
+				  bool alarm, unsigned int level)
+{
+	unsigned int i;
+
+	if (alarm)
+		streams->alarm_volume = level;
+	else
+		streams->media_volume = level;
+	fplinux_audio_streams_refresh(streams);
+	for (i = 0; i < FPLINUX_AUDIO_STREAMS; ++i) {
+		struct fplinux_audio_stream *stream = &streams->streams[i];
+		struct fplinux_audio_process *process;
+
+		if (!stream->ring)
+			continue;
+		process = find_process(streams, stream_pid(streams, stream));
+		if (!process || process->clock != alarm)
+			continue;
+		/* A silent or held stream has no previous level to fade from. */
+		if (stream->mixer.paused ||
+		    streams->output != FPLINUX_AUDIO_OUTPUT_OPEN ||
+		    (!stream->mixer.last[0] && !stream->mixer.last[1]))
+			stream->mixer.gain.current = stream->mixer.gain.target;
+	}
+}
+
+void fplinux_audio_streams_private_output_lost(
+	struct fplinux_audio_streams *streams)
+{
+	unsigned int i;
+
+	for (i = 0; i < FPLINUX_AUDIO_APP_STREAMS; ++i)
+		if (streams->streams[i].ring)
+			streams->streams[i].route_paused = true;
+	fplinux_audio_streams_refresh(streams);
+}
+
 void fplinux_audio_streams_manager(struct fplinux_audio_streams *streams,
 				   bool connected, uint64_t now_ms)
 {
 	if (connected) {
+		streams->manager_ready = false;
 		streams->resync_ms = now_ms + FPLINUX_AUDIO_RESYNC_MS;
 		return;
 	}
 	/* Streams pause: none of their processes is audible any more. */
 	memset(streams->processes, 0, sizeof(streams->processes));
+	streams->clock_active = false;
+	streams->foreground_active = false;
+	streams->manager_ready = false;
 	/* The resynchronization rules apply to every process now. */
 	memset(streams->gone, 0, sizeof(streams->gone));
 	streams->resync_ms = 0;
@@ -577,6 +683,32 @@ bool fplinux_audio_streams_refresh(struct fplinux_audio_streams *streams)
 {
 	bool wanted = false;
 	unsigned int i;
+
+	streams->clock_active = false;
+	streams->foreground_active = false;
+	for (i = 0; i < FPLINUX_AUDIO_STREAMS; ++i) {
+		struct fplinux_audio_stream *stream = &streams->streams[i];
+		struct fplinux_audio_process *process;
+		uint32_t write;
+
+		if (!stream->ring || stream->user_paused ||
+		    stream->route_paused)
+			continue;
+		write = atomic_load(&stream->ring->write);
+		if (write - stream->mixer.read > stream->mixer.mask + 1) {
+			end_stream(streams, stream);
+			continue;
+		}
+		process = find_process(streams, stream_pid(streams, stream));
+		if (!streams->manager_ready || !process || !process->eligible ||
+		    (!process->clock && streams->private_unavailable) ||
+		    write == stream->mixer.heard)
+			continue;
+		if (process->clock)
+			streams->clock_active = true;
+		else
+			streams->foreground_active = true;
+	}
 
 	for (i = 0; i < FPLINUX_AUDIO_STREAMS; ++i) {
 		struct fplinux_audio_stream *stream = &streams->streams[i];

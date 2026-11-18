@@ -6,7 +6,9 @@
 #include <stdint.h>
 
 #include "fplinux-storage.h"
+#include "fplinux-system-levels.h"
 #include "fplinux-ui-document.h"
+#include "fplinux-ui-lights.h"
 #include "fplinux-ui-vibration.h"
 #include "fplinux-volumes.h"
 
@@ -71,6 +73,8 @@ enum fplinux_ui_session_message_type {
 	FPLINUX_UI_SESSION_DOCUMENT_RESULT,
 	FPLINUX_UI_SESSION_STORAGE_REQUEST,
 	FPLINUX_UI_SESSION_STORAGE_RESULT,
+	FPLINUX_UI_SESSION_SYSTEM_LEVELS,
+	FPLINUX_UI_SESSION_LIGHT_EFFECT,
 };
 
 struct fplinux_ui_session_document_choice {
@@ -90,10 +94,19 @@ enum fplinux_ui_session_lifecycle {
 	FPLINUX_UI_SESSION_CLOSING,
 };
 
+enum fplinux_ui_session_playback {
+	FPLINUX_UI_SESSION_PLAYBACK_NONE,
+	FPLINUX_UI_SESSION_PLAYBACK_PAUSED,
+	FPLINUX_UI_SESSION_PLAYBACK_HELD,
+	FPLINUX_UI_SESSION_PLAYBACK_UNAVAILABLE,
+	FPLINUX_UI_SESSION_PLAYBACK_PLAYING,
+};
+
 struct fplinux_ui_session_task {
 	char app_id[FPLINUX_UI_SESSION_ID_BYTES];
 	char title[FPLINUX_UI_SESSION_TEXT_BYTES];
 	enum fplinux_ui_session_lifecycle lifecycle;
+	enum fplinux_ui_session_playback playback;
 	uint32_t token;
 };
 
@@ -146,7 +159,9 @@ struct fplinux_ui_session_clock_presentation {
  * SELECT(value=tasks, enabled) reports whether Tasks covers that base without
  * changing its selection or presentation; SELECT(value=quick-settings,
  * enabled) does the same for Quick settings. ACTIVE returns the base view,
- * including after a launcher restart. LAUNCH may
+ * including after a launcher restart, and tasks_view reports whether the
+ * manager-owned Tasks subview covers it. ACTIVE.enabled remains launch
+ * progress. LAUNCH may
  * attach one descriptor containing tightly packed RGB565 pixels bounded by
  * FRAME_MAX_WIDTH/HEIGHT/PIXELS. SCM_RIGHTS transfers it outside the JSON object.
  * CANCEL ends startup or BUSY without an application-crashed notice.
@@ -167,8 +182,14 @@ struct fplinux_ui_session_clock_presentation {
  *
  * SETTING(name, value) belongs to org.fplinux.settings: empty value queries,
  * otherwise it sets a value. The launcher may also query, preview and save
- * brightness while it reports Quick settings over the unlocked Home; ending
- * Quick settings restores an unsaved preview. The manager replies with the
+ * brightness and volume while Quick settings covers the unlocked Home;
+ * ending Quick settings restores an unsaved preview. volume_step takes -1 or
+ * 1 and changes the manager's current volume preview. volume_commit takes an
+ * empty value and saves that preview, including pending steps. volume and
+ * nonempty volume_preview set absolute levels 0..10; empty volume queries,
+ * and empty volume_preview restores the level before the preview. Volume
+ * operations echo the request serial in replies and errors; successful steps
+ * reply as volume_preview, and commits as volume. The manager replies with the
  * applied SETTING or ERROR. Reply applied records whether the value already took effect;
  * storage_state and storage_error report publication and synchronization
  * separately. An applied ERROR still supplies the current value.
@@ -181,8 +202,10 @@ struct fplinux_ui_session_clock_presentation {
  *
  * TASKS without a tasks array is a launcher-only query. The manager supplies
  * the complete bounded snapshot, including [] when no tasks remain. Each
- * task has an app_id, title, lifecycle and nonzero instance token. Launcher
- * ACTIVATE and CLOSE_TASK carry app_id and token together, so a stale action
+ * task has an app_id, title, lifecycle and nonzero instance token. playback
+ * reports the audio service's current media state independently of lifecycle.
+ * ACTIVE.background_playing reports actual playback by a background task.
+ * Launcher ACTIVATE and CLOSE_TASK carry app_id and token together, so a stale action
  * cannot affect a restarted application. CLOSE_TASK starts PREPARE_CLOSE;
  * a waiting background task becomes visible to present its decision.
  * LAUNCH requests OPEN; ACTIVATE and an internal close-decision return request
@@ -219,8 +242,13 @@ struct fplinux_ui_session_message {
 	enum fplinux_ui_session_theme theme;
 	enum fplinux_ui_session_display display;
 	bool locked;
+	/* SOFTKEYS: a local bar is visible in the client's committed frame. */
 	bool visible;
 	bool enabled;
+	/* ACTIVE: manager-owned Tasks subview covers the base launcher view. */
+	bool tasks_view;
+	/* ACTIVE: the audio service is playing a background media task. */
+	bool background_playing;
 	char locale[FPLINUX_UI_SESSION_LOCALE_BYTES];
 	char input_locale[FPLINUX_UI_SESSION_LOCALE_BYTES];
 	char name[FPLINUX_UI_SESSION_NAME_BYTES];
@@ -247,7 +275,11 @@ struct fplinux_ui_session_message {
 	struct fplinux_ui_session_clock_presentation clock_presentation;
 	/* CONFIG: capabilities available to this application. */
 	bool audio;
+	bool background_audio;
 	bool vibration;
+	unsigned int light_effects;
+	/* LIGHT_EFFECT: transient resources; zero clears this connection's effect. */
+	struct fplinux_ui_light_effect light_effect;
 	/* VIBRATE: pause, pulse, pause, pulse... in ms; [] stops. */
 	unsigned int pattern_count;
 	unsigned int pattern[FPLINUX_UI_SESSION_PATTERN];
@@ -269,6 +301,8 @@ struct fplinux_ui_session_message {
 	enum fplinux_volume_operation volume_operation;
 	uint32_t volume_id;
 	struct fplinux_volume_result volume_result;
+	/* SYSTEM_LEVELS: one complete, read-only snapshot owned by Session. */
+	struct fplinux_system_levels system_levels;
 };
 
 struct fplinux_ui;

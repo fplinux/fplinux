@@ -43,8 +43,6 @@ static void render_expected_boot(const struct fplinux_status_canvas *canvas)
 			fplinux_status_profile.font_body),
 		.title = fplinux_status_font_by_id(
 			fplinux_status_profile.font_title),
-		.legend = fplinux_status_font_by_id(
-			fplinux_status_profile.font_legend),
 	};
 	const struct fplinux_status_view view = {
 		.layout = FPLINUX_STATUS_BOOT,

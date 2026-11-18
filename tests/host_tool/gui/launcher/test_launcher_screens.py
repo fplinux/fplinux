@@ -14,6 +14,7 @@ import struct
 import zlib
 from dataclasses import dataclass
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING, TypedDict, cast
 
 import pytest
@@ -107,6 +108,30 @@ def launcher_native(
             check=True,
         )
         yield directory
+
+
+@pytest.mark.parametrize("action", ["save", "right"])
+def test_volume_keys_and_quick_settings_share_pending_audio_preview(
+    launcher_native: Path, ui_icon_resources: Path, action: str
+) -> None:
+    """Real manager and Launcher preserve both inputs while an audio ACK is held."""
+    with TemporaryDirectory(prefix="fplinux-volume-") as scratch:
+        result = run_process(
+            [
+                str(launcher_native / "launcher-session-volume"),
+                str(launcher_native / "launcher"),
+                str(ROOT / "tests/host_tool/gui/screens/keypad.xkb"),
+                scratch,
+                action,
+            ],
+            name=f"real session and Quick settings volume ordering: {action}",
+            env={"FPLINUX_NATIVE_GLYPHS": str(ui_icon_resources / "usr/share/fplinux/glyphs")},
+            timeout=15,
+        )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.endswith(
+        f"session-volume-{action}: hardware and GUI intents survive a pending ACK\n"
+    )
 
 
 def red_tile_png(size: int) -> bytes:
@@ -864,6 +889,82 @@ def test_actual_status_bar_items_are_centred_above_the_divider(  # noqa: PLR0913
         assert ink, f"{item} is not drawn"
         above, below = ink[0], rows - 1 - ink[-1]
         assert below - above in (0, 1), f"{item}: {above} rows above, {below} below"
+    idle = (tmp_path / "launcher-playback-idle.rgb565").read_bytes()
+    playing = (tmp_path / "launcher-playback-playing.rgb565").read_bytes()
+    locked = (tmp_path / "launcher-status-locked.rgb565").read_bytes()
+    locked_playing = (tmp_path / "launcher-playback-locked.rgb565").read_bytes()
+    ink_colour = rgb565(STATUS_COLOURS[theme]["ink"])
+    for before, after in ((idle, playing), (locked, locked_playing)):
+        changed = [
+            (x, y)
+            for y in range(rows)
+            for x in range(width)
+            if pixel(before, width, x, y) != pixel(after, width, x, y)
+        ]
+        assert changed, "background playback has no visible status indicator"
+        assert all(x < width // 4 for x, _ in changed), "playback moved the clock or battery"
+        assert all(pixel(before, width, x, y) == bar for x, y in changed)
+        painted = {pixel(after, width, x, y) for x, y in changed}
+        assert ink_colour in painted, "playback glyph does not use the status ink"
+        # The alpha mask's edge pixels blend the existing bar and status ink.
+        for shift, mask in ((11, 31), (5, 63), (0, 31)):
+            low, high = sorted(((bar >> shift) & mask, (ink_colour >> shift) & mask))
+            assert all(low <= (colour >> shift) & mask <= high for colour in painted)
+
+
+@pytest.mark.parametrize("locale", ["en", "ru"])
+@pytest.mark.parametrize("screen", [(128, 128), (240, 320)])
+def test_actual_tasks_playback_states_use_current_locale(  # noqa: PLR0913, PLR0917 -- native boundary inputs.
+    launcher_native: Path,
+    launcher_catalogue: tuple[Path, Path],
+    ui_icon_resources: Path,
+    tmp_path: Path,
+    screen: tuple[int, int],
+    locale: str,
+) -> None:
+    """Real Tasks rows keep the localized application name across audio updates."""
+    applications, icons = launcher_catalogue
+    width, height = screen
+    result = run_process(
+        [
+            str(launcher_native / "launcher-screens"),
+            str(width),
+            str(height),
+            str(launcher_native / "launcher"),
+            str(ROOT / "tests/host_tool/gui/screens/keypad.xkb"),
+            str(tmp_path / "session.sock"),
+            str(tmp_path),
+            str(applications),
+            str(icons),
+            "light",
+            "1",
+            "playback",
+            locale,
+        ],
+        name=f"actual Tasks audio states at {width}x{height} ({locale})",
+        env={
+            "FPLINUX_NATIVE_GLYPHS": str(ui_icon_resources / "usr/share/fplinux/glyphs"),
+            "FPLINUX_UI_LOCALE_DIRECTORY": str(launcher_native / "locale"),
+            "FPLINUX_LAUNCHER_LANGUAGE_DIRECTORY": str(ROOT / "alpine/aports/fplinux-language"),
+        },
+        timeout=30,
+    )
+    retain_capture(tmp_path, f"launcher-playback-{width}x{height}-{locale}")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (
+        "launcher-playback: current locale, application name and audio states drawn"
+        in result.stdout
+    )
+    states = (
+        ("Играет", "Пауза", "Звук прерван", "Звук недоступен", "В фоне")  # noqa: RUF001 -- Exact Russian Background label.
+        if locale == "ru"
+        else ("Playing", "Paused", "Audio interrupted", "Audio unavailable", "Background")
+    )
+    for index, state in enumerate(states):
+        observation = observed_frame(tmp_path, f"playback-tasks-{index}")
+        texts = {label["text"] for label in observation["labels"]}
+        assert state in texts
+        assert ("Музыка" if locale == "ru" else "Music") in texts
 
 
 def test_actual_launcher_marquee_finishes_and_restarts_on_focus(

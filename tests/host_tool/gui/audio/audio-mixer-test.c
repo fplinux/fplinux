@@ -501,50 +501,55 @@ static void test_literal_resampling(void)
 	      "literal resampling publishes all four input frames");
 }
 
-static void test_master_volume(void)
+static void test_stream_volume(void)
 {
-	const int32_t samples[] = { 60000, -60000, 40000, -40000,
-				    20000, -20000, 10000, -10000 };
-	const int16_t unity[] = { 32767, -32768, 32767, -32768,
-				  20000, -20000, 10000, -10000 };
-	const int16_t half[] = { 30000, -30000, 20000, -20000,
-				 10000, -10000, 5000,  -5000 };
-	const int16_t ramp[] = { 32767, -32768, 30000, -30000,
-				 10000, -10000, 2500,  -2500 };
-	const int16_t silence[8] = { 0 };
-	struct fplinux_audio_mixer_gain gain;
-	int32_t mix[8];
+	const int16_t samples[] = { 20000, 20000, 20000, 20000,
+				    20000, 20000, 20000, 20000 };
+	const int16_t half[] = { 10000, 10000, 10000, 10000,
+				 10000, 10000, 10000, 10000 };
+	const int16_t ramp[] = { 10000, 10000, 7500, 7500,
+				 5000,	5000,  2500, 2500 };
+	struct fplinux_audio_mixer_stream stream;
+	int32_t mix[8] = { 0 };
 	int16_t output[8];
 
-	gain = (struct fplinux_audio_mixer_gain){ 32768, 32768 };
-	memcpy(mix, samples, sizeof(mix));
-	fplinux_audio_mixer_master(mix, 4, &gain);
-	fplinux_audio_mixer_output(mix, output, 4);
-	check(!memcmp(output, unity, sizeof(output)),
-	      "master unity clips after mixing");
-	gain = (struct fplinux_audio_mixer_gain){ 16384, 16384 };
-	memcpy(mix, samples, sizeof(mix));
-	fplinux_audio_mixer_master(mix, 4, &gain);
+	fplinux_audio_mixer_stream_init(&stream, samples, 8, 48000, 1, 0);
+	stream.gain = (struct fplinux_audio_mixer_gain){ 16384, 16384 };
+	fplinux_audio_mixer_mix(&stream, 8, mix, 4, 4);
 	fplinux_audio_mixer_output(mix, output, 4);
 	check(!memcmp(output, half, sizeof(output)),
-	      "master half scales before clipping");
-	gain = (struct fplinux_audio_mixer_gain){ 32768, 0 };
-	memcpy(mix, samples, sizeof(mix));
-	fplinux_audio_mixer_master(mix, 4, &gain);
+	      "stream half gain applies exactly once");
+	stream.gain.target = 0;
+	memset(mix, 0, sizeof(mix));
+	fplinux_audio_mixer_mix(&stream, 8, mix, 4, 8);
 	fplinux_audio_mixer_output(mix, output, 4);
-	check(!memcmp(output, ramp, sizeof(output)) && gain.current == 0,
-	      "master ramps down across a period");
-	memcpy(mix, samples, sizeof(mix));
-	fplinux_audio_mixer_master(mix, 4, &gain);
-	fplinux_audio_mixer_output(mix, output, 4);
-	check(!memcmp(output, silence, sizeof(output)),
-	      "master mute is silent");
+	check(!memcmp(output, ramp, sizeof(output)) && stream.gain.current == 0,
+	      "stream class gain ramps down across a period");
+}
+
+static void test_native_downsample_waits_for_missing_skipped_frame(void)
+{
+	const int16_t input[] = { 1000, 2000, 3000, 4000 };
+	struct fplinux_audio_mixer_stream stream;
+	int32_t first[4] = { 0 }, later[2] = { 0 };
+
+	fplinux_audio_mixer_stream_init(&stream, input, 4, 48000, 1, 0);
+	stream.step = 3ULL << 31;
+	check(fplinux_audio_mixer_mix(&stream, 2, first, 2, 2) == 2,
+	      "downsampling renders only available source samples");
+	check(first[0] == 1000 && first[2] == 2000 && stream.read == 2,
+	      "a skipped source frame is not consumed before it arrives");
+	check(fplinux_audio_mixer_mix(&stream, 4, later, 1, 3) == 1,
+	      "downsampling resumes after the missing source frame arrives");
+	check(later[0] == 4000 && stream.read == 4,
+	      "the pending source skip survives a dry boundary");
 }
 
 int main(void)
 {
 	test_literal_resampling();
-	test_master_volume();
+	test_stream_volume();
+	test_native_downsample_waits_for_missing_skipped_frame();
 	test_identity_and_dry();
 	test_mono_to_stereo();
 	test_interpolation(44100, 2);

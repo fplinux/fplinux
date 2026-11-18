@@ -53,7 +53,7 @@ void apidemo_forms_open_strings(struct apidemo *app,
 	fplinux_ui_form_append_string(form, _("A label alone"), NULL);
 	fplinux_ui_form_append_string(form, NULL,
 				      _("A text alone, without a label."));
-	/* Neither: an empty item, which only adds the gap between items. */
+	/* An empty item keeps its index until the application supplies text. */
 	fplinux_ui_form_append_string(form, NULL, NULL);
 	fplinux_ui_form_append_string(
 		form, _("Long text"),

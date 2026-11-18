@@ -128,20 +128,21 @@ class ClockAudioService:
         """Keep the authenticated manager socket alive for the exercise."""
         with socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET) as control:
             control.connect(str(self.work / "control.sock"))
+            control.send(b"SYNC")
             yield control
 
     @staticmethod
     def clock(control: socket.socket, pid: int) -> None:
         """Announce the launched helper's actual credentials and allow its audio."""
         control.send(f"CLOCK {pid} {os.geteuid()}".encode())
-        control.send(f"AUDIBLE {pid} 1".encode())
+        control.send(f"ELIGIBLE {pid} 1".encode())
 
     @contextmanager
     def application(self, control: socket.socket) -> Iterator[ApplicationAudio]:
         """Own a normal application's socket and real service-created ring."""
         pid = os.getpid()
-        control.send(f"APP {pid} {os.geteuid()} org.fplinux.test".encode())
-        control.send(f"AUDIBLE {pid} 1".encode())
+        control.send(f"APP {pid} {os.geteuid()} org.fplinux.test 0".encode())
+        control.send(f"ELIGIBLE {pid} 1".encode())
         with socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET) as client:
             client.settimeout(3)
             client.connect(str(self.work / "stream.sock"))

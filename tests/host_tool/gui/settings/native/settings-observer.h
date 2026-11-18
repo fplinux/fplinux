@@ -23,7 +23,11 @@ struct settings_frame_observation {
 	int about_scroll_bottom;
 	char locale[4];
 	char labels[8192];
+	char form_text[256];
 	struct list_value_observation root_values[4];
+	struct list_value_observation root_sound;
+	struct list_value_observation section_values[7];
+	struct list_value_observation sound_values[3];
 	/* The first visible "Bluetooth" row, in the root or its own screen. */
 	struct list_value_observation bluetooth;
 };

@@ -4,6 +4,7 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 
 #include "fplinux-ui-screen.h"
 #include "fplinux-ui-session.h"
@@ -27,7 +28,7 @@ struct fplinux_launcher_quick_settings_listener {
 struct fplinux_launcher_quick_level {
 	int value;
 	bool known;
-	bool unsupported;
+	bool unavailable;
 };
 
 struct fplinux_launcher_quick_settings {
@@ -43,6 +44,9 @@ struct fplinux_launcher_quick_settings {
 	enum fplinux_launcher_quick_setting editing_row;
 	int draft;
 	int preview_sent;
+	uint32_t setting_serial;
+	uint32_t preview_serial;
+	uint32_t save_serial;
 	bool editing;
 	bool preview_pending;
 	bool save_requested;
@@ -72,6 +76,8 @@ bool fplinux_launcher_quick_settings_receive(
 	struct fplinux_launcher_quick_settings *quick,
 	const struct fplinux_ui_session_message *message);
 void fplinux_launcher_quick_settings_bluetooth_changed(
+	struct fplinux_launcher_quick_settings *quick);
+void fplinux_launcher_quick_settings_levels_changed(
 	struct fplinux_launcher_quick_settings *quick);
 void fplinux_launcher_quick_settings_bluetooth_finished(
 	struct fplinux_launcher_quick_settings *quick, bool applied);

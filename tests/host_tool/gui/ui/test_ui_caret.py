@@ -470,6 +470,29 @@ def test_native_scrolling_content_keeps_margins_and_space_for_its_thumb(
     )
 
 
+@pytest.mark.parametrize("widget", ["choice", "passive-gauge"])
+@pytest.mark.parametrize(
+    ("width", "height"),
+    [(128, 128), (128, 160), (176, 220), (240, 320), (320, 240)],
+)
+def test_native_form_widget_reflows_without_losing_its_geometry_or_pixels(
+    caret_consumer: Path, widget: str, width: int, height: int
+) -> None:
+    """Popup pairs resize both ways; passive bars keep wrapped captions and flat geometry."""
+    run_process(
+        [
+            str(caret_consumer),
+            f"{widget}-reflow",
+            str(ROOT / "tests/host_tool/input/fixtures/input-languages"),
+            str(width),
+            str(height),
+        ],
+        name=f"native {widget} reflow at {width}x{height}",
+        timeout=10,
+        check=True,
+    )
+
+
 def test_alert_delivers_all_application_command_ids(caret_consumer: Path) -> None:
     """An alert leaves the stack, reports its command, then releases its widgets."""
     run_process(

@@ -2,7 +2,9 @@
 #include "fplinux-bluez-adapter.h"
 #include "fplinux-language.h"
 #include "fplinux-multitap.h"
+#include "fplinux-system-info.h"
 #include "settings-core.h"
+#include "settings-bluetooth.h"
 #include "fplinux-cli.h"
 
 #include <fplinux/fplinux-ui.h>
@@ -10,6 +12,7 @@
 #include <fplinux/fplinux-ui-menu.h>
 #include <fplinux/fplinux-ui-screen.h>
 #include <fplinux/fplinux-ui-session.h>
+#include <fplinux/fplinux-ui-system.h>
 #include <libintl.h>
 #include <errno.h>
 #include <poll.h>
@@ -24,7 +27,6 @@
 #define APP_ID "org.fplinux.settings"
 #define ARRAY_SIZE(array) (sizeof(array) / sizeof((array)[0]))
 #define LANGUAGE_COUNT_MAX 16
-#define BLUETOOTH_TIMEOUT_MS 10000
 #define _(text) gettext(text)
 /* Marks text for translation where it is stored; _() translates on use. */
 #define N_(text) text
@@ -47,10 +49,23 @@ enum command {
 /* In this order; Bluetooth only while BlueZ has its adapter. */
 enum root_row {
 	ROOT_DISPLAY,
+	ROOT_SOUND,
 	ROOT_BLUETOOTH,
 	ROOT_TIME_LANGUAGE,
 	ROOT_INPUT,
 	ROOT_ABOUT,
+};
+
+enum sound_row {
+	SOUND_MEDIA,
+	SOUND_ALARM,
+	SOUND_OUTPUT,
+};
+
+enum sound_class {
+	SOUND_CLASS_MEDIA,
+	SOUND_CLASS_ALARM,
+	SOUND_CLASSES,
 };
 
 enum display_row {
@@ -158,10 +173,12 @@ struct settings_app {
 	struct fplinux_ui_screen *root;
 	struct fplinux_ui_screen *about;
 	struct fplinux_ui_screen *display;
+	struct fplinux_ui_screen *sound;
 	struct fplinux_ui_screen *time_language;
 	struct fplinux_ui_screen *input;
 	struct fplinux_ui_screen *choice_list;
 	struct fplinux_ui_screen *brightness_form;
+	struct fplinux_ui_screen *volume_form;
 	struct fplinux_ui_screen *date_form;
 	struct fplinux_ui_screen *leave_alert;
 	struct fplinux_ui_screen *change_alert;
@@ -177,6 +194,17 @@ struct settings_app {
 	/* Values reported by the manager; 0 or the list size when unknown. */
 	unsigned int brightness;
 	bool brightness_unavailable;
+	unsigned int volume[SOUND_CLASSES];
+	bool volume_known[SOUND_CLASSES];
+	enum sound_class volume_class;
+	size_t volume_gauge;
+	bool volume_previewing;
+	bool volume_pending;
+	struct choice output_choice;
+	const char *output_values[3];
+	const char *output_labels[3];
+	size_t output;
+	char output_value[16];
 	size_t screen_off;
 	size_t auto_lock;
 
@@ -203,18 +231,9 @@ struct settings_app {
 	size_t gauge_item;
 	bool previewing;
 
-	/*
-	 * Bluetooth: the root row while BlueZ has one adapter, and a screen
-	 * with its switch. A busy alert covers the screen while a change is on
-	 * its way; failed is the outcome that the screen presents next.
-	 */
 	struct fplinux_bluez_adapter *bluetooth;
-	struct fplinux_ui_screen *bluetooth_list;
-	struct fplinux_ui_screen *bluetooth_alert;
-	struct fplinux_ui_screen *bluetooth_wait;
+	struct fplinux_settings_bluetooth *bluetooth_view;
 	bool bluetooth_row;
-	bool bluetooth_turning_on;
-	bool bluetooth_failed;
 
 	/* Date and time: an item follows the clock until the user edits it. */
 	size_t date_item;
@@ -233,6 +252,28 @@ struct settings_app {
 
 static void show_notice(struct settings_app *app);
 static void return_root(struct settings_app *app);
+static void show_sound(struct settings_app *app);
+
+static const char *volume_setting_name(enum sound_class class, bool preview)
+{
+	if (class == SOUND_CLASS_ALARM)
+		return preview ? "alarm_volume_preview" : "alarm_volume";
+	return preview ? "volume_preview" : "volume";
+}
+
+static void end_volume_preview(struct settings_app *app)
+{
+	if (!app->volume_previewing)
+		return;
+	struct fplinux_ui_session_message message = {
+		.type = FPLINUX_UI_SESSION_SETTING,
+	};
+
+	snprintf(message.name, sizeof(message.name), "%s",
+		 volume_setting_name(app->volume_class, true));
+	fplinux_ui_send(app->ui, &message);
+	app->volume_previewing = false;
+}
 
 static void add_back_command(struct settings_app *app,
 			     struct fplinux_ui_screen *screen)
@@ -269,8 +310,8 @@ static void query_setting(struct settings_app *app, const char *name)
 }
 
 /* "brightness" stores the level; "brightness_preview" only shows it. */
-static void send_brightness(struct settings_app *app, const char *name,
-			    unsigned int level)
+static void send_level(struct settings_app *app, const char *name,
+		       unsigned int level)
 {
 	char value[4];
 
@@ -317,6 +358,8 @@ static size_t choice_current(const struct settings_app *app,
 		return app->screen_off;
 	if (choice == &auto_lock_choice)
 		return app->auto_lock;
+	if (choice == &app->output_choice)
+		return app->output;
 	return (size_t)theme_kind(app);
 }
 
@@ -640,7 +683,7 @@ static void brightness_changed(struct fplinux_ui *ui,
 
 	(void)ui;
 	if (index == app->gauge_item && level > 0) {
-		send_brightness(app, "brightness_preview", (unsigned int)level);
+		send_level(app, "brightness_preview", (unsigned int)level);
 		app->previewing = true;
 	}
 }
@@ -656,7 +699,7 @@ static void brightness_command(struct fplinux_ui *ui,
 	if (command_id == COMMAND_SAVE) {
 		/* Storing the level also ends the preview. */
 		if (level > 0)
-			send_brightness(app, "brightness", (unsigned int)level);
+			send_level(app, "brightness", (unsigned int)level);
 		app->previewing = false;
 	} else if (command_id == COMMAND_CANCEL) {
 		end_preview(app);
@@ -698,6 +741,79 @@ static void open_brightness(struct settings_app *app)
 				       brightness_changed, app);
 	app->previewing = false;
 	app->brightness_form = form;
+	fplinux_ui_push(app->ui, form);
+}
+
+static void volume_changed(struct fplinux_ui *ui,
+			   struct fplinux_ui_screen *form, size_t index,
+			   void *context)
+{
+	struct settings_app *app = context;
+	int level = fplinux_ui_form_get_value(form, index);
+
+	(void)ui;
+	if (index != app->volume_gauge || level < 0 || app->volume_pending)
+		return;
+	send_level(app, volume_setting_name(app->volume_class, true),
+		   (unsigned int)level);
+	app->volume_previewing = true;
+}
+
+static void volume_command(struct fplinux_ui *ui,
+			   struct fplinux_ui_screen *form, int command_id,
+			   void *context)
+{
+	struct settings_app *app = context;
+
+	(void)ui;
+	(void)form;
+	if (app->volume_pending)
+		return;
+	if (command_id == COMMAND_SAVE) {
+		/* Commit the manager's latest level, including physical key steps. */
+		app->volume_pending =
+			send_setting(app,
+				     app->volume_class == SOUND_CLASS_MEDIA ?
+					     "volume_commit" :
+					     "alarm_volume_commit",
+				     "");
+	} else if (command_id == COMMAND_CANCEL) {
+		end_volume_preview(app);
+		close_screen(app, &app->volume_form);
+	}
+}
+
+static void open_volume(struct settings_app *app, enum sound_class class)
+{
+	const struct fplinux_ui_command save = {
+		.id = COMMAND_SAVE,
+		.type = FPLINUX_UI_COMMAND_OK,
+		.label = _("Save"),
+		.icon = fplinux_ui_glyph(app->ui, "save", FPLINUX_UI_GLYPH_ROW),
+	};
+	const struct fplinux_ui_command cancel = {
+		.id = COMMAND_CANCEL,
+		.type = FPLINUX_UI_COMMAND_CANCEL,
+		.icon = fplinux_ui_glyph(app->ui, "cancel",
+					 FPLINUX_UI_GLYPH_ROW),
+	};
+	struct fplinux_ui_screen *form =
+		new_form(app, class == SOUND_CLASS_MEDIA ? _("Media volume") :
+							   _("Alarm volume"));
+
+	if (!form)
+		return;
+	app->volume_class = class;
+	app->volume_gauge = fplinux_ui_form_append_gauge(
+		form, _("Level"), 0, 10, (int)app->volume[class], true);
+	fplinux_ui_form_append_string(
+		form, NULL, _("Left/Right: volume. Save keeps the level."));
+	fplinux_ui_screen_add_command(form, &save);
+	fplinux_ui_screen_add_command(form, &cancel);
+	fplinux_ui_screen_set_listener(form, volume_command, volume_changed,
+				       app);
+	app->volume_form = form;
+	app->volume_previewing = false;
 	fplinux_ui_push(app->ui, form);
 }
 
@@ -884,10 +1000,17 @@ static void leave_command(struct fplinux_ui *ui,
 	(void)alert;
 	app->leave_alert = NULL;
 	if (app->leave_destination == LEAVE_CLOSE) {
-		fplinux_ui_close_reply(app->ui,
-				       command_id == COMMAND_LEAVE ?
-					       FPLINUX_UI_CLOSE_READY :
-					       FPLINUX_UI_CLOSE_CANCEL);
+		enum fplinux_ui_close_response response =
+			FPLINUX_UI_CLOSE_CANCEL;
+
+		if (command_id == COMMAND_LEAVE)
+			response =
+				app->bluetooth_view ?
+					fplinux_settings_bluetooth_prepare_close(
+						app->bluetooth_view) :
+					FPLINUX_UI_CLOSE_READY;
+		if (response != FPLINUX_UI_CLOSE_WAIT)
+			fplinux_ui_close_reply(app->ui, response);
 	} else if (command_id == COMMAND_LEAVE) {
 		if (app->leave_destination == LEAVE_ROOT)
 			return_root(app);
@@ -952,7 +1075,10 @@ static enum fplinux_ui_close_response prepare_close(struct fplinux_ui *ui,
 	if (!app->date_form ||
 	    (!app->date_edited && !app->time_edited && !app->date_pending &&
 	     !fplinux_ui_form_is_editing(app->date_form)))
-		return FPLINUX_UI_CLOSE_READY;
+		return app->bluetooth_view ?
+			       fplinux_settings_bluetooth_prepare_close(
+				       app->bluetooth_view) :
+			       FPLINUX_UI_CLOSE_READY;
 	if (!app->leave_alert)
 		confirm_leave(app);
 	app->leave_destination = LEAVE_CLOSE;
@@ -1099,6 +1225,7 @@ static void open_display(struct settings_app *app, size_t focus)
 
 	if (!list)
 		return;
+	fplinux_ui_list_set_value_details(list);
 	fplinux_ui_list_append(list, _("Brightness"), NULL);
 	fplinux_ui_list_append(list, _(screen_off_choice.title), NULL);
 	fplinux_ui_list_append(list, _(auto_lock_choice.title), NULL);
@@ -1111,6 +1238,71 @@ static void open_display(struct settings_app *app, size_t focus)
 	app->display = list;
 	show_display(app);
 	fplinux_ui_push(app->ui, list);
+}
+
+static void show_sound(struct settings_app *app)
+{
+	char level[2][4];
+
+	if (!app->sound)
+		return;
+	for (unsigned int i = 0; i < SOUND_CLASSES; ++i)
+		snprintf(level[i], sizeof(level[i]), "%u", app->volume[i]);
+	fplinux_ui_list_set(app->sound, SOUND_MEDIA, _("Media volume"),
+			    app->volume_known[SOUND_CLASS_MEDIA] ?
+				    level[0] :
+				    _("Unavailable"));
+	fplinux_ui_list_set(app->sound, SOUND_ALARM, _("Alarm volume"),
+			    app->volume_known[SOUND_CLASS_ALARM] ?
+				    level[1] :
+				    _("Unavailable"));
+	fplinux_ui_list_set(app->sound, SOUND_OUTPUT, _("Output"),
+			    app->output_choice.count ?
+				    choice_label(&app->output_choice,
+						 app->output) :
+				    _("Unavailable"));
+}
+
+static void sound_command(struct fplinux_ui *ui, struct fplinux_ui_screen *list,
+			  int command_id, void *context)
+{
+	struct settings_app *app = context;
+	size_t focused = fplinux_ui_list_get_focused(list);
+
+	(void)ui;
+	if (command_id == COMMAND_BACK) {
+		close_screen(app, &app->sound);
+		return;
+	}
+	if (command_id != FPLINUX_UI_SELECT_COMMAND)
+		return;
+	if (focused == SOUND_MEDIA && app->volume_known[SOUND_CLASS_MEDIA])
+		open_volume(app, SOUND_CLASS_MEDIA);
+	else if (focused == SOUND_ALARM && app->volume_known[SOUND_CLASS_ALARM])
+		open_volume(app, SOUND_CLASS_ALARM);
+	else if (focused == SOUND_OUTPUT && app->output_choice.count)
+		open_choice(app, &app->output_choice, app->output);
+}
+
+static void open_sound(struct settings_app *app)
+{
+	struct fplinux_ui_screen *list = new_list(
+		app, _("Sound"), FPLINUX_UI_LIST_IMPLICIT, sound_command, NULL);
+
+	if (!list)
+		return;
+	fplinux_ui_list_set_value_details(list);
+	fplinux_ui_list_append(list, _("Media volume"), NULL);
+	fplinux_ui_list_append(list, _("Alarm volume"), NULL);
+	fplinux_ui_list_append(list, _("Output"), NULL);
+	set_glyph(app, list, SOUND_MEDIA, "volume");
+	set_glyph(app, list, SOUND_ALARM, "alarm");
+	set_glyph(app, list, SOUND_OUTPUT, "volume");
+	app->sound = list;
+	show_sound(app);
+	fplinux_ui_push(app->ui, list);
+	query_setting(app, "audio_output");
+	query_setting(app, "audio_outputs");
 }
 
 static void show_time_language(struct settings_app *app)
@@ -1152,6 +1344,7 @@ static void open_time_language(struct settings_app *app, size_t focus)
 
 	if (!list)
 		return;
+	fplinux_ui_list_set_value_details(list);
 	fplinux_ui_list_append(list, _("Date and time"), NULL);
 	fplinux_ui_list_append(list, _("Language"), NULL);
 	set_glyph(app, list, TIME_LANGUAGE_DATE_TIME, "date-time");
@@ -1194,6 +1387,7 @@ static void open_input(struct settings_app *app)
 
 	if (!list)
 		return;
+	fplinux_ui_list_set_value_details(list);
 	fplinux_ui_list_append(list, _("Input language"), NULL);
 	set_glyph(app, list, 0, "language");
 	app->input = list;
@@ -1230,7 +1424,7 @@ static void append_memory(struct settings_app *app,
 		return;
 	/* A no-break space keeps the unit with its number. */
 	snprintf(value, sizeof(value), _("%s / %s\u00a0MiB"), available, total);
-	fplinux_ui_form_append_string(form, _("Free memory"), value);
+	fplinux_ui_form_append_property(form, _("Free memory"), value);
 }
 
 static void append_logo(struct settings_app *app,
@@ -1256,21 +1450,21 @@ static void open_about(struct settings_app *app)
 	if (!form)
 		return;
 	append_logo(app, form);
-	if (fplinux_settings_read_os_name("/etc/os-release", value,
+	if (fplinux_system_info_read_os_name("/etc/os-release", value,
+					     sizeof(value)))
+		fplinux_ui_form_append_property(form, _("System"), value);
+	if (fplinux_system_info_read_os_field("/etc/os-release", "BUILD_ID",
+					      value, sizeof(value)))
+		fplinux_ui_form_append_property(form, _("Build"), value);
+	if (fplinux_system_info_read_line("/proc/device-tree/model", value,
 					  sizeof(value)))
-		fplinux_ui_form_append_string(form, _("System"), value);
-	if (fplinux_settings_read_os_field("/etc/os-release", "BUILD_ID", value,
-					   sizeof(value)))
-		fplinux_ui_form_append_string(form, _("Build"), value);
-	if (fplinux_settings_read_line("/proc/device-tree/model", value,
-				       sizeof(value)))
-		fplinux_ui_form_append_string(form, _("Model"), value);
-	if (fplinux_settings_read_line("/etc/alpine-release", value,
-				       sizeof(value)))
-		fplinux_ui_form_append_string(form, "Alpine Linux", value);
+		fplinux_ui_form_append_property(form, _("Model"), value);
+	if (fplinux_system_info_read_line("/etc/alpine-release", value,
+					  sizeof(value)))
+		fplinux_ui_form_append_property(form, "Alpine Linux", value);
 	if (uname(&system) == 0)
-		fplinux_ui_form_append_string(form, _("Kernel"),
-					      system.release);
+		fplinux_ui_form_append_property(form, _("Kernel"),
+						system.release);
 	append_memory(app, form);
 	add_back_command(app, form);
 	fplinux_ui_screen_set_listener(form, about_command, NULL, app);
@@ -1278,7 +1472,7 @@ static void open_about(struct settings_app *app)
 	fplinux_ui_push(app->ui, form);
 }
 
-/* Bluetooth: one switch for the adapter's power, applied by BlueZ. */
+/* Settings shares one BlueZ client with its Bluetooth controller. */
 
 static bool bluetooth_present(const struct settings_app *app)
 {
@@ -1325,87 +1519,23 @@ static void show_root_bluetooth(struct settings_app *app)
 				    bluetooth_state(app));
 }
 
-static void show_bluetooth(struct settings_app *app)
-{
-	bool usable = bluetooth_present(app) &&
-		      !fplinux_bluez_adapter_pending(app->bluetooth);
-
-	show_root_bluetooth(app);
-	if (!app->bluetooth_list)
-		return;
-	fplinux_ui_list_set(app->bluetooth_list, 0, _("Bluetooth"),
-			    bluetooth_state(app));
-	fplinux_ui_list_set_select_label(
-		app->bluetooth_list,
-		!usable					      ? "" :
-		fplinux_bluez_adapter_powered(app->bluetooth) ? _("Turn off") :
-								_("Turn on"));
-}
-
-static void bluetooth_alert_closed(struct fplinux_ui *ui,
-				   struct fplinux_ui_screen *alert,
-				   int command_id, void *context)
-{
-	struct settings_app *app = context;
-
-	(void)ui;
-	(void)alert;
-	(void)command_id;
-	app->bluetooth_alert = NULL;
-}
-
-static void show_bluetooth_error(struct settings_app *app)
-{
-	const struct fplinux_ui_command close = {
-		.id = COMMAND_CLOSE,
-		.type = FPLINUX_UI_COMMAND_BACK,
-		.label = _("Close"),
-		.icon = fplinux_ui_glyph(app->ui, "back", FPLINUX_UI_GLYPH_ROW),
-	};
-	struct fplinux_ui_screen *alert = fplinux_ui_alert_new(
-		app->ui, FPLINUX_UI_ALERT_ERROR, _("Bluetooth"),
-		app->bluetooth_turning_on ?
-			_("Cannot turn Bluetooth on. Try again.") :
-			_("Cannot turn Bluetooth off. Try again."),
-		0);
-
-	if (!alert)
-		return;
-	fplinux_ui_screen_add_command(alert, &close);
-	fplinux_ui_screen_set_listener(alert, bluetooth_alert_closed, NULL,
-				       app);
-	app->bluetooth_alert = alert;
-	fplinux_ui_push(app->ui, alert);
-}
-
-/* After the busy alert, or at once without one: the outcome. */
-static void bluetooth_answered(struct fplinux_ui *ui, void *context)
-{
-	struct settings_app *app = context;
-	bool failed = app->bluetooth_failed;
-
-	app->bluetooth_wait = NULL;
-	app->bluetooth_failed = false;
-	show_bluetooth(app);
-	if (failed && app->bluetooth_list &&
-	    fplinux_ui_current(ui) == app->bluetooth_list)
-		show_bluetooth_error(app);
-}
-
 static void bluetooth_finished(bool applied, void *context)
 {
 	struct settings_app *app = context;
 
-	app->bluetooth_failed = !applied;
-	if (app->bluetooth_wait &&
-	    fplinux_ui_wait_end(app->ui, bluetooth_answered, app))
-		return;
-	bluetooth_answered(app->ui, app);
+	show_root_bluetooth(app);
+	if (app->bluetooth_view)
+		fplinux_settings_bluetooth_finished(app->bluetooth_view,
+						    applied);
 }
 
 static void bluetooth_changed(void *context)
 {
-	show_bluetooth(context);
+	struct settings_app *app = context;
+
+	show_root_bluetooth(app);
+	if (app->bluetooth_view)
+		fplinux_settings_bluetooth_changed(app->bluetooth_view);
 }
 
 static void bluetooth_ready(struct fplinux_ui *ui, int fd, short events,
@@ -1419,55 +1549,13 @@ static void bluetooth_ready(struct fplinux_ui *ui, int fd, short events,
 		fplinux_bluez_adapter_dispatch(app->bluetooth);
 }
 
-static void toggle_bluetooth(struct settings_app *app)
-{
-	bool on;
-
-	if (!bluetooth_present(app) ||
-	    fplinux_bluez_adapter_pending(app->bluetooth))
-		return;
-	on = !fplinux_bluez_adapter_powered(app->bluetooth);
-	app->bluetooth_turning_on = on;
-	if (!fplinux_bluez_adapter_set_powered(app->bluetooth, on,
-					       BLUETOOTH_TIMEOUT_MS)) {
-		show_bluetooth_error(app);
-		return;
-	}
-	app->bluetooth_wait = fplinux_ui_wait_begin(
-		app->ui, _("Bluetooth"),
-		on ? _("Turning Bluetooth on…") : _("Turning Bluetooth off…"),
-		NULL, app);
-	show_bluetooth(app);
-}
-
-static void bluetooth_command(struct fplinux_ui *ui,
-			      struct fplinux_ui_screen *list, int command_id,
-			      void *context)
-{
-	struct settings_app *app = context;
-
-	(void)ui;
-	(void)list;
-	if (command_id == COMMAND_BACK)
-		close_screen(app, &app->bluetooth_list);
-	else if (command_id == FPLINUX_UI_SELECT_COMMAND)
-		toggle_bluetooth(app);
-}
-
 static void open_bluetooth(struct settings_app *app)
 {
-	struct fplinux_ui_screen *list = new_list(app, _("Bluetooth"),
-						  FPLINUX_UI_LIST_IMPLICIT,
-						  bluetooth_command, NULL);
-
-	if (!list)
-		return;
-	fplinux_ui_list_set_value_details(list);
-	fplinux_ui_list_append(list, _("Bluetooth"), NULL);
-	set_glyph(app, list, 0, "bluetooth");
-	app->bluetooth_list = list;
-	show_bluetooth(app);
-	fplinux_ui_push(app->ui, list);
+	if (!app->bluetooth_view)
+		app->bluetooth_view =
+			fplinux_settings_bluetooth_new(app->ui, app->bluetooth);
+	if (app->bluetooth_view)
+		fplinux_settings_bluetooth_show(app->bluetooth_view);
 }
 
 static void root_command(struct fplinux_ui *ui, struct fplinux_ui_screen *list,
@@ -1488,6 +1576,9 @@ static void root_command(struct fplinux_ui *ui, struct fplinux_ui_screen *list,
 		break;
 	case ROOT_DISPLAY:
 		open_display(app, DISPLAY_BRIGHTNESS);
+		break;
+	case ROOT_SOUND:
+		open_sound(app);
 		break;
 	case ROOT_TIME_LANGUAGE:
 		open_time_language(app, TIME_LANGUAGE_DATE_TIME);
@@ -1510,6 +1601,12 @@ static void show_root(struct settings_app *app)
 	fplinux_ui_list_set(app->root, root_index(app, ROOT_DISPLAY),
 			    _("Display"),
 			    choice_label(&theme_choice, theme_kind(app)));
+	snprintf(value, sizeof(value), _("Media: %u/10"),
+		 app->volume[SOUND_CLASS_MEDIA]);
+	fplinux_ui_list_set(app->root, root_index(app, ROOT_SOUND), _("Sound"),
+			    app->volume_known[SOUND_CLASS_MEDIA] ?
+				    value :
+				    _("Unavailable"));
 	show_root_bluetooth(app);
 	language_name(fplinux_ui_locale(app->ui), value, sizeof(value));
 	fplinux_ui_list_set(app->root, root_index(app, ROOT_TIME_LANGUAGE),
@@ -1531,18 +1628,20 @@ static struct fplinux_ui_screen *create_root(struct settings_app *app)
 	fplinux_ui_list_set_value_details(list);
 	app->bluetooth_row = bluetooth_present(app);
 	fplinux_ui_list_append(list, _("Display"), NULL);
+	fplinux_ui_list_append(list, _("Sound"), NULL);
 	if (app->bluetooth_row)
 		fplinux_ui_list_append(list, _("Bluetooth"),
 				       bluetooth_state(app));
 	fplinux_ui_list_append(list, _("Time & language"), NULL);
 	fplinux_ui_list_append(list, _("Input"), NULL);
-	fplinux_ui_list_append(list, _("About"),
-			       fplinux_settings_read_os_name("/etc/os-release",
-							     value,
-							     sizeof(value)) ?
-				       value :
-				       NULL);
+	fplinux_ui_list_append(
+		list, _("About"),
+		fplinux_system_info_read_os_name("/etc/os-release", value,
+						 sizeof(value)) ?
+			value :
+			NULL);
 	set_glyph(app, list, root_index(app, ROOT_DISPLAY), "display");
+	set_glyph(app, list, root_index(app, ROOT_SOUND), "volume");
 	if (app->bluetooth_row)
 		set_glyph(app, list, root_index(app, ROOT_BLUETOOTH),
 			  "bluetooth");
@@ -1555,18 +1654,16 @@ static struct fplinux_ui_screen *create_root(struct settings_app *app)
 static void return_root(struct settings_app *app)
 {
 	struct fplinux_ui_screen **children[] = {
-		&app->bluetooth_alert, &app->choice_list, &app->brightness_form,
-		&app->date_form,       &app->about,	  &app->display,
-		&app->time_language,   &app->input,	  &app->bluetooth_list,
+		&app->choice_list, &app->brightness_form, &app->date_form,
+		&app->about,	   &app->display,	  &app->time_language,
+		&app->input,	   &app->volume_form,	  &app->sound,
 	};
 
 	fplinux_ui_menu_close(app->ui);
+	if (app->bluetooth_view)
+		fplinux_settings_bluetooth_reset(app->bluetooth_view);
 	end_preview(app);
-	/* Leaving ends a Bluetooth wait; BlueZ still answers the request. */
-	if (app->bluetooth_wait &&
-	    fplinux_ui_current(app->ui) == app->bluetooth_wait)
-		fplinux_ui_pop(app->ui);
-	app->bluetooth_wait = NULL;
+	end_volume_preview(app);
 	for (size_t index = 0; index < ARRAY_SIZE(children); ++index)
 		if (*children[index])
 			close_screen(app, children[index]);
@@ -1579,7 +1676,7 @@ static void open_root(struct settings_app *app)
 	if (app->leave_alert || app->change_alert || app->notice_open ||
 	    app->date_warning)
 		return;
-	if (app->date_pending || app->choice_pending) {
+	if (app->date_pending || app->choice_pending || app->volume_pending) {
 		app->root_requested = true;
 		return;
 	}
@@ -1598,9 +1695,12 @@ static void rebuild(struct settings_app *app)
 {
 	struct fplinux_ui_screen *root;
 	bool display = app->display != NULL;
+	bool sound = app->sound != NULL;
 	bool time_language = app->time_language != NULL;
 	bool input = app->input != NULL;
 	bool about = app->about != NULL;
+	bool bluetooth = app->bluetooth_view &&
+			 fplinux_settings_bluetooth_shown(app->bluetooth_view);
 	bool notice = app->notice_open;
 	bool root_requested = app->root_requested;
 	size_t focus = fplinux_ui_list_get_focused(app->root);
@@ -1620,25 +1720,126 @@ static void rebuild(struct settings_app *app)
 	show_root(app);
 	if (!root_requested && display)
 		open_display(app, DISPLAY_THEME);
+	else if (!root_requested && sound)
+		open_sound(app);
 	else if (!root_requested && time_language)
 		open_time_language(app, TIME_LANGUAGE_LANGUAGE);
 	else if (!root_requested && input)
 		open_input(app);
 	else if (!root_requested && about)
 		open_about(app);
+	else if (!root_requested && bluetooth)
+		open_bluetooth(app);
 	if (notice)
 		show_notice(app);
 }
 
 /* Replies from the manager */
 
+static void receive_system_levels(struct settings_app *app)
+{
+	struct fplinux_system_level_state state;
+
+	if (fplinux_ui_system_level_get(
+		    app->ui, FPLINUX_SYSTEM_LEVEL_BRIGHTNESS, &state)) {
+		bool ready = state.availability == FPLINUX_SYSTEM_LEVEL_READY;
+
+		app->brightness = ready ? state.value : 0;
+		app->brightness_unavailable = state.availability ==
+					      FPLINUX_SYSTEM_LEVEL_UNAVAILABLE;
+		if (ready && app->brightness_form && !app->previewing)
+			fplinux_ui_form_set_value(app->brightness_form,
+						  app->gauge_item,
+						  (int)state.value);
+	}
+	for (enum sound_class class = 0; class < SOUND_CLASSES; ++class) {
+		enum fplinux_system_level_kind kind =
+			class == SOUND_CLASS_MEDIA ?
+				FPLINUX_SYSTEM_LEVEL_MEDIA :
+				FPLINUX_SYSTEM_LEVEL_ALARM;
+
+		if (!fplinux_ui_system_level_get(app->ui, kind, &state))
+			continue;
+		app->volume_known[class] = state.availability ==
+					   FPLINUX_SYSTEM_LEVEL_READY;
+		if (app->volume_known[class]) {
+			app->volume[class] = state.value;
+			if (app->volume_form && app->volume_class == class &&
+			    !state.pending)
+				fplinux_ui_form_set_value(app->volume_form,
+							  app->volume_gauge,
+							  (int)state.value);
+		}
+	}
+	show_display(app);
+	show_sound(app);
+	show_root(app);
+}
+
 static void apply_setting(struct settings_app *app, const char *name,
 			  const char *value)
 {
-	if (!strcmp(name, "brightness")) {
-		if (!fplinux_settings_parse_brightness(value, &app->brightness))
+	if (!strcmp(name, "volume") || !strcmp(name, "alarm_volume") ||
+	    !strcmp(name, "volume_preview") ||
+	    !strcmp(name, "alarm_volume_preview")) {
+		enum sound_class class = !strncmp(name, "alarm_", 6) ?
+						 SOUND_CLASS_ALARM :
+						 SOUND_CLASS_MEDIA;
+		char *end;
+		unsigned long level = strtoul(value, &end, 10);
+
+		if (!value[0] || *end || level > 10)
 			return;
-		app->brightness_unavailable = false;
+		if (app->volume_form && app->volume_class == class &&
+		    app->volume_previewing)
+			fplinux_ui_form_set_value(app->volume_form,
+						  app->volume_gauge,
+						  (int)level);
+		return;
+	} else if (!strcmp(name, "audio_outputs")) {
+		static const char *const values[] = { "AUTO", "SPEAKER",
+						      "HEADPHONES" };
+		static const char *const labels[] = { N_("Automatic"),
+						      N_("Speaker"),
+						      N_("Headphones") };
+		const char *cursor = value;
+
+		app->output_choice = (struct choice){
+			.title = N_("Output"),
+			.setting = "audio_output",
+			.values = app->output_values,
+			.labels = app->output_labels,
+		};
+		for (size_t i = 0; i < ARRAY_SIZE(values); ++i) {
+			size_t length = strlen(values[i]);
+
+			if (strncmp(cursor, values[i], length) ||
+			    (cursor[length] && cursor[length] != ','))
+				continue;
+			app->output_values[app->output_choice.count] =
+				values[i];
+			app->output_labels[app->output_choice.count++] =
+				labels[i];
+			cursor += length;
+			if (*cursor == ',')
+				++cursor;
+		}
+		if (*cursor)
+			app->output_choice.count = 0;
+		app->output = fplinux_settings_choice_find(
+			app->output_values, app->output_choice.count,
+			app->output_value);
+		show_sound(app);
+		return;
+	} else if (!strcmp(name, "audio_output")) {
+		snprintf(app->output_value, sizeof(app->output_value), "%s",
+			 value);
+		app->output = fplinux_settings_choice_find(
+			app->output_values, app->output_choice.count, value);
+		show_sound(app);
+		return;
+	} else if (!strcmp(name, "brightness")) {
+		return;
 	} else if (!strcmp(name, "screen_off_seconds")) {
 		app->screen_off = fplinux_settings_choice_find(
 			fplinux_settings_screen_off_values,
@@ -1687,6 +1888,13 @@ static const char *setting_title(const char *name)
 {
 	if (!strcmp(name, "brightness") || !strcmp(name, "brightness_preview"))
 		return _("Brightness");
+	if (!strcmp(name, "volume") || !strcmp(name, "volume_preview") ||
+	    !strcmp(name, "volume_commit"))
+		return _("Media volume");
+	if (!strncmp(name, "alarm_volume", 12))
+		return _("Alarm volume");
+	if (!strcmp(name, "audio_output") || !strcmp(name, "audio_outputs"))
+		return _("Output");
 	if (!strcmp(name, "screen_off_seconds"))
 		return _("Screen timeout");
 	if (!strcmp(name, "auto_lock_seconds"))
@@ -1766,7 +1974,16 @@ static void show_error(struct settings_app *app,
 
 	fprintf(stderr, "fplinux-settings: %s=\"%s\" failed: %s\n",
 		message->name, message->value, message->reason);
-	if (!strcmp(message->name, "brightness_preview")) {
+	if (!strcmp(message->name, "volume_preview") ||
+	    !strcmp(message->name, "alarm_volume_preview")) {
+		if (!message->value[0] || !app->volume_previewing)
+			return;
+		end_volume_preview(app);
+		if (app->volume_form)
+			fplinux_ui_form_set_value(
+				app->volume_form, app->volume_gauge,
+				(int)app->volume[app->volume_class]);
+	} else if (!strcmp(message->name, "brightness_preview")) {
 		/* One notice for the steps that were on their way. */
 		if (!message->value[0] || !app->previewing)
 			return;
@@ -1781,13 +1998,14 @@ static void show_error(struct settings_app *app,
 		    !strcmp(message->reason, "not-foreground"))
 			app->choice_requery = true;
 		/* A failed query leaves the value unknown. */
-		if (!strcmp(message->name, "brightness")) {
-			app->brightness_unavailable = true;
-			show_display(app);
-		} else if (!strcmp(message->name, "input_locale")) {
+		if (!strcmp(message->name, "input_locale")) {
 			app->input_unavailable = true;
 			show_input(app);
 			show_root(app);
+		} else if (!strcmp(message->name, "audio_outputs") ||
+			   !strcmp(message->name, "audio_output")) {
+			app->output_choice.count = 0;
+			show_sound(app);
 		}
 		return;
 	}
@@ -1815,7 +2033,10 @@ static void show_error(struct settings_app *app,
 	show_notice(app);
 	if (!message->applied && message->name[0] &&
 	    strcmp(message->name, "time") &&
-	    strcmp(message->name, "brightness_preview")) {
+	    strcmp(message->name, "brightness_preview") &&
+	    strcmp(message->name, "brightness") &&
+	    strncmp(message->name, "volume", 6) &&
+	    strncmp(message->name, "alarm_volume", 12)) {
 		if (app->choice_pending) {
 			app->choice_requery = true;
 			recover_choice(app);
@@ -1834,7 +2055,25 @@ static void handle_event(struct fplinux_ui *ui,
 	const struct fplinux_ui_session_message *message = event->session;
 
 	switch (event->type) {
+	case FPLINUX_UI_EVENT_SYSTEM_LEVELS:
+		receive_system_levels(app);
+		break;
 	case FPLINUX_UI_EVENT_SESSION:
+		if (app->volume_pending &&
+		    (!strcmp(message->name,
+			     volume_setting_name(app->volume_class, false)) ||
+		     !strcmp(message->name,
+			     app->volume_class == SOUND_CLASS_MEDIA ?
+				     "volume_commit" :
+				     "alarm_volume_commit")) &&
+		    (message->type == FPLINUX_UI_SESSION_SETTING ||
+		     message->type == FPLINUX_UI_SESSION_ERROR)) {
+			app->volume_pending = false;
+			if (message->applied) {
+				app->volume_previewing = false;
+				close_screen(app, &app->volume_form);
+			}
+		}
 		if (message->type == FPLINUX_UI_SESSION_ERROR &&
 		    message->value[0])
 			app->root_requested = false;
@@ -1858,7 +2097,9 @@ static void handle_event(struct fplinux_ui *ui,
 			schedule_clock(app);
 		}
 		if (message->applied && strcmp(message->name, "time") &&
-		    strcmp(message->name, "brightness_preview"))
+		    strcmp(message->name, "brightness_preview") &&
+		    strcmp(message->name, "volume_preview") &&
+		    strcmp(message->name, "alarm_volume_preview"))
 			app->unsaved = message->storage_error != 0;
 		if (message->type == FPLINUX_UI_SESSION_SETTING)
 			apply_setting(app, message->name, message->value);
@@ -1870,7 +2111,8 @@ static void handle_event(struct fplinux_ui *ui,
 		}
 		if (app->root_requested &&
 		    message->type == FPLINUX_UI_SESSION_SETTING &&
-		    !app->date_pending && !app->choice_pending)
+		    !app->date_pending && !app->choice_pending &&
+		    !app->volume_pending)
 			open_root(app);
 		break;
 	case FPLINUX_UI_EVENT_ACTIVATION:
@@ -1881,6 +2123,11 @@ static void handle_event(struct fplinux_ui *ui,
 		if (fplinux_ui_lifecycle(ui) == FPLINUX_UI_BACKGROUND) {
 			/* The manager restores the level when the task is parked. */
 			app->previewing = false;
+			app->volume_previewing = false;
+			if (app->volume_form)
+				fplinux_ui_form_set_value(
+					app->volume_form, app->volume_gauge,
+					(int)app->volume[app->volume_class]);
 			if (app->brightness_form)
 				fplinux_ui_form_set_value(app->brightness_form,
 							  app->gauge_item,
@@ -1906,6 +2153,7 @@ static void handle_event(struct fplinux_ui *ui,
 		 * manager also restores it if this message is lost.
 		 */
 		end_preview(app);
+		end_volume_preview(app);
 		break;
 	case FPLINUX_UI_EVENT_KEY:
 		/* The screens take every key. */
@@ -1914,6 +2162,31 @@ static void handle_event(struct fplinux_ui *ui,
 		/* Settings uses the integrated application surface. */
 		break;
 	}
+	if (app->bluetooth_view)
+		fplinux_settings_bluetooth_event(app->bluetooth_view, event);
+}
+
+static void storage_result(struct fplinux_ui *ui,
+			   const struct fplinux_volume_result *result,
+			   void *context)
+{
+	struct settings_app *app = context;
+
+	(void)ui;
+	if (app->bluetooth_view)
+		fplinux_settings_bluetooth_storage_result(app->bluetooth_view,
+							  result);
+}
+
+static void close_bluetooth(struct settings_app *app)
+{
+	struct fplinux_settings_bluetooth *view = app->bluetooth_view;
+
+	app->bluetooth_view = NULL;
+	if (view)
+		fplinux_settings_bluetooth_free(view);
+	fplinux_bluez_adapter_close(app->bluetooth);
+	app->bluetooth = NULL;
 }
 
 int main(int argc, char **argv)
@@ -1942,6 +2215,7 @@ int main(int argc, char **argv)
 	snprintf(app.locale, sizeof(app.locale), "%s",
 		 fplinux_ui_locale(app.ui));
 	fplinux_ui_set_close_handler(app.ui, prepare_close, &app);
+	fplinux_ui_set_storage_handler(app.ui, storage_result, &app);
 	app.clock_timer = lv_timer_create(clock_tick, 60000, &app);
 	lv_timer_pause(app.clock_timer);
 	app.bluetooth = fplinux_bluez_adapter_open(
@@ -1956,8 +2230,8 @@ int main(int argc, char **argv)
 			    POLLIN, bluetooth_ready, &app)) {
 			perror("fplinux-settings: watch Bluetooth");
 			lv_timer_delete(app.clock_timer);
+			close_bluetooth(&app);
 			fplinux_ui_close(app.ui);
-			fplinux_bluez_adapter_close(app.bluetooth);
 			return 1;
 		}
 		fplinux_bluez_adapter_connect(app.bluetooth);
@@ -1965,21 +2239,20 @@ int main(int argc, char **argv)
 	root = create_root(&app);
 	if (!root) {
 		lv_timer_delete(app.clock_timer);
+		close_bluetooth(&app);
 		fplinux_ui_close(app.ui);
-		fplinux_bluez_adapter_close(app.bluetooth);
 		return 1;
 	}
 	fplinux_ui_push(app.ui, root);
 	app.root = root;
 	show_root(&app);
-	/* The language and theme came with CONFIG; the rest is asked for. */
-	query_setting(&app, "brightness");
+	/* Levels arrive in SYSTEM_LEVELS; CONFIG supplied language and theme. */
 	query_setting(&app, "screen_off_seconds");
 	query_setting(&app, "auto_lock_seconds");
 	query_setting(&app, "input_locale");
 	result = fplinux_ui_run(app.ui);
 	lv_timer_delete(app.clock_timer);
+	close_bluetooth(&app);
 	fplinux_ui_close(app.ui);
-	fplinux_bluez_adapter_close(app.bluetooth);
 	return result < 0;
 }

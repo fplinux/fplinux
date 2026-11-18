@@ -1,8 +1,11 @@
 ---
 title: Sound and recording
-description: Play audio through headphones or the speaker, set the volume and record from the microphone.
+description: Set Media and Alarm volume, choose an output and use ALSA tools for recording and diagnosis.
 source:
   - alpine/aports/fplinux-audio
+  - alpine/aports/fplinux-audiod
+  - alpine/aports/fplinux-session
+  - alpine/aports/fplinux-settings
 ---
 
 import { Steps } from '@astrojs/starlight/components';
@@ -10,7 +13,9 @@ import FeatureStatus from '../../../components/FeatureStatus.astro';
 import Figure from '../../../components/Figure.astro';
 import AudioRouting from '../../../assets/diagrams/audio-routing.svg';
 
-Play sound, adjust its volume and record from a microphone with the commands below. Check [support status](/fplinux/phones/#support-status) and your [phone page](/fplinux/phones/) for the available outputs, microphones and automatic headphone switching. Run commands in the [USB shell](/fplinux/use/connect/) or, on an image that includes it, the [phone terminal](/fplinux/use/terminal/).
+Use [Music](/fplinux/apps/music/) for local MP3 and WAV playback. **Settings → Sound** controls system Media volume, Alarm volume and the available outputs. Quick settings adjusts Media volume. Check [support status](/fplinux/phones/#support-status) and your [phone page](/fplinux/phones/) for the available outputs, microphones and headphone detection.
+
+The commands below are administrative tools. Run them in the [USB shell](/fplinux/use/connect/) or [phone terminal](/fplinux/use/terminal/). Stop `fplinux-audiod` before direct playback, recording or writing ALSA controls, and start it afterwards. This temporarily makes application sound unavailable; starting the service restores Session's current audio policy.
 
 The [SC9820E](/fplinux/platforms/sc9820e/) Xiaomi Qin 1s+ uses the rear speaker and built-in microphone, with mutually exclusive playback and recording. It uses `Master Playback Volume`; wired headphones, headset recording and automatic output switching are unsupported. Output selection, per-output volume, equalizer and idle-silence controls below apply to supported [UMS9117](/fplinux/platforms/ums9117/) targets. The [phone page](/fplinux/phones/xiaomi-qin-1s-plus/#audio) states Qin's verified uses and limits.
 
@@ -32,18 +37,22 @@ On Xiaomi Qin 1s+, stop recording before starting playback.
 2. Play it on the phone:
 
    ```sh title="Phone"
+   rc-service fplinux-audiod stop
    aplay /tmp/song.wav
+   rc-service fplinux-audiod start
    ```
 
 </Steps>
 
-The default playback device converts files to 48 kHz on UMS9117 and 44.1 kHz on Qin, so you do not need to convert ordinary WAV files yourself. Volume starts low after every boot; see [Volume](#volume) for your phone's controls and verified levels.
+The default playback device converts files to 48 kHz on UMS9117 and 44.1 kHz on Qin, so you do not need to convert ordinary WAV files yourself. Direct `aplay` bypasses system Media volume and uses the hardware levels described below.
 
 ## Where the sound goes
 
-On UMS9117 phones with automatic headphone switching, plugging in headphones moves playback to them; unplugging moves it to the speaker. This also happens during playback, recording and FM radio, which keep running. The socket only detects that a plug is inserted; it cannot tell headphones from a headset or another cable. A plug change made while the phone sleeps is applied when it wakes.
+With **Output → Automatic**, supported headphone detection selects wired headphones when a plug is inserted and the speaker otherwise. Removing a private output pauses Media before speaker fallback; press Play to continue. An alarm can use the available speaker instead. The socket detects a plug, not whether it belongs to headphones, a headset or another cable. A change made while the phone sleeps is applied when it wakes.
 
-On supported UMS9117 targets with speaker output available, you can also choose the outputs by hand. A manual choice lasts until the next plug or unplug. For example, to play through the speaker as well as the headphones:
+Use **Settings → Sound → Output** for an explicit supported output. A headphone-only phone does not gain a speaker option, and Qin's fixed speaker does not gain wired headphones. The service retains the chosen output separately from the current plug state.
+
+For direct ALSA diagnosis with audiod stopped, supported UMS9117 targets also expose separate output switches. For example, to enable the speaker:
 
 ```sh title="Phone"
 amixer -c 0 cset name='Speaker Playback Switch' on
@@ -56,15 +65,27 @@ amixer -c 0 cset name='Speaker Playback Switch' on
 amixer -c 0 cset name='Headphone Playback Switch' off
 ```
 
-To choose outputs only by hand until the next boot, stop automatic switching with `rc-service fplinux-jack stop`. Starting it again with `rc-service fplinux-jack start` selects the output that matches the socket.
+Restart audiod after diagnosis. Session then restores its chosen system output; manual ALSA switch writes are not system preferences.
 
 <Figure caption="Output selection"><AudioRouting /></Figure>
 
 ## Volume
 
+Media and Alarm each use a scale from 0 to 10. Media zero mutes application sound and FM without muting an alarm. Alarm zero silences the alarm itself; its screen and interruption policy remain active. A ringing alarm's Volume keys change Alarm volume, including while the keypad is locked. Otherwise Volume keys change Media under the usual keyguard rules.
+
+Volume keys and Music's Up/Down controls show a temporary level indicator over the current screen. It shows the level applied by the system; `--` means the level is unknown or unavailable, and `!` marks an error. The indicator takes no input focus. Settings editors show their changes in their own controls.
+
+Save and Cancel apply to the setting being edited. Saved values follow the [home directory's lifetime](/fplinux/use/files/). Music uses this same Media level. The signal level in a file remains separate from system volume.
+
+Java and MRE players start at their full application level. A game's own sound setting can reduce or mute it independently of Media. MIDI keeps the relative levels of its notes and instruments, so different pieces can sound quieter at the same system volume. Simple tones use their requested level within the current Media setting.
+
+Level 10 uses the maximum playback level available from the selected output. Media and Alarm retain independent volume and mute controls. Prepared sound processing stays enabled; a quiet recording remains quieter than a loud one at the same setting.
+
+Hardware controls below are for direct ALSA diagnosis with audiod stopped. The service sets the available hardware playback levels while it runs and restores their previous values when stopped. Restore your diagnostic changes before restarting it. A larger control number is not a loudness calibration shared by all phones.
+
 ### Xiaomi Qin 1s+
 
-`Master Playback Volume` accepts levels `0` to `7` and starts at `1` after boot. The default level produces audible output, and `0` mutes it. Loudness across the range and playback quality are uncalibrated; see the [phone-page limits](/fplinux/phones/xiaomi-qin-1s-plus/#audio) for simultaneous application use.
+`Master Playback Volume` accepts levels `0` to `7`; `0` mutes it. Loudness across the range and playback quality are uncalibrated; see the [phone-page limits](/fplinux/phones/xiaomi-qin-1s-plus/#audio) for simultaneous application use.
 
 ```sh title="Phone"
 amixer -c 0 cget name='Master Playback Volume'
@@ -74,7 +95,7 @@ amixer -c 0 cset name='Master Playback Volume' 1
 
 ### UMS9117 targets
 
-Each available output has its own volume from `0` to `9`. Both start at `1` after every boot, and `0` mutes. Without device data, the headphone range is `0` to `6`. Use the controls for the outputs supported on your phone.
+Each available output has its own ALSA volume from `0` to `9`; `0` mutes. With device data, these levels select the phone's prepared gain settings. Without device data, the headphone range is `0` to `6`. Use the controls for the outputs supported on your phone.
 
 ```sh title="Phone"
 amixer -c 0 cset name='Headphone Playback Volume' 3,3
@@ -86,7 +107,7 @@ The two headphone numbers are the left and right channels. When headphones and s
 
 With both outputs enabled, speaker level `0` silences only the speaker; the headphones keep playing at the lowest combined-output level.
 
-Volume, output and equalizer settings last until the next boot.
+These direct changes do not save system preferences. Restore the original levels before restarting audiod.
 
 ## Equalizer and limiter
 
@@ -118,12 +139,15 @@ Set it to `on` to restore the default. It does not alter a file already playing.
 If built-in microphone recording is supported, record ten seconds of mono audio. On Xiaomi Qin 1s+, stop playback first:
 
 ```sh title="Phone"
+rc-service fplinux-audiod stop
 arecord -D hw:0,0 -f S16_LE -c 1 -r 48000 -d 10 /tmp/recording.wav
+rc-service fplinux-audiod start
 ```
 
 On a UMS9117 phone with headset recording support, select a wired four-contact headset before recording:
 
 ```sh title="Phone"
+rc-service fplinux-audiod stop
 amixer -c 0 cset name='Capture Source' Headset
 arecord -D hw:0,0 -f S16_LE -c 1 -r 48000 -d 10 /tmp/headset.wav
 ```
@@ -132,6 +156,7 @@ After headset recording ends, select the built-in microphone again:
 
 ```sh title="Phone"
 amixer -c 0 cset name='Capture Source' Internal
+rc-service fplinux-audiod start
 ```
 
 Plugging in a headset does not change the source, and the source cannot change while a recording runs. The headset input can produce a short noise during the first second, so start recording before the sound you want. There is no automatic gain or noise suppression. Copy the result to your computer with `--pull`, as shown in [Copy files](/fplinux/use/connect/); files in `/tmp` disappear at power-off.
@@ -140,7 +165,8 @@ On supported UMS9117 targets, recording can run while a file plays, as long as p
 
 ## Limitations
 
-- On supported UMS9117 phones, [FM radio](/fplinux/use/fm-radio/) cannot play while a file plays or a recording runs, and the other way round.
+- On supported UMS9117 phones, [FM radio](/fplinux/use/fm-radio/) uses the same hardware path as PCM. The service pauses PCM media for FM, interrupts FM for an alarm and restores the station afterwards. Direct recording still requires releasing that path.
+- FM bypasses the software mixer. Media volume selects the available hardware levels for the current output, with zero muted and ten at its maximum. A device with fewer hardware levels can use the same hardware step for adjacent settings.
 - There are no phone calls and no live monitoring of the microphone.
 - For wireless output, see [Bluetooth A2DP playback](/fplinux/use/bluetooth/#send-audio-to-an-a2dp-sink). Check your phone page before choosing a sink or profile.
 

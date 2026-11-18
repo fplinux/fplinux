@@ -118,6 +118,8 @@ struct launcher {
 	enum fplinux_launcher_view presentation;
 	lv_obj_t *status_clock;
 	lv_obj_t *lock_glyph;
+	lv_obj_t *playback_glyph;
+	bool background_playing;
 	struct battery_icon battery_icon;
 	lv_obj_t *body;
 	lv_obj_t *softkeys;
@@ -150,6 +152,7 @@ struct launcher {
 	bool paused;
 	/* HOME arrived while an application was still closing. */
 	bool home_pending;
+	bool tasks_pending;
 	enum fplinux_ui_session_display display;
 	char active_left[FPLINUX_UI_SESSION_TEXT_BYTES];
 	char active_centre[FPLINUX_UI_SESSION_TEXT_BYTES];
@@ -1437,6 +1440,10 @@ static void render(struct launcher *launcher)
 	enum fplinux_launcher_notice notice = shown_notice(launcher);
 	const char *legends[FPLINUX_LAUNCHER_LEGEND_COUNT] = { "", "", "" };
 	bool base_ready;
+	bool tasks_blocked =
+		(screen != SCREEN_HOME && screen != SCREEN_CATALOGUE) ||
+		notice != FPLINUX_LAUNCHER_NOTICE_NONE ||
+		fplinux_launcher_clock_is_ringing(&launcher->ringing);
 
 	if (!launcher->paused &&
 	    (screen != SCREEN_CATALOGUE ||
@@ -1447,11 +1454,7 @@ static void render(struct launcher *launcher)
 	/* Remove the clock's own finished modal before changing the base view. */
 	if (!fplinux_launcher_clock_is_ringing(&launcher->ringing))
 		fplinux_launcher_clock_render(&launcher->ringing);
-	fplinux_launcher_tasks_set_blocked(
-		&launcher->tasks,
-		(screen != SCREEN_HOME && screen != SCREEN_CATALOGUE) ||
-			notice != FPLINUX_LAUNCHER_NOTICE_NONE ||
-			fplinux_launcher_clock_is_ringing(&launcher->ringing));
+	fplinux_launcher_tasks_set_blocked(&launcher->tasks, tasks_blocked);
 	fplinux_launcher_quick_settings_set_blocked(
 		&launcher->quick_settings,
 		screen != SCREEN_HOME ||
@@ -1463,6 +1466,10 @@ static void render(struct launcher *launcher)
 	clear_view(launcher);
 	if (launcher->lock_glyph)
 		lv_obj_set_hidden(launcher->lock_glyph, screen != SCREEN_LOCK);
+	if (launcher->playback_glyph)
+		lv_obj_set_hidden(launcher->playback_glyph,
+				  !launcher->background_playing ||
+					  screen == SCREEN_BLANK);
 	switch (screen) {
 	case SCREEN_BLANK:
 		break;
@@ -1512,6 +1519,10 @@ static void render(struct launcher *launcher)
 	if (base_ready)
 		show_notice(launcher);
 	fplinux_launcher_clock_render(&launcher->ringing);
+	if (launcher->tasks_pending && !tasks_blocked && base_ready) {
+		launcher->tasks_pending = false;
+		fplinux_launcher_tasks_open(&launcher->tasks);
+	}
 	schedule_clock(launcher);
 }
 
@@ -1795,6 +1806,7 @@ static void receive_active(struct launcher *launcher,
 	launcher->session_known = true;
 	launcher->active = message->active_id[0] != '\0';
 	launcher->locked = message->locked;
+	launcher->background_playing = message->background_playing;
 	launcher->clock_presentation = message->clock_presentation;
 	copy_message_text(launcher->active_title, message->title);
 	launcher->display = message->display;
@@ -1816,12 +1828,19 @@ static void receive_active(struct launcher *launcher,
 		launcher->reported_view = launcher->view;
 	/* EXIT returns to the catalogue, HOME to the home view. */
 	if (was_active && !launcher->active) {
-		launcher->view = launcher->home_pending ?
-					 FPLINUX_LAUNCHER_VIEW_HOME :
-					 launcher->presentation;
+		bool home = launcher->home_pending ||
+			    (message->tasks_view &&
+			     !strcmp(message->value, "home"));
+
+		launcher->view = home ? FPLINUX_LAUNCHER_VIEW_HOME :
+					launcher->presentation;
 		launcher->home_pending = false;
 		rescan = true;
 	}
+	if (launcher->active)
+		launcher->tasks_pending = false;
+	else if (first || was_active)
+		launcher->tasks_pending = message->tasks_view;
 	/* The watch keeps the catalogue current; see handle_key(). */
 	if (rescan && !launcher->watching)
 		scan_applications(launcher);
@@ -1846,6 +1865,7 @@ static void receive_active(struct launcher *launcher,
 
 static void receive_home(struct launcher *launcher)
 {
+	launcher->tasks_pending = false;
 	fplinux_launcher_tasks_close(&launcher->tasks);
 	fplinux_launcher_quick_settings_close(&launcher->quick_settings);
 	/* The manager assumes Home once it has sent HOME. */
@@ -1876,6 +1896,9 @@ static void ui_event(struct fplinux_ui *ui,
 			render(launcher);
 	} else if (event->type == FPLINUX_UI_EVENT_RESIZE) {
 		resize_view(launcher);
+	} else if (event->type == FPLINUX_UI_EVENT_SYSTEM_LEVELS) {
+		fplinux_launcher_quick_settings_levels_changed(
+			&launcher->quick_settings);
 	} else if (event->type != FPLINUX_UI_EVENT_SESSION) {
 		return;
 	} else if (fplinux_launcher_clock_receive(&launcher->ringing,
@@ -2029,6 +2052,8 @@ static void create_view(struct launcher *launcher)
 	const struct fplinux_launcher_frame *frame = &launcher->frame;
 	const void *lock =
 		fplinux_ui_glyph(launcher->ui, "lock", FPLINUX_UI_GLYPH_STATUS);
+	const void *music = fplinux_ui_glyph(launcher->ui, "music",
+					     FPLINUX_UI_GLYPH_STATUS);
 	lv_obj_t *status_bar = fill(screen,
 				    (struct fplinux_launcher_rect){
 					    .width = frame->width,
@@ -2053,6 +2078,14 @@ static void create_view(struct launcher *launcher)
 		launcher->lock_glyph = glyph(
 			status_bar, lock, fplinux_launcher_status_glyph(spec),
 			theme->bar_text);
+	if (music) {
+		struct fplinux_launcher_rect box =
+			fplinux_launcher_status_glyph(spec);
+
+		box.x += spec->status_icon_size + spec->gap_small;
+		launcher->playback_glyph =
+			glyph(status_bar, music, box, theme->bar_text);
+	}
 	launcher->status_clock = label(status_bar, status_clock_line(launcher),
 				       theme->font, theme->bar_text, "");
 	lv_label_set_long_mode(launcher->status_clock, LV_LABEL_LONG_MODE_CLIP);
@@ -2087,6 +2120,7 @@ static void resize_view(struct launcher *launcher)
 	lv_obj_clean(fplinux_ui_canvas_object(launcher->canvas));
 	launcher->body = NULL;
 	launcher->lock_glyph = NULL;
+	launcher->playback_glyph = NULL;
 	memset(&launcher->battery_icon, 0, sizeof(launcher->battery_icon));
 	fplinux_launcher_frame(launcher->spec, fplinux_ui_width(launcher->ui),
 			       fplinux_ui_height(launcher->ui),

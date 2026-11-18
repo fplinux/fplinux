@@ -27,22 +27,41 @@ struct fplinux_session_audio_process {
 	uid_t uid;
 	char app_id[FPLINUX_UI_SESSION_ID_BYTES];
 	bool clock;
-	bool audible;
-	/* APP went out on the current connection, and what AUDIBLE last said. */
+	bool background;
+	bool eligible;
+	/* APP went out on this connection, and what ELIGIBLE last said. */
 	bool announced;
-	bool told_audible;
+	bool told_eligible;
+	enum fplinux_ui_session_playback playback;
+};
+
+enum fplinux_session_audio_class {
+	FPLINUX_SESSION_AUDIO_MEDIA,
+	FPLINUX_SESSION_AUDIO_ALARM,
+	FPLINUX_SESSION_AUDIO_CLASSES,
+};
+
+struct fplinux_session_audio_volume {
+	unsigned int desired;
+	unsigned int sent;
+	unsigned int applied;
+	bool waiting;
+	bool known;
+	/* The last applied level survives loss of connection knowledge. */
+	bool confirmed;
+	uint64_t deadline_ms;
 };
 
 /*
  * The manager's client of the audio service's control socket
  * (fplinux-audio-protocol.h). It holds the processes the service must know,
- * with their uid, application ID and whether they are audible, and sends
+ * with their uid, application ID, grant and foreground eligibility, and sends
  * each change as it happens, in the order of the calls.
  *
  * Nothing blocks: the socket is nonblocking, and a send that fails or would
  * block closes the connection instead of dropping the command. The next
- * connection, after the backoff, confirms the master volume and announces
- * the whole state again: APP and then AUDIBLE for each process. A process
+ * connection, after the backoff, confirms both volumes and output and announces
+ * the whole state again: APP and then ELIGIBLE for each process. A process
  * that goes while no connection exists is only forgotten, as the service
  * forgets every process when the connection drops. Each connection, each
  * loss and the first failure after them log one line.
@@ -60,13 +79,16 @@ struct fplinux_session_audio {
 	unsigned int backoff_ms;
 	/* A failure was logged since the last connection. */
 	bool quiet;
-	unsigned int desired_volume;
-	unsigned int sent_volume;
-	unsigned int applied_volume;
-	bool volume_waiting;
-	bool volume_known;
-	bool volume_ready;
-	uint64_t volume_deadline_ms;
+	struct fplinux_session_audio_volume
+		volume[FPLINUX_SESSION_AUDIO_CLASSES];
+	bool ready;
+	char desired_output[16];
+	char sent_output[16];
+	char applied_output[16];
+	bool output_waiting;
+	bool output_known;
+	int output_error;
+	uint64_t output_deadline_ms;
 	struct fplinux_session_audio_process
 		processes[FPLINUX_SESSION_AUDIO_PROCESSES];
 };
@@ -83,25 +105,35 @@ void fplinux_session_audio_init(struct fplinux_session_audio *audio,
  * not one word, or when every entry is taken.
  */
 bool fplinux_session_audio_app(struct fplinux_session_audio *audio, pid_t pid,
-			       uid_t uid, const char *app_id, uint64_t now_ms);
+			       uid_t uid, const char *app_id, bool background,
+			       uint64_t now_ms);
 /* The manager's actual clock helper; its stream has reserved capacity. */
 bool fplinux_session_audio_clock(struct fplinux_session_audio *audio, pid_t pid,
 				 uid_t uid, uint64_t now_ms);
 /* The process is leaving, closing or was reaped; later calls for it do nothing. */
 void fplinux_session_audio_gone(struct fplinux_session_audio *audio, pid_t pid,
 				uint64_t now_ms);
-/* Sends AUDIBLE when the announced process's state changes. */
-void fplinux_session_audio_audible(struct fplinux_session_audio *audio,
-				   pid_t pid, bool audible, uint64_t now_ms);
+/* Sends ELIGIBLE when the announced process's foreground state changes. */
+void fplinux_session_audio_eligible(struct fplinux_session_audio *audio,
+				    pid_t pid, bool eligible, uint64_t now_ms);
 /* Retains the latest level, 0 through 10, including across reconnects. */
 bool fplinux_session_audio_set_volume(struct fplinux_session_audio *audio,
+				      enum fplinux_session_audio_class class,
 				      unsigned int level, uint64_t now_ms);
 /* Acknowledged by the service on this connection, if known. */
 bool fplinux_session_audio_volume_applied(
-	const struct fplinux_session_audio *audio, unsigned int *level);
+	const struct fplinux_session_audio *audio,
+	enum fplinux_session_audio_class class, unsigned int *level);
 /* The desired volume has not yet been acknowledged on this connection. */
 bool fplinux_session_audio_volume_pending(
-	const struct fplinux_session_audio *audio);
+	const struct fplinux_session_audio *audio,
+	enum fplinux_session_audio_class class);
+bool fplinux_session_audio_set_output(struct fplinux_session_audio *audio,
+				      const char *output, uint64_t now_ms);
+/* Only the current announced APP's service-owned media state is returned. */
+enum fplinux_ui_session_playback
+fplinux_session_audio_playback(const struct fplinux_session_audio *audio,
+			       pid_t pid, uid_t uid);
 /* Reads what the service sent, notices a hang-up and connects when due. */
 void fplinux_session_audio_dispatch(struct fplinux_session_audio *audio,
 				    uint64_t now_ms);

@@ -9,11 +9,13 @@
 #include <assert.h>
 #include <errno.h>
 #include <linux/input-event-codes.h>
+#include <limits.h>
 #include <poll.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -28,7 +30,10 @@ struct capture {
 	uint32_t serial;
 	uint32_t redraw_ack;
 	unsigned int changes;
+	bool initial_media_unknown;
+	struct fplinux_system_levels system_levels;
 	char close_value[16];
+	bool keep_screen_on;
 	bool has_request;
 	char left[128];
 	char centre[128];
@@ -39,9 +44,16 @@ struct capture {
 	/* The Bluetooth scenario's BlueZ; other scenarios have no bus. */
 	bool bluetooth;
 	struct bluez_fake *bluez;
+	unsigned int document_requests;
+	char document_path[FPLINUX_UI_SESSION_PATH_BYTES];
+	const char *stage;
 };
 
 #define HCI0 "/org/bluez/hci0"
+#define PHONE HCI0 "/dev_11_22_33_44_55_66"
+#define VISITOR HCI0 "/dev_22_33_44_55_66_77"
+#define SPEAKER HCI0 "/dev_33_44_55_66_77_88"
+#define TRANSFER_PEER HCI0 "/dev_01_23_45_67_89_AB"
 
 static const char warning[] =
 	"Changing this setting closes other apps. Unsaved changes may be lost.";
@@ -65,6 +77,21 @@ static void read_observations(struct capture *capture)
 	assert(bytes == -1 && (errno == EAGAIN || errno == EWOULDBLOCK));
 }
 
+static void send_level(struct capture *capture,
+		       enum fplinux_system_level_kind kind,
+		       enum fplinux_system_level_availability availability,
+		       unsigned int value)
+{
+	struct fplinux_ui_session_message message = {
+		.type = FPLINUX_UI_SESSION_SYSTEM_LEVELS,
+	};
+
+	capture->system_levels.level[kind].availability = availability;
+	capture->system_levels.level[kind].value = value;
+	message.system_levels = capture->system_levels;
+	assert(fplinux_ui_session_send(capture->session, &message));
+}
+
 static void answer_query(struct capture *capture,
 			 const struct fplinux_ui_session_message *query)
 {
@@ -75,12 +102,17 @@ static void answer_query(struct capture *capture,
 	};
 	const char *value;
 
-	if (!strcmp(query->name, "brightness"))
-		value = "7";
-	else if (!strcmp(query->name, "screen_off_seconds"))
+	assert(strcmp(query->name, "brightness") &&
+	       strcmp(query->name, "volume") &&
+	       strcmp(query->name, "alarm_volume"));
+	if (!strcmp(query->name, "screen_off_seconds"))
 		value = "30";
 	else if (!strcmp(query->name, "auto_lock_seconds"))
 		value = "0";
+	else if (!strcmp(query->name, "audio_output"))
+		value = "AUTO";
+	else if (!strcmp(query->name, "audio_outputs"))
+		value = "AUTO,HEADPHONES";
 	else {
 		assert(!strcmp(query->name, "input_locale"));
 		value = capture->input_locale;
@@ -116,6 +148,36 @@ static void read_messages(struct capture *capture)
 			capture->redraw_ack = message.serial;
 		} else if (message.type == FPLINUX_UI_SESSION_CLOSE_REPLY) {
 			strcpy(capture->close_value, message.value);
+		} else if (message.type == FPLINUX_UI_SESSION_KEEP_SCREEN_ON) {
+			capture->keep_screen_on = message.enabled;
+		} else if (message.type == FPLINUX_UI_SESSION_STORAGE_REQUEST) {
+			struct fplinux_ui_session_message reply = {
+				.type = FPLINUX_UI_SESSION_STORAGE_RESULT,
+				.serial = message.serial,
+				.volume_result = {
+					.request_id = message.serial,
+					.snapshot.home_persistent = true,
+				},
+			};
+
+			assert(message.volume_operation ==
+			       FPLINUX_VOLUME_REFRESH);
+			assert(fplinux_ui_session_send(capture->session,
+						       &reply));
+		} else if (message.type == FPLINUX_UI_SESSION_OPEN_FILE) {
+			struct fplinux_ui_session_message reply = {
+				.type = FPLINUX_UI_SESSION_DOCUMENT_RESULT,
+				.serial = message.serial,
+				.document_status =
+					FPLINUX_UI_DOCUMENT_CANCELLED,
+			};
+
+			++capture->document_requests;
+			snprintf(capture->document_path,
+				 sizeof(capture->document_path), "%s",
+				 message.path);
+			assert(fplinux_ui_session_send(capture->session,
+						       &reply));
 		}
 	}
 	assert(received == 0);
@@ -155,7 +217,8 @@ static void wait_label(struct capture *capture, const char *text)
 	       fplinux_ui_frame_now_ms() < deadline)
 		pump(capture);
 	if (!has_label(capture, text))
-		fprintf(stderr, "Settings: missing [%s], actual:%s\n", text,
+		fprintf(stderr, "Settings (%s): missing [%s], actual:%s\n",
+			capture->stage ? capture->stage : "navigation", text,
 			capture->observed.labels);
 	assert(has_label(capture, text));
 }
@@ -173,7 +236,8 @@ static void wait_legends(struct capture *capture, const char *left,
 	if (strcmp(capture->left, left) || strcmp(capture->centre, centre) ||
 	    strcmp(capture->right, right))
 		fprintf(stderr,
-			"Settings legends: [%s | %s | %s], expected [%s | %s | %s]\n",
+			"Settings legends (%s): [%s | %s | %s], expected [%s | %s | %s]\n",
+			capture->stage ? capture->stage : "navigation",
 			capture->left, capture->centre, capture->right, left,
 			centre, right);
 	assert(!strcmp(capture->left, left) &&
@@ -189,6 +253,30 @@ static void press(struct capture *capture, unsigned int key)
 	fplinux_ui_frame_send_key(keyboard, key, true);
 	fplinux_ui_frame_send_key(keyboard, key, false);
 	pump(capture);
+}
+
+static void hold(struct capture *capture, unsigned int key)
+{
+	struct fplinux_ui_frame_keyboard *keyboard =
+		&capture->peer.keyboards[1];
+
+	fplinux_ui_frame_send_key(keyboard, key, true);
+	pump_for(capture, 600);
+	fplinux_ui_frame_send_key(keyboard, key, false);
+	pump(capture);
+}
+
+static void wait_form_text(struct capture *capture, const char *text)
+{
+	uint64_t deadline = fplinux_ui_frame_now_ms() + 3000;
+
+	while (strcmp(capture->observed.form_text, text) &&
+	       fplinux_ui_frame_now_ms() < deadline)
+		pump(capture);
+	if (strcmp(capture->observed.form_text, text))
+		fprintf(stderr, "Settings form text: [%s], expected [%s]\n",
+			capture->observed.form_text, text);
+	assert(!strcmp(capture->observed.form_text, text));
 }
 
 static void expect_request(struct capture *capture, const char *name,
@@ -388,6 +476,29 @@ static void start(struct capture *capture, char **arguments)
 	strcpy(config.input_locale, config.locale);
 	strcpy(capture->input_locale, config.input_locale);
 	assert(fplinux_ui_session_send(capture->session, &config));
+	capture->system_levels = (struct fplinux_system_levels){
+		.level = {
+			[FPLINUX_SYSTEM_LEVEL_MEDIA] = {
+				.maximum = 10,
+			},
+			[FPLINUX_SYSTEM_LEVEL_ALARM] = {
+				.availability = FPLINUX_SYSTEM_LEVEL_READY,
+				.maximum = 10,
+				.value = 8,
+			},
+			[FPLINUX_SYSTEM_LEVEL_BRIGHTNESS] = {
+				.availability = FPLINUX_SYSTEM_LEVEL_READY,
+				.minimum = 1,
+				.maximum = 10,
+				.value = 7,
+			},
+		},
+	};
+	send_level(capture, FPLINUX_SYSTEM_LEVEL_MEDIA,
+		   capture->initial_media_unknown ?
+			   FPLINUX_SYSTEM_LEVEL_UNKNOWN :
+			   FPLINUX_SYSTEM_LEVEL_READY,
+		   0);
 	wait_label(capture,
 		   !strcmp(config.locale, "ru") ? "Настройки" : "Settings");
 	wait_legends(capture, "",
@@ -398,17 +509,12 @@ static void start(struct capture *capture, char **arguments)
 	pump_for(capture, 100);
 }
 
-static void close_and_reap(struct capture *capture)
+static void reap_closed(struct capture *capture)
 {
-	struct fplinux_ui_session_message message = {
-		.type = FPLINUX_UI_SESSION_CLOSE,
-	};
 	uint64_t deadline = fplinux_ui_frame_now_ms() + 3000;
 	pid_t finished;
 	int status;
 
-	strcpy(message.reason, "capture-complete");
-	assert(fplinux_ui_session_send(capture->session, &message));
 	do {
 		fplinux_ui_frame_pump(&capture->peer);
 		finished = waitpid(capture->application, &status, WNOHANG);
@@ -421,6 +527,17 @@ static void close_and_reap(struct capture *capture)
 	close(capture->listener);
 	fplinux_ui_frame_cleanup(&capture->peer);
 	assert(unlink(capture->session_path) == 0);
+}
+
+static void close_and_reap(struct capture *capture)
+{
+	struct fplinux_ui_session_message message = {
+		.type = FPLINUX_UI_SESSION_CLOSE,
+	};
+
+	strcpy(message.reason, "capture-complete");
+	assert(fplinux_ui_session_send(capture->session, &message));
+	reap_closed(capture);
 }
 
 static void open_theme(struct capture *capture, bool from_root)
@@ -619,6 +736,8 @@ static void root_values_fit_and_follow_current_settings(struct capture *capture)
 
 		if (index)
 			press(capture, KEY_DOWN);
+		if (index == 1)
+			press(capture, KEY_DOWN);
 		pump_for(capture, 80);
 		row = &capture->observed.root_values[index];
 		screen_check_list_value(row, landscape);
@@ -651,6 +770,8 @@ static void root_values_fit_and_follow_current_settings(struct capture *capture)
 		       capture->observed.root_values[3].value_left + 1);
 	for (size_t index = 3; index-- > 0;) {
 		press(capture, KEY_UP);
+		if (index == 0)
+			press(capture, KEY_UP);
 		pump_for(capture, 80);
 		save_frame(capture, index == 0 ? "settings-root-up-display" :
 				    index == 1 ? "settings-root-up-language" :
@@ -662,6 +783,7 @@ static void root_values_fit_and_follow_current_settings(struct capture *capture)
 	wait_label(capture, !strcmp(reply.value, "light") ?
 				    (russian ? "Светлая" : "Light") :
 				    (russian ? "Тёмная" : "Dark"));
+	press(capture, KEY_DOWN);
 	press(capture, KEY_DOWN);
 	press(capture, KEY_DOWN);
 	strcpy(reply.name, "input_locale");
@@ -678,11 +800,114 @@ static void root_values_fit_and_follow_current_settings(struct capture *capture)
 	puts("settings-root-values: real glyphs and current values fit; landscape shares a right column; long system name scrolls; replies refresh retained values");
 }
 
+static void wait_root_sound(struct capture *capture, const char *value)
+{
+	uint64_t deadline = fplinux_ui_frame_now_ms() + 3000;
+
+	while (strcmp(capture->observed.root_sound.value, value) &&
+	       fplinux_ui_frame_now_ms() < deadline)
+		pump(capture);
+	assert(!strcmp(capture->observed.root_sound.value, value));
+}
+
+static void root_sound_summary(struct capture *capture)
+{
+	bool russian = !strcmp(capture->observed.locale, "ru");
+	bool landscape = capture->peer.width >
+			 atoi(getenv("FPLINUX_SETTINGS_TEST_HEIGHT"));
+	struct fplinux_ui_session_message lifecycle = {
+		.type = FPLINUX_UI_SESSION_LIFECYCLE,
+		.lifecycle = FPLINUX_UI_SESSION_BACKGROUND,
+	};
+
+	press(capture, KEY_DOWN);
+	wait_root_sound(capture, russian ? "Недоступно" : "Unavailable");
+	send_level(capture, FPLINUX_SYSTEM_LEVEL_MEDIA,
+		   FPLINUX_SYSTEM_LEVEL_READY, 10);
+	wait_root_sound(capture, russian ? "Медиа: 10/10" : "Media: 10/10");
+	screen_check_list_value(&capture->observed.root_sound, landscape);
+	save_frame(capture, "settings-root-sound-full");
+	send_level(capture, FPLINUX_SYSTEM_LEVEL_MEDIA,
+		   FPLINUX_SYSTEM_LEVEL_READY, 0);
+	wait_root_sound(capture, russian ? "Медиа: 0/10" : "Media: 0/10");
+	send_level(capture, FPLINUX_SYSTEM_LEVEL_ALARM,
+		   FPLINUX_SYSTEM_LEVEL_READY, 8);
+	pump_for(capture, 80);
+	wait_root_sound(capture, russian ? "Медиа: 0/10" : "Media: 0/10");
+	save_frame(capture, "settings-root-sound-zero");
+
+	press(capture, KEY_OK);
+	wait_label(capture, russian ? "Громкость медиа" : "Media volume");
+	send_level(capture, FPLINUX_SYSTEM_LEVEL_MEDIA,
+		   FPLINUX_SYSTEM_LEVEL_READY, 4);
+	wait_label(capture, "4");
+	press(capture, KEY_F14);
+	wait_root_sound(capture, russian ? "Медиа: 4/10" : "Media: 4/10");
+	assert(fplinux_ui_session_send(capture->session, &lifecycle));
+	send_level(capture, FPLINUX_SYSTEM_LEVEL_MEDIA,
+		   FPLINUX_SYSTEM_LEVEL_READY, 7);
+	lifecycle.lifecycle = FPLINUX_UI_SESSION_FOREGROUND;
+	assert(fplinux_ui_session_send(capture->session, &lifecycle));
+	wait_root_sound(capture, russian ? "Медиа: 7/10" : "Media: 7/10");
+	send_level(capture, FPLINUX_SYSTEM_LEVEL_MEDIA,
+		   FPLINUX_SYSTEM_LEVEL_UNAVAILABLE, 0);
+	wait_root_sound(capture, russian ? "Недоступно" : "Unavailable");
+	puts("settings-root-sound: applied snapshots update Media without queries and refresh before resume");
+}
+
+static void section_value_frames(struct capture *capture)
+{
+	static const char *const names[] = { "display", "time", "input" };
+	static const unsigned int first[] = { 0, 4, 6 };
+	static const unsigned int counts[] = { 4, 2, 1 };
+	char path[1024], name[64];
+	FILE *geometry;
+
+	assert(snprintf(path, sizeof(path), "%s/section-values.txt",
+			capture->directory) < (int)sizeof(path));
+	geometry = fopen(path, "w");
+	assert(geometry);
+	for (size_t section = 0; section < 3; ++section) {
+		if (section)
+			press(capture, KEY_DOWN);
+		if (section == 1)
+			press(capture, KEY_DOWN);
+		press(capture, KEY_OK);
+		for (unsigned int index = 0; index < counts[section]; ++index) {
+			const struct list_value_observation *row;
+
+			if (index)
+				press(capture, KEY_DOWN);
+			pump_for(capture, 100);
+			row = &capture->observed
+				       .section_values[first[section] + index];
+			assert(row->found && row->images == 1);
+			assert(fprintf(geometry,
+				       "%s %u %d %d %d %d %d %d %d %d %d %d\n",
+				       names[section], index, row->row_top,
+				       row->row_bottom, row->text_top,
+				       row->text_bottom, row->value_top,
+				       row->value_bottom, row->text_left,
+				       row->text_right, row->value_left,
+				       row->value_right) > 0);
+			assert(snprintf(name, sizeof(name),
+					"settings-section-%s-%u",
+					names[section],
+					index) < (int)sizeof(name));
+			save_frame(capture, name);
+		}
+		press(capture, KEY_F14);
+		pump_for(capture, 100);
+	}
+	assert(fclose(geometry) == 0);
+	puts("settings-sections: captured actual value rows and geometry");
+}
+
 static void about_reading_edges(struct capture *capture)
 {
 	int previous = -1;
 
-	for (int index = 0; index < 3; ++index)
+	for (int index = 0; index < 4; ++index)
 		press(capture, KEY_DOWN);
 	press(capture, KEY_OK);
 	pump_for(capture, 200);
@@ -708,6 +933,60 @@ static void about_reading_edges(struct capture *capture)
 	}
 	assert(capture->observed.about_scroll_bottom == 0);
 	puts("settings-about: last text line is whole on every downward step");
+}
+
+static void sound_frames(struct capture *capture)
+{
+	bool russian = !strcmp(capture->observed.locale, "ru");
+	const char *height = getenv("FPLINUX_SETTINGS_TEST_HEIGHT");
+	bool landscape = height && capture->peer.width > atoi(height);
+	const char *media = russian ? "Громкость медиа" : "Media volume";
+	const char *alarm = russian ? "Громкость будильника" : "Alarm volume";
+	char name[64];
+
+	press(capture, KEY_DOWN);
+	press(capture, KEY_OK);
+	wait_label(capture, media);
+	pump_for(capture, 150);
+	for (size_t row = 0; row < 3; ++row) {
+		const struct list_value_observation *value;
+
+		if (row)
+			press(capture, KEY_DOWN);
+		pump_for(capture, 100);
+		value = &capture->observed.sound_values[row];
+		screen_check_list_value(value, landscape);
+		assert(!strcmp(value->value,
+			       row == 0 ? "0" :
+			       row == 1 ? "8" :
+					  (russian ? "Автоматически" :
+						     "Automatic")));
+		snprintf(name, sizeof(name), "settings-sound-row-%zu", row);
+		save_frame(capture, name);
+	}
+	press(capture, KEY_OK);
+	wait_label(capture, russian ? "Наушники" : "Headphones");
+	assert(!has_label(capture, russian ? "Динамик" : "Speaker"));
+	save_frame(capture, "settings-sound-output");
+	press(capture, KEY_F14);
+	press(capture, KEY_UP);
+	press(capture, KEY_UP);
+	press(capture, KEY_OK);
+	wait_legends(capture, "", russian ? "Сохранить" : "Save",
+		     russian ? "Отмена" : "Cancel");
+	wait_label(capture, media);
+	wait_label(capture,
+		   russian ? "Влево/вправо: громкость. Сохранить — оставить." :
+			     "Left/Right: volume. Save keeps the level.");
+	save_frame(capture, "settings-sound-media");
+	press(capture, KEY_F14);
+	press(capture, KEY_DOWN);
+	press(capture, KEY_OK);
+	wait_legends(capture, "", russian ? "Сохранить" : "Save",
+		     russian ? "Отмена" : "Cancel");
+	wait_label(capture, alarm);
+	save_frame(capture, "settings-sound-alarm");
+	puts("settings-sound: separate class gauges and supported output choices fit actual frames");
 }
 
 static bool shows_bluetooth(const struct capture *capture, const char *value)
@@ -742,9 +1021,16 @@ static void bluetooth_switch(struct capture *capture)
 	};
 	char name[64];
 
+	/* Reveal the adapter row on profiles that show only two root rows. */
+	press(capture, KEY_DOWN);
+	press(capture, KEY_DOWN);
 	wait_bluetooth(capture, "Off");
+	press(capture, KEY_UP);
+	press(capture, KEY_UP);
 	for (size_t index = 0; index < 5; ++index) {
 		if (index)
+			press(capture, KEY_DOWN);
+		if (index == 1)
 			press(capture, KEY_DOWN);
 		pump_for(capture, 80);
 		snprintf(name, sizeof(name), "settings-bluetooth-root-%s",
@@ -761,13 +1047,13 @@ static void bluetooth_switch(struct capture *capture)
 	screen_check_list_value(&capture->observed.bluetooth, landscape);
 	press(capture, KEY_OK);
 	wait_legends(capture, "", "Turn on", "Back");
-	wait_bluetooth(capture, "Off");
-	screen_check_list_value(&capture->observed.bluetooth, landscape);
+	wait_label(capture, "Off");
+	wait_label(capture, "Power");
 	save_frame(capture, "settings-bluetooth-off");
 
 	/* Another client switches it on; the screen follows. */
 	bluez_fake_set_powered(capture->bluez, HCI0, true);
-	wait_bluetooth(capture, "On");
+	wait_label(capture, "On");
 	wait_legends(capture, "", "Turn off", "Back");
 	save_frame(capture, "settings-bluetooth-on");
 
@@ -779,7 +1065,7 @@ static void bluetooth_switch(struct capture *capture)
 	pump_for(capture, 100);
 	save_frame(capture, "settings-bluetooth-busy");
 	wait_legends(capture, "", "Turn on", "Back");
-	wait_bluetooth(capture, "Off");
+	wait_label(capture, "Off");
 	assert(!has_label(capture, "Turning Bluetooth off…"));
 	assert(bluez_fake_requests(capture->bluez) == 1);
 
@@ -791,13 +1077,13 @@ static void bluetooth_switch(struct capture *capture)
 	save_frame(capture, "settings-bluetooth-error");
 	press(capture, KEY_F14);
 	wait_legends(capture, "", "Turn on", "Back");
-	wait_bluetooth(capture, "Off");
+	wait_label(capture, "Off");
 	assert(!bluez_fake_powered(capture->bluez, HCI0));
 
 	/* bluetoothd stops: the switch is unavailable and the root row goes. */
 	bluez_fake_stop(capture->bluez);
 	capture->bluez = NULL;
-	wait_bluetooth(capture, "Unavailable");
+	wait_label(capture, "Unavailable");
 	wait_legends(capture, "", "", "Back");
 	save_frame(capture, "settings-bluetooth-unavailable");
 	press(capture, KEY_F14);
@@ -815,29 +1101,473 @@ static void bluetooth_switch(struct capture *capture)
 	puts("settings-bluetooth: the switch follows BlueZ, waits for slow changes, reports refusals and goes with bluetoothd");
 }
 
+static void wait_pairing(struct capture *capture, const char *path)
+{
+	uint64_t deadline = fplinux_ui_frame_now_ms() + 3000;
+
+	while (!bluez_fake_device_paired(capture->bluez, path) &&
+	       fplinux_ui_frame_now_ms() < deadline)
+		pump(capture);
+	assert(bluez_fake_device_paired(capture->bluez, path));
+	wait_legends(capture, "", "Select", "Back");
+}
+
+static void wait_screen_hold(struct capture *capture, bool enabled)
+{
+	uint64_t deadline = fplinux_ui_frame_now_ms() + 3000;
+
+	while (capture->keep_screen_on != enabled &&
+	       fplinux_ui_frame_now_ms() < deadline)
+		pump(capture);
+	assert(capture->keep_screen_on == enabled);
+}
+
+static void wait_scan_controls(struct capture *capture)
+{
+	bool small = atoi(getenv("FPLINUX_SETTINGS_TEST_WIDTH")) <= 128;
+	const char *left = small ? "Options" : "Stop search";
+
+	wait_legends(capture, left, "Select", "Back");
+	if (small) {
+		press(capture, KEY_F13);
+		wait_label(capture, "Stop search");
+		press(capture, KEY_F14);
+		wait_legends(capture, left, "Select", "Back");
+	}
+}
+
+static void bluetooth_name_wait_retains_editor(struct capture *capture)
+{
+	press(capture, KEY_DOWN);
+	press(capture, KEY_DOWN);
+	press(capture, KEY_OK);
+	wait_label(capture, "Name");
+	hold(capture, KEY_NUMERIC_POUND);
+	wait_label(capture, "123");
+	press(capture, KEY_NUMERIC_1);
+	press(capture, KEY_NUMERIC_2);
+	press(capture, KEY_NUMERIC_3);
+	wait_form_text(capture, "Test adapter123");
+	bluez_fake_answer(capture->bluez, BLUEZ_FAKE_FAIL, 1000);
+	press(capture, KEY_OK);
+	pump_for(capture, 150);
+	assert(has_label(capture, "Name"));
+	assert(!strcmp(capture->observed.form_text, "Test adapter123"));
+	assert(!has_label(capture, "Power"));
+	wait_label(capture, "Saving name…");
+	wait_legends(capture, "", "", "Close");
+	press(capture, KEY_F14);
+	wait_label(capture, "Name");
+	wait_form_text(capture, "Test adapter123");
+	bluez_fake_answer(capture->bluez, BLUEZ_FAKE_APPLY, 1000);
+	press(capture, KEY_OK);
+	pump_for(capture, 150);
+	assert(has_label(capture, "Name"));
+	assert(!strcmp(capture->observed.form_text, "Test adapter123"));
+	assert(!has_label(capture, "Power"));
+	wait_label(capture, "Saving name…");
+	wait_legends(capture, "", "Open", "Back");
+	wait_label(capture, "Test adapter123");
+	bluez_fake_answer(capture->bluez, BLUEZ_FAKE_APPLY, 0);
+	press(capture, KEY_UP);
+	press(capture, KEY_UP);
+}
+
+/* Navigate the real device inventory; only the radio daemon is replaced. */
+static void bluetooth_devices(struct capture *capture)
+{
+	struct fplinux_ui_session_message lifecycle = {
+		.type = FPLINUX_UI_SESSION_LIFECYCLE,
+		.lifecycle = FPLINUX_UI_SESSION_BACKGROUND,
+	};
+	const char *const services[] = {
+		"00001105-0000-1000-8000-00805f9b34fb",
+		"0000110b-0000-1000-8000-00805f9b34fb",
+		"0000180f-0000-1000-8000-00805f9b34fb",
+		"dc02a3f0-6d83-49ef-8c6c-7523a533beba",
+	};
+	uint64_t deadline;
+
+	bluez_fake_add_device(capture->bluez, PHONE, "11:22:33:44:55:66",
+			      "Office phone", false);
+	bluez_fake_add_device(capture->bluez, VISITOR, "22:33:44:55:66:77",
+			      "Visitor", false);
+	bluez_fake_set_device_rssi(capture->bluez, VISITOR, -52, true);
+	bluez_fake_set_device_battery(capture->bluez, VISITOR, 73, true);
+	bluez_fake_set_device_uuids(capture->bluez, VISITOR, services, 4);
+	bluez_fake_add_device(capture->bluez, SPEAKER, "33:44:55:66:77:88",
+			      "Desk speaker", true);
+	bluez_fake_set_external_discovery(capture->bluez, HCI0, true);
+	pump_for(capture, 150);
+	press(capture, KEY_DOWN);
+	press(capture, KEY_DOWN);
+	wait_bluetooth(capture, "On");
+	press(capture, KEY_OK);
+	wait_label(capture, "Power");
+	bluetooth_name_wait_retains_editor(capture);
+	save_frame(capture, "settings-bluetooth-root");
+	for (size_t i = 0; i < 3; ++i)
+		press(capture, KEY_DOWN);
+	bluez_fake_answer(capture->bluez, BLUEZ_FAKE_APPLY, 700);
+	press(capture, KEY_OK);
+	wait_label(capture, "Starting search…");
+	wait_label(capture, "Office phone");
+	wait_scan_controls(capture);
+	assert(bluez_fake_discovery_requests(capture->bluez) == 1);
+	save_frame(capture, "settings-bluetooth-nearby");
+	press(capture, KEY_DOWN);
+	bluez_fake_remove_device(capture->bluez, PHONE);
+	pump_for(capture, 150);
+	press(capture, KEY_OK);
+	wait_label(capture, "Address");
+	wait_label(capture, "22:33:44:55:66:77");
+
+	/* The focus remains on Visitor when another inventory row disappears. */
+	for (size_t i = 0; i < 5; ++i)
+		press(capture, KEY_DOWN);
+	wait_label(capture, "Pair");
+	bluez_fake_set_pairing_request(capture->bluez,
+				       BLUEZ_FAKE_AGENT_CONFIRMATION, 123456);
+	press(capture, KEY_OK);
+	wait_label(capture, "Pairing…");
+	wait_label(capture, "Does this code match on Visitor?\n123456");
+	wait_screen_hold(capture, true);
+	wait_legends(capture, "", "Accept", "Reject");
+	assert(!bluez_fake_device_paired(capture->bluez, VISITOR));
+	save_frame(capture, "settings-bluetooth-pairing");
+	press(capture, KEY_OK);
+	wait_pairing(capture, VISITOR);
+	wait_screen_hold(capture, false);
+	assert(bluez_fake_agent_answered(capture->bluez));
+	assert(!bluez_fake_agent_rejected(capture->bluez));
+	assert(!bluez_fake_device_connected(capture->bluez, VISITOR));
+	save_frame(capture, "settings-bluetooth-device");
+
+	/* A pair is separate from a connection and from trust. */
+	for (size_t i = 0; i < 5; ++i)
+		press(capture, KEY_DOWN);
+	press(capture, KEY_OK);
+	wait_label(capture, "Connecting…");
+	deadline = fplinux_ui_frame_now_ms() + 3000;
+	while (!bluez_fake_device_connected(capture->bluez, VISITOR) &&
+	       fplinux_ui_frame_now_ms() < deadline)
+		pump(capture);
+	assert(bluez_fake_device_connected(capture->bluez, VISITOR));
+	wait_legends(capture, "", "Select", "Back");
+	press(capture, KEY_DOWN);
+	press(capture, KEY_OK);
+	wait_label(capture, "Changing trust…");
+	deadline = fplinux_ui_frame_now_ms() + 3000;
+	while (!bluez_fake_device_trusted(capture->bluez, VISITOR) &&
+	       fplinux_ui_frame_now_ms() < deadline)
+		pump(capture);
+	assert(bluez_fake_device_trusted(capture->bluez, VISITOR));
+	wait_legends(capture, "", "Select", "Back");
+	bluez_fake_answer(capture->bluez, BLUEZ_FAKE_APPLY, 0);
+	press(capture, KEY_UP);
+	press(capture, KEY_UP);
+	press(capture, KEY_OK);
+	wait_label(capture, "Object Push");
+	wait_legends(capture, "", "", "Back");
+	save_frame(capture, "settings-bluetooth-services");
+	press(capture, KEY_DOWN);
+	wait_legends(capture, "", "Connect", "Back");
+	press(capture, KEY_DOWN);
+	wait_legends(capture, "", "", "Back");
+	unsigned int requests = bluez_fake_requests(capture->bluez);
+	press(capture, KEY_OK);
+	pump_for(capture, 80);
+	assert(bluez_fake_requests(capture->bluez) == requests);
+	press(capture, KEY_DOWN);
+	wait_legends(capture, "", "", "Back");
+	press(capture, KEY_OK);
+	pump_for(capture, 80);
+	assert(bluez_fake_requests(capture->bluez) == requests);
+	press(capture, KEY_F14);
+	press(capture, KEY_F14);
+	press(capture, KEY_F14);
+	wait_label(capture, "Nearby devices");
+	pump_for(capture, 150);
+	assert(bluez_fake_discovery_requests(capture->bluez) == 2);
+	assert(bluez_fake_discovering(capture->bluez, HCI0));
+	bluez_fake_set_external_discovery(capture->bluez, HCI0, false);
+
+	/* Hide releases Agent1 and any local scan while retaining radio power. */
+	assert(fplinux_ui_session_send(capture->session, &lifecycle));
+	pump_for(capture, 150);
+	assert(!bluez_fake_agent_registered(capture->bluez));
+	assert(bluez_fake_powered(capture->bluez, HCI0));
+	lifecycle.lifecycle = FPLINUX_UI_SESSION_FOREGROUND;
+	assert(fplinux_ui_session_send(capture->session, &lifecycle));
+	pump_for(capture, 150);
+	assert(bluez_fake_agent_registered(capture->bluez));
+	bluez_fake_request_agent(capture->bluez, BLUEZ_FAKE_AGENT_AUTHORIZATION,
+				 VISITOR, 0, 0, NULL);
+	wait_label(capture, "Allow pairing with Visitor?");
+	press(capture, KEY_F14);
+	pump_for(capture, 150);
+	assert(bluez_fake_agent_rejected(capture->bluez));
+	press(capture, KEY_F14);
+	wait_label(capture, "Settings");
+	pump_for(capture, 150);
+	assert(!bluez_fake_agent_registered(capture->bluez));
+	assert(bluez_fake_powered(capture->bluez, HCI0));
+	puts("settings-bluetooth-devices: real paths retain focus; pairing, connection and trust are distinct; hiding releases only owned discovery and the agent");
+}
+
+static pid_t start_obex(struct capture *capture, const char *mode,
+			const char *name)
+{
+	const char *executable = getenv("FPLINUX_SETTINGS_TEST_OBEX_SERVICE");
+	char directory[PATH_MAX];
+	char ready[PATH_MAX];
+	uint64_t deadline = fplinux_ui_frame_now_ms() + 3000;
+	pid_t child;
+	int status;
+
+	assert(executable);
+	assert(snprintf(directory, sizeof(directory), "%s/obex-%s",
+			capture->directory, name) < (int)sizeof(directory));
+	assert(mkdir(directory, 0700) == 0);
+	assert(snprintf(ready, sizeof(ready), "%s/ready", directory) <
+	       (int)sizeof(ready));
+	child = fork();
+	assert(child >= 0);
+	if (!child) {
+		assert(chdir(directory) == 0);
+		execl(executable, executable, mode, ready, "--obex-only",
+		      (char *)NULL);
+		perror("exec OBEX fixture");
+		_exit(127);
+	}
+	while (access(ready, R_OK) < 0 &&
+	       fplinux_ui_frame_now_ms() < deadline) {
+		assert(waitpid(child, &status, WNOHANG) == 0);
+		pump(capture);
+	}
+	assert(access(ready, R_OK) == 0);
+	return child;
+}
+
+static void reap_obex(struct capture *capture, pid_t child)
+{
+	uint64_t deadline = fplinux_ui_frame_now_ms() + 3000;
+	pid_t finished;
+	int status;
+
+	do {
+		finished = waitpid(child, &status, WNOHANG);
+		assert(finished >= 0);
+		if (!finished)
+			pump(capture);
+	} while (!finished && fplinux_ui_frame_now_ms() < deadline);
+	assert(finished == child);
+	assert(WIFEXITED(status) && WEXITSTATUS(status) == 0);
+}
+
+static void choose_transfer_folder(struct capture *capture)
+{
+	wait_label(capture, "My files");
+	press(capture, KEY_OK);
+	wait_legends(capture, "Receive here", "", "Back");
+	press(capture, KEY_F13);
+}
+
+static void request_user_close(struct capture *capture)
+{
+	struct fplinux_ui_session_message close = {
+		.type = FPLINUX_UI_SESSION_PREPARE_CLOSE,
+		.serial = ++capture->serial,
+	};
+	uint64_t deadline = fplinux_ui_frame_now_ms() + 3000;
+
+	capture->close_value[0] = '\0';
+	strcpy(close.reason, "user-close");
+	assert(fplinux_ui_session_send(capture->session, &close));
+	while (strcmp(capture->close_value, "wait") &&
+	       fplinux_ui_frame_now_ms() < deadline)
+		pump(capture);
+	assert(!strcmp(capture->close_value, "wait"));
+	wait_label(capture,
+		   "Cancel the current file transfer and close Settings?");
+}
+
+static void bluetooth_transfers(struct capture *capture)
+{
+	const char *home = getenv("HOME");
+	char incoming[PATH_MAX];
+	uint64_t deadline;
+	pid_t obex;
+
+	assert(home);
+	assert(snprintf(incoming, sizeof(incoming), "%s/Files/incoming.txt",
+			home) < (int)sizeof(incoming));
+	bluez_fake_add_device(capture->bluez, TRANSFER_PEER,
+			      "01:23:45:67:89:AB", "Test peer", true);
+	pump_for(capture, 100);
+	press(capture, KEY_DOWN);
+	press(capture, KEY_DOWN);
+	press(capture, KEY_OK);
+	wait_label(capture, "Power");
+	for (size_t i = 0; i < 5; ++i)
+		press(capture, KEY_DOWN);
+	capture->stage = "send: choose peer";
+	obex = start_obex(capture, "send-fast", "send");
+	press(capture, KEY_OK);
+	wait_label(capture, "Test peer");
+	wait_legends(capture, "Stop search", "Select", "Back");
+	press(capture, KEY_OK);
+	capture->stage = "send: choose file";
+	wait_label(capture, "My files");
+	press(capture, KEY_OK);
+	wait_label(capture, "payload.txt");
+	press(capture, KEY_OK);
+	capture->stage = "send: await completion";
+	wait_label(capture, "Complete");
+	wait_label(capture, "17 / 17 bytes");
+	reap_obex(capture, obex);
+	press(capture, KEY_F14);
+	press(capture, KEY_F14);
+	wait_label(capture, "Send file");
+	press(capture, KEY_DOWN);
+	capture->stage = "receive: choose peer";
+	obex = start_obex(capture, "receive", "receive");
+	press(capture, KEY_OK);
+	wait_label(capture, "Test peer");
+	wait_legends(capture, "Stop search", "Select", "Back");
+	press(capture, KEY_OK);
+	capture->stage = "receive: choose destination";
+	choose_transfer_folder(capture);
+	capture->stage = "receive: consent";
+	wait_label(capture, "Receive incoming.txt from Test peer?");
+	wait_screen_hold(capture, true);
+	assert(access(incoming, F_OK) < 0 && errno == ENOENT);
+	press(capture, KEY_OK);
+	capture->stage = "receive: await publication";
+	wait_label(capture, "Complete");
+	wait_legends(capture, "", "Open file", "Back");
+	assert(access(incoming, R_OK) == 0);
+	wait_screen_hold(capture, false);
+	press(capture, KEY_OK);
+	capture->stage = "receive: open document";
+	deadline = fplinux_ui_frame_now_ms() + 3000;
+	while (!capture->document_requests &&
+	       fplinux_ui_frame_now_ms() < deadline)
+		pump(capture);
+	assert(capture->document_requests == 1);
+	assert(!strcmp(capture->document_path, incoming));
+	reap_obex(capture, obex);
+	press(capture, KEY_F14);
+	press(capture, KEY_F14);
+	/* Cancelling a new send picker preserves the last received result. */
+	press(capture, KEY_UP);
+	capture->stage = "cancel new send: choose peer";
+	press(capture, KEY_OK);
+	wait_label(capture, "Test peer");
+	wait_legends(capture, "Stop search", "Select", "Back");
+	press(capture, KEY_OK);
+	capture->stage = "cancel new send: cancel picker";
+	wait_label(capture, "My files");
+	press(capture, KEY_F14);
+	wait_label(capture, "Test peer");
+	press(capture, KEY_F14);
+	wait_label(capture, "Bluetooth");
+	wait_legends(capture, "", "Open", "Back");
+	press(capture, KEY_DOWN);
+	press(capture, KEY_DOWN);
+	press(capture, KEY_OK);
+	capture->stage = "cancel new send: reopen received result";
+	wait_legends(capture, "", "Open file", "Back");
+	press(capture, KEY_F14);
+	press(capture, KEY_UP);
+
+	capture->stage = "cancel receive: choose peer";
+	obex = start_obex(capture, "receive-slow", "cancel");
+	press(capture, KEY_OK);
+	wait_label(capture, "Test peer");
+	wait_legends(capture, "Stop search", "Select", "Back");
+	press(capture, KEY_OK);
+	capture->stage = "cancel receive: choose destination";
+	choose_transfer_folder(capture);
+	capture->stage = "cancel receive: consent";
+	wait_label(capture, "Receive incoming.txt from Test peer?");
+	press(capture, KEY_OK);
+	capture->stage = "cancel receive: await partial bytes";
+	wait_label(capture, "3 / 7 bytes");
+	save_frame(capture, "settings-bluetooth-transfer");
+	capture->stage = "cancel receive: stay after close";
+	request_user_close(capture);
+	press(capture, KEY_F14);
+	deadline = fplinux_ui_frame_now_ms() + 3000;
+	while (strcmp(capture->close_value, "cancel") &&
+	       fplinux_ui_frame_now_ms() < deadline)
+		pump(capture);
+	assert(!strcmp(capture->close_value, "cancel"));
+	wait_label(capture, "3 / 7 bytes");
+	capture->stage = "cancel receive: cancel and close";
+	request_user_close(capture);
+	press(capture, KEY_OK);
+	/* The ordinary close reply waits for the cancelled worker to finish. */
+	deadline = fplinux_ui_frame_now_ms() + 3000;
+	while (strcmp(capture->close_value, "ready") &&
+	       fplinux_ui_frame_now_ms() < deadline)
+		pump(capture);
+	assert(!strcmp(capture->close_value, "ready"));
+	close_and_reap(capture);
+	int status;
+	assert(waitpid(obex, &status, 0) == obex);
+	assert(WIFEXITED(status) && WEXITSTATUS(status) == 0);
+	puts("settings-bluetooth-transfers: shared pickers send bytes, consent publishes received files, document results return, and close waits for cancellation");
+}
+
 int main(int argc, char **argv)
 {
 	struct capture capture = { 0 };
 
 	assert(setvbuf(stdout, NULL, _IONBF, 0) == 0);
-	assert(argc == 6 || (argc == 7 && (!strcmp(argv[6], "root-values") ||
-					   !strcmp(argv[6], "bluetooth") ||
-					   !strcmp(argv[6], "about-edges"))));
-	capture.bluetooth = argc == 7 && !strcmp(argv[6], "bluetooth");
+	assert(argc == 6 ||
+	       (argc == 7 &&
+		(!strcmp(argv[6], "root-values") ||
+		 !strcmp(argv[6], "bluetooth") ||
+		 !strcmp(argv[6], "bluetooth-devices") ||
+		 !strcmp(argv[6], "bluetooth-transfers") ||
+		 !strcmp(argv[6], "section-values") ||
+		 !strcmp(argv[6], "sound") || !strcmp(argv[6], "root-sound") ||
+		 !strcmp(argv[6], "about-edges"))));
+	capture.bluetooth = argc == 7 &&
+			    (!strcmp(argv[6], "bluetooth") ||
+			     !strcmp(argv[6], "bluetooth-devices") ||
+			     !strcmp(argv[6], "bluetooth-transfers"));
+	capture.initial_media_unknown = argc == 7 &&
+					!strcmp(argv[6], "root-sound");
 	if (capture.bluetooth) {
 		capture.bluez = bluez_fake_start();
-		bluez_fake_add_adapter(capture.bluez, HCI0, false);
+		bluez_fake_add_adapter(capture.bluez, HCI0,
+				       strcmp(argv[6], "bluetooth") != 0);
 	}
 	start(&capture, argv);
 	if (capture.bluetooth) {
-		bluetooth_switch(&capture);
+		if (!strcmp(argv[6], "bluetooth-transfers")) {
+			bluetooth_transfers(&capture);
+			bluez_fake_stop(capture.bluez);
+			return 0;
+		} else if (!strcmp(argv[6], "bluetooth-devices"))
+			bluetooth_devices(&capture);
+		else
+			bluetooth_switch(&capture);
 		close_and_reap(&capture);
 		bluez_fake_stop(capture.bluez);
 		return 0;
 	}
 	if (argc == 7) {
-		if (!strcmp(argv[6], "about-edges"))
+		if (!strcmp(argv[6], "section-values"))
+			section_value_frames(&capture);
+		else if (!strcmp(argv[6], "about-edges"))
 			about_reading_edges(&capture);
+		else if (!strcmp(argv[6], "sound"))
+			sound_frames(&capture);
+		else if (!strcmp(argv[6], "root-sound"))
+			root_sound_summary(&capture);
 		else
 			root_values_fit_and_follow_current_settings(&capture);
 		close_and_reap(&capture);
@@ -892,6 +1622,7 @@ int main(int argc, char **argv)
 
 	press(&capture, KEY_F14);
 	wait_label(&capture, "Settings");
+	press(&capture, KEY_DOWN);
 	press(&capture, KEY_DOWN);
 	press(&capture, KEY_OK);
 	wait_label(&capture, "Time & language");

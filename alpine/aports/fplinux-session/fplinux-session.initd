@@ -17,7 +17,7 @@ error_log="/var/log/fplinux-session.log"
 leds_dir=/sys/class/leds
 
 depend() {
-	need localmount
+	need localmount fplinux-devices
 	after fplinux-input fplinux-brightness
 }
 

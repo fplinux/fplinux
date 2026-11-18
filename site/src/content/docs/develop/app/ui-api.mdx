@@ -6,7 +6,9 @@ source:
   - include/fplinux/fplinux-ui-menu.h
   - include/fplinux/fplinux-ui-frame.h
   - include/fplinux/fplinux-ui-audio.h
+  - include/fplinux/fplinux-ui-system.h
   - include/fplinux/fplinux-ui-vibration.h
+  - include/fplinux/fplinux-ui-lights.h
   - include/fplinux/fplinux-ui-file-picker.h
   - include/fplinux/fplinux-ui-recent.h
   - include/fplinux/fplinux-ui-view-settings.h
@@ -31,7 +33,9 @@ Include the installed headers under `fplinux/` and link with `pkg-config --cflag
 | `fplinux-ui-locale.h` | Localized date and number display |
 | `fplinux-ui-frame.h` | Owned RGB565 software frames |
 | `fplinux-ui-audio.h` | Playback streams managed by the system |
+| `fplinux-ui-system.h` | Confirmed Media, Alarm and brightness levels |
 | `fplinux-ui-vibration.h` | System-managed vibration patterns |
+| `fplinux-ui-lights.h` | Temporary screen and keypad light effects |
 | `fplinux-ui-session.h` | System application messages and raw `fplinux_ui_send()` |
 
 Use high-level screens first. The low-level menu provides one popup, not a page history; [screen navigation](/fplinux/develop/app/screens/#open-return-and-finish) handles return to Options. The private session message transport is for system components, not an application-to-application API.
@@ -54,7 +58,7 @@ Open `fplinux_ui_file_picker_open()` over the current screen for a file or desti
 
 The callback runs on the UI thread. A selected path is borrowed until it returns; copy it before retaining it. Selection leaves the picker open so the caller can finish a destination operation or report its error. Close it explicitly when finished. Closing invokes no callback. To open a document in another application, pass the selected path to the existing document API; the picker does not choose or launch a handler.
 
-`fplinux_ui_recent` holds up to ten documents without testing whether they are currently accessible. Record a document after accepting it, then store the model in the application's preferences and check the save result. Removing an entry does not remove its file or data. Shared view settings supply scale and rotation fields for a Form. Their setters change memory; callers own persistence and the point at which a running program adopts the values.
+`fplinux_ui_recent` holds up to ten documents without testing whether they are currently accessible. Record a document after accepting it, then store the model in the application's preferences and check the save result. Removing an entry does not remove its file or data. Shared view settings supply a List of scale and rotation values and exclusive Lists for choosing them. Callers own the choice listener, persistence and the point at which a running program adopts the values.
 
 For per-program overrides, `fplinux_ui_program_prefs_open()` accepts the runtime's own 64-character lowercase hexadecimal identity key. These preferences are separate from guest save files. The runtime remains responsible for its program identity and guest storage format.
 
@@ -87,7 +91,17 @@ Check `fplinux_ui_audio_supported()` before offering playback. Open a stream wit
 
 `fplinux_ui_audio_write()` is nonblocking and may accept fewer frames than requested. Counts are frames, not individual channel samples or bytes. Keep unwritten frames for a later callback instead of busy-waiting. `EPIPE` means the stream has ended; close it and open a new one when appropriate.
 
-Hiding the application pauses its streams while keeping queued frames; showing it resumes them. Closing or crashing the application ends them. A busy output can hold playback until it becomes available. Background audio is not supported by the current runtime. Closing a stream discards its remaining queue, though a bounded tail already mixed into the output can remain.
+Hiding an ordinary application pauses its streams while keeping queued frames; showing it resumes them. An installed desktop entry may request `X-FPLinux-BackgroundAudio=true`. Session grants at most one background audio owner; check `fplinux_ui_audio_background_supported()` for the current grant, including after a runtime CONFIG update. This permission does not allow background vibration or recording. Closing or crashing an application ends its streams.
+
+Use `fplinux_ui_audio_pause()` for user pause without discarding frames. Resuming does not override system policy. `fplinux_ui_audio_status()` distinguishes playing, paused, unavailable and ended streams, with a separate reason. Foreground PCM and alarms can hold background media; opening a silent application does not. A muted alarm still interrupts media. On private-output loss, present Play to explicitly resume; do not silently resume through the speaker.
+
+`fplinux_ui_audio_volume_step()` requests a persistent relative Media change of −1 or +1. A true return means the request was sent. Its asynchronous SETTING or ERROR response is named `media_volume_step` and carries a nonzero serial; a newer step can supersede an outstanding step. It does not grant permission to change other settings. Content-specific gain, such as a guest program's volume, belongs before transport; do not add a second Music master.
+
+Use `fplinux_ui_system_level_get()` to display a confirmed Media, Alarm or brightness level. `FPLINUX_UI_EVENT_SYSTEM_LEVELS` means the runtime has updated its snapshot; read the getter from the callback. READY provides a value and range. UNKNOWN and UNAVAILABLE do not mean zero, and `pending` never turns a requested value into a confirmed one. Before the first snapshot the getter fails with `EAGAIN`. Foreground applications receive changes and a refreshed snapshot when they return; hidden applications are not woken for every level change.
+
+The shell presents temporary feedback for volume keys and application Media steps without taking input focus. Inline settings editors keep their own controls and save results. A level applied successfully but not saved remains the current level; report its storage error separately. Applications do not create or position the system indicator.
+
+Keep file reads and decoding off the UI thread. Existing `fplinux_ui_watch_fd()` callbacks can receive worker results and timerfd playback deadlines while hidden; visual frame timers are visibility-bound and cannot drive background playback. All audio stream calls remain on the UI thread. `fplinux_ui_audio_queued()` includes the output queue: decoder EOF alone does not mean the final frames have played. Closing a stream discards its remaining queue, though a bounded tail already mixed into the output can remain.
 
 The capability check and successful writes do not prove that the physical speaker produced sound. Preserve the distinction between program results and [phone support](/fplinux/phones/#support-status).
 
@@ -98,6 +112,14 @@ Check `fplinux_ui_vibration_supported()`, then submit a bounded pattern through 
 Vibration is available only to the visible foreground application. Hiding it stops the pattern; returning does not restart it. A vibration request does not wake the display or postpone dimming. Do not assume the phone has a separate motor: the session owns the hardware choice.
 
 A successful request means it was sent. Later execution errors can be reported by the session, and neither response measures a physical effect. An unavailable capability must leave the application's non-vibration actions usable.
+
+## Light effects
+
+An installed application can declare `X-FPLinux-LightEffects=true` in its desktop entry. Check `fplinux_ui_light_effects_supported()` for the available screen and keypad resources, then submit a temporary effect through `fplinux_ui_light_effects_apply()`. The installed header defines the resource mask and level ranges. Applications do not open backlight or LED devices.
+
+Effects belong to the visible foreground application. Hiding, locking or a higher-priority system screen clears them; showing the application does not replay them. Call `fplinux_ui_light_effects_clear()` when the visible operation ends. Clearing restores the current system policy, including the user's latest brightness setting. Effects do not change saved settings.
+
+A true return means the request was sent. An optional output parameter receives its serial for matching the asynchronous confirmation or error. Handle a `not-visible` response by waiting until the operation is eligible and submitting its current effect; do not replay elapsed effects. An unavailable light must leave the rest of the application usable.
 
 ## Further examples
 

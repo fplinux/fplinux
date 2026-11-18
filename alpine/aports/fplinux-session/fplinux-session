@@ -56,6 +56,10 @@ if ! id fplinux >/dev/null 2>&1; then
 	fi
 	adduser -S -D -h /home/fplinux -s /bin/sh -G fplinux fplinux
 fi
+case " $(id -nG fplinux) " in
+*" render "*) ;;
+*) addgroup fplinux render || exit 1 ;;
+esac
 
 # Correct existing private directories do not need metadata writes on startup.
 prepare_directory() {

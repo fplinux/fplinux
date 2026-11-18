@@ -40,6 +40,18 @@ static void view_changed(struct fplinux_launcher_tasks *tasks)
 		tasks->listener.view_changed(tasks->listener.context);
 }
 
+static void remember_focus(struct fplinux_launcher_tasks *tasks)
+{
+	if (!tasks->list)
+		return;
+	tasks->focused_row = fplinux_ui_list_get_focused(tasks->list);
+	if (tasks->focused_row >= tasks->count)
+		tasks->focused_row = 0;
+	tasks->focused_token = tasks->focused_row < tasks->count ?
+				       tasks->tasks[tasks->focused_row].token :
+				       0;
+}
+
 void fplinux_launcher_tasks_close(struct fplinux_launcher_tasks *tasks)
 {
 	struct fplinux_ui_screen *list = tasks->list;
@@ -47,6 +59,7 @@ void fplinux_launcher_tasks_close(struct fplinux_launcher_tasks *tasks)
 
 	if (!tasks->list && !tasks->alert)
 		return;
+	remember_focus(tasks);
 	tasks->list = NULL;
 	tasks->alert = NULL;
 	tasks->querying = false;
@@ -224,23 +237,40 @@ static void task_command(struct fplinux_ui *ui,
 	}
 }
 
-static void update_list(struct fplinux_launcher_tasks *tasks,
-			uint32_t focused_token)
+static const char *task_state(const struct fplinux_ui_session_task *task)
 {
+	if (task->lifecycle == FPLINUX_UI_SESSION_CLOSING)
+		return _("Closing");
+	switch (task->playback) {
+	case FPLINUX_UI_SESSION_PLAYBACK_PLAYING:
+		return _("Playing");
+	case FPLINUX_UI_SESSION_PLAYBACK_PAUSED:
+		return _("Paused");
+	case FPLINUX_UI_SESSION_PLAYBACK_HELD:
+		return _("Audio interrupted");
+	case FPLINUX_UI_SESSION_PLAYBACK_UNAVAILABLE:
+		return _("Audio unavailable");
+	case FPLINUX_UI_SESSION_PLAYBACK_NONE:
+		return task->lifecycle == FPLINUX_UI_SESSION_FOREGROUND ?
+			       _("Foreground") :
+			       _("Background");
+	}
+	return "";
+}
+
+static void update_list(struct fplinux_launcher_tasks *tasks)
+{
+	size_t focus = tasks->focused_row;
+
 	if (!tasks->list)
 		return;
+	if (focus >= tasks->count)
+		focus = tasks->count ? tasks->count - 1 : 0;
 	fplinux_ui_list_delete_all(tasks->list);
 	for (size_t i = 0; i < tasks->count; ++i) {
 		const struct fplinux_ui_session_task *task = &tasks->tasks[i];
-		const char *state =
-			task->lifecycle == FPLINUX_UI_SESSION_FOREGROUND ?
-				_("Foreground") :
-			task->lifecycle == FPLINUX_UI_SESSION_BACKGROUND ?
-				_("Background") :
-				_("Closing");
-
-		size_t row =
-			fplinux_ui_list_append(tasks->list, task->title, state);
+		size_t row = fplinux_ui_list_append(tasks->list, task->title,
+						    task_state(task));
 
 		if (tasks->listener.icon) {
 			struct fplinux_launcher_task_icon icon =
@@ -250,11 +280,13 @@ static void update_list(struct fplinux_launcher_tasks *tasks,
 			fplinux_ui_list_set_icon(tasks->list, row, icon.source,
 						 icon.kind);
 		}
-		if (task->token == focused_token)
-			fplinux_ui_list_set_focused(tasks->list, i);
+		if (task->token == tasks->focused_token)
+			focus = i;
 	}
 	if (!tasks->count && tasks->known)
 		fplinux_ui_list_append(tasks->list, _("No open apps"), NULL);
+	if (tasks->count || tasks->known)
+		fplinux_ui_list_set_focused(tasks->list, focus);
 	update_commands(tasks);
 }
 
@@ -263,22 +295,15 @@ bool fplinux_launcher_tasks_receive(
 	const struct fplinux_ui_session_message *message)
 {
 	if (message->type == FPLINUX_UI_SESSION_TASKS) {
-		uint32_t focused_token = 0;
-
 		if (!message->has_tasks)
 			return true;
-		if (tasks->list) {
-			size_t focus = fplinux_ui_list_get_focused(tasks->list);
-
-			if (focus < tasks->count)
-				focused_token = tasks->tasks[focus].token;
-		}
+		remember_focus(tasks);
 		tasks->count = message->task_count;
 		memcpy(tasks->tasks, message->tasks, sizeof(tasks->tasks));
 		tasks->known = true;
 		tasks->querying = false;
 		tasks->request_pending = false;
-		update_list(tasks, focused_token);
+		update_list(tasks);
 		return true;
 	}
 	if (message->type == FPLINUX_UI_SESSION_ERROR &&
@@ -311,7 +336,7 @@ void fplinux_launcher_tasks_open(struct fplinux_launcher_tasks *tasks)
 	fplinux_ui_screen_add_command(tasks->list, &back);
 	fplinux_ui_screen_set_listener(tasks->list, task_command, NULL, tasks);
 	fplinux_ui_list_set_focus_listener(tasks->list, task_changed, tasks);
-	update_list(tasks, 0);
+	update_list(tasks);
 	fplinux_ui_push(tasks->ui, tasks->list);
 	view_changed(tasks);
 	if (!query_tasks(tasks)) {

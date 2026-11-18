@@ -241,7 +241,6 @@ class AlpineRegistrationTests:
         """Palette consumers stage new bytes and reject old APKs while unrelated APKs hit."""
         consumers = (
             "fplinux-terminal",
-            "fplinux-brightness-ui",
             "fplinux-session",
             "fplinux-ui",
         )

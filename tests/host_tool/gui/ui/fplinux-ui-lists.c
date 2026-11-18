@@ -807,6 +807,137 @@ static void check_status_row(struct fplinux_ui *ui, lv_obj_t *screen)
 	lv_draw_buf_destroy(icon);
 }
 
+static void check_centred_column(struct fplinux_ui *ui,
+				 struct fplinux_ui_listview *list, bool detail,
+				 int expected_pitch, const char *phase)
+{
+	lv_obj_t *row = fplinux_ui_listview_selected_row(list);
+	lv_obj_t *column = lv_obj_get_parent(ui->text);
+	lv_obj_t *secondary = lv_obj_get_child(column, 1);
+	lv_obj_t *image = find_image(row);
+	lv_area_t bounds, primary, last, body;
+	int32_t above, below;
+
+	lv_obj_update_layout(fplinux_ui_listview_object(list));
+	bounds = coords(row);
+	primary = coords(ui->text);
+	body = coords(column);
+	check(lv_area_get_height(&bounds) == expected_pitch,
+	      "mixed rows retain the shared detail pitch");
+	check((secondary != NULL) == detail,
+	      "only rows with a subtitle contain a second line");
+	last = secondary ? coords(secondary) : primary;
+	check(body.y1 == primary.y1 && body.y2 == last.y2,
+	      "the text column contains no reserved empty line");
+	if (secondary)
+		check(last.y1 == primary.y2 + 1,
+		      "a real subtitle follows the primary line");
+	above = primary.y1 - bounds.y1;
+	below = bounds.y2 - 1 - last.y2;
+	/* Nested integer centring can move the column's centre by one pixel. */
+	check(above >= 0 && below >= 0 && abs(above - below) <= 2,
+	      "the present text lines stay within one pixel of the cell centre");
+	if (image) {
+		lv_area_t box = coords(lv_obj_get_parent(image));
+		int32_t icon_above = box.y1 - bounds.y1;
+		int32_t icon_below = bounds.y2 - 1 - box.y2;
+
+		check(icon_above >= 0 && icon_below >= 0 &&
+			      abs(icon_above - icon_below) <= 1,
+		      "the leading icon remains centred independently of text");
+	}
+	printf("%s\t%d\t%d\t%d\n", phase, (int)above,
+	       (int)(last.y2 - bounds.y1), expected_pitch);
+}
+
+static bool mixed_virtual_row(struct fplinux_ui_listview *list, size_t index,
+			      struct fplinux_ui_virtual_row *row, void *context)
+{
+	const bool *omit_detail = context;
+
+	(void)list;
+	row->text = "Row";
+	row->detail = index % 2 && !*omit_detail ? "Subtitle" : NULL;
+	return true;
+}
+
+static void check_mixed_row_centres(struct fplinux_ui *ui, lv_obj_t *screen,
+				    int expected_pitch, bool is_virtual)
+{
+	struct fplinux_ui_listview *list;
+	bool omit_detail = false;
+	lv_draw_buf_t *icon;
+	lv_obj_t *first;
+
+	ui->theme.font = fplinux_ui_builtin_font(ui->spec->font_body);
+	ui->theme.font_large = fplinux_ui_builtin_font(ui->spec->font_title);
+	assert(ui->theme.font && ui->theme.font_large);
+	if (is_virtual) {
+		list = fplinux_ui_listview_create_virtual(
+			ui, screen, FPLINUX_UI_LISTVIEW_PLAIN, 40,
+			mixed_virtual_row, &omit_detail);
+		assert(list);
+		fplinux_ui_listview_set_active(list, true);
+		check_centred_column(ui, list, false, expected_pitch, "body");
+		fplinux_ui_listview_select(list, 21);
+		check_centred_column(ui, list, true, expected_pitch, "detail");
+		first = fplinux_ui_listview_selected_row(list);
+		omit_detail = true;
+		fplinux_ui_listview_invalidate(list, 21, 1);
+		check(fplinux_ui_listview_selected_row(list) == first,
+		      "invalidation reuses the selected virtual row");
+		check_centred_column(ui, list, false, expected_pitch,
+				     "removed");
+		omit_detail = false;
+		fplinux_ui_listview_invalidate(list, 21, 1);
+		check_centred_column(ui, list, true, expected_pitch,
+				     "restored");
+		fplinux_ui_listview_select(list, 38);
+		check_centred_column(ui, list, false, expected_pitch,
+				     "rebound");
+		lv_obj_clean(screen);
+		return;
+	}
+	list = fplinux_ui_listview_create(ui, screen,
+					  FPLINUX_UI_LISTVIEW_PLAIN);
+	assert(list);
+	assert(fplinux_ui_listview_add(list, "Start", NULL) == 0);
+	icon = lv_draw_buf_create(2, 2, LV_COLOR_FORMAT_A8, LV_STRIDE_AUTO);
+	assert(icon);
+	assert(fplinux_ui_listview_set_icon(list, 0, icon,
+					    FPLINUX_UI_LIST_ICON_IMAGE));
+	assert(fplinux_ui_listview_set_emphasis(list, 0, true));
+	assert(fplinux_ui_listview_add(list, "Setting", "Subtitle") == 1);
+	check_centred_column(ui, list, false, expected_pitch, "emphasis");
+	assert(fplinux_ui_listview_set_emphasis(list, 0, false));
+	check_centred_column(ui, list, false, expected_pitch, "body");
+	assert(fplinux_ui_listview_add(list, "Back", NULL) == 2);
+	fplinux_ui_listview_select(list, 2);
+	check_centred_column(ui, list, false, expected_pitch, "appended");
+	assert(fplinux_ui_listview_insert(list, 1, "Help", NULL) == 1);
+	fplinux_ui_listview_select(list, 1);
+	check_centred_column(ui, list, false, expected_pitch, "inserted");
+	fplinux_ui_listview_select(list, 0);
+	assert(fplinux_ui_listview_set_text(list, 0, "Start", "Subtitle"));
+	check_centred_column(ui, list, true, expected_pitch, "detail");
+	assert(fplinux_ui_listview_set_emphasis(list, 0, true));
+	check_centred_column(ui, list, true, expected_pitch, "emphasis-detail");
+	assert(fplinux_ui_listview_set_text(list, 0, "Start", NULL));
+	check_centred_column(ui, list, false, expected_pitch,
+			     "emphasis-removed");
+	assert(fplinux_ui_listview_set_emphasis(list, 0, false));
+	check_centred_column(ui, list, false, expected_pitch, "removed");
+	assert(fplinux_ui_listview_set_trailing_value(list, 0, "Ready"));
+	check_centred_column(ui, list, false, expected_pitch, "value");
+	assert(fplinux_ui_listview_set_trailing_value(list, 0, NULL));
+	check_centred_column(ui, list, false, expected_pitch, "value-removed");
+	assert(fplinux_ui_listview_set_level(list, 0, 0, 100, 50));
+	check_centred_column(ui, list, true, expected_pitch, "level");
+	assert(fplinux_ui_listview_set_trailing_icon(list, 0, NULL));
+	check_centred_column(ui, list, false, expected_pitch, "level-removed");
+	lv_obj_clean(screen);
+}
+
 /* The theme's list colours on its page. */
 static void use_palette(struct fplinux_ui *ui, lv_obj_t *screen,
 			const char *theme)
@@ -1251,6 +1382,11 @@ int main(int argc, char **argv)
 	}
 	if (!strcmp(argv[1], "status-row")) {
 		check_status_row(&ui, screen);
+		goto done;
+	}
+	if (!strncmp(argv[1], "mixed-centres-", 14)) {
+		check_mixed_row_centres(&ui, screen, row_height,
+					!strcmp(argv[1] + 14, "virtual"));
 		goto done;
 	}
 	if (!strcmp(argv[1], "controls")) {

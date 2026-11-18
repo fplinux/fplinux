@@ -79,6 +79,33 @@ def test_one_adapter_switches_and_follows_bluez_restarts(adapter_test: Path) -> 
     )
 
 
+@pytest.mark.parametrize(
+    ("scenario", "expected"),
+    [
+        (
+            "settings-inventory",
+            "bluez-adapter: real inventory properties and owned discovery sessions\n",
+        ),
+        (
+            "pairing-agent",
+            "bluez-adapter: authenticated pairing requests require real user replies\n",
+        ),
+    ],
+)
+def test_settings_bluez_protocol_behaviors(
+    adapter_test: Path, scenario: str, expected: str
+) -> None:
+    with private_bus() as bus:
+        result = run_process(
+            [str(adapter_test), scenario],
+            name=f"BlueZ settings {scenario}",
+            timeout=30,
+            env=bus.environment(),
+            check=True,
+        )
+    assert result.stdout == expected
+
+
 def test_lost_bus_leaves_bluetooth_absent_without_busy_wakeups(adapter_test: Path) -> None:
     with private_bus() as bus:
         process = subprocess.Popen(

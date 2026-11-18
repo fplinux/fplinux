@@ -4,7 +4,7 @@
  * in the installed headers fplinux-ui.h, fplinux-ui-screen.h,
  * fplinux-ui-text.h, fplinux-ui-menu.h, fplinux-ui-prefs.h,
  * fplinux-ui-locale.h, fplinux-ui-symbol-picker.h, fplinux-ui-audio.h,
- * fplinux-ui-vibration.h, fplinux-ui-frame.h, fplinux-rgb565.h,
+ * fplinux-ui-vibration.h, fplinux-ui-lights.h, fplinux-ui-frame.h, fplinux-rgb565.h,
  * fplinux-files-browse.h, fplinux-ui-file-picker.h, fplinux-ui-recent.h and
  * fplinux-ui-view-settings.h. A new function is added here and in its header.
  * The library and its current consumers are built
@@ -53,8 +53,15 @@ global:
 	fplinux_ui_audio_background_supported;
 	fplinux_ui_audio_close;
 	fplinux_ui_audio_open;
+	fplinux_ui_audio_pause;
 	fplinux_ui_audio_queued;
+	fplinux_ui_audio_status;
 	fplinux_ui_audio_supported;
+	fplinux_ui_audio_volume_step;
+	fplinux_ui_system_level_get;
+	fplinux_ui_light_effects_supported;
+	fplinux_ui_light_effects_apply;
+	fplinux_ui_light_effects_clear;
 	fplinux_ui_audio_write;
 	fplinux_ui_back;
 	fplinux_ui_canvas_new;
@@ -74,8 +81,10 @@ global:
 	fplinux_ui_form_append_duration;
 	fplinux_ui_form_append_gauge;
 	fplinux_ui_form_append_image;
+	fplinux_ui_form_append_property;
 	fplinux_ui_form_append_string;
 	fplinux_ui_form_append_text_field;
+	fplinux_ui_form_append_value;
 	fplinux_ui_form_delete;
 	fplinux_ui_form_delete_all;
 	fplinux_ui_form_get_choice;
@@ -101,6 +110,7 @@ global:
 	fplinux_ui_form_set_string;
 	fplinux_ui_form_set_text;
 	fplinux_ui_form_set_value;
+	fplinux_ui_form_set_value_text;
 	fplinux_ui_format_date;
 	fplinux_ui_format_number;
 	fplinux_ui_frame_damage;

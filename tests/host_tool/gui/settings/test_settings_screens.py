@@ -33,6 +33,89 @@ ROOT_ROWS = {
 }
 
 
+@pytest.mark.parametrize("screen", list(ROOT_ROWS))
+@pytest.mark.parametrize("locale", ["en", "ru"])
+def test_actual_settings_root_sound_summary_follows_live_media_level(
+    settings_native: Path, tmp_path: Path, screen: tuple[int, int], locale: str
+) -> None:
+    """The real root paints the asynchronous Media value before Sound is opened."""
+    width, height = screen
+    result = run_process(
+        [
+            str(settings_native / "settings-screens"),
+            str(settings_native / "settings"),
+            str(ROOT / "tests/host_tool/gui/screens/keypad.xkb"),
+            str(tmp_path / "session.sock"),
+            str(tmp_path),
+            str(ROOT / "alpine/aports/fplinux-language"),
+            "root-sound",
+        ],
+        name=f"refresh actual Settings root Sound at {width}x{height} in {locale}",
+        env={
+            "FPLINUX_SETTINGS_TEST_WIDTH": str(width),
+            "FPLINUX_SETTINGS_TEST_HEIGHT": str(height),
+            "FPLINUX_SETTINGS_TEST_LOCALE": locale,
+            "FPLINUX_SETTINGS_TEST_THEME": "dark",
+        },
+        timeout=20,
+    )
+    (tmp_path / "capture.log").write_text(result.stdout + result.stderr, encoding="utf-8")
+    log_root = os.environ.get("FPLINUX_LOG_ROOT")
+    if log_root:
+        shutil.copytree(
+            tmp_path,
+            Path(log_root) / f"settings-root-sound-{width}x{height}-{locale}",
+            dirs_exist_ok=True,
+            ignore=shutil.ignore_patterns("session.sock"),
+        )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout == (
+        "settings-root-sound: applied snapshots update Media without queries "
+        "and refresh before resume\n"
+    )
+
+
+@pytest.mark.parametrize("screen", list(ROOT_ROWS))
+@pytest.mark.parametrize("locale", ["en", "ru"])
+def test_actual_settings_sound_uses_separate_class_gauges_and_supported_outputs(
+    settings_native: Path, tmp_path: Path, screen: tuple[int, int], locale: str
+) -> None:
+    """Real Sound lists, class gauges and truthful choices fit every shipped profile."""
+    width, height = screen
+    result = run_process(
+        [
+            str(settings_native / "settings-screens"),
+            str(settings_native / "settings"),
+            str(ROOT / "tests/host_tool/gui/screens/keypad.xkb"),
+            str(tmp_path / "session.sock"),
+            str(tmp_path),
+            str(ROOT / "alpine/aports/fplinux-language"),
+            "sound",
+        ],
+        name=f"measure actual Settings Sound at {width}x{height} in {locale}",
+        env={
+            "FPLINUX_SETTINGS_TEST_WIDTH": str(width),
+            "FPLINUX_SETTINGS_TEST_HEIGHT": str(height),
+            "FPLINUX_SETTINGS_TEST_LOCALE": locale,
+            "FPLINUX_SETTINGS_TEST_THEME": "dark",
+        },
+        timeout=20,
+    )
+    (tmp_path / "capture.log").write_text(result.stdout + result.stderr, encoding="utf-8")
+    log_root = os.environ.get("FPLINUX_LOG_ROOT")
+    if log_root:
+        shutil.copytree(
+            tmp_path,
+            Path(log_root) / f"settings-sound-{width}x{height}-{locale}",
+            dirs_exist_ok=True,
+            ignore=shutil.ignore_patterns("session.sock"),
+        )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout == (
+        "settings-sound: separate class gauges and supported output choices fit actual frames\n"
+    )
+
+
 def test_actual_settings_about_never_leaves_the_last_line_partly_hidden(
     settings_native: Path, tmp_path: Path
 ) -> None:
@@ -225,6 +308,70 @@ def test_actual_settings_root_values_fit_scroll_and_follow_current_replies(
     assert sequence_faults(frames, area) == []
 
 
+@pytest.mark.parametrize("screen", list(ROOT_ROWS))
+@pytest.mark.parametrize("locale", ["en", "ru"])
+@pytest.mark.parametrize("theme", ["light", "dark"])
+def test_actual_settings_sections_use_the_same_value_layout_as_the_root(
+    settings_native: Path, tmp_path: Path, screen: tuple[int, int], locale: str, theme: str
+) -> None:
+    """Real section rows retain portrait details and share the landscape value column."""
+    width, height = screen
+    result = run_process(
+        [
+            str(settings_native / "settings-screens"),
+            str(settings_native / "settings"),
+            str(ROOT / "tests/host_tool/gui/screens/keypad.xkb"),
+            str(tmp_path / "session.sock"),
+            str(tmp_path),
+            str(ROOT / "alpine/aports/fplinux-language"),
+            "section-values",
+        ],
+        name=f"measure actual Settings section values at {width}x{height} in {locale}/{theme}",
+        env={
+            "FPLINUX_SETTINGS_TEST_WIDTH": str(width),
+            "FPLINUX_SETTINGS_TEST_HEIGHT": str(height),
+            "FPLINUX_SETTINGS_TEST_LOCALE": locale,
+            "FPLINUX_SETTINGS_TEST_THEME": theme,
+            "FPLINUX_SETTINGS_TEST_FIXED_TIME": "1",
+            "TZ": "UTC",
+        },
+        timeout=20,
+    )
+    (tmp_path / "capture.log").write_text(result.stdout + result.stderr, encoding="utf-8")
+    log_root = os.environ.get("FPLINUX_LOG_ROOT")
+    if log_root:
+        shutil.copytree(
+            tmp_path,
+            Path(log_root) / f"settings-section-values-{width}x{height}-{locale}-{theme}",
+            dirs_exist_ok=True,
+            ignore=shutil.ignore_patterns("session.sock"),
+        )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout == "settings-sections: captured actual value rows and geometry\n"
+    rows = (tmp_path / "section-values.txt").read_text(encoding="ascii").splitlines()
+    assert [row.split()[:2] for row in rows] == [
+        ["display", "0"],
+        ["display", "1"],
+        ["display", "2"],
+        ["display", "3"],
+        ["time", "0"],
+        ["time", "1"],
+        ["input", "0"],
+    ]
+    for row in rows:
+        _, _, *geometry = row.split()
+        top, bottom, text_top, text_bottom, value_top, _, text_left, text_right, value_left, _ = (
+            map(int, geometry)
+        )
+        assert bottom - top + 1 == ROOT_ROWS[screen][1], row
+        if width > height:
+            assert text_top == value_top, row
+            assert text_right < value_left, row
+        else:
+            assert text_bottom < value_top, row
+            assert text_left == value_left, row
+
+
 @pytest.mark.parametrize(
     "screen",
     [(128, 128), (128, 160), (176, 220), (240, 320), (320, 240)],
@@ -293,9 +440,107 @@ def test_actual_settings_bluetooth_switch_follows_bluez_with_whole_rows(
         for name in names
     }
     assert sequence_faults(frames, area) == []
-    # The switch screen's only row has no divider; its states differ.
+    # The native Bluetooth settings show distinct live power states.
     switch = {
         (tmp_path / f"settings-bluetooth-{name}.rgb565").read_bytes()
         for name in ("off", "on", "unavailable")
     }
     assert len(switch) == 3
+
+
+@pytest.mark.parametrize("screen", [(128, 128), (240, 320)], ids=["small", "portrait"])
+def test_actual_settings_bluetooth_devices_use_live_paths_and_pairing_consent(
+    settings_native: Path, tmp_path: Path, screen: tuple[int, int]
+) -> None:
+    """Real device screens use a private BlueZ peer, without a radio or phone."""
+    width, height = screen
+    with private_bus() as bus:
+        result = run_process(
+            [
+                str(settings_native / "settings-screens"),
+                str(settings_native / "settings"),
+                str(ROOT / "tests/host_tool/gui/screens/keypad.xkb"),
+                str(tmp_path / "session.sock"),
+                str(tmp_path),
+                str(ROOT / "alpine/aports/fplinux-language"),
+                "bluetooth-devices",
+            ],
+            name=f"navigate real Bluetooth devices at {width}x{height}",
+            env=bus.environment()
+            | {
+                "FPLINUX_SETTINGS_TEST_WIDTH": str(width),
+                "FPLINUX_SETTINGS_TEST_HEIGHT": str(height),
+                "FPLINUX_SETTINGS_TEST_LOCALE": "en",
+                "FPLINUX_SETTINGS_TEST_THEME": "dark",
+            },
+            timeout=30,
+        )
+    (tmp_path / "capture.log").write_text(result.stdout + result.stderr, encoding="utf-8")
+    log_root = os.environ.get("FPLINUX_LOG_ROOT")
+    if log_root:
+        shutil.copytree(
+            tmp_path,
+            Path(log_root) / f"settings-bluetooth-devices-{width}x{height}",
+            dirs_exist_ok=True,
+            ignore=shutil.ignore_patterns("session.sock"),
+        )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout == (
+        "settings-bluetooth-devices: real paths retain focus; pairing, connection and trust "
+        "are distinct; hiding releases only owned discovery and the agent\n"
+    )
+    for state in ("nearby", "pairing", "device", "services"):
+        assert (tmp_path / f"settings-bluetooth-{state}.rgb565").stat().st_size == (
+            width * (height - ROOT_ROWS[screen][2]) * 2
+        )
+
+
+def test_actual_settings_bluetooth_file_pickers_and_worker_complete_and_cancel_transfers(
+    settings_native: Path, tmp_path: Path
+) -> None:
+    """The real UI, pickers and worker exchange bytes over a private OBEX service."""
+    home = tmp_path / "home"
+    files = home / "Files"
+    files.mkdir(parents=True)
+    (files / "payload.txt").write_bytes(b"settings payload\n")
+    with private_bus() as bus:
+        result = run_process(
+            [
+                str(settings_native / "settings-screens"),
+                str(settings_native / "settings"),
+                str(ROOT / "tests/host_tool/gui/screens/keypad.xkb"),
+                str(tmp_path / "session.sock"),
+                str(tmp_path),
+                str(ROOT / "alpine/aports/fplinux-language"),
+                "bluetooth-transfers",
+            ],
+            name="send, receive and cancel through real Settings and shared file pickers",
+            env=bus.environment()
+            | {
+                "HOME": str(home),
+                "FPLINUX_SETTINGS_TEST_WIDTH": "240",
+                "FPLINUX_SETTINGS_TEST_HEIGHT": "320",
+                "FPLINUX_SETTINGS_TEST_LOCALE": "en",
+                "FPLINUX_SETTINGS_TEST_THEME": "dark",
+                "FPLINUX_SETTINGS_TEST_OBEX_SERVICE": str(settings_native / "bluetooth-service"),
+            },
+            timeout=30,
+        )
+    (tmp_path / "capture.log").write_text(result.stdout + result.stderr, encoding="utf-8")
+    log_root = os.environ.get("FPLINUX_LOG_ROOT")
+    if log_root:
+        shutil.copytree(
+            tmp_path,
+            Path(log_root) / "settings-bluetooth-transfers",
+            dirs_exist_ok=True,
+            ignore=shutil.ignore_patterns("session.sock"),
+        )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout == (
+        "settings-bluetooth-transfers: shared pickers send bytes, consent publishes "
+        "received files, document results return, and close waits for cancellation\n"
+    )
+    assert (tmp_path / "obex-send/sent-bytes").read_bytes() == b"settings payload\n"
+    assert (files / "incoming.txt").read_bytes() == b"fixture"
+    assert (tmp_path / "obex-cancel/cancelled").read_text(encoding="ascii") == "cancelled\n"
+    assert {path.name for path in files.iterdir()} == {"payload.txt", "incoming.txt"}

@@ -21,7 +21,7 @@ backlight = "inoi240-backlight"
 levels = [0, 2, 5, 8, 10, 12, 15, 18, 20, 21, 24]
 
 [rootfs]
-packages = ["fplinux-audio", "fplinux-font-terminus-6x12", "fplinux-jack"]
+packages = ["fplinux-audio", "fplinux-font-terminus-6x12"]
 
 [bundle]
 packages = []

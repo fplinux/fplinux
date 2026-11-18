@@ -13,7 +13,7 @@ import Figure from '../../../components/Figure.astro';
 import BluetoothPan from '../../../assets/diagrams/bluetooth-pan.svg';
 import Key from '../../../components/Key.astro';
 
-Turn Bluetooth on and off in Settings. Pair devices, exchange files, use a Bluetooth Internet connection (PAN) and connect keyboards or mice with `bluetoothctl` and `fplinux-bluetooth` in a shell on the phone. Optional packages add A2DP audio output. Check [support status](/fplinux/phones/#support-status) and your [phone page](/fplinux/phones/) for the supported functions, peers and profiles before using a procedure below.
+Use **Settings → Bluetooth** to turn the radio on or off, change the phone name and visibility, find and pair devices, and send or receive a file. Bluetooth Internet connections (PAN) and optional A2DP audio output use the shell procedures below. Check [support status](/fplinux/phones/#support-status) and your [phone page](/fplinux/phones/) for the supported functions, peers and profiles before using a procedure below.
 
 These procedures apply to supported [UMS9117](/fplinux/platforms/ums9117/) phones. Bluetooth is unsupported on the [SC9820E Xiaomi Qin 1s+](/fplinux/platforms/sc9820e/); preparing optional radio data does not enable it.
 
@@ -27,7 +27,7 @@ Run `fplinux-bluetooth --help` for the list of commands, and add `--help` after 
 
 ## Turn Bluetooth on and off
 
-In the graphical session, open **Settings → Bluetooth** and press **Turn on** or **Turn off**. The [Quick settings](/fplinux/use/session/#quick-settings) on Home have the same switch. Both show the current state, including a change made with `bluetoothctl`, and are listed only while the Bluetooth controller is available. If the change fails, an error asks you to try again.
+In the graphical session, open **Settings → Bluetooth**, select **Power** and press **Turn on** or **Turn off**. The [Quick settings](/fplinux/use/session/#quick-settings) on Home have the same switch. Both show the current state, including a change made with `bluetoothctl`, and are listed only while the Bluetooth controller is available. If the change fails, an error asks you to try again.
 
 In a shell:
 
@@ -38,7 +38,29 @@ bluetoothctl power off
 
 Pairings are kept while Bluetooth is off.
 
+## Manage devices in Settings
+
+**Phone name** changes the name other devices see. **Visibility** offers **Hidden**, **2 minutes** and **Always visible**. A visible window also permits incoming pairing. Keep Bluetooth settings in the foreground while pairing or accepting an incoming file; leaving them releases the pairing agent and any search started there. It does not turn the radio off.
+
+Timed visibility, pairing prompts and receive windows keep the display on while Bluetooth settings are visible. Ordinary accepted transfers can continue with the display off.
+
+Open **Nearby devices** to search. **Stop search** ends your search while keeping the discovered devices listed. **Paired devices** lists saved pairings. Select a device to see its address and state, with signal strength or battery level when available. You can pair, connect or disconnect, change its local name, toggle **Trusted**, and **Forget device**. Forgetting removes the pairing; pair again before reconnecting.
+
+Follow the pairing request shown on the phone: enter a PIN or passkey, compare the code on both devices, or enter the displayed code on a keyboard. Reject a request you did not expect. **Services** shows the device's reported services; only connectable profiles have a Connect action. A listed service does not establish that the corresponding local transport or optional package is available.
+
+The phone name, aliases, pairing and trust belong to BlueZ. They survive closing Settings. A RAM system loses them at power-off; a supported system card keeps them as described in [Storage lifetime](/fplinux/guides/microsd-system-card/#what-persists).
+
+## Exchange a file in Settings
+
+For sending, choose **Send file**, select the recipient and choose one file. The shared file picker lists **My files** and available cards. You can also start from a device's details.
+
+For receiving, choose **Receive files**, select the sending device and a writable destination folder. Choose **Receive here**, then send a file from that device during the two-minute receive window. The phone asks before accepting the incoming file. If the destination name already exists, choose to keep both files or explicitly replace it.
+
+**File transfer** shows the actual state, transferred bytes and progress when the total is known. **Cancel transfer** stops the operation. An accepted transfer continues while Settings is in the background; closing Settings asks whether to cancel it. **Transfer history** keeps results for the current Settings session. A received file can be opened with an installed application that supports its format.
+
 ## Pair with a computer or another phone
+
+The following shell procedure is an alternative to the graphical pairing flow.
 
 You need `bluetoothctl` on both devices. Send each command separately and wait for it to finish before sending the next. Identify each device by the exact address that `show` prints.
 
@@ -147,7 +169,7 @@ Internet traffic goes through Bluetooth only. The USB link to your computer stay
 
 ## Send audio to an A2DP sink
 
-Copy `fplinux-bluealsa.apk`, `fplinux-bluez-libs.apk` and `fplinux-sbc.apk` from your build's `apks/` directory to `/tmp`, as described in [Packages](/fplinux/guides/packages/). Install them together so their dependencies are available, then start the service:
+Copy `fplinux-bluealsa.apk`, `fplinux-bluez-libs.apk` and `fplinux-sbc.apk` from your build's `apks/` directory to `/tmp`, as described in [Optional packages](/fplinux/guides/packages/). Install them together, then start the service on the phone:
 
 ```sh title="Phone"
 apk add --no-network --allow-untrusted --force-non-repository \

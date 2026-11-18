@@ -40,22 +40,123 @@ static const char *script = "";
 /* The kernel sends a changed value to every subscriber, the writer too. */
 static unsigned int echo_numids[ECHO_EVENT_COUNT];
 static size_t echo_count;
+static bool yielded_script;
 
 static struct test_control *find(const snd_ctl_elem_id_t *id)
 {
 	struct test_control *controls[] = { &jack, &headphone, &speaker };
 	size_t index;
 
+	if (getenv("JACK_TEST_QIN"))
+		return NULL;
 	for (index = 0; index < sizeof(controls) / sizeof(controls[0]);
 	     ++index) {
 		if (controls[index] == &speaker &&
 		    getenv("JACK_TEST_NO_SPEAKER"))
+			continue;
+		if (id->numid && controls[index]->numid == id->numid)
+			return controls[index];
+		if (id->numid)
 			continue;
 		if (controls[index]->iface == id->iface &&
 		    !strcmp(controls[index]->name, id->name))
 			return controls[index];
 	}
 	return NULL;
+}
+
+int snd_ctl_card_info(snd_ctl_t *ctl, snd_ctl_card_info_t *info)
+{
+	(void)ctl;
+	(void)info;
+	return 0;
+}
+
+const char *snd_ctl_card_info_get_driver(const snd_ctl_card_info_t *info)
+{
+	(void)info;
+	return getenv("JACK_TEST_QIN") ? "SC9820E audio" : "ums9117-pcm";
+}
+
+void snd_ctl_elem_info_set_interface(snd_ctl_elem_info_t *info,
+				     snd_ctl_elem_iface_t iface)
+{
+	memset(info, 0, sizeof(*info));
+	info->id.iface = iface;
+}
+
+void snd_ctl_elem_info_set_name(snd_ctl_elem_info_t *info, const char *name)
+{
+	info->id.name = name;
+}
+
+int snd_ctl_elem_info_get_type(const snd_ctl_elem_info_t *info)
+{
+	(void)info;
+	return SND_CTL_ELEM_TYPE_BOOLEAN;
+}
+
+int snd_ctl_elem_info_is_readable(const snd_ctl_elem_info_t *info)
+{
+	(void)info;
+	return 1;
+}
+
+int snd_ctl_elem_info_is_writable(const snd_ctl_elem_info_t *info)
+{
+	(void)info;
+	return 1;
+}
+
+unsigned int snd_ctl_elem_info_get_count(const snd_ctl_elem_info_t *info)
+{
+	(void)info;
+	return 1;
+}
+
+long snd_ctl_elem_info_get_min(const snd_ctl_elem_info_t *info)
+{
+	(void)info;
+	return 0;
+}
+
+long snd_ctl_elem_info_get_max(const snd_ctl_elem_info_t *info)
+{
+	(void)info;
+	return 1;
+}
+
+long snd_ctl_elem_value_get_integer(const snd_ctl_elem_value_t *value,
+				    unsigned int index)
+{
+	return value->integer[index];
+}
+
+void snd_ctl_elem_value_set_integer(snd_ctl_elem_value_t *value,
+				    unsigned int index, long level)
+{
+	value->integer[index] = level;
+}
+
+void snd_ctl_elem_value_set_numid(snd_ctl_elem_value_t *value,
+				  unsigned int numid)
+{
+	value->id.numid = numid;
+}
+
+int snd_ctl_poll_descriptors_count(snd_ctl_t *ctl)
+{
+	(void)ctl;
+	return 1;
+}
+
+int snd_ctl_poll_descriptors(snd_ctl_t *ctl, struct pollfd *fds,
+			     unsigned int count)
+{
+	(void)ctl;
+	(void)count;
+	fds[0].fd = -1;
+	return 1;
 }
 
 int snd_ctl_open(snd_ctl_t **ctl, const char *name, int mode)
@@ -75,6 +176,12 @@ int snd_ctl_open(snd_ctl_t **ctl, const char *name, int mode)
 int snd_ctl_close(snd_ctl_t *ctl)
 {
 	(void)ctl;
+	return 0;
+}
+
+int snd_pcm_close(snd_pcm_t *pcm)
+{
+	(void)pcm;
 	return 0;
 }
 
@@ -204,8 +311,17 @@ int snd_ctl_read(snd_ctl_t *ctl, snd_ctl_event_t *event)
 	(void)ctl;
 	if (!subscribed)
 		return -EINVAL;
-	if (!echo_count)
-		return next_script_event(event);
+	if (!echo_count) {
+		int result;
+
+		if (yielded_script) {
+			yielded_script = false;
+			return -EAGAIN;
+		}
+		result = next_script_event(event);
+		yielded_script = result > 0;
+		return result;
+	}
 	event->numid = echo_numids[0];
 	event->mask = SND_CTL_EVENT_MASK_VALUE;
 	for (index = 1; index < echo_count; ++index)

@@ -41,10 +41,8 @@ def test_settings_values_and_date_only_save_preserves_running_clock(tmp_path: Pa
         ],
         name="compile Settings core harness",
     )
-    os_release = tmp_path / "os-release"
-    os_release.write_text('NAME="FPLinux"\nVERSION_ID=1\nBUILD_ID="012345abcdef"\n')
     result = run_process(
-        [str(executable), str(os_release)],
+        [str(executable)],
         name="run Settings core harness",
         timeout=10,
         check=True,

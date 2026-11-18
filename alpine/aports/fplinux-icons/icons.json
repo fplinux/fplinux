@@ -86,6 +86,17 @@
         "24": "outline"
       }
     },
+    "music": {
+      "source": "tabler",
+      "name": "music",
+      "stroke_px": 2,
+      "styles": {
+        "12": "outline",
+        "16": "outline",
+        "20": "outline",
+        "24": "outline"
+      }
+    },
     "wifi": {
       "source": "tabler",
       "name": "wifi",
@@ -578,6 +589,26 @@
         "24": "outline"
       }
     },
+    "rotate": {
+      "source": "tabler",
+      "name": "rotate-clockwise",
+      "styles": {
+        "12": "outline",
+        "16": "outline",
+        "20": "outline",
+        "24": "outline"
+      }
+    },
+    "pointer": {
+      "source": "tabler",
+      "name": "pointer",
+      "styles": {
+        "12": "filled",
+        "16": "filled",
+        "20": "outline",
+        "24": "outline"
+      }
+    },
     "restore": {
       "source": "tabler",
       "name": "minimize",
@@ -699,9 +730,19 @@
       "glyph": "coffee",
       "install": true
     },
+    "org.fplinux.music": {
+      "tile": "clock",
+      "glyph": "music",
+      "install": true
+    },
     "org.fplinux.mre": {
       "tile": "snake",
       "glyph": "cpu",
+      "install": true
+    },
+    "org.fplinux.showcase": {
+      "tile": "snake",
+      "glyph": "sparkles",
       "install": true
     }
   }

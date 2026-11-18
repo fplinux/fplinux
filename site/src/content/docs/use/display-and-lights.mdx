@@ -4,7 +4,6 @@ description: Change the screen brightness, control the keypad light and understa
 ---
 
 import FeatureStatus from '../../../components/FeatureStatus.astro';
-import Key from '../../../components/Key.astro';
 
 Control the screen brightness, keypad light and vibration through the interfaces below. Check [support status](/fplinux/phones/#support-status) and your [phone page](/fplinux/phones/) before using a control; their availability and visible results depend on the phone.
 
@@ -25,7 +24,7 @@ fplinux-brightness get
 fplinux-brightness set 4
 ```
 
-To change it with the keypad, use **Settings → Display → Brightness** in the [phone interface](/fplinux/use/session/). The optional direct-display [Brightness control](/fplinux/apps/brightness/) application uses the same service.
+To change it with the keypad, use **Settings → Display → Brightness** or [Quick settings](/fplinux/use/session/#quick-settings) in the phone interface.
 
 The brightness service keeps the level during the current boot. Settings saves its selection with the other [session settings](/fplinux/use/session/#settings); those files survive power-off only on a persistent system root. The numbers are settings, not percentages or light measurements, and the same number can look different on different phones.
 
@@ -37,7 +36,7 @@ Switching off the backlight leaves the display running. After wake or display en
 
 :::tip[Screen is dark]
 
-If you set level `0`, the screen stays dark. Restore it with `fplinux-brightness set 7` in a shell opened [from your computer](/fplinux/use/connect/), or press <Key>Up</Key> in the Brightness application.
+If you set level `0`, the screen stays dark. Restore it with `fplinux-brightness set 7` in a shell opened [from your computer](/fplinux/use/connect/).
 
 :::
 

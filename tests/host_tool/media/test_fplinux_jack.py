@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-2.0-only
-"""Host checks for headphone-jack output switching at the ALSA control boundary."""
+"""The audiod device owner against scripted ALSA controls and jack events."""
 
 from __future__ import annotations
 
@@ -8,125 +8,131 @@ from typing import TYPE_CHECKING
 import pytest
 
 from tests import ROOT
-from tests.c_harness import c_build_directory, compile_c
+from tests.c_harness import compile_c
 from tests.process import run_process
 
 if TYPE_CHECKING:
     import subprocess
-    from collections.abc import Iterator
     from pathlib import Path
 
-SOURCE = ROOT / "alpine/aports/fplinux-jack/fplinux-jack.c"
+APORT = ROOT / "alpine/aports/fplinux-audiod"
 FIXTURE = ROOT / "tests/host_tool/media/fixtures/fplinux-jack"
 
 
-class FPLinuxJackHostToolTests:
-    """Run the real service against a scripted card from an ALSA control double.
-
-    The double replaces alsa-lib and the kernel driver. It cannot show that
-    the phone reports the jack or that a switch sequence is silent.
-    """
-
-    @pytest.fixture(scope="class")
-    @classmethod
-    def executable(cls, tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
-        """Build the service with the ALSA control double for this host."""
-        with c_build_directory(tmp_path_factory, "fplinux-jack") as directory:
-            executable = directory / "fplinux-jack"
-            compile_c(
-                executable,
-                [
-                    "-std=c11",
-                    "-Wall",
-                    "-Wextra",
-                    "-Werror",
-                    "-I",
-                    str(FIXTURE),
-                    "-I",
-                    str(ROOT / "include/fplinux"),
-                    str(SOURCE),
-                    str(ROOT / "lib/fplinux-shared/fplinux-cli.c"),
-                    str(FIXTURE / "boundary.c"),
-                ],
-                name="compile fplinux-jack with ALSA control double",
-                check=True,
-            )
-            yield executable
-
-    def run_jack(
-        self, executable: Path, *, initial: str, events: str = "", **scenario: str
-    ) -> subprocess.CompletedProcess[str]:
-        """Run the service until the scripted card disappears and it fails."""
-        environment = {
-            "LC_ALL": "C",
-            "JACK_TEST_INITIAL": initial,
-            "JACK_TEST_EVENTS": events,
-            **scenario,
-        }
-        result = run_process(
-            [str(executable)],
-            name="run fplinux-jack",
-            timeout=5,
-            env=environment,
-        )
-        # A lost card ends the service with a diagnostic rather than a crash.
-        assert (result.returncode) == (1), result.stderr
-        assert ("fplinux-jack: read ALSA events:") in (result.stderr)
-        return result
-
-    @staticmethod
-    def switch_writes(result: subprocess.CompletedProcess[str]) -> list[str]:
-        """Return the switch writes that reached the card, in order."""
-        return [
-            line.removeprefix("TRACE ")
-            for line in result.stderr.splitlines()
-            if line.startswith("TRACE ")
-        ]
-
-    @pytest.mark.parametrize(
-        ("initial", "writes", "message"),
+@pytest.fixture(scope="module")
+def device(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    executable = tmp_path_factory.mktemp("audio-controls") / "device"
+    compile_c(
+        executable,
         [
-            ("1", ["headphone on", "speaker off"], "headphones connected"),
-            ("0", ["speaker on", "headphone off"], "headphones disconnected"),
+            "-std=c11",
+            "-Wall",
+            "-Wextra",
+            "-Werror",
+            "-ffunction-sections",
+            "-Wl,--gc-sections",
+            f"-I{FIXTURE}",
+            f"-I{APORT}",
+            f"-I{ROOT / 'include/fplinux'}",
+            str(APORT / "audio-device.c"),
+            str(FIXTURE / "device.c"),
+            str(FIXTURE / "boundary.c"),
         ],
-        ids=["1", "0"],
+        name="compile audiod device owner with ALSA control double",
     )
-    def test_start_selects_the_output_for_the_current_jack_state(
-        self, executable: Path, initial: str, writes: list[str], message: str
-    ) -> None:
-        """At start the new output is enabled before the other is disabled."""
-        result = self.run_jack(executable, initial=initial)
-        assert (self.switch_writes(result)) == (writes)
-        assert (message) in (result.stdout)
+    return executable
 
-    def test_jack_changes_switch_outputs_and_manual_changes_persist(
-        self, executable: Path
-    ) -> None:
-        """Only jack changes move playback; a manual speaker change stays."""
-        result = self.run_jack(executable, initial="0", events="insert,speaker-on,remove")
-        assert (self.switch_writes(result)) == (
-            [
-                "speaker on",
-                "headphone off",
-                "headphone on",
-                "speaker off",
-                "speaker on",
-                "headphone off",
-            ]
-        )
 
-    def test_without_a_speaker_switch_outputs_are_left_alone(self, executable: Path) -> None:
-        """A card without the fitted speaker keeps its manual outputs."""
-        result = self.run_jack(
-            executable, initial="1", events="remove,insert", JACK_TEST_NO_SPEAKER="1"
-        )
-        assert (self.switch_writes(result)) == ([])
-        assert ("no Speaker Playback Switch control") in (result.stdout)
+def run_device(device: Path, **scenario: str) -> subprocess.CompletedProcess[str]:
+    return run_process(
+        [str(device)],
+        name="exercise audiod ALSA controls",
+        timeout=5,
+        env={"LC_ALL": "C", **scenario},
+        check=True,
+    )
 
-    def test_failed_enable_keeps_the_previous_output(self, executable: Path) -> None:
-        """Playback is never left without an output when enabling one fails."""
-        result = self.run_jack(
-            executable, initial="0", events="insert", JACK_TEST_FAIL_WRITE="headphone on"
-        )
-        assert (self.switch_writes(result)) == (["speaker on", "headphone off", "headphone on"])
-        assert ("set Headphone Playback Switch on:") in (result.stderr)
+
+def writes(result: subprocess.CompletedProcess[str]) -> list[str]:
+    return [line.removeprefix("TRACE ") for line in result.stderr.splitlines()]
+
+
+@pytest.mark.parametrize(
+    ("initial", "expected"),
+    [("1", ["headphone on", "speaker off"]), ("0", ["speaker on", "headphone off"])],
+)
+def test_auto_route_enables_new_output_before_disabling_old(
+    device: Path, initial: str, expected: list[str]
+) -> None:
+    result = run_device(device, JACK_TEST_INITIAL=initial)
+    assert writes(result) == expected
+    assert "init=0 rate=48000 speaker=1 headphones=1" in result.stdout
+
+
+def test_jack_changes_move_auto_route_and_unrelated_controls_do_not(device: Path) -> None:
+    result = run_device(device, JACK_TEST_INITIAL="0", JACK_TEST_EVENTS="insert,speaker-on,remove")
+    assert writes(result) == [
+        "speaker on",
+        "headphone off",
+        "headphone on",
+        "speaker off",
+        "speaker on",
+        "headphone off",
+    ]
+    assert result.stdout.splitlines()[1:3] == ["inserted", "removed"]
+
+
+def test_headphones_only_card_never_requests_missing_speaker(device: Path) -> None:
+    result = run_device(device, JACK_TEST_INITIAL="1", JACK_TEST_NO_SPEAKER="1")
+    assert writes(result) == ["headphone on"]
+    assert "speaker=0 headphones=1" in result.stdout
+
+
+def test_failed_enable_does_not_disable_previous_output(device: Path) -> None:
+    result = run_device(
+        device,
+        JACK_TEST_INITIAL="0",
+        JACK_TEST_EVENTS="insert",
+        JACK_TEST_FAIL_WRITE="headphone on",
+    )
+    assert writes(result) == ["speaker on", "headphone off", "headphone on"]
+    assert result.stdout.endswith("events=-5\n")
+
+
+def test_qin_card_uses_native_44100_with_fixed_speaker(device: Path) -> None:
+    result = run_device(device, JACK_TEST_QIN="1")
+    assert "init=0 rate=44100 speaker=1 headphones=0" in result.stdout
+    assert writes(result) == []
+
+
+def test_alarm_uses_speaker_when_selected_headphones_are_known_absent_and_restores_preference(
+    device: Path,
+) -> None:
+    result = run_device(device, JACK_TEST_INITIAL="0", JACK_TEST_ALARM_FALLBACK="1")
+    assert writes(result) == [
+        "speaker on",
+        "headphone off",
+        "headphone on",
+        "speaker off",
+        "speaker on",
+        "headphone off",
+        "headphone on",
+        "speaker off",
+    ]
+    assert result.stdout.splitlines()[-2:] == [
+        "alarm result=0 desired=2 applied=1",
+        "restore desired=2 applied=2",
+    ]
+
+
+def test_headphones_only_card_reports_alarm_unavailable_when_jack_is_known_absent(
+    device: Path,
+) -> None:
+    result = run_device(
+        device, JACK_TEST_INITIAL="0", JACK_TEST_NO_SPEAKER="1", JACK_TEST_ALARM_FALLBACK="1"
+    )
+    assert writes(result) == ["headphone on"]
+    assert result.stdout.splitlines()[-2:] == [
+        "alarm result=-19 desired=2 applied=2",
+        "restore desired=2 applied=2",
+    ]

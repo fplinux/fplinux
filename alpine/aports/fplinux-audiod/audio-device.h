@@ -9,22 +9,79 @@
 #define FPLINUX_AUDIO_DEVICE_FDS 4U
 
 struct _snd_pcm;
+struct _snd_ctl;
+
+enum fplinux_audio_route {
+	FPLINUX_AUDIO_ROUTE_AUTO,
+	FPLINUX_AUDIO_ROUTE_SPEAKER,
+	FPLINUX_AUDIO_ROUTE_HEADPHONES,
+};
+
+enum fplinux_audio_device_event {
+	FPLINUX_AUDIO_DEVICE_JACK_CHANGED = 1,
+	FPLINUX_AUDIO_DEVICE_PRIVATE_LOST = 2,
+};
+
+struct fplinux_audio_volume_control {
+	unsigned int id;
+	unsigned int count;
+	long maximum;
+	long saved[2];
+};
 
 /*
- * The sound card, opened nonblocking for 48000 Hz signed 16-bit stereo with
+ * The sound card, opened nonblocking for native-rate signed 16-bit stereo with
  * an exact period and buffer, so that a busy card fails at once instead of
- * blocking the service. audiod never touches the mixer controls.
+ * blocking the service. The same owner controls routes, jack and FM.
  */
 struct fplinux_audio_device {
 	const char *name;
 	uint32_t period;
 	uint32_t buffer;
+	uint32_t rate;
 	struct _snd_pcm *pcm;
+	struct _snd_ctl *control;
+	int control_fd;
+	int radio_fd;
+	unsigned int headphone_id;
+	unsigned int speaker_id;
+	unsigned int jack_id;
+	unsigned int fm_id;
+	struct fplinux_audio_volume_control headphone_volume;
+	struct fplinux_audio_volume_control speaker_volume;
+	struct fplinux_audio_volume_control master_volume;
+	unsigned int fm_volume;
+	bool fixed_speaker;
+	bool jack_present;
+	bool fm_enabled;
+	bool fm_muted;
+	bool alarm_active;
+	enum fplinux_audio_route route;
+	enum fplinux_audio_route applied_route;
 	struct pollfd fds[FPLINUX_AUDIO_DEVICE_FDS];
 	unsigned int fd_count;
 	/* Output frames written or dropped since the service started. */
 	uint64_t written;
 };
+
+/* Discover only controls that the current card actually exposes. */
+int fplinux_audio_device_init(struct fplinux_audio_device *device);
+void fplinux_audio_device_cleanup(struct fplinux_audio_device *device);
+int fplinux_audio_device_route(struct fplinux_audio_device *device,
+			       enum fplinux_audio_route route);
+/* Alarm may use a supported speaker while the selected private sink is absent. */
+int fplinux_audio_device_alarm(struct fplinux_audio_device *device,
+			       bool active);
+/* Returns event bits, without switching routes, or a negative errno. */
+int fplinux_audio_device_events(struct fplinux_audio_device *device);
+/* Tune while muted, then claim or release the exclusive FM route. */
+int fplinux_audio_device_tune(struct fplinux_audio_device *device,
+			      unsigned int frequency);
+bool fplinux_audio_device_fm_available(
+	const struct fplinux_audio_device *device);
+int fplinux_audio_device_fm(struct fplinux_audio_device *device, bool enabled,
+			    unsigned int level);
+int fplinux_audio_device_radio_close(struct fplinux_audio_device *device);
 
 /* Opens and prepares the card; 0 or a negative errno. */
 int fplinux_audio_device_open(struct fplinux_audio_device *device);

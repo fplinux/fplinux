@@ -278,7 +278,10 @@ static const char *command_icon(int id)
 	case COMMAND_DELETE:
 		return "delete";
 	case COMMAND_SEARCH:
+	case COMMAND_FIND:
 		return "search";
+	case COMMAND_SAVE_NAME:
+		return "save";
 	case COMMAND_NEW_FOLDER:
 		return "add";
 	case COMMAND_REFRESH:
@@ -881,14 +884,15 @@ static void show_details(struct files_app *app, size_t index)
 	       entry->kind == FPLINUX_FILES_KIND_SYMLINK ? _("Symbolic link") :
 							   _("Special file");
 	format_size(entry->size, size, sizeof(size));
-	fplinux_ui_form_append_string(screen, _("Name"), name);
-	fplinux_ui_form_append_string(screen, _("Type"), kind);
-	fplinux_ui_form_append_string(screen, _("Path"), displayed);
+	fplinux_ui_form_append_property(screen, _("Name"), name);
+	fplinux_ui_form_append_property(screen, _("Type"), kind);
+	fplinux_ui_form_append_property(screen, _("Path"), displayed);
 	if (entry->kind == FPLINUX_FILES_KIND_FILE)
-		fplinux_ui_form_append_string(screen, _("Size"), size);
+		fplinux_ui_form_append_property(screen, _("Size"), size);
 	if (localtime_r(&entry->modified, &local)) {
 		strftime(modified, sizeof(modified), "%Y-%m-%d %H:%M", &local);
-		fplinux_ui_form_append_string(screen, _("Modified"), modified);
+		fplinux_ui_form_append_property(screen, _("Modified"),
+						modified);
 	}
 	add_command(app, screen, COMMAND_BACK, FPLINUX_UI_COMMAND_BACK, NULL,
 		    0);

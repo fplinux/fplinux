@@ -114,7 +114,6 @@ export default defineConfig({
 					items: pages(
 						"apps",
 						"apps/api-demos",
-						"apps/brightness",
 						"apps/armada",
 						"apps/tyrquake",
 						"apps/ffmpeg",

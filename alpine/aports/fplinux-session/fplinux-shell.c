@@ -25,6 +25,7 @@
 #include "fplinux-ui-profile.h"
 #include "fplinux-weston-presentation.h"
 #include "session-core.h"
+#include "session-indicator-render.h"
 #include "session-launch-surface.h"
 
 struct phone_shell;
@@ -73,6 +74,7 @@ struct phone_shell {
 	struct weston_layer launcher_layer;
 	struct weston_layer application_layer;
 	struct weston_layer progress_layer;
+	struct weston_layer indicator_layer;
 	struct weston_layer lock_layer;
 	struct weston_layer startup_layer;
 	struct weston_layer hidden_layer;
@@ -81,6 +83,13 @@ struct phone_shell {
 	struct fplinux_launch_frame held_frame;
 	struct launch_surface startup_mark;
 	struct fplinux_launch_frame startup_frame;
+	struct launch_surface indicator_surface;
+	struct fplinux_session_indicator_frame indicator_frame;
+	struct fplinux_session_indicator indicator_view;
+	int indicator_screen_width;
+	int indicator_screen_height;
+	struct weston_coord_global indicator_position;
+	enum fplinux_ui_session_theme indicator_theme;
 	struct weston_curtain *launch_background;
 	struct launch_surface launch_card;
 	struct launch_surface launch_spinner;
@@ -135,11 +144,13 @@ static void output_frame(struct wl_listener *listener, void *data);
 static void output_latched(struct wl_listener *listener, void *data);
 static void output_presented(struct wl_listener *listener, void *data);
 static void hold_frame(void *context, bool enabled);
+static void hide_indicator_surface(struct phone_shell *shell);
 
 static void detach_output(struct phone_shell *shell)
 {
 	if (!shell->output)
 		return;
+	hide_indicator_surface(shell);
 	hold_frame(shell, false);
 	wl_list_remove(&shell->frame_listener.link);
 	wl_list_remove(&shell->latch_listener.link);
@@ -227,6 +238,75 @@ static bool create_launch_surface(struct phone_shell *shell,
 fail:
 	destroy_launch_surface(surface);
 	return false;
+}
+
+static void hide_indicator_surface(struct phone_shell *shell)
+{
+	/* Drop every renderer reference before freeing the immutable pixels. */
+	destroy_launch_surface(&shell->indicator_surface);
+	fplinux_session_indicator_frame_clear(&shell->indicator_frame);
+}
+
+static bool same_indicator(const struct fplinux_session_indicator *left,
+			   const struct fplinux_session_indicator *right)
+{
+	return left->softkeys == right->softkeys &&
+	       left->warning == right->warning && left->kind == right->kind &&
+	       left->level.availability == right->level.availability &&
+	       left->level.minimum == right->level.minimum &&
+	       left->level.maximum == right->level.maximum &&
+	       left->level.value == right->level.value;
+}
+
+static void update_indicator_surface(struct phone_shell *shell,
+				     struct weston_output *output)
+{
+	struct fplinux_session_indicator indicator;
+	struct fplinux_session_indicator_frame frame = { 0 };
+	struct launch_surface surface = { 0 };
+	struct weston_coord_global position = output->pos;
+	enum fplinux_ui_session_theme theme =
+		fplinux_session_theme(shell->manager);
+
+	fplinux_session_get_indicator(shell->manager, &indicator);
+	if (!indicator.visible || !shell->compositor->session_active) {
+		hide_indicator_surface(shell);
+		return;
+	}
+	if (shell->indicator_surface.view &&
+	    same_indicator(&shell->indicator_view, &indicator) &&
+	    shell->indicator_theme == theme &&
+	    shell->indicator_screen_width == output->width &&
+	    shell->indicator_screen_height == output->height &&
+	    shell->indicator_position.c.x == output->pos.c.x &&
+	    shell->indicator_position.c.y == output->pos.c.y)
+		return;
+	/* Never repaint an allocation still borrowed by the renderer. */
+	if (!fplinux_session_indicator_render(
+		    &frame, output->width, output->height, theme, &indicator)) {
+		hide_indicator_surface(shell);
+		return;
+	}
+	position.c.x += frame.x;
+	position.c.y += frame.y;
+	if (!create_launch_surface(shell, &surface, PIXMAN_r5g6b5, frame.pixels,
+				   frame.width, frame.height,
+				   (int)frame.stride_bytes, position,
+				   "FPLinux level indicator")) {
+		fplinux_session_indicator_frame_clear(&frame);
+		hide_indicator_surface(shell);
+		return;
+	}
+	weston_view_move_to_layer(surface.view,
+				  &shell->indicator_layer.view_list);
+	hide_indicator_surface(shell);
+	shell->indicator_surface = surface;
+	shell->indicator_frame = frame;
+	shell->indicator_view = indicator;
+	shell->indicator_theme = theme;
+	shell->indicator_screen_width = output->width;
+	shell->indicator_screen_height = output->height;
+	shell->indicator_position = output->pos;
 }
 
 static bool capture_surface(struct phone_shell *shell,
@@ -807,6 +887,7 @@ static void update_surfaces(void *context)
 		show_background(shell, output);
 	apply_scene(shell, output);
 	update_launch_surface(shell, output);
+	update_indicator_surface(shell, output);
 	if (fplinux_session_is_ready(shell->manager))
 		hide_startup_surface(shell);
 	if (!shell->ready_written && fplinux_session_is_ready(shell->manager)) {
@@ -1180,6 +1261,7 @@ static void session_changed(struct wl_listener *listener, void *data)
 		fplinux_session_cancel_input(shell->manager,
 					     FPLINUX_SESSION_KEY_KEYBOARD);
 		hide_launch_surface(shell);
+		hide_indicator_surface(shell);
 	}
 }
 
@@ -1257,6 +1339,7 @@ static void shell_destroy(struct wl_listener *listener, void *data)
 	weston_layer_fini(&shell->launcher_layer);
 	weston_layer_fini(&shell->application_layer);
 	weston_layer_fini(&shell->progress_layer);
+	weston_layer_fini(&shell->indicator_layer);
 	weston_layer_fini(&shell->lock_layer);
 	weston_layer_fini(&shell->startup_layer);
 	weston_layer_fini(&shell->hidden_layer);
@@ -1296,6 +1379,7 @@ WL_EXPORT int wet_shell_init(struct weston_compositor *compositor, int *argc,
 	weston_layer_init(&shell->launcher_layer, compositor);
 	weston_layer_init(&shell->application_layer, compositor);
 	weston_layer_init(&shell->progress_layer, compositor);
+	weston_layer_init(&shell->indicator_layer, compositor);
 	weston_layer_init(&shell->lock_layer, compositor);
 	weston_layer_init(&shell->startup_layer, compositor);
 	weston_layer_init(&shell->hidden_layer, compositor);
@@ -1309,8 +1393,10 @@ WL_EXPORT int wet_shell_init(struct weston_compositor *compositor, int *argc,
 				  WESTON_LAYER_POSITION_NORMAL + 2);
 	weston_layer_set_position(&shell->lock_layer,
 				  WESTON_LAYER_POSITION_LOCK);
-	weston_layer_set_position(&shell->startup_layer,
+	weston_layer_set_position(&shell->indicator_layer,
 				  WESTON_LAYER_POSITION_LOCK + 1);
+	weston_layer_set_position(&shell->startup_layer,
+				  WESTON_LAYER_POSITION_LOCK + 2);
 	weston_layer_set_position(&shell->hidden_layer,
 				  WESTON_LAYER_POSITION_HIDDEN);
 	shell->destroy_listener.notify = shell_destroy;

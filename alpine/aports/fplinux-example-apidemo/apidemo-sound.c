@@ -8,6 +8,7 @@
 #include "apidemo.h"
 
 #include <fplinux/fplinux-ui-audio.h>
+#include <fplinux/fplinux-ui-session.h>
 
 #include <errno.h>
 #include <stdint.h>
@@ -22,10 +23,10 @@
 #define CHUNK_FRAMES 512
 #define LEFT_HZ 440
 #define RIGHT_HZ 660
-#define AMPLITUDE 6000
 enum { COMMAND_START = 1, COMMAND_STOP };
 
 static const unsigned int rates[] = { 8000, 22050, 48000 };
+static const unsigned int amplitudes[] = { 6000, 24000 };
 
 /* The open demo screen; only one is on the stack at a time. */
 static struct {
@@ -35,21 +36,25 @@ static struct {
 	lv_timer_t *timer;
 	unsigned int rate;
 	unsigned int channels;
+	unsigned int amplitude;
 	/* Tone phases, 2^32 per cycle, left and right. */
 	uint32_t phase[2];
 	size_t rate_item;
 	size_t channels_item;
+	size_t signal_item;
+	size_t media_volume;
+	size_t output;
 	size_t status;
 	size_t queued;
 } sound;
 
-/* sin(2πp / 2^32) × AMPLITUDE by Bhaskara's approximation, without libm. */
+/* sin(2πp / 2^32) at the selected signal level, without libm. */
 static int16_t tone_sample(uint32_t phase)
 {
 	int64_t half = (phase >> 16) & 0x7fff;
 	int64_t product = half * (32768 - half);
-	int64_t value =
-		16 * product * AMPLITUDE / (5LL * 32768 * 32768 - 4 * product);
+	int64_t value = 16 * product * sound.amplitude /
+			(5LL * 32768 * 32768 - 4 * product);
 
 	return (int16_t)(phase & 0x80000000U ? -value : value);
 }
@@ -85,6 +90,44 @@ static void set_line(size_t item, const char *text)
 {
 	if (sound.form)
 		fplinux_ui_form_set_string(sound.form, item, text);
+}
+
+static void query_system_sound(struct apidemo *app)
+{
+	struct fplinux_ui_session_message query = {
+		.type = FPLINUX_UI_SESSION_SETTING,
+		.name = "volume",
+	};
+
+	if (!fplinux_ui_audio_supported(app->ui))
+		return;
+	(void)fplinux_ui_send(app->ui, &query);
+	strcpy(query.name, "audio_output_active");
+	(void)fplinux_ui_send(app->ui, &query);
+}
+
+void apidemo_sound_setting(struct apidemo *app,
+			   const struct fplinux_ui_session_message *message)
+{
+	bool media = !strcmp(message->name, "volume");
+	bool output = !strcmp(message->name, "audio_output_active");
+	const char *text;
+
+	if (sound.app != app || !sound.form || (!media && !output) ||
+	    (message->type != FPLINUX_UI_SESSION_SETTING &&
+	     message->type != FPLINUX_UI_SESSION_ERROR))
+		return;
+	text = message->type == FPLINUX_UI_SESSION_ERROR ? _("Unavailable") :
+							   message->value;
+	if (output && message->type == FPLINUX_UI_SESSION_SETTING) {
+		if (!strcmp(text, "SPEAKER"))
+			text = _("Speaker");
+		else if (!strcmp(text, "HEADPHONES"))
+			text = _("Headphones");
+		else
+			text = _("Unavailable");
+	}
+	set_line(media ? sound.media_volume : sound.output, text);
 }
 
 /* "OK", or the errno name and its description. */
@@ -210,6 +253,7 @@ static bool start_timer(struct apidemo *app)
 /* Opens a stream at the chosen rate and channels and starts the tone. */
 static void start_tone(struct apidemo *app)
 {
+	query_system_sound(app);
 	sound.stream =
 		fplinux_ui_audio_open(app->ui, sound.rate, sound.channels);
 	if (!sound.stream) {
@@ -255,11 +299,14 @@ static void tone_changed(struct fplinux_ui *ui, struct fplinux_ui_screen *form,
 			 size_t item, void *context)
 {
 	(void)ui;
-	if (item != sound.rate_item && item != sound.channels_item)
+	if (item != sound.rate_item && item != sound.channels_item &&
+	    item != sound.signal_item)
 		return;
 	sound.rate = rates[fplinux_ui_form_get_choice(form, sound.rate_item)];
 	sound.channels =
 		fplinux_ui_form_get_choice(form, sound.channels_item) + 1;
+	sound.amplitude =
+		amplitudes[fplinux_ui_form_get_choice(form, sound.signal_item)];
 	/* A playing tone starts again in the new format. */
 	if (sound.stream) {
 		stop_stream();
@@ -288,6 +335,7 @@ static void open_tone(struct apidemo *app, const struct apidemo_entry *entry)
 	static char rate_names[APIDEMO_COUNT(rates)][24];
 	const char *rate_choices[APIDEMO_COUNT(rates)];
 	const char *channel_choices[] = { _("Mono"), _("Stereo") };
+	const char *signal_choices[] = { "18%", "73%" };
 	struct fplinux_ui_screen *form = new_form(app, entry);
 
 	if (!form)
@@ -300,6 +348,7 @@ static void open_tone(struct apidemo *app, const struct apidemo_entry *entry)
 	}
 	sound.rate = rates[0];
 	sound.channels = 1;
+	sound.amplitude = amplitudes[0];
 	sound.status = fplinux_ui_form_append_string(
 		form, _("Status"),
 		fplinux_ui_audio_supported(app->ui) ? _("Stopped") :
@@ -310,6 +359,13 @@ static void open_tone(struct apidemo *app, const struct apidemo_entry *entry)
 	sound.channels_item = fplinux_ui_form_append_choice(
 		form, _("Channels"), FPLINUX_UI_CHOICE_POPUP, channel_choices,
 		APIDEMO_COUNT(channel_choices));
+	sound.signal_item = fplinux_ui_form_append_choice(
+		form, _("Signal level"), FPLINUX_UI_CHOICE_POPUP,
+		signal_choices, APIDEMO_COUNT(signal_choices));
+	sound.media_volume = fplinux_ui_form_append_string(
+		form, _("System Media (0–10)"), _("Unavailable"));
+	sound.output = fplinux_ui_form_append_string(form, _("Output"),
+						     _("Unavailable"));
 	sound.queued = fplinux_ui_form_append_string(form, _("Queued"),
 						     _("No stream"));
 	fplinux_ui_form_append_string(
@@ -328,6 +384,7 @@ static void open_tone(struct apidemo *app, const struct apidemo_entry *entry)
 	apidemo_add_back(form);
 	fplinux_ui_screen_set_listener(form, tone_command, tone_changed, app);
 	fplinux_ui_push(app->ui, form);
+	query_system_sound(app);
 }
 
 /* Hooks */
@@ -337,6 +394,8 @@ static void sound_visibility(struct apidemo *app, bool visible)
 	(void)app;
 	if (!sound.form)
 		return;
+	if (visible)
+		query_system_sound(app);
 	/* The system pauses the stream; the timer waits with it. */
 	if (sound.timer) {
 		if (visible) {

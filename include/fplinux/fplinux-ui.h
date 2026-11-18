@@ -60,6 +60,8 @@ enum fplinux_ui_event_type {
 	/* Catalogue OPEN or retained-task RESUME, before its next visible frame. */
 	FPLINUX_UI_EVENT_ACTIVATION,
 	FPLINUX_UI_EVENT_DOCUMENT_RESULT,
+	/* Read the updated snapshot with fplinux_ui_system_level_get(). */
+	FPLINUX_UI_EVENT_SYSTEM_LEVELS,
 };
 
 enum fplinux_ui_lifecycle {
@@ -195,6 +197,7 @@ struct fplinux_ui_metrics {
 	int divider_width; /* line between adjacent panels */
 	int frame_padding; /* inside a framed control: gauge, clock face */
 	int scrollbar_space; /* indicator width plus both side gaps */
+	int bar_height; /* height of a progress track */
 };
 
 /*

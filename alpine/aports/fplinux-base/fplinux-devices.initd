@@ -1,0 +1,23 @@
+#!/sbin/openrc-run
+# SPDX-License-Identifier: GPL-2.0-only
+# shellcheck shell=sh disable=SC2034
+
+description="FPLinux device access policy"
+
+depend() {
+	need devfs sysfs
+	before fplinux-session
+}
+
+start() {
+	if ! grep -q '^render:' /etc/group; then
+		addgroup -S render || return 1
+	fi
+	# Rendering does not grant ownership of the display or its input devices.
+	for node in /dev/dri/renderD[0-9]*; do
+		[ -c "$node" ] || continue
+		chgrp render "$node" || return 1
+		chmod 0660 "$node" || return 1
+	done
+	return 0
+}

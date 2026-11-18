@@ -178,11 +178,8 @@ msgstr "Масштаб"
 msgid "Fit"
 msgstr "Вписать"
 
-msgid "Original size"
-msgstr "Исходный размер"
-
 msgid "Integer"
-msgstr "Целый"
+msgstr "Кратный"
 
 msgid "Rotation"
 msgstr "Поворот"

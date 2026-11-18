@@ -21,7 +21,7 @@ backlight = "uniwa-v1000-backlight"
 levels = [0, 3, 7, 10, 14, 17, 20, 24, 27, 31, 34]
 
 [rootfs]
-packages = ["fplinux-audio", "fplinux-font-terminus-8x16", "fplinux-jack"]
+packages = ["fplinux-audio", "fplinux-font-terminus-8x16"]
 
 [bundle]
 packages = []

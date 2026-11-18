@@ -447,6 +447,59 @@ long fplinux_audio_stream_queued(const struct fplinux_audio_stream *stream)
 	return queued > 0 ? (long)queued : 0;
 }
 
+bool fplinux_audio_stream_pause(struct fplinux_audio_stream *stream,
+				bool paused)
+{
+	struct fplinux_audio_message message = {
+		.type = FPLINUX_AUDIO_PAUSE,
+		.flags = paused ? 1 : 0,
+	};
+	ssize_t sent;
+
+	if (!stream) {
+		errno = EINVAL;
+		return false;
+	}
+	if (stream->ended ||
+	    atomic_load_explicit(&stream->ring->state, memory_order_acquire) ==
+		    FPLINUX_AUDIO_RING_ENDED) {
+		errno = EPIPE;
+		return false;
+	}
+	message.stream = stream->id;
+	do {
+		sent = send(stream->client->fd, &message, sizeof(message),
+			    MSG_DONTWAIT | MSG_NOSIGNAL);
+	} while (sent < 0 && errno == EINTR);
+	if (sent == (ssize_t)sizeof(message))
+		return true;
+	if (sent >= 0)
+		errno = EIO;
+	if (errno != EAGAIN && errno != EWOULDBLOCK) {
+		int error = errno;
+
+		hang_up(stream->client);
+		errno = error;
+	}
+	return false;
+}
+
+bool fplinux_audio_stream_status(const struct fplinux_audio_stream *stream,
+				 uint32_t *state, uint32_t *reason)
+{
+	if (!stream || !state || !reason) {
+		errno = EINVAL;
+		return false;
+	}
+	*state = stream->ended ? FPLINUX_AUDIO_RING_ENDED :
+				 atomic_load_explicit(&stream->ring->state,
+						      memory_order_acquire);
+	*reason = stream->ended ? FPLINUX_AUDIO_REASON_DEVICE :
+				  atomic_load_explicit(&stream->ring->reason,
+						       memory_order_acquire);
+	return true;
+}
+
 void fplinux_audio_stream_close(struct fplinux_audio_stream *stream)
 {
 	struct fplinux_audio_client *client;

@@ -205,10 +205,6 @@
     "status": "untested",
     "note": "Application use on this phone is unverified."
   },
-  "brightness-control": {
-    "status": "untested",
-    "note": ""
-  },
   "tyrquake": {
     "status": "untested",
     "note": ""

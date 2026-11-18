@@ -397,6 +397,46 @@ test_late_error_preserves_catalogue(struct fplinux_ui *ui,
 	assert(ui->depth == 1);
 }
 
+static void test_playback_states(struct fplinux_ui *ui,
+				 struct fplinux_launcher_tasks *tasks)
+{
+	struct fplinux_ui_session_message message = {
+		.type = FPLINUX_UI_SESSION_TASKS,
+		.has_tasks = true,
+		.task_count = 1,
+		.tasks = { { .app_id = "org.fplinux.music",
+			     .title = "Музыка",
+			     .lifecycle = FPLINUX_UI_SESSION_BACKGROUND,
+			     .token = 303 } },
+	};
+	static const struct {
+		enum fplinux_ui_session_playback playback;
+		const char *text;
+	} states[] = {
+		{ FPLINUX_UI_SESSION_PLAYBACK_PLAYING, "Playing" },
+		{ FPLINUX_UI_SESSION_PLAYBACK_PAUSED, "Paused" },
+		{ FPLINUX_UI_SESSION_PLAYBACK_HELD, "Audio interrupted" },
+		{ FPLINUX_UI_SESSION_PLAYBACK_UNAVAILABLE,
+		  "Audio unavailable" },
+		{ FPLINUX_UI_SESSION_PLAYBACK_NONE, "Background" },
+	};
+
+	fplinux_launcher_tasks_open(tasks);
+	for (size_t i = 0; i < sizeof(states) / sizeof(states[0]); ++i) {
+		message.tasks[0].playback = states[i].playback;
+		assert(fplinux_launcher_tasks_receive(tasks, &message));
+		struct fplinux_ui_screen *list = fplinux_ui_current(ui);
+
+		assert(list->count == 1 && list->focus == 0);
+		assert(!strcmp(list->rows[0].text, "Музыка"));
+		assert(!strcmp(list->rows[0].detail, states[i].text));
+	}
+	message.tasks[0].lifecycle = FPLINUX_UI_SESSION_CLOSING;
+	message.tasks[0].playback = FPLINUX_UI_SESSION_PLAYBACK_PLAYING;
+	assert(fplinux_launcher_tasks_receive(tasks, &message));
+	assert(!strcmp(fplinux_ui_current(ui)->rows[0].detail, "Closing"));
+}
+
 static void test_states(struct fplinux_ui *ui,
 			struct fplinux_launcher_tasks *tasks)
 {
@@ -562,6 +602,56 @@ static void test_errors(struct fplinux_ui *ui,
 	assert(ui->depth == 1 && !ui->sent_count);
 }
 
+static void test_restore_focus(struct fplinux_ui *ui,
+			       struct fplinux_launcher_tasks *tasks)
+{
+	struct fplinux_ui_session_message message = {
+		.type = FPLINUX_UI_SESSION_TASKS,
+		.has_tasks = true,
+		.task_count = 3,
+		.tasks = {
+			{ .app_id = "org.example.notes", .title = "Notes",
+			  .lifecycle = FPLINUX_UI_SESSION_BACKGROUND, .token = 101 },
+			{ .app_id = "org.example.editor", .title = "Editor",
+			  .lifecycle = FPLINUX_UI_SESSION_BACKGROUND, .token = 202 },
+			{ .app_id = "org.example.game", .title = "Game",
+			  .lifecycle = FPLINUX_UI_SESSION_BACKGROUND, .token = 303 },
+		},
+	};
+
+	fplinux_launcher_tasks_open(tasks);
+	assert(fplinux_launcher_tasks_receive(tasks, &message));
+	focus_row(ui, 1);
+	fplinux_launcher_tasks_set_blocked(tasks, true);
+	struct fplinux_ui_session_task editor = message.tasks[1];
+
+	message.tasks[1] = message.tasks[0];
+	message.tasks[0] = message.tasks[2];
+	message.tasks[2] = editor;
+	assert(fplinux_launcher_tasks_receive(tasks, &message));
+	fplinux_launcher_tasks_set_blocked(tasks, false);
+	fplinux_launcher_tasks_open(tasks);
+	struct fplinux_ui_screen *list = fplinux_ui_current(ui);
+
+	assert(list->focus == 2 && !strcmp(list->rows[2].text, "Editor"));
+	fplinux_launcher_tasks_set_blocked(tasks, true);
+	message.task_count = 2;
+	assert(fplinux_launcher_tasks_receive(tasks, &message));
+	fplinux_launcher_tasks_set_blocked(tasks, false);
+	fplinux_launcher_tasks_open(tasks);
+	list = fplinux_ui_current(ui);
+	assert(list->focus == 1 && !strcmp(list->rows[1].text, "Notes"));
+	fplinux_launcher_tasks_set_blocked(tasks, true);
+	message.task_count = 0;
+	assert(fplinux_launcher_tasks_receive(tasks, &message));
+	fplinux_launcher_tasks_set_blocked(tasks, false);
+	fplinux_launcher_tasks_open(tasks);
+	list = fplinux_ui_current(ui);
+	assert(list->count == 1 && list->focus == 0);
+	assert(!strcmp(list->rows[0].text, "No open apps"));
+	assert(!find_command(list, FPLINUX_UI_COMMAND_SCREEN));
+}
+
 int main(int argc, char **argv)
 {
 	struct fplinux_ui ui = { .depth = 1 };
@@ -585,6 +675,8 @@ int main(int argc, char **argv)
 		test_late_error_preserves_catalogue(&ui, &tasks);
 	else if (!strcmp(argv[1], "states"))
 		test_states(&ui, &tasks);
+	else if (!strcmp(argv[1], "playback"))
+		test_playback_states(&ui, &tasks);
 	else if (!strcmp(argv[1], "refresh"))
 		test_refresh(&ui, &tasks);
 	else if (!strcmp(argv[1], "icons"))
@@ -596,6 +688,8 @@ int main(int argc, char **argv)
 		test_interruptions(&ui, &tasks);
 	else if (!strcmp(argv[1], "errors"))
 		test_errors(&ui, &tasks);
+	else if (!strcmp(argv[1], "restore-focus"))
+		test_restore_focus(&ui, &tasks);
 	else
 		assert(false);
 	fplinux_launcher_tasks_close(&tasks);

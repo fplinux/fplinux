@@ -44,9 +44,9 @@ struct fplinux_audio_mixer_stream {
 	uint32_t channels;
 	/* Stream frames per output frame, 32.32. */
 	uint64_t step;
-	/* The first frame still needed, and the phase past it, 0.32. */
+	/* The first frame still needed, and the phase past it, 32.32. */
 	uint32_t read;
-	uint32_t phase;
+	uint64_t phase;
 	uint32_t heard;
 	/* Set by the caller between periods; a paused stream takes no frames. */
 	bool paused;
@@ -103,9 +103,5 @@ uint32_t fplinux_audio_mixer_heard(struct fplinux_audio_mixer_stream *stream,
 /* Saturates a period of the mix to signed 16-bit interleaved stereo. */
 void fplinux_audio_mixer_output(const int32_t *mix, int16_t *output,
 				uint32_t frames);
-
-/* Apply a master gain to the complete mix, ramping across one period. */
-void fplinux_audio_mixer_master(int32_t *mix, uint32_t frames,
-				struct fplinux_audio_mixer_gain *gain);
 
 #endif

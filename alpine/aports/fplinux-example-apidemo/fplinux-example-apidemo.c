@@ -561,6 +561,8 @@ static void handle_event(struct fplinux_ui *ui,
 				categories[i]->resize(app);
 		break;
 	case FPLINUX_UI_EVENT_SESSION:
+		if (event->session)
+			apidemo_sound_setting(app, event->session);
 		if (event->session &&
 		    event->session->type == FPLINUX_UI_SESSION_ERROR &&
 		    !strcmp(event->session->name, "vibration"))

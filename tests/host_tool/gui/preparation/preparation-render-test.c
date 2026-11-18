@@ -111,7 +111,6 @@ int main(int argc, char **argv)
 		.theme = fplinux_ui_theme_spec(FPLINUX_UI_SESSION_THEME_DARK),
 		.body = fplinux_status_font_by_id(profile->font_body),
 		.title = fplinux_status_font_by_id(profile->font_title),
-		.legend = fplinux_status_font_by_id(profile->font_legend),
 		.activity = fplinux_activity_mask(
 			(unsigned int)profile->spinner_size,
 			(unsigned int)profile->spinner_width, 0),

@@ -2,11 +2,11 @@
 #define _POSIX_C_SOURCE 200809L
 
 #include "fplinux-cli.h"
+#include "fplinux-audio-protocol.h"
 
-#include <alloca.h>
-#include <alsa/asoundlib.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <time.h>
 #include <linux/videodev2.h>
 #include <poll.h>
 #include <signal.h>
@@ -15,11 +15,11 @@
 #include <stdio.h>
 #include <string.h>
 #include <sys/ioctl.h>
-#include <time.h>
+#include <sys/socket.h>
+#include <sys/un.h>
 #include <unistd.h>
 
 #define RADIO_DEVICE "/dev/radio0"
-#define FM_CONTROL "FM Playback Switch"
 #define FM_LOW_100KHZ 875U
 #define FM_HIGH_100KHZ 1080U
 #define FM_V4L2_UNITS_PER_100KHZ 1600U
@@ -289,35 +289,46 @@ static int scan(int fd)
 	return 0;
 }
 
-static int set_fm_switch(snd_ctl_t *control, snd_ctl_elem_value_t *value,
-			 bool enabled)
+static int claim_audio(const struct arguments *arguments)
 {
-	int result;
-
-	snd_ctl_elem_value_set_boolean(value, 0, enabled);
-	result = snd_ctl_elem_write(control, value);
-	if (result < 0)
-		fprintf(stderr, "fplinux-fm: set %s %s: %s\n", FM_CONTROL,
-			enabled ? "on" : "off", snd_strerror(result));
-	return result;
-}
-
-static int set_audio_mute(int fd, bool muted)
-{
-	struct v4l2_control control = {
-		.id = V4L2_CID_AUDIO_MUTE,
-		.value = muted,
+	struct sockaddr_un address = {
+		.sun_family = AF_UNIX,
+		.sun_path = FPLINUX_AUDIO_RADIO_SOCKET,
 	};
+	char command[32], reply[32];
+	struct pollfd ready;
+	ssize_t length;
+	int fd = socket(AF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC, 0);
 
-	if (ioctl(fd, VIDIOC_S_CTRL, &control) < 0) {
-		fprintf(stderr, "fplinux-fm: set V4L2 audio mute %s: %s\n",
-			muted ? "on" : "off", strerror(errno));
+	if (fd < 0)
 		return -1;
+	if (connect(fd, (struct sockaddr *)&address, sizeof(address)) < 0)
+		goto fail;
+	if (arguments->command == COMMAND_SCAN)
+		snprintf(command, sizeof(command), "SCAN");
+	else
+		snprintf(command, sizeof(command), "PLAY %u",
+			 arguments->frequency_100khz);
+	if (send(fd, command, strlen(command), MSG_NOSIGNAL) !=
+	    (ssize_t)strlen(command))
+		goto fail;
+	ready = (struct pollfd){ .fd = fd, .events = POLLIN };
+	if (poll(&ready, 1, 2000) <= 0) {
+		errno = ETIMEDOUT;
+		goto fail;
 	}
-	return 0;
+	length = recv(fd, reply, sizeof(reply), MSG_TRUNC);
+	if (length != 5 || memcmp(reply, "READY", 5)) {
+		errno = EBUSY;
+		goto fail;
+	}
+	return fd;
+fail:
+	close(fd);
+	return -1;
 }
 
-static int wait_for_stop(unsigned int seconds)
+static int wait_for_stop(int fd, unsigned int seconds)
 {
 	struct timespec now;
 	time_t deadline = 0;
@@ -328,26 +339,30 @@ static int wait_for_stop(unsigned int seconds)
 		deadline = now.tv_sec + seconds;
 	}
 	while (!stop_signal) {
+		struct pollfd service = { .fd = fd, .events = POLLIN };
+		int result;
+
 		if (seconds) {
 			if (clock_gettime(CLOCK_MONOTONIC, &now) < 0)
 				return -1;
 			if (now.tv_sec >= deadline)
 				break;
 		}
-		if (poll(NULL, 0, 1000) < 0 && errno != EINTR)
+		result = poll(&service, 1, 1000);
+		if (result < 0 && errno != EINTR)
 			return -1;
+		if (result > 0) {
+			errno = EPIPE;
+			return -1;
+		}
 	}
 	return 0;
 }
 
-static int play(int fd, const struct arguments *arguments)
+static int play(const struct arguments *arguments)
 {
-	snd_ctl_elem_id_t *id;
-	snd_ctl_elem_value_t *value;
-	snd_ctl_t *control = NULL;
 	struct sigaction action = { .sa_handler = request_stop };
-	bool switch_owned = false;
-	int result;
+	int fd;
 	int status = 1;
 
 	sigemptyset(&action.sa_mask);
@@ -357,57 +372,23 @@ static int play(int fd, const struct arguments *arguments)
 			strerror(errno));
 		return 1;
 	}
-	result = snd_ctl_open(&control, "default", 0);
-	if (result < 0) {
-		fprintf(stderr, "fplinux-fm: open ALSA control: %s\n",
-			snd_strerror(result));
-		goto out;
+	fd = claim_audio(arguments);
+	if (fd < 0) {
+		fprintf(stderr, "fplinux-fm: audio service: %s\n",
+			strerror(errno));
+		return 1;
 	}
-	snd_ctl_elem_id_alloca(&id);
-	snd_ctl_elem_value_alloca(&value);
-	snd_ctl_elem_id_set_interface(id, SND_CTL_ELEM_IFACE_MIXER);
-	snd_ctl_elem_id_set_name(id, FM_CONTROL);
-	snd_ctl_elem_value_set_id(value, id);
-	result = snd_ctl_elem_read(control, value);
-	if (result < 0) {
-		fprintf(stderr, "fplinux-fm: read %s: %s\n", FM_CONTROL,
-			snd_strerror(result));
-		goto out;
-	}
-	if (snd_ctl_elem_value_get_boolean(value, 0)) {
-		fputs("fplinux-fm: FM playback is already active\n", stderr);
-		goto out;
-	}
-	if (stop_signal)
-		goto out;
-	if (set_frequency(fd, arguments->frequency_100khz) < 0)
-		goto out;
-	if (stop_signal)
-		goto out;
-	/* A failed write may still have reached the control; always try to mute. */
-	switch_owned = true;
-	if (set_fm_switch(control, value, true) < 0 || stop_signal)
-		goto out;
-	if (set_audio_mute(fd, false) < 0)
-		goto out;
 	printf("Playing %u.%u MHz; press Ctrl-C to stop.\n",
 	       arguments->frequency_100khz / 10U,
 	       arguments->frequency_100khz % 10U);
 	fflush(stdout);
-	if (wait_for_stop(arguments->seconds) < 0) {
+	if (wait_for_stop(fd, arguments->seconds) < 0) {
 		fprintf(stderr, "fplinux-fm: wait: %s\n", strerror(errno));
 		goto out;
 	}
 	status = stop_signal ? 128 + stop_signal : 0;
 out:
-	if (switch_owned) {
-		if (set_audio_mute(fd, true) < 0)
-			status = 1;
-		if (set_fm_switch(control, value, false) < 0)
-			status = 1;
-	}
-	if (control)
-		snd_ctl_close(control);
+	close(fd);
 	if (stop_signal && status == 1)
 		status = 128 + stop_signal;
 	return status;
@@ -416,17 +397,27 @@ out:
 int main(int argc, char **argv)
 {
 	struct arguments arguments = { 0 };
-	int fd;
+	int fd, lease;
 	int status;
 
 	status = parse_arguments(argc, argv, &arguments);
 	if (status != FPLINUX_CLI_READY)
 		return status;
-	fd = open_radio(arguments.command == COMMAND_SCAN);
-	if (fd < 0)
+	if (arguments.command == COMMAND_PLAY)
+		return play(&arguments);
+	lease = claim_audio(&arguments);
+	if (lease < 0) {
+		fprintf(stderr, "fplinux-fm: audio service: %s\n",
+			strerror(errno));
 		return 1;
-	status = arguments.command == COMMAND_SCAN ? scan(fd) :
-						     play(fd, &arguments);
-	close(fd);
+	}
+	fd = open_radio(true);
+	if (fd < 0)
+		status = 1;
+	else {
+		status = scan(fd);
+		close(fd);
+	}
+	close(lease);
 	return status;
 }

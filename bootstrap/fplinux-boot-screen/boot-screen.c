@@ -46,8 +46,6 @@ static int render(struct fplinux_boot_screen *screen)
 			fplinux_status_profile.font_body),
 		.title = fplinux_status_font_by_id(
 			fplinux_status_profile.font_title),
-		.legend = fplinux_status_font_by_id(
-			fplinux_status_profile.font_legend),
 	};
 	struct fplinux_status_view view = {
 		.layout = FPLINUX_STATUS_BOOT,

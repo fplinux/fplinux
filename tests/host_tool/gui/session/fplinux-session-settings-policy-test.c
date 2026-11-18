@@ -53,11 +53,11 @@ static void test_setting_values(void)
 	fplinux_session_settings_defaults(&settings, languages);
 	check(!settings.has_brightness && settings.screen_off_seconds == 30 &&
 		      settings.auto_lock_seconds == 5 &&
-		      !strcmp(settings.locale, "ru") &&
-		      !strcmp(settings.input_locale, "ru") &&
-		      !strcmp(settings.lang, "ru_RU.UTF-8") &&
+		      !strcmp(settings.locale, "en") &&
+		      !strcmp(settings.input_locale, "en") &&
+		      !strcmp(settings.lang, "en_US.UTF-8") &&
 		      settings.theme == FPLINUX_UI_SESSION_THEME_LIGHT,
-	      "defaults are 30 s, auto-lock 5 s, Russian and the light theme");
+	      "defaults are 30 s, auto-lock 5 s, English and the light theme");
 	check(fplinux_session_setting_find("screen_off_seconds") ==
 			      FPLINUX_SESSION_SETTING_SCREEN_OFF &&
 		      fplinux_session_setting_find("time") ==
@@ -148,7 +148,7 @@ static void test_setting_values(void)
 	check(!fplinux_session_settings_parse(
 		      &settings, NULL, FPLINUX_SESSION_SETTING_LOCALE, "ru"),
 	      "no locale can be chosen without language files");
-	check(!strcmp(settings.input_locale, "ru"),
+	check(!strcmp(settings.input_locale, "en"),
 	      "changing the UI language keeps the input language");
 	check(fplinux_session_settings_parse(
 		      &settings, languages,
@@ -359,7 +359,7 @@ static void test_default_language(void)
 	check(!strcmp(settings.locale, "en") &&
 		      !strcmp(settings.lang, "en_GB.UTF-8") &&
 		      !strcmp(settings.input_locale, "en"),
-	      "without Russian the default is the English file");
+	      "the default uses the installed English definition");
 	check(!fplinux_session_settings_parse(
 		      &settings, english_only,
 		      FPLINUX_SESSION_SETTING_INPUT_LOCALE, "en"),
@@ -368,12 +368,17 @@ static void test_default_language(void)
 		english_only, "ru",
 		"name=Русский\nlang=ru_RU.UTF-8\nsystem=yes\ninput=no\n");
 	fplinux_session_settings_defaults(&settings, english_only);
+	check(!strcmp(settings.locale, "en") &&
+		      !strcmp(settings.lang, "en_GB.UTF-8") &&
+		      !strcmp(settings.input_locale, "en"),
+	      "English precedes Russian when both are installed");
+	snprintf(path, sizeof(path), "%s/en", english_only);
+	unlink(path);
+	fplinux_session_settings_defaults(&settings, english_only);
 	check(!strcmp(settings.locale, "ru") &&
 		      !strcmp(settings.input_locale, "en"),
 	      "a UI language with input disabled defaults input to English");
 	snprintf(path, sizeof(path), "%s/ru", english_only);
-	unlink(path);
-	snprintf(path, sizeof(path), "%s/en", english_only);
 	unlink(path);
 	check(fplinux_session_settings_parse(
 		      &settings, english_only,
@@ -407,8 +412,15 @@ static void test_settings_file(void)
 	snprintf(path, sizeof(path), "%s/session.conf", directory);
 	check(fplinux_session_settings_load(&settings, languages, path) &&
 		      settings.screen_off_seconds == 30 &&
-		      !strcmp(settings.locale, "ru"),
+		      !strcmp(settings.locale, "en") &&
+		      !strcmp(settings.input_locale, "en"),
 	      "a missing file selects the defaults");
+	write_file(path, "locale=ru\ninput_locale=ru\n");
+	check(fplinux_session_settings_load(&settings, languages, path) &&
+		      !strcmp(settings.locale, "ru") &&
+		      !strcmp(settings.input_locale, "ru") &&
+		      !strcmp(settings.lang, "ru_RU.UTF-8"),
+	      "saved Russian selections override the English defaults");
 	write_file(path, "locale=ast\n");
 	check(fplinux_session_settings_load(&settings, languages, path) &&
 		      !strcmp(settings.locale, "ast") &&
@@ -421,12 +433,12 @@ static void test_settings_file(void)
 	      "saved UI and input languages are loaded independently");
 	write_file(path, "input_locale=ast\n");
 	check(fplinux_session_settings_load(&settings, languages, path) &&
-		      !strcmp(settings.input_locale, "ru"),
+		      !strcmp(settings.input_locale, "en"),
 	      "an invalid saved input language keeps the default");
 	write_file(path, "locale=de\n");
 	check(fplinux_session_settings_load(&settings, languages, path) &&
-		      !strcmp(settings.locale, "ru") &&
-		      !strcmp(settings.lang, "ru_RU.UTF-8"),
+		      !strcmp(settings.locale, "en") &&
+		      !strcmp(settings.lang, "en_US.UTF-8"),
 	      "a saved language that is no longer installed is the default");
 	write_file(path, "theme=dark\n");
 	check(fplinux_session_settings_load(&settings, languages, path) &&

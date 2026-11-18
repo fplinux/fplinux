@@ -46,6 +46,11 @@ lv_obj_t *fplinux_ui_listview_object(struct fplinux_ui_listview *list);
  */
 void fplinux_ui_listview_set_inline_detail(struct fplinux_ui_listview *list,
 					   bool inline_detail);
+/* A Form popup's single row fits the complete pair, else uses two lines. */
+void fplinux_ui_listview_set_popup_choice(struct fplinux_ui_listview *list);
+/* Stored rows: draw the last divider when another group of rows follows. */
+void fplinux_ui_listview_set_trailing_divider(struct fplinux_ui_listview *list,
+					      bool visible);
 size_t fplinux_ui_listview_add(struct fplinux_ui_listview *list,
 			       const char *text, const char *detail);
 /*

@@ -22,8 +22,10 @@ FM needs receiver settings in [device data](/fplinux/guides/device-data/) prepar
 FM shares the equalizer and limiter settings used for audio files; device data enables both by default. Follow the conditions in the phone checklist before starting FM. If it lists playback with EQ/ALC off, disable both:
 
 ```sh title="Phone"
+rc-service fplinux-audiod stop
 amixer -c 0 cset name='EQ Playback Switch' off
 amixer -c 0 cset name='ALC Playback Switch' off
+rc-service fplinux-audiod start
 ```
 
 These settings also affect later file playback. Restore them only for a configuration your phone checklist supports.
@@ -56,12 +58,9 @@ Run `fplinux-fm --help` for the full syntax.
 
 ## Volume and outputs
 
-FM uses the same volume controls, equalizer and output switches as other playback; see [Sound and recording](/fplinux/use/audio/). FM is quiet at low volume levels. Where automatic headphone switching is supported, plugging in the cable selects the headphones. If FM speaker output is supported, turn it on with the cable still plugged in, and optionally turn the headphones off:
+The audio service coordinates FM with application playback and alarms. Leave `fplinux-audiod` running when using `fplinux-fm`; the command also works without the graphical interface. Media zero mutes FM; nonzero Media levels leave its ALSA playback level unchanged. For direct level adjustments, follow the ALSA procedure in [Sound](/fplinux/use/audio/#volume).
 
-```sh title="Phone"
-amixer -c 0 cset name='Speaker Playback Switch' on
-amixer -c 0 cset name='Headphone Playback Switch' off
-```
+Use **Settings → Sound → Output** to choose a supported speaker or headphones. In Automatic mode, inserting the antenna cable selects headphones where detection is supported. Keep the cable plugged in when selecting the speaker.
 
 Unplugging the cable removes the antenna, even if automatic output switching moves the sound to the speaker.
 
@@ -75,7 +74,7 @@ If an `fplinux-fm` command reports a timeout, stop using FM and cold-boot the ph
 
 ## Limitations
 
-- FM cannot play while an audio file plays or a recording runs.
+- FM and PCM cannot use the card simultaneously. Starting FM pauses application PCM; an alarm interrupts FM and the previous station resumes afterwards. Recording still requires releasing the hardware path.
 - No station names and no calibrated signal strength are available.
 - FM radio cannot be recorded.
 - The phone cannot [sleep](/fplinux/use/power/) while the receiver is on, including during a scan.

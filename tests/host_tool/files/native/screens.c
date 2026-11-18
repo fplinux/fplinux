@@ -275,6 +275,17 @@ static bool menu_has(const struct capture *capture, const char *text)
 	return false;
 }
 
+static void assert_menu_icon(const struct capture *capture, const char *text)
+{
+	for (size_t i = 0; i < capture->observed.menu_count; i++) {
+		if (!strcmp(capture->observed.menu_items[i], text)) {
+			assert(capture->observed.menu_icons[i]);
+			return;
+		}
+	}
+	assert(false);
+}
+
 static void open_menu(struct capture *capture)
 {
 	uint64_t deadline;
@@ -758,7 +769,9 @@ static void keep_positions(struct capture *capture)
 	wait_editor_text(capture, "z-14-long-visible-name.txt");
 	press(capture, KEY_Z);
 	wait_editor_text(capture, "z-14-long-visible-name.txtz");
-	option(capture, "Save");
+	open_menu(capture);
+	assert_menu_icon(capture, "Save");
+	select_option(capture, "Save");
 	wait_conflict_list(capture, "z-14-long-visible-name.txtz", 24, 17);
 	pump_for(capture, 100);
 	assert(capture->observed.first_visible == first);
@@ -1384,6 +1397,7 @@ int main(int argc, char **argv)
 	press(&capture, KEY_COMPOSE);
 	assert(capture.observed.menu);
 	assert(menu_has(&capture, word(&capture, "Find", "Найти")));
+	assert_menu_icon(&capture, word(&capture, "Find", "Найти"));
 	press(&capture, KEY_ENTER);
 	wait_label(&capture, "unknown.zzz", false);
 	assert(capture.observed.count == 1);

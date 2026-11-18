@@ -7,6 +7,8 @@
 /* Protocol transport linked by the runtime, session manager and host peers. */
 bool fplinux_ui_session_vibrate_valid(
 	const struct fplinux_ui_session_message *message);
+bool fplinux_ui_session_light_effect_valid(
+	const struct fplinux_ui_light_effect *effect);
 
 /* Checks a local regular file without following any path-component symlink. */
 int fplinux_ui_session_document_path_error(const char *path);

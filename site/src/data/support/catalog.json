@@ -378,14 +378,6 @@
       "scope": "both"
     },
     {
-      "id": "brightness-control",
-      "label": "Brightness control",
-      "kind": "application",
-      "guide": "apps/brightness",
-      "group": "Applications",
-      "scope": "both"
-    },
-    {
       "id": "tyrquake",
       "label": "TyrQuake",
       "kind": "application",

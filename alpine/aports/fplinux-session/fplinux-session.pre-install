@@ -1,4 +1,9 @@
 #!/bin/sh
 # SPDX-License-Identifier: GPL-2.0-only
-addgroup -S fplinux 2> /dev/null || true
-adduser -S -D -h /home/fplinux -s /bin/sh -G fplinux fplinux 2> /dev/null || true
+
+if ! grep -q '^fplinux:' /etc/group; then
+	addgroup -S fplinux || exit 1
+fi
+if ! id fplinux >/dev/null 2>&1; then
+	adduser -S -D -h /home/fplinux -s /bin/sh -G fplinux fplinux || exit 1
+fi

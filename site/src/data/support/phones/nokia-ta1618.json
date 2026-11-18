@@ -209,10 +209,6 @@
     "status": "partial",
     "note": "Synchronizes the display, keypad light and vibrator."
   },
-  "brightness-control": {
-    "status": "verified",
-    "note": "Phone-keypad control of levels 0…10; level 0 turns the backlight off."
-  },
   "tyrquake": {
     "status": "partial",
     "note": "Game data can use the supported microSD path."

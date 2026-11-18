@@ -21,6 +21,8 @@ struct fplinux_desktop_entry {
 	bool icon_valid;
 	bool hidden;
 	bool no_display;
+	bool background_audio;
+	bool light_effects;
 	enum fplinux_ui_session_mode mode;
 };
 

@@ -25,8 +25,12 @@ struct fplinux_audio_process {
 	/* 0 for a free entry. */
 	pid_t pid;
 	uid_t uid;
-	bool audible;
+	bool eligible;
+	bool background;
 	bool clock;
+	/* Activity last sent on the current manager connection. */
+	bool activity_known;
+	unsigned int activity;
 };
 
 enum fplinux_audio_connection_state {
@@ -58,6 +62,8 @@ struct fplinux_audio_stream {
 	/* The values last stored in the ring. */
 	uint32_t state;
 	uint32_t sleeping;
+	bool user_paused;
+	bool route_paused;
 	struct fplinux_audio_mixer_stream mixer;
 };
 
@@ -75,6 +81,14 @@ struct fplinux_audio_streams {
 	struct fplinux_audio_connection connections[FPLINUX_AUDIO_CONNECTIONS];
 	struct fplinux_audio_stream streams[FPLINUX_AUDIO_STREAMS];
 	enum fplinux_audio_output output;
+	uint32_t rate;
+	unsigned int media_volume;
+	unsigned int alarm_volume;
+	bool clock_active;
+	bool foreground_active;
+	bool fm_active;
+	bool manager_ready;
+	bool private_unavailable;
 	/* Output frames mixed since the service started. */
 	uint64_t mixed;
 	/* When streams of processes not announced again end; 0 for none. */
@@ -84,6 +98,13 @@ struct fplinux_audio_streams {
 };
 
 void fplinux_audio_streams_init(struct fplinux_audio_streams *streams);
+
+/* Apply one class level before acknowledging it to the manager. */
+void fplinux_audio_streams_volume(struct fplinux_audio_streams *streams,
+				  bool alarm, unsigned int level);
+/* Hold existing media before a private output is disconnected. */
+void fplinux_audio_streams_private_output_lost(
+	struct fplinux_audio_streams *streams);
 
 /* Applies one control command, a string without a newline. */
 void fplinux_audio_streams_command(struct fplinux_audio_streams *streams,

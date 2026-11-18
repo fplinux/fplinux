@@ -2,6 +2,7 @@
 #include "launcher-quick-settings.h"
 #include "fplinux-bluez-adapter.h"
 #include "fplinux-settings-values.h"
+#include "fplinux-ui-system.h"
 
 #include <libintl.h>
 #include <linux/input-event-codes.h>
@@ -58,6 +59,9 @@ static bool send_setting(struct fplinux_launcher_quick_settings *quick,
 		.type = FPLINUX_UI_SESSION_SETTING,
 	};
 
+	if (!++quick->setting_serial)
+		++quick->setting_serial;
+	message.serial = quick->setting_serial;
 	snprintf(message.name, sizeof(message.name), "%s", name);
 	if (value)
 		snprintf(message.value, sizeof(message.value), "%d", *value);
@@ -111,8 +115,7 @@ static void show_rows(struct fplinux_launcher_quick_settings *quick)
 	if (!quick->list)
 		return;
 	rows[count++] = FPLINUX_LAUNCHER_QUICK_SETTING_BRIGHTNESS;
-	if (!quick->levels[1].unsupported)
-		rows[count++] = FPLINUX_LAUNCHER_QUICK_SETTING_VOLUME;
+	rows[count++] = FPLINUX_LAUNCHER_QUICK_SETTING_VOLUME;
 	if (quick->wifi_known)
 		rows[count++] = FPLINUX_LAUNCHER_QUICK_SETTING_WIFI;
 	if (bluetooth_present(quick))
@@ -168,7 +171,9 @@ static void show_rows(struct fplinux_launcher_quick_settings *quick)
 						level->value);
 			else
 				fplinux_ui_list_set_trailing_value(
-					quick->list, i, _("Unavailable"));
+					quick->list, i,
+					level->unavailable ? _("Unavailable") :
+							     _("Loading…"));
 		} else {
 			bool on = row == FPLINUX_LAUNCHER_QUICK_SETTING_WIFI ?
 					  quick->wifi_on :
@@ -270,12 +275,21 @@ static void send_draft(struct fplinux_launcher_quick_settings *quick)
 {
 	const struct row_descriptor *descriptor =
 		&descriptors[quick->editing_row];
+	bool volume = quick->editing_row ==
+		      FPLINUX_LAUNCHER_QUICK_SETTING_VOLUME;
 
-	if (quick->preview_pending || quick->save_pending)
+	if (quick->save_pending || (!volume && quick->preview_pending) ||
+	    (volume && !quick->save_requested))
 		return;
 	if (quick->save_requested) {
-		quick->save_pending =
-			send_setting(quick, descriptor->setting, &quick->draft);
+		if (volume) {
+			quick->preview_pending = false;
+			quick->preview_serial = 0;
+		}
+		quick->save_pending = send_setting(
+			quick, volume ? "volume_commit" : descriptor->setting,
+			volume ? NULL : &quick->draft);
+		quick->save_serial = quick->setting_serial;
 		if (!quick->save_pending) {
 			quick->save_requested = false;
 			editing_commands(quick);
@@ -287,12 +301,30 @@ static void send_draft(struct fplinux_launcher_quick_settings *quick)
 		quick->preview_sent = quick->draft;
 		quick->preview_pending =
 			send_setting(quick, descriptor->preview, &quick->draft);
+		quick->preview_serial = quick->setting_serial;
 		if (!quick->preview_pending) {
 			end_edit(quick, true);
 			show_alert(
 				quick, _(descriptor->title),
 				_("The setting was not changed. Try again."));
 		}
+	}
+}
+
+static void send_volume_step(struct fplinux_launcher_quick_settings *quick,
+			     int step)
+{
+	quick->draft += step;
+	if (quick->draft < 0)
+		quick->draft = 0;
+	if (quick->draft > 10)
+		quick->draft = 10;
+	quick->preview_pending = send_setting(quick, "volume_step", &step);
+	quick->preview_serial = quick->setting_serial;
+	if (!quick->preview_pending) {
+		end_edit(quick, true);
+		show_alert(quick, _("Volume"),
+			   _("The setting was not changed. Try again."));
 	}
 }
 
@@ -349,15 +381,19 @@ bool fplinux_launcher_quick_settings_receive(
 	bool preview;
 	bool valid;
 	int value;
+	const char *name = message->name;
 
 	if (message->type != FPLINUX_UI_SESSION_SETTING &&
 	    message->type != FPLINUX_UI_SESSION_ERROR)
 		return false;
+	if (!strcmp(name, "volume_step"))
+		name = "volume_preview";
+	else if (!strcmp(name, "volume_commit"))
+		name = "volume";
 	for (row = 0; row <= FPLINUX_LAUNCHER_QUICK_SETTING_WIFI; ++row) {
 		descriptor = &descriptors[row];
-		if (!strcmp(message->name, descriptor->setting) ||
-		    (descriptor->preview &&
-		     !strcmp(message->name, descriptor->preview)))
+		if (!strcmp(name, descriptor->setting) ||
+		    (descriptor->preview && !strcmp(name, descriptor->preview)))
 			break;
 	}
 	if (row > FPLINUX_LAUNCHER_QUICK_SETTING_WIFI)
@@ -380,37 +416,38 @@ bool fplinux_launcher_quick_settings_receive(
 		show_rows(quick);
 		return true;
 	}
-	preview = !strcmp(message->name, descriptor->preview);
+	preview = !strcmp(name, descriptor->preview);
 	valid = parse_level(message->value, descriptor, &value);
-	if (!preview &&
-	    (message->type == FPLINUX_UI_SESSION_SETTING || message->applied) &&
-	    valid) {
-		quick->levels[row].value = value;
-		quick->levels[row].known = true;
-		quick->levels[row].unsupported = false;
-	} else if (!preview && message->type == FPLINUX_UI_SESSION_ERROR &&
-		   !message->value[0]) {
-		quick->levels[row].known = false;
-		quick->levels[row].unsupported =
-			!strcmp(message->reason, "unsupported");
-	}
 	if (quick->editing && row == quick->editing_row) {
-		if (preview && quick->preview_pending &&
-		    (!valid || value == quick->preview_sent)) {
+		bool volume = row == FPLINUX_LAUNCHER_QUICK_SETTING_VOLUME;
+		bool current_preview =
+			volume ? message->serial == quick->preview_serial :
+				 (!valid || value == quick->preview_sent);
+
+		if (preview && current_preview &&
+		    (quick->preview_pending || volume)) {
 			quick->preview_pending = false;
 			if (message->type == FPLINUX_UI_SESSION_ERROR) {
 				end_edit(quick, true);
 				setting_error(quick, descriptor, message);
-			} else if (quick->save_requested ||
-				   quick->draft != quick->preview_sent) {
-				send_draft(quick);
+			} else {
+				if (volume && valid) {
+					quick->draft = value;
+				} else if (quick->save_requested ||
+					   quick->draft !=
+						   quick->preview_sent) {
+					send_draft(quick);
+				}
 			}
-		} else if (!preview && quick->save_pending) {
+		} else if (!preview && quick->save_pending &&
+			   (!volume || message->serial == quick->save_serial)) {
 			quick->save_pending = false;
 			if ((message->type == FPLINUX_UI_SESSION_SETTING ||
 			     message->applied) &&
 			    valid)
 				end_edit(quick, false);
+			else if (volume)
+				end_edit(quick, true);
 			else {
 				quick->save_requested = false;
 				editing_commands(quick);
@@ -421,6 +458,36 @@ bool fplinux_launcher_quick_settings_receive(
 	}
 	show_rows(quick);
 	return true;
+}
+
+void fplinux_launcher_quick_settings_levels_changed(
+	struct fplinux_launcher_quick_settings *quick)
+{
+	for (enum fplinux_launcher_quick_setting row = 0;
+	     row <= FPLINUX_LAUNCHER_QUICK_SETTING_VOLUME; ++row) {
+		struct fplinux_launcher_quick_level *level =
+			&quick->levels[row];
+		struct fplinux_system_level_state state;
+		enum fplinux_system_level_kind kind =
+			row == FPLINUX_LAUNCHER_QUICK_SETTING_BRIGHTNESS ?
+				FPLINUX_SYSTEM_LEVEL_BRIGHTNESS :
+				FPLINUX_SYSTEM_LEVEL_MEDIA;
+
+		if (!fplinux_ui_system_level_get(quick->ui, kind, &state))
+			continue;
+		level->known = state.availability == FPLINUX_SYSTEM_LEVEL_READY;
+		level->unavailable = state.availability ==
+				     FPLINUX_SYSTEM_LEVEL_UNAVAILABLE;
+		if (level->known) {
+			level->value = (int)state.value;
+			if (row == FPLINUX_LAUNCHER_QUICK_SETTING_VOLUME &&
+			    quick->editing && quick->editing_row == row &&
+			    !state.pending && !quick->preview_pending &&
+			    !quick->save_requested)
+				quick->draft = level->value;
+		}
+	}
+	show_rows(quick);
 }
 
 void fplinux_launcher_quick_settings_bluetooth_changed(
@@ -527,6 +594,17 @@ static bool key_filter(struct fplinux_ui *ui, struct fplinux_ui_screen *screen,
 		return false;
 	if (!key->pressed || quick->save_requested)
 		return true;
+	if (row == FPLINUX_LAUNCHER_QUICK_SETTING_VOLUME) {
+		if (!quick->editing) {
+			quick->editing = true;
+			quick->editing_row = row;
+			quick->draft = quick->levels[row].value;
+			editing_commands(quick);
+		}
+		send_volume_step(quick, key->code == KEY_LEFT ? -1 : 1);
+		show_rows(quick);
+		return true;
+	}
 	next = (quick->editing ? quick->draft : quick->levels[row].value) +
 	       (key->code == KEY_LEFT ? -1 : 1);
 	if (next < descriptors[row].minimum || next > descriptors[row].maximum)
@@ -573,12 +651,11 @@ void fplinux_launcher_quick_settings_open(
 	fplinux_ui_list_set_focus_listener(quick->list, row_focused, quick);
 	fplinux_ui_screen_set_key_filter(quick->list, key_filter, quick);
 	quick->row_count = 0;
+	fplinux_launcher_quick_settings_levels_changed(quick);
 	editing_commands(quick);
 	show_rows(quick);
 	fplinux_ui_push(quick->ui, quick->list);
 	view_changed(quick);
-	send_setting(quick, "brightness", NULL);
-	send_setting(quick, "volume", NULL);
 	send_setting(quick, "wifi", NULL);
 	if (quick->bluetooth)
 		fplinux_bluez_adapter_connect(quick->bluetooth);

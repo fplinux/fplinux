@@ -116,6 +116,18 @@ msgstr "Нет открытых приложений"
 msgid "Foreground"
 msgstr "На экране"
 
+msgid "Playing"
+msgstr "Играет"
+
+msgid "Paused"
+msgstr "Пауза"
+
+msgid "Audio interrupted"
+msgstr "Звук прерван"
+
+msgid "Audio unavailable"
+msgstr "Звук недоступен"
+
 msgid "Background"
 msgstr "В фоне"
 
@@ -193,6 +205,9 @@ msgstr "Сохранить"
 
 msgid "Unavailable"
 msgstr "Недоступно"
+
+msgid "Loading…"
+msgstr "Загрузка…"
 
 msgid "The setting is applied for this session. It was not saved."
 msgstr "Настройка действует в текущем сеансе, но не сохранена."

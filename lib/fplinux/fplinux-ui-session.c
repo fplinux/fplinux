@@ -120,6 +120,20 @@ static const char *const message_names[] = {
 	[FPLINUX_UI_SESSION_DOCUMENT_RESULT] = "DOCUMENT_RESULT",
 	[FPLINUX_UI_SESSION_STORAGE_REQUEST] = "STORAGE_REQUEST",
 	[FPLINUX_UI_SESSION_STORAGE_RESULT] = "STORAGE_RESULT",
+	[FPLINUX_UI_SESSION_SYSTEM_LEVELS] = "SYSTEM_LEVELS",
+	[FPLINUX_UI_SESSION_LIGHT_EFFECT] = "LIGHT_EFFECT",
+};
+
+static const char *const level_names[] = {
+	[FPLINUX_SYSTEM_LEVEL_MEDIA] = "media",
+	[FPLINUX_SYSTEM_LEVEL_ALARM] = "alarm",
+	[FPLINUX_SYSTEM_LEVEL_BRIGHTNESS] = "brightness",
+};
+
+static const char *const level_status_names[] = {
+	[FPLINUX_SYSTEM_LEVEL_UNKNOWN] = "unknown",
+	[FPLINUX_SYSTEM_LEVEL_READY] = "ready",
+	[FPLINUX_SYSTEM_LEVEL_UNAVAILABLE] = "unavailable",
 };
 
 static const char *const volume_operation_names[] = {
@@ -145,6 +159,14 @@ static const char *const lifecycle_names[] = {
 	[FPLINUX_UI_SESSION_FOREGROUND] = "foreground",
 	[FPLINUX_UI_SESSION_BACKGROUND] = "background",
 	[FPLINUX_UI_SESSION_CLOSING] = "closing",
+};
+
+static const char *const playback_names[] = {
+	[FPLINUX_UI_SESSION_PLAYBACK_NONE] = "none",
+	[FPLINUX_UI_SESSION_PLAYBACK_PAUSED] = "paused",
+	[FPLINUX_UI_SESSION_PLAYBACK_HELD] = "held",
+	[FPLINUX_UI_SESSION_PLAYBACK_UNAVAILABLE] = "unavailable",
+	[FPLINUX_UI_SESSION_PLAYBACK_PLAYING] = "playing",
 };
 
 static const char *const mode_names[] = {
@@ -188,6 +210,8 @@ static const char *const field_names[] = {
 	"locked",
 	"visible",
 	"enabled",
+	"tasks_view",
+	"background_playing",
 	"locale",
 	"input_locale",
 	"name",
@@ -205,6 +229,7 @@ static const char *const field_names[] = {
 	"clock",
 	"clock_presentation",
 	"audio",
+	"background_audio",
 	"vibration",
 	"pattern",
 	"repeat",
@@ -221,6 +246,9 @@ static const char *const field_names[] = {
 	"volume_error",
 	"home_persistent",
 	"volumes",
+	"levels",
+	"light_effects",
+	"light_effect",
 };
 
 static void add_string(struct json_object *object, const char *name,
@@ -457,6 +485,111 @@ static bool get_choice(struct json_object *object, const char *field_name,
 	return false;
 }
 
+static bool system_level_valid(const struct fplinux_system_level_state *level)
+{
+	if ((unsigned int)level->availability >=
+		    ARRAY_SIZE(level_status_names) ||
+	    level->minimum >= level->maximum || level->maximum > UINT16_MAX)
+		return false;
+	if (level->availability == FPLINUX_SYSTEM_LEVEL_READY)
+		return level->value >= level->minimum &&
+		       level->value <= level->maximum;
+	return !level->value &&
+	       (level->availability != FPLINUX_SYSTEM_LEVEL_UNAVAILABLE ||
+		!level->pending);
+}
+
+static bool
+system_levels_valid(const struct fplinux_ui_session_message *message)
+{
+	for (size_t i = 0; i < ARRAY_SIZE(level_names); ++i) {
+		const struct fplinux_system_level_state *level =
+			&message->system_levels.level[i];
+
+		if (message->type == FPLINUX_UI_SESSION_SYSTEM_LEVELS) {
+			if (!system_level_valid(level))
+				return false;
+		} else if (level->availability || level->minimum ||
+			   level->maximum || level->value || level->pending) {
+			return false;
+		}
+	}
+	return true;
+}
+
+static void add_system_levels(struct json_object *object,
+			      const struct fplinux_system_levels *levels)
+{
+	struct json_object *state = json_object_new_object();
+
+	for (size_t i = 0; i < ARRAY_SIZE(level_names); ++i) {
+		const struct fplinux_system_level_state *level =
+			&levels->level[i];
+		struct json_object *entry = json_object_new_object();
+
+		add_string(entry, "status",
+			   level_status_names[level->availability]);
+		json_object_object_add(entry, "minimum",
+				       json_object_new_int(level->minimum));
+		json_object_object_add(entry, "maximum",
+				       json_object_new_int(level->maximum));
+		json_object_object_add(entry, "value",
+				       json_object_new_int(level->value));
+		json_object_object_add(entry, "pending",
+				       json_object_new_boolean(level->pending));
+		json_object_object_add(state, level_names[i], entry);
+	}
+	json_object_object_add(object, "levels", state);
+}
+
+static bool get_system_levels(struct json_object *object, unsigned int type,
+			      struct fplinux_system_levels *levels)
+{
+	static const char *const fields[] = {
+		"status", "minimum", "maximum", "value", "pending",
+	};
+	struct json_object *state, *field;
+	bool present = json_object_object_get_ex(object, "levels", &state);
+
+	if (type != FPLINUX_UI_SESSION_SYSTEM_LEVELS)
+		return !present;
+	if (!present || !json_object_is_type(state, json_type_object) ||
+	    json_object_object_length(state) != (int)ARRAY_SIZE(level_names))
+		return false;
+	for (size_t i = 0; i < ARRAY_SIZE(level_names); ++i) {
+		struct fplinux_system_level_state *level = &levels->level[i];
+		struct json_object *entry;
+		unsigned int availability;
+		int minimum = 0, maximum = 0, value = 0;
+
+		if (!json_object_object_get_ex(state, level_names[i], &entry) ||
+		    !json_object_is_type(entry, json_type_object) ||
+		    json_object_object_length(entry) != (int)ARRAY_SIZE(fields))
+			return false;
+		for (size_t j = 0; j < ARRAY_SIZE(fields); ++j)
+			if (!json_object_object_get_ex(entry, fields[j],
+						       &field))
+				return false;
+		if (!get_choice(entry, "status", level_status_names,
+				ARRAY_SIZE(level_status_names),
+				ARRAY_SIZE(level_status_names),
+				&availability) ||
+		    availability >= ARRAY_SIZE(level_status_names) ||
+		    !get_int(entry, "minimum", &minimum) || minimum < 0 ||
+		    !get_int(entry, "maximum", &maximum) || maximum < 0 ||
+		    !get_int(entry, "value", &value) || value < 0 ||
+		    !get_bool(entry, "pending", &level->pending))
+			return false;
+		level->availability = availability;
+		level->minimum = minimum;
+		level->maximum = maximum;
+		level->value = value;
+		if (!system_level_valid(level))
+			return false;
+	}
+	return true;
+}
+
 static bool has_only_known_fields(struct json_object *object)
 {
 	struct json_object_iterator field = json_object_iter_begin(object);
@@ -513,7 +646,8 @@ static bool task_valid(const struct fplinux_ui_session_task *task)
 
 	if (!task_id_valid(task->app_id) || !bytes ||
 	    bytes == sizeof(task->title) || !task->token ||
-	    (unsigned int)task->lifecycle >= ARRAY_SIZE(lifecycle_names))
+	    (unsigned int)task->lifecycle >= ARRAY_SIZE(lifecycle_names) ||
+	    (unsigned int)task->playback >= ARRAY_SIZE(playback_names))
 		return false;
 	for (size_t i = 0; i < bytes; ++i)
 		if ((unsigned char)task->title[i] < 0x20 ||
@@ -572,16 +706,26 @@ static bool get_tasks(struct json_object *object,
 	for (size_t i = 0; i < count; ++i) {
 		struct json_object *entry = json_object_array_get_idx(array, i);
 		struct fplinux_ui_session_task *task = &message->tasks[i];
+		struct json_object *field;
+		unsigned int playback;
+		bool has_playback;
 
-		if (!json_object_is_type(entry, json_type_object) ||
-		    json_object_object_length(entry) != 4 ||
+		if (!json_object_is_type(entry, json_type_object))
+			return false;
+		has_playback =
+			json_object_object_get_ex(entry, "playback", &field);
+		if (json_object_object_length(entry) != 4 + has_playback ||
 		    !get_string(entry, "app_id", task->app_id,
 				sizeof(task->app_id)) ||
 		    !get_string(entry, "title", task->title,
 				sizeof(task->title)) ||
 		    !get_lifecycle(entry, &task->lifecycle) ||
+		    !get_choice(entry, "playback", playback_names,
+				ARRAY_SIZE(playback_names),
+				FPLINUX_UI_SESSION_PLAYBACK_NONE, &playback) ||
 		    !get_token(entry, &task->token))
 			return false;
+		task->playback = playback;
 	}
 	return tasks_valid(message);
 }
@@ -1036,6 +1180,65 @@ bool fplinux_ui_session_vibrate_valid(
 	       pattern[last_pulse] + pattern[1] <= VIBRATION_PULSE_MAX_MS;
 }
 
+bool fplinux_ui_session_light_effect_valid(
+	const struct fplinux_ui_light_effect *effect)
+{
+	unsigned int mask = FPLINUX_UI_LIGHT_SCREEN | FPLINUX_UI_LIGHT_KEYPAD;
+
+	return effect && !(effect->resources & ~mask) &&
+	       (effect->resources & FPLINUX_UI_LIGHT_SCREEN ?
+			effect->display_level >= 1 &&
+				effect->display_level <= 10 :
+			!effect->display_level) &&
+	       ((effect->resources & FPLINUX_UI_LIGHT_KEYPAD) ||
+		!effect->keypad_on);
+}
+
+static bool light_fields_valid(const struct fplinux_ui_session_message *message)
+{
+	const struct fplinux_ui_light_effect *effect = &message->light_effect;
+
+	if (message->light_effects > 3 ||
+	    (message->light_effects &&
+	     message->type != FPLINUX_UI_SESSION_CONFIG))
+		return false;
+	if (message->type == FPLINUX_UI_SESSION_LIGHT_EFFECT)
+		return message->serial &&
+		       fplinux_ui_session_light_effect_valid(effect);
+	return !effect->resources && !effect->display_level &&
+	       !effect->keypad_on;
+}
+
+static bool get_light_fields(struct json_object *object, unsigned int type,
+			     struct fplinux_ui_session_message *message)
+{
+	struct json_object *state, *field;
+	int resources = 0, level = 0, supported = 0;
+	bool has_effect =
+		json_object_object_get_ex(object, "light_effect", &state);
+
+	if (json_object_object_get_ex(object, "light_effects", &field) &&
+	    (type != FPLINUX_UI_SESSION_CONFIG ||
+	     !get_int(object, "light_effects", &supported) || supported < 0 ||
+	     supported > 3))
+		return false;
+	message->light_effects = supported;
+	if (type != FPLINUX_UI_SESSION_LIGHT_EFFECT)
+		return !has_effect;
+	if (!has_effect || !json_object_is_type(state, json_type_object) ||
+	    json_object_object_length(state) != 3 ||
+	    !json_object_object_get_ex(state, "resources", &field) ||
+	    !get_int(state, "resources", &resources) || resources < 0 ||
+	    !json_object_object_get_ex(state, "display_level", &field) ||
+	    !get_int(state, "display_level", &level) || level < 0 ||
+	    !json_object_object_get_ex(state, "keypad_on", &field) ||
+	    !get_bool(state, "keypad_on", &message->light_effect.keypad_on))
+		return false;
+	message->light_effect.resources = resources;
+	message->light_effect.display_level = level;
+	return fplinux_ui_session_light_effect_valid(&message->light_effect);
+}
+
 static bool get_media_fields(struct json_object *object, unsigned int type,
 			     struct fplinux_ui_session_message *message)
 {
@@ -1044,11 +1247,15 @@ static bool get_media_fields(struct json_object *object, unsigned int type,
 	size_t count;
 
 	if ((json_object_object_get_ex(object, "audio", &field) ||
+	     json_object_object_get_ex(object, "background_audio", &field) ||
 	     json_object_object_get_ex(object, "vibration", &field)) &&
 	    type != FPLINUX_UI_SESSION_CONFIG)
 		return false;
 	if (!get_bool(object, "audio", &message->audio) ||
+	    !get_bool(object, "background_audio", &message->background_audio) ||
 	    !get_bool(object, "vibration", &message->vibration))
+		return false;
+	if (message->background_audio && !message->audio)
 		return false;
 	if (type != FPLINUX_UI_SESSION_VIBRATE)
 		return !json_object_object_get_ex(object, "pattern", &field) &&
@@ -1125,9 +1332,16 @@ bool fplinux_ui_session_send(int fd,
 	    !clock_data_valid(message->clock_data) ||
 	    !clock_presentation_valid(message) ||
 	    !storage_result_valid(message) || !document_fields_valid(message) ||
-	    !volume_fields_valid(message) ||
-	    ((message->audio || message->vibration) &&
+	    !volume_fields_valid(message) || !system_levels_valid(message) ||
+	    !light_fields_valid(message) ||
+	    (message->tasks_view &&
+	     message->type != FPLINUX_UI_SESSION_ACTIVE) ||
+	    (message->background_playing &&
+	     message->type != FPLINUX_UI_SESSION_ACTIVE) ||
+	    ((message->audio || message->background_audio ||
+	      message->vibration) &&
 	     message->type != FPLINUX_UI_SESSION_CONFIG) ||
+	    (message->background_audio && !message->audio) ||
 	    ((message->pattern_count || message->repeat) &&
 	     message->type != FPLINUX_UI_SESSION_VIBRATE) ||
 	    (message->type == FPLINUX_UI_SESSION_VIBRATE &&
@@ -1175,6 +1389,8 @@ bool fplinux_ui_session_send(int fd,
 	if (message->type == FPLINUX_UI_SESSION_ACTIVE)
 		add_clock_presentation(object, &message->clock_presentation);
 	add_string(object, "type", message_names[message->type]);
+	if (message->type == FPLINUX_UI_SESSION_SYSTEM_LEVELS)
+		add_system_levels(object, &message->system_levels);
 	if (message->type == FPLINUX_UI_SESSION_STORAGE_REQUEST ||
 	    message->type == FPLINUX_UI_SESSION_STORAGE_RESULT) {
 		json_object_object_add(object, "serial",
@@ -1242,8 +1458,32 @@ bool fplinux_ui_session_send(int fd,
 		json_object_object_add(object, "audio",
 				       json_object_new_boolean(message->audio));
 		json_object_object_add(
+			object, "background_audio",
+			json_object_new_boolean(message->background_audio));
+		json_object_object_add(
 			object, "vibration",
 			json_object_new_boolean(message->vibration));
+		json_object_object_add(
+			object, "light_effects",
+			json_object_new_int(message->light_effects));
+	}
+	if (message->type == FPLINUX_UI_SESSION_LIGHT_EFFECT) {
+		struct json_object *effect = json_object_new_object();
+
+		json_object_object_add(
+			effect, "resources",
+			json_object_new_int(message->light_effect.resources));
+		json_object_object_add(
+			effect, "display_level",
+			json_object_new_int(
+				message->light_effect.display_level));
+		json_object_object_add(
+			effect, "keypad_on",
+			json_object_new_boolean(
+				message->light_effect.keypad_on));
+		json_object_object_add(object, "light_effect", effect);
+		json_object_object_add(object, "serial",
+				       json_object_new_int64(message->serial));
 	}
 	if (message->type == FPLINUX_UI_SESSION_VIBRATE) {
 		struct json_object *pattern = json_object_new_array();
@@ -1296,6 +1536,8 @@ bool fplinux_ui_session_send(int fd,
 			add_string(entry, "title", task->title);
 			add_string(entry, "lifecycle",
 				   lifecycle_names[task->lifecycle]);
+			add_string(entry, "playback",
+				   playback_names[task->playback]);
 			json_object_object_add(
 				entry, "token",
 				json_object_new_int64(task->token));
@@ -1335,6 +1577,14 @@ bool fplinux_ui_session_send(int fd,
 			       json_object_new_boolean(message->visible));
 	json_object_object_add(object, "enabled",
 			       json_object_new_boolean(message->enabled));
+	if (message->type == FPLINUX_UI_SESSION_ACTIVE)
+		json_object_object_add(
+			object, "tasks_view",
+			json_object_new_boolean(message->tasks_view));
+	if (message->type == FPLINUX_UI_SESSION_ACTIVE)
+		json_object_object_add(
+			object, "background_playing",
+			json_object_new_boolean(message->background_playing));
 	json_object_object_add(object, "battery",
 			       json_object_new_int(message->battery));
 	json_object_object_add(object, "charging",
@@ -1538,12 +1788,20 @@ int fplinux_ui_session_receive(int fd,
 		get_bool(object, "locked", &message->locked) &&
 		get_bool(object, "visible", &message->visible) &&
 		get_bool(object, "enabled", &message->enabled) &&
+		get_bool(object, "tasks_view", &message->tasks_view) &&
+		get_bool(object, "background_playing",
+			 &message->background_playing) &&
 		get_int(object, "battery", &message->battery) &&
 		message->battery >= -1 && message->battery <= 100 &&
 		get_bool(object, "charging", &message->charging);
 	if (valid && json_object_object_get_ex(object, "input_locale", &field))
 		valid = type == FPLINUX_UI_SESSION_CONFIG ||
 			type == FPLINUX_UI_SESSION_ACTIVE;
+	if (valid && json_object_object_get_ex(object, "tasks_view", &field))
+		valid = type == FPLINUX_UI_SESSION_ACTIVE;
+	if (valid &&
+	    json_object_object_get_ex(object, "background_playing", &field))
+		valid = type == FPLINUX_UI_SESSION_ACTIVE;
 	if (valid)
 		valid = get_task_fields(object, type, message);
 	if (valid)
@@ -1553,11 +1811,16 @@ int fplinux_ui_session_receive(int fd,
 	if (valid)
 		valid = get_media_fields(object, type, message);
 	if (valid)
+		valid = get_light_fields(object, type, message);
+	if (valid)
 		valid = get_storage_fields(object, type, message);
 	if (valid)
 		valid = get_document_fields(object, type, message);
 	if (valid)
 		valid = get_volume_fields(object, type, message);
+	if (valid)
+		valid = get_system_levels(object, type,
+					  &message->system_levels);
 	if (valid && type == FPLINUX_UI_SESSION_CLOSE_REPLY)
 		valid = close_response_valid(message->value);
 	if (valid && json_object_object_get_ex(object, "serial", &field)) {
@@ -1580,6 +1843,8 @@ int fplinux_ui_session_receive(int fd,
 		valid = document_fields_valid(message);
 	if (valid)
 		valid = volume_fields_valid(message);
+	if (valid)
+		valid = light_fields_valid(message);
 	json_object_put(object);
 	if (valid && (type == FPLINUX_UI_SESSION_ACTIVE_ACK ||
 		      type == FPLINUX_UI_SESSION_ACTIVATION ||

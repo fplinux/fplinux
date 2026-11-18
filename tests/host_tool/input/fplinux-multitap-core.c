@@ -332,6 +332,8 @@ static void assert_language_files(const char *directory)
 	struct fplinux_multitap_languages languages;
 
 	names_are(&fixture, by_code, 3);
+	fplinux_multitap_load_languages(&languages, directory, "en");
+	names_are(&languages, by_code, 3);
 	fplinux_multitap_load_languages(&languages, directory, "ru");
 	names_are(&languages, russian_first, 3);
 	assert(!strcmp(

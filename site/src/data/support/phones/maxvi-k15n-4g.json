@@ -210,10 +210,6 @@
     "status": "unsupported",
     "note": "No force-feedback device is enabled."
   },
-  "brightness-control": {
-    "status": "untested",
-    "note": "Application support has not been established on this phone."
-  },
   "tyrquake": {
     "status": "partial",
     "note": "Game data can use RAM or ext4 microSD storage; phone gameplay controls are supported."

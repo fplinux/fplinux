@@ -210,10 +210,6 @@
     "status": "partial",
     "note": "Runs in both profiles; physical display and light effects have not been tested."
   },
-  "brightness-control": {
-    "status": "verified",
-    "note": "Phone-keypad control of levels 0…10; level 0 turns the backlight off."
-  },
   "tyrquake": {
     "status": "partial",
     "note": "Game data supports RAM and ext4 paths, including the system root, but card initialization at boot is unverified on this phone."

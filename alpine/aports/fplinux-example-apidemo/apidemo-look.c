@@ -266,7 +266,7 @@ static void add_metric(struct fplinux_ui_screen *form, const char *name,
 
 	/* TRANSLATORS: a size in pixels. */
 	snprintf(text, sizeof(text), _("%d px"), value);
-	fplinux_ui_form_append_string(form, name, text);
+	fplinux_ui_form_append_value(form, name, text);
 }
 
 static void open_metrics(struct apidemo *app, const struct apidemo_entry *entry)
@@ -302,15 +302,15 @@ static void open_metrics(struct apidemo *app, const struct apidemo_entry *entry)
 		profile = _("A profile this demo does not know");
 		break;
 	}
-	fplinux_ui_form_append_string(form, "profile", profile);
+	fplinux_ui_form_append_value(form, "profile", profile);
 	/* TRANSLATORS: width x height in pixels. */
 	snprintf(text, sizeof(text), _("%d × %d px"), fplinux_ui_width(app->ui),
 		 fplinux_ui_height(app->ui));
-	fplinux_ui_form_append_string(form, "fplinux_ui_width × height", text);
+	fplinux_ui_form_append_value(form, "fplinux_ui_width × height", text);
 	snprintf(text, sizeof(text), _("%d × %d px"), metrics->screen_width,
 		 metrics->screen_height);
-	fplinux_ui_form_append_string(form, "screen_width × screen_height",
-				      text);
+	fplinux_ui_form_append_value(form, "screen_width × screen_height",
+				     text);
 	add_metric(form, "status_height", metrics->status_height);
 	add_metric(form, "softkey_height", metrics->softkey_height);
 	add_metric(form, "header_height", metrics->header_height);
@@ -324,8 +324,9 @@ static void open_metrics(struct apidemo *app, const struct apidemo_entry *entry)
 	add_metric(form, "status_icon_size", metrics->status_icon_size);
 	add_metric(form, "app_icon_size", metrics->app_icon_size);
 	snprintf(text, sizeof(text), "%d", metrics->grid_columns);
-	fplinux_ui_form_append_string(form, "grid_columns", text);
+	fplinux_ui_form_append_value(form, "grid_columns", text);
 	add_metric(form, "focus_width", metrics->focus_width);
+	add_metric(form, "bar_height", metrics->bar_height);
 	add_metric(form, "frame_padding", metrics->frame_padding);
 	apidemo_add_back(form);
 	fplinux_ui_screen_set_listener(form, apidemo_back_listener, NULL, app);

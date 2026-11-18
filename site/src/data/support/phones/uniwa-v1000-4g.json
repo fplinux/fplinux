@@ -9,7 +9,7 @@
   },
   "local-console": {
     "status": "partial",
-    "note": "Readable 320×240 landscape terminal in RAM and microSD profiles. The terminal returns after five-second idle RTC wake with a read-only microSD root. Full keypad input and exact color accuracy are unverified."
+    "note": "The kernel console is visible before the GUI. Switching to the console for text output and returning to the GUI work in RAM. A readable 320×240 landscape terminal and its return after five-second idle RTC wake were also observed with a read-only microSD root. Full keypad input and exact color accuracy are unverified."
   },
   "lcd-backlight": {
     "stock": "available",
@@ -205,10 +205,6 @@
   "fplinux-armada": {
     "status": "untested",
     "note": "Application use on this phone is unverified."
-  },
-  "brightness-control": {
-    "status": "partial",
-    "note": "Command-line brightness control at logical levels 0, 5 and 10 in RAM. The brightness application displays and changes the logical level; physical keypad control and brightness calibration are unverified."
   },
   "tyrquake": {
     "status": "partial",

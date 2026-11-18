@@ -55,7 +55,7 @@ amixer -c 0 cget iface=CARD,name='Headphone Jack'
 
 The input device `UMS9117 Headphones Headphone` reports the same state as `SW_HEADPHONE_INSERT` once the plug has settled. The state cannot tell headphones from a headset or another cable, and it does not change `Capture Source`. Plug changes during sleep are reported after wake.
 
-Where included and supported, the `fplinux-jack` service starts at boot and sets the two output switches when the plug changes: headphones on and speaker off on insertion, the reverse on removal, always enabling the new output first. It changes nothing between plug events, so a manual setting lasts until the next change. Without device data there is no speaker switch, and the service leaves the outputs alone.
+The `fplinux-audiod` service owns output switching. In Automatic mode it follows the supported jack control. Removing a private output pauses Media before speaker fallback; an active alarm may use the available speaker. Explicit output selection remains separate from the detected plug state. Missing speaker controls do not imply speaker support. Stop the service before administrative direct ALSA playback or control changes; see [Sound](/fplinux/use/audio/).
 
 <span id="sc9820e-capture" />
 

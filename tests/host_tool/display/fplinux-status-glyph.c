@@ -7,11 +7,10 @@
 
 int main(void)
 {
-	static const uint8_t bitmap[] = { 0x80, 0xf0, 0xf0 };
+	static const uint8_t bitmap[] = { 0x80, 0xf0 };
 	static const struct fplinux_status_glyph glyphs[99] = {
 		['A' - ' '] = { 0, 32, 1, 1, 0, 0 },
 		['V' - ' '] = { 1, 32, 1, 1, 0, 0 },
-		['.' - ' '] = { 2, 16, 1, 1, 0, 0 },
 	};
 	static const struct fplinux_status_kern pairs[] = {
 		{ 'A' - ' ', 'U' - ' ', -8 },
@@ -19,14 +18,12 @@ int main(void)
 		{ 'B' - ' ', 'A' - ' ', -8 },
 	};
 	static const struct fplinux_status_font font = {
-		bitmap, glyphs, pairs, 3, 4, 0,
+		bitmap, glyphs, pairs, 3, 4, 1,
 	};
 	static const struct fplinux_ui_profile_spec profile = {
 		.margin = 1,
 		.spacing = 1,
-		.header_height = 8,
 		.bar_height = 1,
-		.softkey_height = 4,
 	};
 	static const struct fplinux_ui_theme_spec theme = {
 		.rgb = { [FPLINUX_UI_COLOUR_FOREGROUND] = 0xffffff },
@@ -36,10 +33,13 @@ int main(void)
 		.theme = &theme,
 		.body = &font,
 		.title = &font,
-		.legend = &font,
 	};
-	struct fplinux_status_view view = { .layout = FPLINUX_STATUS_BRIGHTNESS,
-					    .heading = "AV" };
+	static const uint16_t wrapped_row[] = {
+		0, 0x8c51, 0xffff, 0, 0x8c51, 0xffff, 0, 0,
+	};
+	struct fplinux_status_view view = {
+		.layout = FPLINUX_STATUS_PREPARATION, .heading = "AV"
+	};
 	uint16_t pixels[20 * 24];
 	struct fplinux_status_surface surface = { pixels, 20, 24, 40 };
 	struct fplinux_status_canvas canvas;
@@ -55,17 +55,18 @@ int main(void)
 	assert(!fplinux_status_surface_canvas(&canvas, &surface));
 	assert(!fplinux_status_screen_render(&canvas, &resources, &view));
 	/* The A/V pair advances one pixel; the first glyph has 8/15 alpha. */
-	assert(pixels[12 * 20 + 1] == 0x8c51);
-	assert(pixels[12 * 20 + 2] == 0xffff);
-	assert(pixels[11 * 20 + 1] == 0);
+	assert(pixels[12 * 20 + 8] == 0x8c51);
+	assert(pixels[12 * 20 + 9] == 0xffff);
+	assert(pixels[11 * 20 + 8] == 0);
 	memset(pixels, 0, sizeof(pixels));
 	surface.width = 8;
+	view.layout = FPLINUX_STATUS_BOOT;
 	view.heading = "AVAVAVAV";
 	assert(!fplinux_status_surface_canvas(&canvas, &surface));
 	assert(!fplinux_status_screen_render(&canvas, &resources, &view));
-	assert(pixels[12 * 20 + 4] == 0xffff);
-	assert(pixels[12 * 20 + 5] == 0xffff);
-	assert(pixels[12 * 20 + 6] == 0xffff);
-	assert(pixels[12 * 20 + 7] == 0);
+	assert(!memcmp(pixels + 10 * 20, wrapped_row, sizeof(wrapped_row)));
+	assert(!memcmp(pixels + 14 * 20, wrapped_row, sizeof(wrapped_row)));
+	assert(pixels[9 * 20 + 1] == 0);
+	assert(pixels[13 * 20 + 1] == 0);
 	return 0;
 }

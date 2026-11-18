@@ -195,10 +195,6 @@
     "status": "partial",
     "note": "Software and GPU rendering are available. Exit restores the previous display state, LCD brightness and keypad light and stops vibration. Physical soft-key operation is not verified."
   },
-  "brightness-control": {
-    "status": "untested",
-    "note": "The brightness CLI get/set works; physical keypad use of the application is not tested."
-  },
   "tyrquake": {
     "status": "partial",
     "note": "TyrQuake can use game data on an ext4 microSD card or in RAM, with software or GPU rendering. Complete physical keypad operation is not verified. There is no game sound."

@@ -39,6 +39,7 @@ struct capture {
 	bool tasks_open;
 	bool quick_open;
 	bool task_closed;
+	enum fplinux_ui_session_playback task_playback;
 	bool has_request;
 	bool has_clock_request;
 	char dismissed_notice[FPLINUX_UI_SESSION_NAME_BYTES];
@@ -57,11 +58,15 @@ struct capture {
 	struct bluez_fake *bluez;
 	unsigned int brightness;
 	unsigned int volume;
+	int volume_draft;
+	bool volume_preview_active;
 	bool wifi_supported;
 	bool wifi_on;
 	bool brightness_unavailable;
 	bool hold_volume_save;
 	struct fplinux_ui_session_message held_volume_save;
+	bool hold_volume_preview;
+	struct fplinux_ui_session_message volume_preview;
 	char brightness_request[FPLINUX_UI_SESSION_NAME_BYTES];
 	char brightness_value[FPLINUX_UI_SESSION_TEXT_BYTES];
 	unsigned int brightness_requests;
@@ -99,7 +104,48 @@ static void answer_tasks(struct capture *capture)
 
 	if (capture->task_closed)
 		reply.tasks[0] = reply.tasks[1];
+	if (!strcmp(capture->scenario, "playback")) {
+		reply.task_count = 1;
+		strcpy(reply.tasks[0].title,
+		       !strcmp(capture->locale, "ru") ? "Музыка" : "Music");
+		reply.tasks[0].playback = capture->task_playback;
+	}
 	assert(fplinux_ui_session_send(capture->session, &reply));
+}
+
+static void send_system_levels(struct capture *capture)
+{
+	struct fplinux_ui_session_message message = {
+		.type = FPLINUX_UI_SESSION_SYSTEM_LEVELS,
+		.system_levels.level = {
+			[FPLINUX_SYSTEM_LEVEL_MEDIA] = {
+				.availability = FPLINUX_SYSTEM_LEVEL_READY,
+				.maximum = 10,
+			},
+			[FPLINUX_SYSTEM_LEVEL_ALARM] = {
+				.availability = FPLINUX_SYSTEM_LEVEL_READY,
+				.maximum = 10,
+				.value = 8,
+			},
+			[FPLINUX_SYSTEM_LEVEL_BRIGHTNESS] = {
+				.minimum = 1,
+				.maximum = 10,
+			},
+		},
+	};
+	struct fplinux_system_level_state *brightness =
+		&message.system_levels.level[FPLINUX_SYSTEM_LEVEL_BRIGHTNESS];
+
+	message.system_levels.level[FPLINUX_SYSTEM_LEVEL_MEDIA].value =
+		capture->volume_preview_active ?
+			(unsigned int)capture->volume_draft :
+			capture->volume;
+	brightness->availability = capture->brightness_unavailable ?
+					   FPLINUX_SYSTEM_LEVEL_UNAVAILABLE :
+					   FPLINUX_SYSTEM_LEVEL_READY;
+	brightness->value =
+		capture->brightness_unavailable ? 0 : capture->brightness;
+	assert(fplinux_ui_session_send(capture->session, &message));
 }
 
 /* As the manager: a preview shows a level, Save stores it, "" restores. */
@@ -108,11 +154,14 @@ static void answer_setting(struct capture *capture,
 {
 	struct fplinux_ui_session_message reply = {
 		.type = FPLINUX_UI_SESSION_SETTING,
+		.serial = request->serial,
 		.applied = true,
 		.storage_state = FPLINUX_STORAGE_DURABLE,
 	};
 
 	strcpy(reply.name, request->name);
+	assert(strcmp(request->name, "brightness") || request->value[0]);
+	assert(strcmp(request->name, "volume") || request->value[0]);
 	if (!strcmp(request->name, "wifi")) {
 		if (!capture->wifi_supported) {
 			reply.type = FPLINUX_UI_SESSION_ERROR;
@@ -126,13 +175,45 @@ static void answer_setting(struct capture *capture,
 		return;
 	}
 	if (request->value[0] || strstr(request->name, "_preview") ||
+	    !strcmp(request->name, "volume_commit") ||
 	    !strcmp(request->name, "brightness")) {
 		strcpy(capture->brightness_request, request->name);
 		strcpy(capture->brightness_value, request->value);
 		++capture->brightness_requests;
 	}
-	if (!strcmp(request->name, "brightness") && !request->value[0] &&
-	    capture->brightness_unavailable) {
+	if (!strcmp(request->name, "volume_step")) {
+		assert(!strcmp(request->value, "-1") ||
+		       !strcmp(request->value, "1"));
+		if (!capture->volume_preview_active) {
+			capture->volume_draft = (int)capture->volume;
+			capture->volume_preview_active = true;
+		}
+		capture->volume_draft += atoi(request->value);
+		if (capture->volume_draft < 0)
+			capture->volume_draft = 0;
+		if (capture->volume_draft > 10)
+			capture->volume_draft = 10;
+		strcpy(reply.name, "volume_preview");
+		snprintf(reply.value, sizeof(reply.value), "%d",
+			 capture->volume_draft);
+		capture->volume_preview = reply;
+		if (capture->hold_volume_preview) {
+			send_system_levels(capture);
+			return;
+		}
+	} else if (!strcmp(request->name, "volume_commit")) {
+		assert(!request->value[0]);
+		capture->volume = (unsigned int)capture->volume_draft;
+		capture->volume_preview_active = false;
+		strcpy(reply.name, "volume");
+		snprintf(reply.value, sizeof(reply.value), "%u",
+			 capture->volume);
+		if (capture->hold_volume_save) {
+			capture->held_volume_save = reply;
+			return;
+		}
+	} else if (!strcmp(request->name, "brightness") && !request->value[0] &&
+		   capture->brightness_unavailable) {
 		reply.type = FPLINUX_UI_SESSION_ERROR;
 		reply.applied = false;
 		reply.storage_state = FPLINUX_STORAGE_UNPUBLISHED;
@@ -154,14 +235,22 @@ static void answer_setting(struct capture *capture,
 		}
 	} else if (request->value[0]) {
 		strcpy(reply.value, request->value);
+		if (!strcmp(request->name, "volume_preview")) {
+			capture->volume_preview = reply;
+			if (capture->hold_volume_preview)
+				return;
+		}
 	} else {
 		bool volume = !strcmp(request->name, "volume_preview");
 
+		if (volume)
+			capture->volume_preview_active = false;
 		strcpy(reply.name, volume ? "volume" : "brightness");
 		snprintf(reply.value, sizeof(reply.value), "%u",
 			 volume ? capture->volume : capture->brightness);
 	}
 	assert(fplinux_ui_session_send(capture->session, &reply));
+	send_system_levels(capture);
 }
 
 static void read_messages(struct capture *capture)
@@ -203,7 +292,6 @@ static void read_messages(struct capture *capture)
 			answer_tasks(capture);
 			break;
 		case FPLINUX_UI_SESSION_CLOSE_TASK:
-			capture->task_closed = true;
 			/* fall through */
 		case FPLINUX_UI_SESSION_ACTIVATE:
 		case FPLINUX_UI_SESSION_LAUNCH:
@@ -551,33 +639,40 @@ static void wait_label_prefix(struct capture *capture, const char *prefix)
 	assert(has_label_prefix(capture, prefix));
 }
 
+static void active_frame(struct capture *capture,
+			 struct fplinux_ui_session_message *active)
+{
+	uint64_t deadline = fplinux_ui_frame_now_ms() + 3000;
+
+	active->serial = ++capture->serial;
+	strcpy(active->locale, capture->locale);
+	strcpy(active->input_locale, capture->locale);
+	active->theme = !strcmp(capture->theme, "dark") ?
+				FPLINUX_UI_SESSION_THEME_DARK :
+				FPLINUX_UI_SESSION_THEME_LIGHT;
+	assert(fplinux_ui_session_send(capture->session, active));
+	while ((capture->active_ack != active->serial ||
+		capture->observed.active_serial != active->serial) &&
+	       fplinux_ui_frame_now_ms() < deadline)
+		pump(capture);
+	assert(capture->active_ack == active->serial);
+	assert(capture->observed.active_serial == active->serial);
+}
+
 static void
 home_active(struct capture *capture,
 	    const struct fplinux_ui_session_clock_presentation *presentation)
 {
 	struct fplinux_ui_session_message active = {
 		.type = FPLINUX_UI_SESSION_ACTIVE,
-		.serial = ++capture->serial,
 		.battery = 80,
 		.visible = true,
 		.value = "home",
 		.name = "list",
 		.clock_presentation = *presentation,
 	};
-	uint64_t deadline = fplinux_ui_frame_now_ms() + 3000;
 
-	strcpy(active.locale, capture->locale);
-	strcpy(active.input_locale, capture->locale);
-	active.theme = !strcmp(capture->theme, "dark") ?
-			       FPLINUX_UI_SESSION_THEME_DARK :
-			       FPLINUX_UI_SESSION_THEME_LIGHT;
-	assert(fplinux_ui_session_send(capture->session, &active));
-	while ((capture->active_ack != active.serial ||
-		capture->observed.active_serial != active.serial) &&
-	       fplinux_ui_frame_now_ms() < deadline)
-		pump(capture);
-	assert(capture->active_ack == active.serial);
-	assert(capture->observed.active_serial == active.serial);
+	active_frame(capture, &active);
 }
 
 static void home_standby(struct capture *capture, bool installed)
@@ -687,6 +782,9 @@ static void wait_request(struct capture *capture,
 		pump(capture);
 	assert(capture->has_request);
 	assert(capture->request.type == type);
+	if (strcmp(capture->request.app_id, id))
+		fprintf(stderr, "Launcher request: wanted %s, received %s\n",
+			id, capture->request.app_id);
 	assert(!strcmp(capture->request.app_id, id));
 	assert(capture->request.token == token);
 	capture->has_request = false;
@@ -803,6 +901,7 @@ static void start(struct capture *capture, char **arguments)
 	assert(hello.type == FPLINUX_UI_SESSION_HELLO);
 	assert(!strcmp(hello.app_id, "org.fplinux.launcher"));
 	assert(fplinux_ui_session_send(capture->session, &config));
+	send_system_levels(capture);
 	deadline = fplinux_ui_frame_now_ms() + 3000;
 	while (!capture->ready && fplinux_ui_frame_now_ms() < deadline)
 		pump(capture);
@@ -913,6 +1012,41 @@ static void launch_and_notice(struct capture *capture)
 	puts("launcher-launch: app 02 snapshot is full size; failed launch closes back to List");
 }
 
+static void playback_tasks(struct capture *capture)
+{
+	static const struct {
+		enum fplinux_ui_session_playback playback;
+		const char *english;
+		const char *russian;
+	} states[] = {
+		{ FPLINUX_UI_SESSION_PLAYBACK_PLAYING, "Playing", "Играет" },
+		{ FPLINUX_UI_SESSION_PLAYBACK_PAUSED, "Paused", "Пауза" },
+		{ FPLINUX_UI_SESSION_PLAYBACK_HELD, "Audio interrupted",
+		  "Звук прерван" },
+		{ FPLINUX_UI_SESSION_PLAYBACK_UNAVAILABLE, "Audio unavailable",
+		  "Звук недоступен" },
+		{ FPLINUX_UI_SESSION_PLAYBACK_NONE, "Background", "В фоне" },
+	};
+	bool russian = !strcmp(capture->locale, "ru");
+	char name[64];
+
+	press(capture, KEY_F14);
+	wait_selection(capture, "home", "list", 1);
+	press(capture, KEY_TAB);
+	wait_tasks(capture, true);
+	for (size_t i = 0; i < sizeof(states) / sizeof(states[0]); ++i) {
+		capture->task_playback = states[i].playback;
+		answer_tasks(capture);
+		wait_label_prefix(capture, russian ? states[i].russian :
+						     states[i].english);
+		assert(has_label_prefix(capture, russian ? "Музыка" : "Music"));
+		assert(snprintf(name, sizeof(name), "playback-tasks-%zu", i) <
+		       (int)sizeof(name));
+		save_observation(capture, name);
+	}
+	puts("launcher-playback: current locale, application name and audio states drawn");
+}
+
 static void task_overlay(struct capture *capture)
 {
 	const struct fplinux_ui_session_message late_error = {
@@ -943,6 +1077,27 @@ static void task_overlay(struct capture *capture)
 	press(capture, KEY_OK);
 	wait_request(capture, FPLINUX_UI_SESSION_CLOSE_TASK, "org.test.app01",
 		     101);
+	/* A waiting close brings its decision to the foreground. */
+	struct fplinux_ui_session_message closing = {
+		.type = FPLINUX_UI_SESSION_ACTIVE,
+		.active_id = "org.test.app01",
+		.selected_id = "org.test.app02",
+		.title = "App 01",
+		.value = "home",
+		.name = "list",
+		.battery = 80,
+	};
+
+	active_frame(capture, &closing);
+	wait_tasks(capture, false);
+	capture->task_closed = true;
+	closing.active_id[0] = '\0';
+	closing.tasks_view = true;
+	active_frame(capture, &closing);
+	/* ACTIVE_ACK must cover Tasks, not an intermediate catalogue frame. */
+	assert(capture->tasks_open);
+	assert(find_label(capture, "Open apps"));
+	wait_tasks(capture, true);
 	wait_legends(capture, "Close app", "Open", "Back");
 	press(capture, KEY_OK);
 	wait_request(capture, FPLINUX_UI_SESSION_ACTIVATE, "org.test.app02",
@@ -1398,6 +1553,23 @@ static void battery_states(struct capture *capture)
 	}
 	battery_active(capture, 60, false, true);
 	save_frame(capture, "launcher-status-locked");
+	struct fplinux_ui_session_message active = {
+		.type = FPLINUX_UI_SESSION_ACTIVE,
+		.battery = 60,
+		.visible = true,
+		.value = "catalogue",
+		.name = "list",
+		.selected_id = "org.test.app01",
+	};
+
+	active_frame(capture, &active);
+	save_frame(capture, "launcher-playback-idle");
+	active.background_playing = true;
+	active_frame(capture, &active);
+	save_frame(capture, "launcher-playback-playing");
+	active.locked = true;
+	active_frame(capture, &active);
+	save_frame(capture, "launcher-playback-locked");
 	puts("launcher-battery: every level, low and charging state drawn");
 }
 
@@ -1453,7 +1625,6 @@ static void quick_settings(struct capture *capture)
 	press(capture, KEY_PICKUP_PHONE);
 	wait_quick_settings(capture, true);
 	wait_label(capture, "Quick settings");
-	wait_brightness_request(capture, "brightness", "");
 	wait_label(capture, "← 7 →");
 	wait_legends(capture, "", "", "Back");
 	save_frame(capture, "quick-list");
@@ -1516,21 +1687,118 @@ static void quick_settings(struct capture *capture)
 	wait_legends(capture, "", "", "Back");
 	assert(capture->brightness == 8);
 
-	/* Zero is a value, not a query or rollback. */
 	press_frame(capture, KEY_DOWN);
 	wait_label(capture, "← 1 →");
+	/* Every GUI step reaches the manager while the previous ACK is held. */
+	capture->hold_volume_preview = true;
+	press(capture, KEY_RIGHT);
+	wait_brightness_request(capture, "volume_step", "1");
+	struct fplinux_ui_session_message old_preview = capture->volume_preview;
+	unsigned int requests = capture->brightness_requests;
+	uint64_t steps_deadline = fplinux_ui_frame_now_ms() + 3000;
+
+	assert(old_preview.serial);
+	press(capture, KEY_RIGHT);
+	press(capture, KEY_RIGHT);
+	while (capture->brightness_requests < requests + 2 &&
+	       fplinux_ui_frame_now_ms() < steps_deadline)
+		pump(capture);
+	assert(capture->brightness_requests == requests + 2);
+	wait_brightness_request(capture, "volume_step", "1");
+	wait_label(capture, "← 4 →");
+	assert(capture->volume_preview.serial != old_preview.serial);
+	assert(!strcmp(capture->volume_preview.value, "4"));
+	capture->hold_volume_preview = false;
+	assert(fplinux_ui_session_send(capture->session,
+				       &capture->volume_preview));
+	assert(fplinux_ui_session_send(capture->session, &old_preview));
+	settle(capture, 100);
+	assert(!capture->brightness_request[0]);
+	wait_label(capture, "← 4 →");
+	/* A relative intent still leaves the client at its displayed limit. */
+	capture->hold_volume_preview = true;
+	requests = capture->brightness_requests;
+	steps_deadline = fplinux_ui_frame_now_ms() + 3000;
+	for (unsigned int i = 0; i < 7; ++i)
+		press(capture, KEY_RIGHT);
+	while (capture->brightness_requests < requests + 7 &&
+	       fplinux_ui_frame_now_ms() < steps_deadline)
+		pump(capture);
+	assert(capture->brightness_requests == requests + 7);
+	wait_brightness_request(capture, "volume_step", "1");
+	wait_label(capture, "← 10 →");
+	assert(!strcmp(capture->volume_preview.value, "10"));
+	capture->hold_volume_preview = false;
+	assert(fplinux_ui_session_send(capture->session,
+				       &capture->volume_preview));
+	press(capture, KEY_F14);
+	wait_brightness_request(capture, "volume_preview", "");
+	wait_legends(capture, "", "", "Back");
+	wait_label(capture, "← 1 →");
+	/* An earlier editor's error cannot cancel the new pending preview. */
+	capture->hold_volume_preview = true;
+	press(capture, KEY_RIGHT);
+	wait_brightness_request(capture, "volume_step", "1");
+	old_preview.type = FPLINUX_UI_SESSION_ERROR;
+	old_preview.applied = false;
+	old_preview.storage_state = FPLINUX_STORAGE_UNPUBLISHED;
+	strcpy(old_preview.reason, "unavailable");
+	assert(old_preview.serial != capture->volume_preview.serial);
+	assert(fplinux_ui_session_send(capture->session, &old_preview));
+	settle(capture, 100);
+	assert(!capture->brightness_request[0]);
+	wait_legends(capture, "Save", "", "Cancel");
+	wait_label(capture, "← 2 →");
+	struct fplinux_ui_session_message error = capture->volume_preview;
+
+	error.type = FPLINUX_UI_SESSION_ERROR;
+	error.applied = false;
+	error.storage_state = FPLINUX_STORAGE_UNPUBLISHED;
+	strcpy(error.name, "volume_step");
+	strcpy(error.value, "1");
+	strcpy(error.reason, "unavailable");
+	assert(fplinux_ui_session_send(capture->session, &error));
+	wait_brightness_request(capture, "volume_preview", "");
+	wait_label(capture,
+		   "This setting is unavailable now. Try again later.");
+	wait_legends(capture, "", "", "Close");
+	press(capture, KEY_F14);
+	wait_legends(capture, "", "", "Back");
+	wait_label(capture, "← 1 →");
+	capture->hold_volume_preview = false;
+
+	/* Commit saves the current zero preview without a client-side target. */
 	press(capture, KEY_LEFT);
-	wait_brightness_request(capture, "volume_preview", "0");
+	wait_brightness_request(capture, "volume_step", "-1");
+	wait_label(capture, "← 0 →");
 	capture->hold_volume_save = true;
 	press(capture, KEY_F13);
-	wait_brightness_request(capture, "volume", "0");
+	wait_brightness_request(capture, "volume_commit", "");
 	wait_legends(capture, "", "", "");
 	press(capture, KEY_F14);
 	settle(capture, 100);
 	assert(!capture->brightness_request[0]);
 	capture->hold_volume_save = false;
-	assert(fplinux_ui_session_send(capture->session,
-				       &capture->held_volume_save));
+	error = capture->held_volume_save;
+	error.type = FPLINUX_UI_SESSION_ERROR;
+	error.applied = false;
+	error.storage_state = FPLINUX_STORAGE_UNPUBLISHED;
+	strcpy(error.reason, "unavailable");
+	capture->volume = 1;
+	assert(fplinux_ui_session_send(capture->session, &error));
+	wait_label(capture,
+		   "This setting is unavailable now. Try again later.");
+	wait_legends(capture, "", "", "Close");
+	press(capture, KEY_F14);
+	wait_legends(capture, "", "", "Back");
+	wait_label(capture, "← 1 →");
+	capture->brightness_request[0] = '\0';
+	capture->brightness_value[0] = '\0';
+	press(capture, KEY_LEFT);
+	wait_brightness_request(capture, "volume_step", "-1");
+	wait_label(capture, "← 0 →");
+	press(capture, KEY_F13);
+	wait_brightness_request(capture, "volume_commit", "");
 	wait_legends(capture, "", "", "Back");
 	assert(capture->volume == 0);
 
@@ -1545,8 +1813,10 @@ static void quick_settings(struct capture *capture)
 	/* The adapter appears asynchronously and its row can be off-screen. */
 	uint64_t deadline = fplinux_ui_frame_now_ms() + 3000;
 	while (!find_label(capture, "On") &&
-	       fplinux_ui_frame_now_ms() < deadline)
-		press_frame(capture, KEY_DOWN);
+	       fplinux_ui_frame_now_ms() < deadline) {
+		press(capture, KEY_DOWN);
+		settle(capture, 100);
+	}
 	wait_label(capture, "On");
 
 	/* Dial closes it; HOME from the manager does as well. */
@@ -1558,17 +1828,21 @@ static void quick_settings(struct capture *capture)
 	wait_quick_settings(capture, true);
 	deadline = fplinux_ui_frame_now_ms() + 3000;
 	while (!find_label(capture, "Wi-Fi") &&
-	       fplinux_ui_frame_now_ms() < deadline)
-		press_frame(capture, KEY_DOWN);
+	       fplinux_ui_frame_now_ms() < deadline) {
+		press(capture, KEY_DOWN);
+		settle(capture, 100);
+	}
 	wait_label(capture, "Wi-Fi");
 	deadline = fplinux_ui_frame_now_ms() + 3000;
 	while (!find_label(capture, "← 8 →") &&
-	       fplinux_ui_frame_now_ms() < deadline)
-		press_frame(capture, KEY_UP);
+	       fplinux_ui_frame_now_ms() < deadline) {
+		press(capture, KEY_UP);
+		settle(capture, 100);
+	}
 	wait_label(capture, "← 8 →");
-	press_frame(capture, KEY_DOWN);
+	press(capture, KEY_DOWN);
 	wait_label(capture, "← 0 →");
-	press_frame(capture, KEY_DOWN);
+	press(capture, KEY_DOWN);
 	wait_legends(capture, "", "Turn on", "Back");
 	press(capture, KEY_OK);
 	wait_legends(capture, "", "Turn off", "Back");
@@ -1577,6 +1851,7 @@ static void quick_settings(struct capture *capture)
 	wait_quick_settings(capture, false);
 	capture->wifi_supported = false;
 	capture->brightness_unavailable = true;
+	send_system_levels(capture);
 	press(capture, KEY_PICKUP_PHONE);
 	wait_quick_settings(capture, true);
 	wait_label(capture, "Unavailable");
@@ -1642,13 +1917,12 @@ static void application_bars(struct capture *capture, int count, char **legends)
 
 int main(int argc, char **argv)
 {
-	struct capture capture = { 0 };
+	struct capture capture = { .brightness = 7 };
 
 	assert(argc == 11 || argc >= 13);
 	capture.scenario = argc >= 13 ? argv[11] : "navigation";
 	capture.locale = argc >= 13 ? argv[12] : "en";
 	if (!strcmp(capture.scenario, "quick-settings")) {
-		capture.brightness = 7;
 		capture.volume = 1;
 		capture.bluez = bluez_fake_start();
 		bluez_fake_add_adapter(capture.bluez, HCI0, false);
@@ -1669,6 +1943,8 @@ int main(int argc, char **argv)
 		catalogue_marquee(&capture);
 	} else if (!strcmp(capture.scenario, "battery")) {
 		battery_states(&capture);
+	} else if (!strcmp(capture.scenario, "playback")) {
+		playback_tasks(&capture);
 	} else if (!strcmp(capture.scenario, "ring")) {
 		ring_answers(&capture);
 	} else if (!strncmp(capture.scenario, "notice-", 7)) {

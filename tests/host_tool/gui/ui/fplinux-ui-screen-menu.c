@@ -297,6 +297,10 @@ int32_t lv_obj_get_content_height(const lv_obj_t *obj)
 {
 	return geometry(obj)->height;
 }
+int32_t lv_area_get_height(const lv_area_t *area)
+{
+	return area->y2 - area->y1 + 1;
+}
 int32_t lv_obj_get_height(const lv_obj_t *obj)
 {
 	return geometry(obj)->height;
@@ -366,6 +370,11 @@ void lv_obj_set_y(lv_obj_t *obj, int32_t y)
 {
 	geometry(obj)->y = y;
 }
+void lv_obj_set_x(lv_obj_t *obj, int32_t x)
+{
+	geometry(obj)->x = x;
+}
+NOTHING(lv_obj_set_layout, lv_obj_t *obj, uint32_t layout)
 NOTHING(lv_obj_set_scrollable, lv_obj_t *obj, bool enable)
 NOTHING(lv_obj_set_scrollbar_mode, lv_obj_t *obj, lv_scrollbar_mode_t mode)
 NOTHING(lv_obj_set_scroll_dir, lv_obj_t *obj, lv_dir_t dir)
@@ -404,6 +413,10 @@ void lv_obj_set_style_pad_all(lv_obj_t *obj, int32_t value,
 	geometry(obj)->pad_right = value;
 }
 NOTHING(lv_obj_set_style_pad_bottom, lv_obj_t *obj, int32_t value,
+	lv_style_selector_t selector)
+NOTHING(lv_obj_set_style_pad_top, lv_obj_t *obj, int32_t value,
+	lv_style_selector_t selector)
+NOTHING(lv_obj_set_style_margin_top, lv_obj_t *obj, int32_t value,
 	lv_style_selector_t selector)
 NOTHING(lv_obj_set_style_pad_column, lv_obj_t *obj, int32_t value,
 	lv_style_selector_t selector)
@@ -625,6 +638,9 @@ ZERO(bool, fplinux_ui_listview_set_level, struct fplinux_ui_listview *list,
      size_t index, int32_t minimum, int32_t maximum, int32_t value)
 NOTHING(fplinux_ui_listview_set_inline_detail, struct fplinux_ui_listview *list,
 	bool inline_detail)
+NOTHING(fplinux_ui_listview_set_popup_choice, struct fplinux_ui_listview *list)
+NOTHING(fplinux_ui_listview_set_trailing_divider,
+	struct fplinux_ui_listview *list, bool visible)
 NOTHING(fplinux_ui_listview_set_marked, struct fplinux_ui_listview *list,
 	size_t index, bool marked)
 NOTHING(fplinux_ui_listview_set_selectable, struct fplinux_ui_listview *list,
@@ -732,14 +748,26 @@ bool fplinux_ui_is_launcher(const struct fplinux_ui *owner)
 	return false;
 }
 
-/* The screen component receives a fixed surface from its runtime stand-in. */
-int fplinux_ui_modal_height(const struct fplinux_ui *owner)
+bool fplinux_ui_is_fullscreen(const struct fplinux_ui *owner)
 {
-	return owner->height;
+	return owner->fullscreen;
 }
 
-NOTHING(fplinux_ui_modal_set, struct fplinux_ui *owner,
-	enum fplinux_ui_modal source, bool up)
+int fplinux_ui_modal_height(const struct fplinux_ui *owner)
+{
+	return owner->fullscreen ?
+		       owner->height - owner->metrics.softkey_height :
+		       owner->height;
+}
+
+void fplinux_ui_modal_set(struct fplinux_ui *owner,
+			  enum fplinux_ui_modal source, bool up)
+{
+	if (up)
+		owner->modals |= source;
+	else
+		owner->modals &= ~(unsigned int)source;
+}
 
 const char *fplinux_ui_locale(const struct fplinux_ui *owner)
 {
@@ -1613,6 +1641,48 @@ static bool legends_are(const char *left, const char *centre, const char *right)
 	       !strcmp(drawn.legends[2], right);
 }
 
+static void
+test_fullscreen_resize_keeps_current_form_legends_above_content(void)
+{
+	const struct fplinux_ui_command save = {
+		.id = OPEN_ID,
+		.type = FPLINUX_UI_COMMAND_OK,
+		.label = "Save",
+	};
+	const struct fplinux_ui_command back = {
+		.id = BACK_ID,
+		.type = FPLINUX_UI_COMMAND_BACK,
+		.keep_visible = true,
+	};
+	struct fplinux_ui_screen *form = fplinux_ui_form_new(&ui, "Name");
+	int width = -1;
+	int height = -1;
+
+	CHECK(form);
+	CHECK(fplinux_ui_form_append_text_field(form, NULL, "hello", 32,
+						FPLINUX_UI_TEXT_ANY) == 0);
+	CHECK(fplinux_ui_screen_add_command(form, &save));
+	CHECK(fplinux_ui_screen_add_command(form, &back));
+	ui.height = 268;
+	fplinux_ui_push(&ui, form);
+	CHECK(fplinux_ui_current(&ui) == form);
+	CHECK(legends_are("Clear", "Save", "Back"));
+	CHECK(!(ui.modals & FPLINUX_UI_MODAL_SCREEN));
+
+	ui.fullscreen = true;
+	ui.height = 320;
+	fplinux_ui_screens_resize(ui.screens);
+	CHECK(fplinux_ui_current(&ui) == form);
+	CHECK(ui.modals & FPLINUX_UI_MODAL_SCREEN);
+	CHECK(legends_are("Clear", "Save", "Back"));
+	CHECK(fplinux_ui_screen_get_content_size(form, &width, &height));
+	/* The title occupies 28 pixels and the local bar occupies 16. */
+	CHECK(width == 240 && height == 276);
+	ui.fullscreen = false;
+	ui.height = 320;
+	finish();
+}
+
 /* Runtime image resources are outside this command/callback harness. */
 const void *fplinux_ui_glyph(struct fplinux_ui *owner, const char *name,
 			     enum fplinux_ui_glyph_size size)
@@ -2111,6 +2181,7 @@ int main(int argc, char *argv[])
 	test_unchanged_date_done_reports_acceptance_without_change();
 	test_retained_save_stays_on_narrow_form_with_edit_and_cancel();
 	test_retained_cancel_leaves_phone_text_correction_available();
+	test_fullscreen_resize_keeps_current_form_legends_above_content();
 	test_form_appearance();
 	test_form_get_focus_errors();
 	test_hidden_text_box_stops_clear_repeat();

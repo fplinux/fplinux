@@ -8,6 +8,7 @@
 #include <sys/types.h>
 
 #include "fplinux-ui-session-internal.h"
+#include "session-indicator.h"
 #include "session-power.h"
 
 struct fplinux_session;
@@ -122,6 +123,8 @@ struct fplinux_session_launch {
 void fplinux_session_get_launch(struct fplinux_session *session,
 				struct fplinux_session_launch *state);
 void fplinux_session_cancel_launch(struct fplinux_session *session);
+void fplinux_session_get_indicator(struct fplinux_session *session,
+				   struct fplinux_session_indicator *state);
 
 struct fplinux_session *
 fplinux_session_create(const struct fplinux_session_options *options);
@@ -198,10 +201,10 @@ void fplinux_session_output_reset(struct fplinux_session *session);
 bool fplinux_session_wake_pending(const struct fplinux_session *session);
 /* Home retains the application and its state in the bounded task registry. */
 void fplinux_session_home(struct fplinux_session *session);
-/* A phone keypad key; true when Wayland may deliver it to the focus. */
+/* Volume keys stay with the manager; true permits delivery to the focus. */
 bool fplinux_session_key(struct fplinux_session *session, unsigned int code,
 			 bool pressed, uint64_t time_ms);
-/* An external keyboard key; returns true when it may reach the focus. */
+/* The same system-key policy for an external keyboard. */
 bool fplinux_session_keyboard_key(struct fplinux_session *session,
 				  unsigned int code, bool pressed);
 /* The external keyboard Home shortcut. */

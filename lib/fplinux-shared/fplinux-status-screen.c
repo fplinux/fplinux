@@ -6,22 +6,28 @@ struct painter {
 	uint16_t background;
 };
 
+void fplinux_status_fill(const struct fplinux_status_canvas *canvas, uint32_t x,
+			 uint32_t y, uint32_t width, uint32_t height,
+			 uint16_t colour)
+{
+	if (x >= canvas->width || y >= canvas->height)
+		return;
+	if (width > canvas->width - x)
+		width = canvas->width - x;
+	if (height > canvas->height - y)
+		height = canvas->height - y;
+	if (width && height)
+		canvas->fill(canvas->context, x, y, width, height, colour);
+}
+
 static void fill(const struct painter *p, uint32_t x, uint32_t y,
 		 uint32_t width, uint32_t height, uint16_t colour)
 {
-	if (x >= p->canvas->width || y >= p->canvas->height)
-		return;
-	if (width > p->canvas->width - x)
-		width = p->canvas->width - x;
-	if (height > p->canvas->height - y)
-		height = p->canvas->height - y;
-	if (width && height)
-		p->canvas->fill(p->canvas->context, x, y, width, height,
-				colour);
+	fplinux_status_fill(p->canvas, x, y, width, height, colour);
 }
 
-static uint16_t blend(uint16_t foreground, uint16_t background,
-		      unsigned int alpha, unsigned int scale)
+uint16_t fplinux_status_blend(uint16_t foreground, uint16_t background,
+			      unsigned int alpha, unsigned int scale)
 {
 	unsigned int r =
 		(((foreground >> 11) & 31U) * alpha +
@@ -127,57 +133,40 @@ static void draw_span(const struct painter *p,
 				    py >= top && py < bottom)
 					fill(p, (uint32_t)px, (uint32_t)py, 1,
 					     1,
-					     blend(colour, p->background, alpha,
-						   15));
+					     fplinux_status_blend(colour,
+								  p->background,
+								  alpha, 15));
 			}
 		}
 		x += (int)advance(font, index, following);
 	}
 }
 
-static const char *end_of(const char *text)
+unsigned int fplinux_status_text_width(const struct fplinux_status_font *font,
+				       const char *text)
 {
 	const char *end = text;
 
 	while (*end)
 		++end;
-	return end;
+	return span_width(font, text, end);
 }
 
-static void line(const struct painter *p,
-		 const struct fplinux_status_font *font, int x, int y,
-		 int width, int bottom, const char *text, uint16_t colour)
+void fplinux_status_text_draw(const struct fplinux_status_canvas *canvas,
+			      const struct fplinux_status_font *font, int x,
+			      int y, const char *text, uint16_t colour,
+			      uint16_t background)
 {
-	const char *end, *prefix;
-	static const char dots[] = "...";
-	unsigned int dots_width;
+	const struct painter p = {
+		.canvas = canvas,
+		.background = background,
+	};
+	const char *end = text;
 
-	if (!text || width <= 0 || y + font->line_height > bottom)
-		return;
-	end = end_of(text);
-	if (span_width(font, text, end) <= (unsigned int)width) {
-		draw_span(p, font, x, y, x, y, x + width, bottom, text, end,
-			  colour);
-		return;
-	}
-	dots_width = span_width(font, dots, dots + 3);
-	if (dots_width > (unsigned int)width)
-		return;
-	prefix = text;
-	while (prefix < end) {
-		const char *next = prefix;
-
-		(void)next_glyph(&next);
-		if (span_width(font, text, next) + dots_width >
-		    (unsigned int)width)
-			break;
-		prefix = next;
-	}
-	draw_span(p, font, x, y, x, y, x + width, bottom, text, prefix, colour);
-	x += (int)span_width(font, text, prefix);
-	draw_span(p, font, x, y, x, y,
-		  x + width - (int)span_width(font, text, prefix), bottom, dots,
-		  dots + 3, colour);
+	while (*end)
+		++end;
+	draw_span(&p, font, x, y, 0, 0, (int)canvas->width, (int)canvas->height,
+		  text, end, colour);
 }
 
 static const char *wrap_end(const struct fplinux_status_font *font,
@@ -199,28 +188,6 @@ static const char *wrap_end(const struct fplinux_status_font *font,
 	if (end == text && *end && *end != '\n')
 		(void)next_glyph(&end);
 	return end;
-}
-
-static int wrapped(const struct painter *p,
-		   const struct fplinux_status_font *font, int x, int y,
-		   int width, int bottom, const char *text, uint16_t colour)
-{
-	if (!text || width <= 0)
-		return y;
-	while (*text && y + font->line_height <= bottom) {
-		const char *end;
-
-		while (*text == ' ')
-			++text;
-		end = wrap_end(font, text, width);
-		draw_span(p, font, x, y, x, y, x + width, bottom, text, end,
-			  colour);
-		text = end;
-		if (*text == '\n')
-			++text;
-		y += font->line_height;
-	}
-	return y;
 }
 
 /* Measure and draw with the same word boundaries and glyph advances. */
@@ -313,10 +280,12 @@ static void draw_activity(const struct painter *p,
 
 			if (alpha || base)
 				fill(p, x + col, y + row, 1, 1,
-				     blend(colour,
-					   blend(track, p->background, base,
-						 255),
-					   alpha, 255));
+				     fplinux_status_blend(
+					     colour,
+					     fplinux_status_blend(track,
+								  p->background,
+								  base, 255),
+					     alpha, 255));
 		}
 }
 
@@ -444,16 +413,15 @@ int fplinux_status_screen_render(const struct fplinux_status_canvas *canvas,
 {
 	const struct fplinux_ui_profile_spec *profile;
 	struct painter p;
-	uint16_t foreground, muted, accent, border, danger, surface;
-	int margin, spacing, width, y, bottom, header;
+	uint16_t foreground, muted, accent, border, danger;
+	int margin, spacing, width, bottom;
 
 	if (!canvas || !canvas->fill || !canvas->width || !canvas->height ||
 	    canvas->width > 65535U || canvas->height > 65535U || !r ||
-	    !r->profile || !r->theme || !r->body || !r->title || !r->legend ||
+	    !r->profile || !r->theme || !r->body || !r->title ||
 	    !r->body->bitmap || !r->body->glyphs || !r->title->bitmap ||
-	    !r->title->glyphs || !r->legend->bitmap || !r->legend->glyphs ||
-	    !r->body->line_height || !r->title->line_height ||
-	    !r->legend->line_height || !view || view->level > 10U ||
+	    !r->title->glyphs || !r->body->line_height ||
+	    !r->title->line_height || !view ||
 	    (view->indicator == FPLINUX_STATUS_BUSY && !view->error &&
 	     (!r->activity || !r->activity->alpha || !r->activity->track ||
 	      !r->activity->size)) ||
@@ -462,12 +430,8 @@ int fplinux_status_screen_render(const struct fplinux_status_canvas *canvas,
 	profile = r->profile;
 	margin = profile->margin;
 	spacing = profile->spacing;
-	if (margin < 0 || spacing < 0 || profile->header_height <= 0 ||
-	    profile->header_height > (int)canvas->height ||
-	    profile->softkey_height < 0 || profile->bar_height <= 0 ||
-	    margin > (int)canvas->width / 2 ||
-	    margin * 2 >= (int)canvas->width ||
-	    margin + profile->softkey_height > (int)canvas->height)
+	if (margin < 0 || spacing < 0 || profile->bar_height <= 0 ||
+	    margin > (int)canvas->width / 2 || margin * 2 >= (int)canvas->width)
 		return -1;
 	p.canvas = canvas;
 	p.background =
@@ -478,53 +442,12 @@ int fplinux_status_screen_render(const struct fplinux_status_canvas *canvas,
 	accent = fplinux_ui_colour565(r->theme, FPLINUX_UI_COLOUR_FOCUS);
 	border = fplinux_ui_colour565(r->theme, FPLINUX_UI_COLOUR_BORDER);
 	danger = fplinux_ui_colour565(r->theme, FPLINUX_UI_COLOUR_DANGER);
-	surface = fplinux_ui_colour565(r->theme, FPLINUX_UI_COLOUR_SURFACE);
 	fill(&p, 0, 0, canvas->width, canvas->height, p.background);
 	width = (int)canvas->width - 2 * margin;
 	bottom = (int)canvas->height - margin;
 
-	if (view->layout != FPLINUX_STATUS_BRIGHTNESS) {
-		draw_status(&p, r, view, margin, spacing, width, bottom,
-			    foreground, muted, accent, border, danger);
-		if (canvas->present)
-			canvas->present(canvas->context);
-		return 0;
-	}
-	header = profile->header_height;
-	line(&p, r->title, margin, (header - r->title->line_height) / 2, width,
-	     header, view->header, foreground);
-	fill(&p, 0, (uint32_t)(header - 1), canvas->width, 1, border);
-	y = header + spacing;
-	line(&p, r->title, margin, y, width, bottom, view->heading,
-	     view->error ? danger : foreground);
-	y += r->title->line_height + spacing;
-
-	{
-		unsigned int gap = (unsigned int)profile->gap_small;
-		unsigned int available = (unsigned int)width;
-		unsigned int segment;
-
-		if (profile->gap_small < 0 || gap * 9U >= available)
-			return -1;
-		segment = (available - gap * 9U) / 10U;
-		for (unsigned int i = 0; i < 10U; ++i)
-			fill(&p, (uint32_t)margin + i * (segment + gap),
-			     (uint32_t)y, segment,
-			     (uint32_t)profile->bar_height,
-			     i < view->level ? accent : surface);
-		y += profile->bar_height + spacing;
-	}
-	if (view->action) {
-		bottom -= profile->softkey_height;
-		fill(&p, 0, (uint32_t)bottom, canvas->width, 1, border);
-		line(&p, r->legend, margin,
-		     bottom + (profile->softkey_height -
-			       r->legend->line_height) /
-				      2,
-		     width, (int)canvas->height, view->action, muted);
-	}
-	(void)wrapped(&p, r->body, margin, y, width, bottom, view->detail,
-		      view->error ? danger : muted);
+	draw_status(&p, r, view, margin, spacing, width, bottom, foreground,
+		    muted, accent, border, danger);
 	if (canvas->present)
 		canvas->present(canvas->context);
 	return 0;

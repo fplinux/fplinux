@@ -19,6 +19,8 @@
 static const char *const setting_names[] = {
 	[FPLINUX_SESSION_SETTING_BRIGHTNESS] = "brightness",
 	[FPLINUX_SESSION_SETTING_VOLUME] = "volume",
+	[FPLINUX_SESSION_SETTING_ALARM_VOLUME] = "alarm_volume",
+	[FPLINUX_SESSION_SETTING_AUDIO_OUTPUT] = "audio_output",
 	[FPLINUX_SESSION_SETTING_SCREEN_OFF] = "screen_off_seconds",
 	[FPLINUX_SESSION_SETTING_AUTO_LOCK] = "auto_lock_seconds",
 	[FPLINUX_SESSION_SETTING_LOCALE] = "locale",
@@ -76,12 +78,14 @@ void fplinux_session_settings_defaults(
 	memset(settings, 0, sizeof(*settings));
 	settings->brightness = 7;
 	settings->volume = 10;
+	settings->alarm_volume = 10;
+	strcpy(settings->audio_output, "AUTO");
 	settings->screen_off_seconds = 30;
 	settings->auto_lock_seconds = 5;
 	settings->theme = FPLINUX_UI_SESSION_THEME_LIGHT;
 	fplinux_language_english(&english);
-	if (!select_language(settings, languages, "ru") &&
-	    !select_language(settings, languages, "en")) {
+	if (!select_language(settings, languages, "en") &&
+	    !select_language(settings, languages, "ru")) {
 		strcpy(settings->locale, english.code);
 		memcpy(settings->lang, english.lang, sizeof(settings->lang));
 	}
@@ -132,10 +136,22 @@ bool fplinux_session_settings_parse(struct fplinux_session_settings *settings,
 		settings->has_brightness = true;
 		return true;
 	case FPLINUX_SESSION_SETTING_VOLUME:
+	case FPLINUX_SESSION_SETTING_ALARM_VOLUME:
 		if (!parse_decimal(value, &number) || number > 10)
 			return false;
-		settings->volume = number;
-		settings->has_volume = true;
+		if (setting == FPLINUX_SESSION_SETTING_VOLUME) {
+			settings->volume = number;
+			settings->has_volume = true;
+		} else {
+			settings->alarm_volume = number;
+			settings->has_alarm_volume = true;
+		}
+		return true;
+	case FPLINUX_SESSION_SETTING_AUDIO_OUTPUT:
+		if (strcmp(value, "AUTO") && strcmp(value, "SPEAKER") &&
+		    strcmp(value, "HEADPHONES"))
+			return false;
+		strcpy(settings->audio_output, value);
 		return true;
 	case FPLINUX_SESSION_SETTING_SCREEN_OFF:
 		if (!parse_decimal(value, &number))
@@ -190,6 +206,14 @@ bool fplinux_session_settings_format(
 		break;
 	case FPLINUX_SESSION_SETTING_VOLUME:
 		length = snprintf(value, capacity, "%u", settings->volume);
+		break;
+	case FPLINUX_SESSION_SETTING_ALARM_VOLUME:
+		length =
+			snprintf(value, capacity, "%u", settings->alarm_volume);
+		break;
+	case FPLINUX_SESSION_SETTING_AUDIO_OUTPUT:
+		length =
+			snprintf(value, capacity, "%s", settings->audio_output);
 		break;
 	case FPLINUX_SESSION_SETTING_SCREEN_OFF:
 		length = snprintf(value, capacity, "%u",
@@ -345,6 +369,10 @@ fplinux_session_settings_save(const struct fplinux_session_settings *settings,
 		"input_locale=%s\ntheme=%s\n",
 		screen_off, auto_lock, settings->locale, settings->input_locale,
 		theme);
+	if (strcmp(settings->audio_output, "AUTO") && length >= 0 &&
+	    (size_t)length < sizeof(text))
+		length += snprintf(text + length, sizeof(text) - length,
+				   "audio_output=%s\n", settings->audio_output);
 	if (settings->has_brightness && length >= 0 &&
 	    (size_t)length < sizeof(text))
 		length += snprintf(text + length, sizeof(text) - length,
@@ -353,6 +381,10 @@ fplinux_session_settings_save(const struct fplinux_session_settings *settings,
 	    (size_t)length < sizeof(text))
 		length += snprintf(text + length, sizeof(text) - length,
 				   "volume=%u\n", settings->volume);
+	if (settings->has_alarm_volume && length >= 0 &&
+	    (size_t)length < sizeof(text))
+		length += snprintf(text + length, sizeof(text) - length,
+				   "alarm_volume=%u\n", settings->alarm_volume);
 	if (length < 0 || (size_t)length >= sizeof(text) ||
 	    snprintf(temporary, sizeof(temporary), "%s.XXXXXX", path) >=
 		    (int)sizeof(temporary)) {

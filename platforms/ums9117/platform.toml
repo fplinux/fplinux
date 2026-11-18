@@ -28,7 +28,6 @@ packages = [
 packages = [
   "fplinux-bluealsa",
   "fplinux-bluez-libs",
-  "fplinux-brightness-ui",
   "fplinux-charge",
   "fplinux-ffmpeg",
   "fplinux-mre",

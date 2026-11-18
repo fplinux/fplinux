@@ -9,7 +9,7 @@
   },
   "local-console": {
     "status": "partial",
-    "note": "Visible terminal output in RAM. Orientation, color accuracy and physical keypad input are unverified."
+    "note": "The kernel console is visible before the GUI. Switching to the console for text output and returning to the GUI work in RAM. Full keypad input and exact color accuracy are unverified."
   },
   "lcd-backlight": {
     "stock": "available",
@@ -204,10 +204,6 @@
   "fplinux-armada": {
     "status": "unsupported",
     "note": "No force-feedback device is enabled for this target."
-  },
-  "brightness-control": {
-    "status": "untested",
-    "note": "The brightness service responds; application use, physical keypad control and visible changes are unverified."
   },
   "tyrquake": {
     "status": "partial",

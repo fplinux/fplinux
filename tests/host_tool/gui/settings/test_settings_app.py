@@ -37,6 +37,8 @@ def settings_app(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
             str(ROOT / "include"),
             "-I",
             str(ROOT / "include/fplinux"),
+            "-I",
+            str(aport),
         ]
         app_object = directory / "settings-app.o"
         compile_c(
@@ -52,6 +54,7 @@ def settings_app(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
                 str(ROOT / "tests/host_tool/gui/settings/settings_app.c"),
                 str(aport / "settings-core.c"),
                 str(ROOT / "lib/fplinux-shared/fplinux-settings-values.c"),
+                str(ROOT / "lib/fplinux-shared/fplinux-system-info.c"),
                 str(ROOT / "lib/fplinux/fplinux-multitap.c"),
                 str(ROOT / "lib/fplinux/fplinux-utf8.c"),
                 str(ROOT / "lib/fplinux-shared/fplinux-cli.c"),
@@ -267,6 +270,8 @@ def test_settings_russian_catalogue_translates_about_labels(tmp_path: Path) -> N
         "theme-failed",
         "locale-failed",
         "brightness-retry-current",
+        "sound-speaker",
+        "sound-headphones",
         "save-failed-no-space",
         "save-failed-read-only",
         "save-failed-published",

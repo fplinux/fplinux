@@ -32,6 +32,8 @@ struct launcher_frame_observation {
 	struct launcher_line_observation line_objects[8];
 	unsigned int line_objects_count;
 	uint32_t active_serial;
+	uint32_t volume_preview_serial;
+	char volume_preview_value[16];
 	unsigned int animations;
 	int scroll_extent;
 	bool timer_only;

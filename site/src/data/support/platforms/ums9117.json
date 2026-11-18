@@ -43,7 +43,6 @@
   "suspend": "implemented",
   "reboot": "unimplemented",
   "fplinux-armada": "implemented",
-  "brightness-control": "implemented",
   "tyrquake": "implemented",
   "built-in-microphone": "implemented",
   "headset-microphone": "implemented",

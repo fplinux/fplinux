@@ -157,6 +157,12 @@ bool fplinux_ui_is_launcher(const struct fplinux_ui *context)
 	return false;
 }
 
+bool fplinux_ui_is_fullscreen(const struct fplinux_ui *context)
+{
+	(void)context;
+	return false;
+}
+
 struct fplinux_ui_screens **fplinux_ui_screens_slot(struct fplinux_ui *context)
 {
 	return &context->screens;
@@ -2026,6 +2032,148 @@ static bool pixel_is(const lv_draw_buf_t *frame, int32_t x, int32_t y,
 	       pixel[2] == (colour >> 16 & 0xffU);
 }
 
+static void test_popup_choice_reflow(void)
+{
+	const char *choices[] = {
+		"AAAAAAAAAAAA",
+		"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+		"",
+	};
+	struct fplinux_ui_screen *form;
+	lv_obj_t *name, *value, *row, *list, *holder, *content;
+	lv_area_t caption, detail, cell, horizontal, thumb;
+	lv_draw_buf_t *pixels;
+	int width = fplinux_ui_width(&ui), short_height, full_width;
+
+	ui.theme.font = fplinux_ui_builtin_font("menu-10");
+	ui.theme.accent = lv_color_hex(0x2468ac);
+	form = fplinux_ui_form_new(&ui, NULL);
+	assert(form);
+	assert(fplinux_ui_form_append_choice(
+		       form, "To", FPLINUX_UI_CHOICE_POPUP, choices, 3) == 0);
+	assert(fplinux_ui_push(&ui, form));
+	advance(0);
+	name = label_with_text(ui.root, "To");
+	value = label_with_text(ui.root, choices[0]);
+	assert(name && value);
+	row = lv_obj_get_parent(name);
+	list = lv_obj_get_parent(row);
+	holder = lv_obj_get_parent(list);
+	content = lv_obj_get_parent(lv_obj_get_parent(holder));
+	short_height = lv_obj_get_height(row);
+	lv_obj_get_coords(name, &caption);
+	lv_obj_get_coords(value, &detail);
+	assert(caption.y1 == detail.y1);
+	/* Twelve six-pixel glyphs remain complete, also beyond half a 128 px row. */
+	assert(lv_area_get_width(&detail) == 72);
+	assert(caption.x2 < detail.x1);
+	assert(lv_obj_get_height(holder) == short_height);
+	pixels = snapshot(row);
+	assert(pixel_is(pixels, 0, 0, 0x2468ac));
+	lv_draw_buf_destroy(pixels);
+
+	fplinux_ui_form_set_choice(form, 0, 1);
+	advance(0);
+	value = lv_obj_get_child(row, 1);
+	lv_obj_get_coords(name, &caption);
+	lv_obj_get_coords(value, &detail);
+	assert(detail.y1 == caption.y2 + 1);
+	assert(detail.x1 == caption.x1 && detail.x2 == caption.x2);
+	assert(lv_obj_get_height(row) > short_height);
+	assert(lv_obj_get_height(holder) == lv_obj_get_height(row));
+
+	fplinux_ui_form_set_choice(form, 0, 0);
+	advance(0);
+	assert(lv_obj_get_height(row) == short_height);
+	lv_display_set_resolution(ui.display, 80, fplinux_ui_height(&ui));
+	fplinux_ui_screens_resize(ui.screens);
+	advance(0);
+	value = lv_obj_get_child(row, 1);
+	lv_obj_get_coords(name, &caption);
+	lv_obj_get_coords(value, &detail);
+	assert(detail.y1 == caption.y2 + 1);
+	lv_display_set_resolution(ui.display, width, fplinux_ui_height(&ui));
+	fplinux_ui_screens_resize(ui.screens);
+	advance(0);
+	assert(lv_obj_get_height(row) == short_height);
+	assert(lv_obj_get_width(value) == 72);
+	assert(!strcmp(lv_label_get_text(value), choices[0]));
+	full_width = lv_obj_get_width(row);
+	for (size_t index = 1; index < 40; ++index)
+		assert(fplinux_ui_form_append_string(form, NULL, "Spacer") ==
+		       index);
+	advance(0);
+	assert(lv_obj_get_width(row) == full_width - 4);
+	lv_obj_get_scrollbar_area(content, &horizontal, &thumb);
+	lv_obj_get_coords(value, &detail);
+	assert(lv_area_get_width(&thumb) == 2);
+	assert(detail.x2 < thumb.x1);
+	fplinux_ui_form_set_choice(form, 0, 2);
+	advance(0);
+	assert(lv_obj_get_height(row) == short_height);
+	fplinux_ui_form_set_choice(form, 0, 0);
+	advance(0);
+	value = label_with_text(ui.root, choices[0]);
+	assert(value);
+	lv_obj_get_coords(row, &cell);
+	lv_obj_get_coords(value, &detail);
+	assert(detail.x2 < cell.x2);
+}
+
+static void test_passive_gauge_reflow(void)
+{
+	const char *caption =
+		"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+	struct fplinux_ui_screen *form = fplinux_ui_form_new(&ui, NULL);
+	lv_obj_t *name, *heading, *frame, *bar;
+	lv_area_t label_area, value_area, bar_area;
+	lv_draw_buf_t *pixels;
+	int width, line;
+
+	ui.theme.border = lv_color_hex(0x778899);
+	ui.theme.focus = lv_color_hex(0x445566);
+	assert(form);
+	assert(fplinux_ui_form_append_gauge(form, caption, 0, 100, 50, false) ==
+	       0);
+	assert(fplinux_ui_push(&ui, form));
+	advance(0);
+	name = label_with_text(ui.root, caption);
+	assert(name);
+	heading = lv_obj_get_parent(name);
+	frame = lv_obj_get_parent(heading);
+	bar = lv_obj_get_child(frame, 1);
+	assert(lv_obj_check_type(bar, &lv_bar_class));
+	assert(lv_obj_get_style_border_width(frame, 0) == 0);
+	assert(lv_obj_get_style_pad_left(frame, 0) == 0);
+	assert(lv_obj_get_style_pad_right(frame, 0) == 0);
+	assert(lv_obj_get_style_bg_opa(frame, 0) == LV_OPA_TRANSP);
+	line = lv_font_get_line_height(ui.theme.font);
+	assert(lv_obj_get_height(name) > line);
+	lv_obj_get_coords(name, &label_area);
+	lv_obj_get_coords(label_with_text(heading, "50"), &value_area);
+	lv_obj_get_coords(bar, &bar_area);
+	assert(label_area.x2 < value_area.x1);
+	assert(bar_area.x1 == label_area.x1);
+	assert(bar_area.x2 == value_area.x2);
+	pixels = snapshot(bar);
+	assert(pixel_is(pixels, 0, 0, 0x445566));
+	assert(pixel_is(pixels, lv_obj_get_width(bar) - 1, 0, 0x778899));
+	lv_draw_buf_destroy(pixels);
+	width = lv_obj_get_width(bar);
+	fplinux_ui_form_set_value(form, 0, 100);
+	advance(0);
+	assert(lv_obj_get_width(bar) == width);
+	assert(lv_obj_get_height(name) > line);
+	assert(fplinux_ui_form_append_gauge(form, "Last", 0, 100, 50, true) ==
+	       1);
+	advance(0);
+	name = label_with_text(ui.root, "Last");
+	frame = lv_obj_get_parent(lv_obj_get_parent(name));
+	assert(lv_obj_get_style_border_width(frame, 0) > 0);
+	assert(lv_obj_get_style_pad_left(frame, 0) > 0);
+	assert(lv_obj_get_height(name) == line);
+}
+
 static void test_modal_edges(bool choice, bool light)
 {
 	const char *choices[30];
@@ -2849,8 +2997,7 @@ static void test_alert_content_insets(int margin, int padding,
 	assert(view.x1 == margin);
 	assert(lv_area_get_width(&view) == fplinux_ui_width(&ui) - 2 * margin);
 	assert(lv_obj_get_style_border_width(box, 0) == 2);
-	expect_label_insets(title, box, 2 + ui.spec->margin,
-			    2 + ui.spec->margin);
+	expect_label_insets(title, box, 2 + padding, 2 + padding);
 	expect_label_insets(message, box, 2 + padding, 2 + padding);
 	assert(fplinux_ui_screen_get_content_size(alert, &width, &height));
 	assert(width == fplinux_ui_width(&ui) - 2 * margin - 2 * (2 + padding));
@@ -2862,8 +3009,7 @@ static void test_alert_content_insets(int margin, int padding,
 
 	assert(fplinux_ui_alert_set_text(alert, long_text));
 	advance(0);
-	expect_label_insets(title, box, 2 + ui.spec->margin,
-			    2 + ui.spec->margin);
+	expect_label_insets(title, box, 2 + padding, 2 + padding);
 	expect_label_insets(message, box, 2 + padding, 2 + padding + 4);
 	lv_obj_get_coords(viewport, &view);
 	lv_obj_get_content_coords(message, &text);
@@ -3987,6 +4133,8 @@ int main(int argc, char **argv)
 			       !strncmp(argv[1], "modal-edges-", 12) ||
 			       !strcmp(argv[1], "alert-title-lifecycle") ||
 			       !strcmp(argv[1], "alert-activity-pixels") ||
+			       !strcmp(argv[1], "choice-reflow") ||
+			       !strcmp(argv[1], "passive-gauge-reflow") ||
 			       !strcmp(argv[1], "stacked-title-ownership") ||
 			       !strcmp(argv[1], "menu-dividers") ||
 			       !strncmp(argv[1], "choice-edge-", 12) ||
@@ -4041,6 +4189,10 @@ int main(int argc, char **argv)
 		test_form_image_reading_edges();
 	else if (!strcmp(argv[1], "alert-activity-pixels"))
 		test_alert_activity_pixels();
+	else if (!strcmp(argv[1], "choice-reflow"))
+		test_popup_choice_reflow();
+	else if (!strcmp(argv[1], "passive-gauge-reflow"))
+		test_passive_gauge_reflow();
 	else if (!strncmp(argv[1], "symbols-", 8)) {
 		assert(argc == 10);
 		test_symbol_context(argv[1] + 8, atoi(argv[5]), atoi(argv[6]),

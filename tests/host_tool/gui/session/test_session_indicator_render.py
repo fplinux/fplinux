@@ -1,0 +1,311 @@
+# SPDX-License-Identifier: GPL-2.0-only
+"""The production shell level panel with its pinned fonts and glyph masks."""
+
+from __future__ import annotations
+
+import importlib
+import json
+import os
+import struct
+from dataclasses import dataclass
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+import pytest
+
+from tests import ROOT
+from tests.c_harness import c_build_directory, compile_c
+from tests.host_tool.display.status_resources import generate
+from tests.host_tool.gui.support.rgb565_png import convert
+from tests.process import run_process
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+    from types import ModuleType
+
+
+@dataclass(frozen=True)
+class Frame:
+    """The immutable panel pixels and screen placement returned by the renderer."""
+
+    x: int
+    y: int
+    width: int
+    height: int
+    pixels: tuple[int, ...]
+
+
+@pytest.fixture(scope="module")
+def renderer(
+    tmp_path_factory: pytest.TempPathFactory, ui_host_inputs: Path, ui_icon_resources: Path
+) -> Iterator[Path]:
+    with c_build_directory(tmp_path_factory, "session-indicator-render") as directory:
+        fonts = generate(directory, ui_host_inputs)
+        executable = directory / "session-indicator-render"
+        aport = ROOT / "alpine/aports/fplinux-session"
+        compile_c(
+            executable,
+            [
+                "-std=c11",
+                "-pedantic",
+                "-Wall",
+                "-Wextra",
+                "-Werror",
+                f"-I{directory}",
+                f"-I{ui_icon_resources.parent}",
+                f"-I{ROOT / 'include/fplinux'}",
+                f"-I{aport}",
+                str(aport / "session-indicator-render.c"),
+                str(ROOT / "lib/fplinux-shared/fplinux-status-screen.c"),
+                str(ROOT / "lib/fplinux/fplinux-ui-profile.c"),
+                str(fonts),
+                str(ROOT / "tests/host_tool/gui/session/session-indicator-render-test.c"),
+            ],
+            name="compile the shell level renderer with production resources",
+        )
+        yield executable
+
+
+def frame(  # noqa: PLR0913 -- independent profile, state, theme and visible chrome.
+    renderer: Path,
+    output: Path,
+    width: int,
+    height: int,
+    *,
+    theme: str,
+    state: str,
+    softkeys: bool = True,
+) -> Frame:
+    result = run_process(
+        [
+            str(renderer),
+            str(width),
+            str(height),
+            theme,
+            state,
+            "softkeys" if softkeys else "fullscreen",
+            str(output),
+            "test",
+        ],
+        name=f"render shell {state} level on {width}x{height} {theme}",
+        timeout=10,
+        check=True,
+    )
+    geometry = json.loads(result.stdout)
+    pixels = struct.unpack(f"={geometry['width'] * geometry['height']}H", output.read_bytes())
+    return Frame(**geometry, pixels=pixels)
+
+
+@pytest.mark.parametrize(
+    ("width", "height", "margin", "softkey_height", "panel_height", "bar_y", "bar_height"),
+    [
+        (128, 128, 4, 16, 32, 24, 4),
+        (128, 160, 4, 18, 32, 24, 4),
+        (176, 220, 6, 24, 44, 32, 6),
+        (240, 320, 8, 32, 56, 40, 8),
+        (320, 240, 6, 22, 50, 36, 8),
+    ],
+)
+@pytest.mark.parametrize(
+    ("theme", "fill_colour", "track_colour"),
+    [("dark", 0xAE7B, 0x3A29), ("light", 0x3B0E, 0xBE39)],
+)
+@pytest.mark.parametrize("softkeys", [False, True])
+def test_applied_level_scale_and_profile_placement(  # noqa: PLR0913 -- independent geometry, palette and chrome cases.
+    renderer: Path,
+    tmp_path: Path,
+    *,
+    width: int,
+    height: int,
+    margin: int,
+    softkey_height: int,
+    panel_height: int,
+    bar_y: int,
+    bar_height: int,
+    theme: str,
+    fill_colour: int,
+    track_colour: int,
+    softkeys: bool,
+) -> None:
+    actual = frame(
+        renderer, tmp_path / "panel", width, height, theme=theme, state="ready", softkeys=softkeys
+    )
+    assert (actual.x, actual.y, actual.width, actual.height) == (
+        margin,
+        height - margin - panel_height - (softkey_height if softkeys else 0),
+        width - 2 * margin,
+        panel_height,
+    )
+    bar_width = actual.width - 2 * margin
+    filled = bar_width * 7 // 10
+    for row in range(bar_y, bar_y + bar_height):
+        assert actual.pixels[row * actual.width + margin : (row + 1) * actual.width - margin] == (
+            (fill_colour,) * filled + (track_colour,) * (bar_width - filled)
+        )
+    assert actual.pixels[: actual.width] == (track_colour,) * actual.width
+    assert actual.pixels[-actual.width :] == (track_colour,) * actual.width
+
+
+@pytest.mark.parametrize(
+    ("width", "height"), [(128, 128), (128, 160), (176, 220), (240, 320), (320, 240)]
+)
+@pytest.mark.parametrize("theme", ["dark", "light"])
+def test_pending_uses_applied_value_and_warning_preserves_level_pixels(
+    renderer: Path, tmp_path: Path, width: int, height: int, theme: str
+) -> None:
+    ready = frame(renderer, tmp_path / "ready", width, height, theme=theme, state="ready")
+    pending = frame(renderer, tmp_path / "pending", width, height, theme=theme, state="pending")
+    warning = frame(renderer, tmp_path / "warning", width, height, theme=theme, state="warning")
+    assert pending == ready
+    assert warning.pixels != ready.pixels
+    # The last quarter contains the scale and its lower margin, below the marker.
+    assert (
+        warning.pixels[-warning.width * (warning.height // 4) :]
+        == ready.pixels[-ready.width * (ready.height // 4) :]
+    )
+
+
+@pytest.mark.parametrize(
+    ("width", "height", "margin", "bar_y"),
+    [
+        (128, 128, 4, 24),
+        (128, 160, 4, 24),
+        (176, 220, 6, 32),
+        (240, 320, 8, 40),
+        (320, 240, 6, 36),
+    ],
+)
+@pytest.mark.parametrize(
+    ("theme", "background", "track"), [("dark", 0x2945, 0x3A29), ("light", 0xE73C, 0xBE39)]
+)
+def test_unknown_and_unavailable_show_dashes_without_a_zero_scale(  # noqa: PLR0913 -- independent geometry and palette values.
+    renderer: Path,
+    tmp_path: Path,
+    *,
+    width: int,
+    height: int,
+    margin: int,
+    bar_y: int,
+    theme: str,
+    background: int,
+    track: int,
+) -> None:
+    unknown = frame(renderer, tmp_path / "unknown", width, height, theme=theme, state="unknown")
+    unavailable = frame(
+        renderer, tmp_path / "unavailable", width, height, theme=theme, state="unavailable"
+    )
+    zero = frame(renderer, tmp_path / "zero", width, height, theme=theme, state="zero")
+    assert unknown == unavailable
+    assert unknown.pixels != zero.pixels
+    start = bar_y * unknown.width + margin
+    end = (bar_y + 1) * unknown.width - margin
+    assert unknown.pixels[start:end] == (background,) * (unknown.width - 2 * margin)
+    assert zero.pixels[start:end] == (track,) * (zero.width - 2 * margin)
+
+
+@pytest.mark.parametrize("state", ["zero", "full", "alarm", "brightness"])
+@pytest.mark.parametrize(
+    ("width", "height"), [(128, 128), (128, 160), (176, 220), (240, 320), (320, 240)]
+)
+@pytest.mark.parametrize("theme", ["dark", "light"])
+def test_resource_icon_number_and_range_have_distinct_pixels(  # noqa: PLR0913 -- independent resource, profile and theme inputs.
+    renderer: Path, tmp_path: Path, *, state: str, width: int, height: int, theme: str
+) -> None:
+    ready = frame(renderer, tmp_path / "ready", width, height, theme=theme, state="ready")
+    selected = frame(renderer, tmp_path / "selected", width, height, theme=theme, state=state)
+    assert selected.pixels != ready.pixels
+
+
+@pytest.fixture
+def png_reader(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
+    """Read the installed catalogue glyphs through their existing PNG reader."""
+    monkeypatch.syspath_prepend(str(ROOT / "alpine/aports/fplinux-icons"))
+    return importlib.import_module("svgraster")
+
+
+def blend_pixel(alpha: int, foreground: int, background: int) -> int:
+    """Blend an RGB565 pixel with alpha in the range 0..255."""
+    channels = []
+    for shift, mask in ((11, 31), (5, 63), (0, 31)):
+        ink = (foreground >> shift) & mask
+        paper = (background >> shift) & mask
+        channels.append(((ink * alpha + paper * (255 - alpha) + 127) // 255) << shift)
+    return channels[0] | channels[1] | channels[2]
+
+
+@pytest.mark.parametrize(
+    ("width", "height", "margin", "icon_size"),
+    [
+        (128, 128, 4, 16),
+        (128, 160, 4, 16),
+        (176, 220, 6, 20),
+        (240, 320, 8, 24),
+        (320, 240, 6, 24),
+    ],
+)
+@pytest.mark.parametrize(
+    ("theme", "foreground", "background"),
+    [("dark", 0xDEFB, 0x2945), ("light", 0x18C3, 0xE73C)],
+)
+@pytest.mark.parametrize(
+    ("state", "icon"),
+    [("ready", "volume"), ("zero", "mute"), ("alarm", "alarm"), ("brightness", "brightness")],
+)
+def test_panel_uses_the_actual_catalogue_alpha_mask(  # noqa: PLR0913 -- selected resource and independent profile/palette inputs.
+    renderer: Path,
+    ui_icon_resources: Path,
+    png_reader: ModuleType,
+    tmp_path: Path,
+    *,
+    width: int,
+    height: int,
+    margin: int,
+    icon_size: int,
+    theme: str,
+    foreground: int,
+    background: int,
+    state: str,
+    icon: str,
+) -> None:
+    actual = frame(renderer, tmp_path / "panel", width, height, theme=theme, state=state)
+    glyph = png_reader.decode_png(
+        (ui_icon_resources / f"usr/share/fplinux/glyphs/{icon_size}/{icon}.png").read_bytes()
+    )
+    alpha = glyph.alpha()
+    assert max(alpha) == 255
+    for row in range(icon_size):
+        expected = tuple(
+            blend_pixel(value, foreground, background)
+            for value in alpha[row * icon_size : (row + 1) * icon_size]
+        )
+        offset = (margin + row) * actual.width + margin
+        assert actual.pixels[offset : offset + icon_size] == expected
+
+
+@pytest.mark.parametrize(
+    ("width", "height", "theme", "state", "chrome"),
+    [
+        (128, 128, "dark", "ready", "softkeys"),
+        (176, 220, "dark", "warning", "softkeys"),
+        (240, 320, "light", "zero", "fullscreen"),
+        (320, 240, "light", "brightness", "softkeys"),
+    ],
+)
+def test_retain_small_profile_theme_and_state_previews(  # noqa: PLR0913 -- four independently selected display scenes.
+    renderer: Path, tmp_path: Path, *, width: int, height: int, theme: str, state: str, chrome: str
+) -> None:
+    output = tmp_path / "panel"
+    run_process(
+        [str(renderer), str(width), str(height), theme, state, chrome, str(output), "preview"],
+        name=f"capture shell level indicator {width}x{height} {theme} {state}",
+        timeout=10,
+        check=True,
+    )
+    if log_root := os.environ.get("FPLINUX_LOG_ROOT"):
+        Path(log_root).mkdir(parents=True, exist_ok=True)
+        convert(
+            width,
+            height,
+            Path(f"{output}-screen.rgb565"),
+            Path(log_root) / f"system-level-{width}x{height}-{theme}-{state}-{chrome}.png",
+        )

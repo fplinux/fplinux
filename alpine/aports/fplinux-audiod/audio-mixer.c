@@ -98,9 +98,15 @@ static uint32_t resample(struct fplinux_audio_mixer_stream *stream,
 		level += slope;
 		offset += stream->step;
 	}
-	/* At most available: the loop stops on the first frame missing. */
-	stream->read += (uint32_t)(offset >> 32);
-	stream->phase = (uint32_t)offset;
+	/* A downsample step may skip a frame that has not arrived yet. */
+	{
+		uint32_t consumed = (uint32_t)(offset >> 32);
+
+		if (consumed > available)
+			consumed = available;
+		stream->read += consumed;
+		stream->phase = offset - ((uint64_t)consumed << 32);
+	}
 	stream->gain.current = stream->gain.target;
 	stream->last[0] = made == frames ? left : 0;
 	stream->last[1] = made == frames ? right : 0;
@@ -189,23 +195,6 @@ static int16_t saturate(int64_t value)
 	if (value < -32768)
 		return -32768;
 	return (int16_t)value;
-}
-
-void fplinux_audio_mixer_master(int32_t *mix, uint32_t frames,
-				struct fplinux_audio_mixer_gain *gain)
-{
-	int32_t level = gain->current * 32768;
-	int32_t slope = ramp_slope(gain, frames);
-	uint32_t i;
-
-	for (i = 0; i < frames; ++i) {
-		int64_t factor = level >> 15;
-
-		mix[2 * i] = (int32_t)((mix[2 * i] * factor) >> 15);
-		mix[2 * i + 1] = (int32_t)((mix[2 * i + 1] * factor) >> 15);
-		level += slope;
-	}
-	gain->current = gain->target;
 }
 
 void fplinux_audio_mixer_output(const int32_t *mix, int16_t *output,

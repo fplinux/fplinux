@@ -6,6 +6,7 @@
 #include "fplinux-language.h"
 #include "fplinux-ui-audio.h"
 #include "fplinux-ui-fonts.h"
+#include "fplinux-ui-lights.h"
 #include "fplinux-ui-frame-private.h"
 #include "fplinux-ui-internal.h"
 #include "fplinux-ui-menu.h"
@@ -16,6 +17,7 @@
 #include "fplinux-ui-session-internal.h"
 #include "fplinux-ui-softkey-layout.h"
 #include "fplinux-ui-storage.h"
+#include "fplinux-ui-system.h"
 #include "fplinux-ui-vibration.h"
 #include "xdg-shell-client-protocol.h"
 
@@ -201,6 +203,9 @@ struct fplinux_ui {
 	void *storage_context;
 	uint32_t next_storage_request;
 	uint32_t storage_request;
+	uint32_t volume_step_serial;
+	struct fplinux_system_levels system_levels;
+	bool system_levels_received;
 	unsigned int document_choice_count;
 	struct fplinux_ui_screen *document_choice_screen;
 	struct fplinux_ui_session_document_choice
@@ -283,6 +288,8 @@ struct fplinux_ui {
 	char sent_legends[3][FPLINUX_UI_SESSION_TEXT_BYTES];
 	bool legends_sent;
 	bool legends_pending;
+	bool sent_local_softkeys;
+	struct legend_texts *softkey_bars;
 	/* enum fplinux_ui_modal bits of the modal elements that are up. */
 	unsigned int modals;
 	/* The soft-key bar of a fullscreen application's modals, or NULL. */
@@ -305,7 +312,10 @@ struct fplinux_ui {
 	bool exit_pending;
 	bool visible;
 	bool audio;
+	bool background_audio;
 	bool vibration;
+	unsigned int light_effects;
+	uint32_t light_effect_serial;
 	struct fplinux_audio_client *audio_client;
 	enum fplinux_ui_lifecycle lifecycle;
 	/* A compositor may close the surface before open returns to the caller. */
@@ -328,6 +338,7 @@ static void marquee_restart(struct fplinux_ui *ui);
 static void resize(struct fplinux_ui *ui, int width, int height,
 		   bool fullscreen);
 static void show_legend_bar(struct fplinux_ui *ui);
+static bool local_softkeys_visible(const struct fplinux_ui *ui);
 static void set_theme_kind(struct fplinux_ui *ui, const char *value);
 static void layout_done(lv_event_t *event);
 static void release_keys(struct input_seat *seat);
@@ -436,9 +447,11 @@ static bool flush_legends(struct fplinux_ui *ui)
 	struct fplinux_ui_session_message message = {
 		.type = FPLINUX_UI_SESSION_SOFTKEYS,
 	};
-	bool known = ui->legends_sent;
+	bool visible = local_softkeys_visible(ui);
+	bool known = ui->legends_sent && visible == ui->sent_local_softkeys;
 
-	if (!ui->legends_pending || ui->dirty)
+	if ((!ui->legends_pending && visible == ui->sent_local_softkeys) ||
+	    ui->dirty)
 		return true;
 	for (int i = 0; known && i < 3; ++i)
 		known = !strcmp(ui->legends[i], ui->sent_legends[i]);
@@ -446,10 +459,12 @@ static bool flush_legends(struct fplinux_ui *ui)
 		strcpy(message.left, ui->legends[0]);
 		strcpy(message.centre, ui->legends[1]);
 		strcpy(message.right, ui->legends[2]);
+		message.visible = visible;
 		if (!fplinux_ui_session_send(ui->session_fd, &message))
 			return false;
 		memcpy(ui->sent_legends, ui->legends, sizeof(ui->legends));
 		ui->legends_sent = true;
+		ui->sent_local_softkeys = visible;
 	}
 	ui->legends_pending = false;
 	return true;
@@ -878,6 +893,16 @@ static bool receive_session(struct fplinux_ui *ui)
 			set_visible(ui, message.visible);
 			continue;
 		}
+		if (message.type == FPLINUX_UI_SESSION_SYSTEM_LEVELS) {
+			const struct fplinux_ui_event levels_event = {
+				.type = FPLINUX_UI_EVENT_SYSTEM_LEVELS,
+			};
+
+			ui->system_levels = message.system_levels;
+			ui->system_levels_received = true;
+			dispatch_event(ui, &levels_event);
+			continue;
+		}
 		if (message.type == FPLINUX_UI_SESSION_LIFECYCLE) {
 			enum fplinux_ui_lifecycle lifecycle;
 
@@ -897,6 +922,12 @@ static bool receive_session(struct fplinux_ui *ui)
 			}
 			set_lifecycle(ui, lifecycle);
 			continue;
+		}
+		if (message.type == FPLINUX_UI_SESSION_CONFIG) {
+			/* Session may revoke a background grant for a retained app. */
+			ui->audio = message.audio;
+			ui->background_audio = message.background_audio;
+			ui->light_effects = message.light_effects;
 		}
 		if (message.type == FPLINUX_UI_SESSION_PREPARE_CLOSE) {
 			if (!prepare_close(ui, message.serial))
@@ -1028,7 +1059,8 @@ static bool receive_session(struct fplinux_ui *ui)
 		}
 		if (message.serial &&
 		    (message.type == FPLINUX_UI_SESSION_SETTING ||
-		     message.type == FPLINUX_UI_SESSION_ERROR))
+		     (message.type == FPLINUX_UI_SESSION_ERROR &&
+		      strcmp(message.name, "light_effect"))))
 			queue_frame_ack(ui, FPLINUX_UI_SESSION_REDRAW_ACK,
 					message.serial);
 		/* The event callback borrows an attached scene for this call. */
@@ -1938,7 +1970,9 @@ static int wait_config(struct fplinux_ui *ui)
 				return EINVAL;
 			ui->config_mode = config.mode;
 			ui->audio = config.audio;
+			ui->background_audio = config.background_audio;
 			ui->vibration = config.vibration;
+			ui->light_effects = config.light_effects;
 			ui->requested_mode = config.mode;
 			ui->fullscreen = config.mode ==
 					 FPLINUX_UI_SESSION_FULLSCREEN;
@@ -2011,6 +2045,7 @@ static void set_metrics(struct fplinux_ui *ui)
 		.grid_columns = spec->grid_columns,
 		.focus_width = spec->focus_width,
 		.divider_width = spec->divider_width,
+		.bar_height = spec->bar_height,
 		.frame_padding = spec->frame_padding,
 		.scrollbar_space = spec->scrollbar_space,
 	};
@@ -2316,7 +2351,8 @@ int fplinux_ui_run(struct fplinux_ui *ui)
 		if (ui->quit)
 			break;
 		/* Pending legends name content that this pass has to draw. */
-		if ((needs_frame_ack(ui) || ui->legends_pending) &&
+		if ((needs_frame_ack(ui) || ui->legends_pending ||
+		     local_softkeys_visible(ui) != ui->sent_local_softkeys) &&
 		    !ui->exit_pending)
 			lv_refr_now(ui->display);
 		if (!submit_frame(ui)) {
@@ -2823,6 +2859,7 @@ bool fplinux_ui_send(struct fplinux_ui *ui,
 	    message->type == FPLINUX_UI_SESSION_PREPARE_CLOSE ||
 	    message->type == FPLINUX_UI_SESSION_STORAGE_REQUEST ||
 	    message->type == FPLINUX_UI_SESSION_STORAGE_RESULT ||
+	    message->type == FPLINUX_UI_SESSION_SYSTEM_LEVELS ||
 	    (message->type >= FPLINUX_UI_SESSION_OPEN_FILE &&
 	     message->type <= FPLINUX_UI_SESSION_DOCUMENT_RESULT)) {
 		errno = EINVAL;
@@ -3362,8 +3399,7 @@ bool fplinux_ui_audio_supported(const struct fplinux_ui *ui)
 
 bool fplinux_ui_audio_background_supported(const struct fplinux_ui *ui)
 {
-	(void)ui;
-	return false;
+	return ui->audio && ui->background_audio;
 }
 
 static bool media_eligible(const struct fplinux_ui *ui)
@@ -3384,7 +3420,9 @@ struct fplinux_audio_stream *fplinux_ui_audio_open(struct fplinux_ui *ui,
 		errno = ENOTSUP;
 		return NULL;
 	}
-	if (!media_eligible(ui)) {
+	if (!media_eligible(ui) &&
+	    !(ui->background_audio && !ui->quit && !ui->exit_pending &&
+	      ui->lifecycle != FPLINUX_UI_CLOSING)) {
 		errno = EAGAIN;
 		return NULL;
 	}
@@ -3410,6 +3448,112 @@ long fplinux_ui_audio_queued(const struct fplinux_audio_stream *stream)
 void fplinux_ui_audio_close(struct fplinux_audio_stream *stream)
 {
 	fplinux_audio_stream_close(stream);
+}
+
+bool fplinux_ui_audio_pause(struct fplinux_audio_stream *stream, bool paused)
+{
+	return fplinux_audio_stream_pause(stream, paused);
+}
+
+bool fplinux_ui_audio_status(const struct fplinux_audio_stream *stream,
+			     struct fplinux_ui_audio_status *status)
+{
+	uint32_t state;
+	uint32_t reason;
+
+	if (!status) {
+		errno = EINVAL;
+		return false;
+	}
+	if (!fplinux_audio_stream_status(stream, &state, &reason))
+		return false;
+	status->state = (enum fplinux_ui_audio_state)state;
+	status->reason = (enum fplinux_ui_audio_reason)reason;
+	return true;
+}
+
+bool fplinux_ui_audio_volume_step(struct fplinux_ui *ui, int step)
+{
+	struct fplinux_ui_session_message message = {
+		.type = FPLINUX_UI_SESSION_SETTING,
+		.name = "media_volume_step",
+	};
+
+	if (!ui || (step != -1 && step != 1)) {
+		errno = EINVAL;
+		return false;
+	}
+	if (!ui->audio) {
+		errno = ENOTSUP;
+		return false;
+	}
+	if (!++ui->volume_step_serial)
+		++ui->volume_step_serial;
+	message.serial = ui->volume_step_serial;
+	strcpy(message.value, step < 0 ? "-1" : "1");
+	return fplinux_ui_send(ui, &message);
+}
+
+bool fplinux_ui_system_level_get(struct fplinux_ui *ui,
+				 enum fplinux_system_level_kind kind,
+				 struct fplinux_system_level_state *state)
+{
+	if (!ui || !state || kind < FPLINUX_SYSTEM_LEVEL_MEDIA ||
+	    kind >= FPLINUX_SYSTEM_LEVEL_COUNT) {
+		errno = EINVAL;
+		return false;
+	}
+	if (!ui->system_levels_received) {
+		errno = EAGAIN;
+		return false;
+	}
+	*state = ui->system_levels.level[kind];
+	return true;
+}
+
+unsigned int fplinux_ui_light_effects_supported(const struct fplinux_ui *ui)
+{
+	return ui ? ui->light_effects : 0;
+}
+
+bool fplinux_ui_light_effects_apply(struct fplinux_ui *ui,
+				    const struct fplinux_ui_light_effect *effect,
+				    uint32_t *serial)
+{
+	struct fplinux_ui_session_message message = {
+		.type = FPLINUX_UI_SESSION_LIGHT_EFFECT,
+	};
+
+	if (serial)
+		*serial = 0;
+	if (!ui || !fplinux_ui_session_light_effect_valid(effect)) {
+		errno = EINVAL;
+		return false;
+	}
+	if (effect->resources & ~ui->light_effects) {
+		errno = ENOTSUP;
+		return false;
+	}
+	if (effect->resources && !media_eligible(ui)) {
+		errno = EAGAIN;
+		return false;
+	}
+	if (!++ui->light_effect_serial)
+		++ui->light_effect_serial;
+	message.serial = ui->light_effect_serial;
+	message.light_effect = *effect;
+	if (!fplinux_ui_send(ui, &message))
+		return false;
+	if (serial)
+		*serial = message.serial;
+	return true;
+}
+
+bool fplinux_ui_light_effects_clear(struct fplinux_ui *ui, uint32_t *serial)
+{
+	const struct fplinux_ui_light_effect effect = { 0 };
+
+	return fplinux_ui_light_effects_apply(ui, &effect, serial);
 }
 
 bool fplinux_ui_vibration_supported(const struct fplinux_ui *ui)
@@ -3587,11 +3731,30 @@ static void legend_bar_deleted(lv_event_t *event)
  */
 struct legend_texts {
 	char text[3][FPLINUX_UI_SESSION_TEXT_BYTES];
+	struct fplinux_ui *ui;
+	lv_obj_t *bar;
+	struct legend_texts *next;
 };
 
 static void legend_texts_deleted(lv_event_t *event)
 {
-	free(lv_event_get_user_data(event));
+	struct legend_texts *texts = lv_event_get_user_data(event);
+	struct legend_texts **link = &texts->ui->softkey_bars;
+
+	while (*link && *link != texts)
+		link = &(*link)->next;
+	if (*link)
+		*link = texts->next;
+	free(texts);
+}
+
+static bool local_softkeys_visible(const struct fplinux_ui *ui)
+{
+	for (const struct legend_texts *texts = ui->softkey_bars; texts;
+	     texts = texts->next)
+		if (lv_obj_is_visible(texts->bar))
+			return true;
+	return false;
 }
 
 static struct legend_texts *legend_texts(lv_obj_t *bar)
@@ -3630,6 +3793,8 @@ lv_obj_t *fplinux_ui_softkey_bar_create(struct fplinux_ui *ui, lv_obj_t *parent)
 		errno = ENOMEM;
 		return NULL;
 	}
+	texts->ui = ui;
+	texts->bar = bar;
 	if (!lv_obj_add_event_cb(bar, legend_texts_deleted, LV_EVENT_DELETE,
 				 texts)) {
 		lv_obj_delete(bar);
@@ -3664,6 +3829,8 @@ lv_obj_t *fplinux_ui_softkey_bar_create(struct fplinux_ui *ui, lv_obj_t *parent)
 		lv_label_set_long_mode(label, LV_LABEL_LONG_MODE_DOTS);
 		lv_label_set_text(label, "");
 	}
+	texts->next = ui->softkey_bars;
+	ui->softkey_bars = texts;
 	return bar;
 }
 

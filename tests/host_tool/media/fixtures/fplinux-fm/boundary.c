@@ -1,36 +1,98 @@
 // SPDX-License-Identifier: GPL-2.0-only
-/*
- * One scripted radio and sound card for fplinux-fm host tests. The open(),
- * close() and ioctl() defined here replace the libc calls of the linked
- * command: only /dev/radio0 opens, as descriptor 17, other paths fail with
- * ENOENT, and close() releases nothing. ioctl() answers the V4L2 capability,
- * tuner, frequency, hardware seek and audio mute requests. A seek must be an
- * upward, non-wrapping 100 kHz scan of 87.5-108.0 MHz and stops at the first
- * of 87.5, 88.1, 93.4 and 108.0 MHz not below the current frequency. The
- * snd_ctl_* functions replace the ALSA control API declared by the local
- * alsa/asoundlib.h for the FM playback switch.
- *
- * Device events are traced to standard error as RADIO_OPEN, RADIO_CLOSE,
- * V4L2_MUTE, V4L2_UNMUTE, FM_ON and FM_OFF. FM_TEST_FAIL_TUNE,
- * FM_TEST_NO_CHANNEL, FM_TEST_FAIL_V4L2_MUTE, FM_TEST_FAIL_V4L2_UNMUTE,
- * FM_TEST_FAIL_FM_ON and FM_TEST_FAIL_FM_OFF make that step fail.
- * FM_TEST_EXPECT_983 rejects any tuned frequency other than 98.3 MHz,
- * FM_TEST_ALREADY_ACTIVE reports the FM switch as already on, and
- * FM_TEST_SIGNAL raises SIGTERM after unmuting.
- */
 #define _POSIX_C_SOURCE 200809L
 
-#include <alsa/asoundlib.h>
 #include <errno.h>
+#include <time.h>
 #include <linux/videodev2.h>
+#include <poll.h>
 #include <signal.h>
 #include <stdarg.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/socket.h>
+#include <sys/un.h>
 
+/* A service lease and a silent V4L2 seek boundary, with independent checks. */
 static unsigned int frequency;
-static snd_ctl_t control;
+static bool handshake;
+
+int socket(int domain, int type, int protocol)
+{
+	(void)protocol;
+	if (domain != AF_UNIX || (type & ~SOCK_CLOEXEC) != SOCK_SEQPACKET) {
+		errno = EINVAL;
+		return -1;
+	}
+	return 18;
+}
+
+int connect(int fd, const struct sockaddr *address, socklen_t length)
+{
+	const struct sockaddr_un *unix_address = (const void *)address;
+
+	(void)length;
+	if (fd != 18 ||
+	    strcmp(unix_address->sun_path, "/run/fplinux-audio/radio.sock")) {
+		errno = EINVAL;
+		return -1;
+	}
+	fputs("SERVICE_CONNECT\n", stderr);
+	return 0;
+}
+
+ssize_t send(int fd, const void *data, size_t bytes, int flags)
+{
+	(void)flags;
+	if (fd != 18 || (bytes != 4 && bytes != 8)) {
+		errno = EINVAL;
+		return -1;
+	}
+	if (getenv("FM_TEST_EXPECT_983") &&
+	    (bytes != 8 || memcmp(data, "PLAY 983", 8))) {
+		errno = EINVAL;
+		return -1;
+	}
+	fprintf(stderr, "REQUEST %.*s\n", (int)bytes, (const char *)data);
+	return (ssize_t)bytes;
+}
+
+ssize_t recv(int fd, void *data, size_t bytes, int flags)
+{
+	const char *reply = getenv("FM_TEST_SERVICE_ERROR") ? "ERROR 16" :
+							      "READY";
+
+	(void)fd;
+	(void)flags;
+	if (bytes < strlen(reply))
+		return -1;
+	memcpy(data, reply, strlen(reply));
+	handshake = true;
+	return (ssize_t)strlen(reply);
+}
+
+int poll(struct pollfd *fds, nfds_t count, int timeout)
+{
+	struct timespec delay = { .tv_sec = timeout / 1000 };
+
+	(void)count;
+	if (!handshake) {
+		fds[0].revents = POLLIN;
+		return 1;
+	}
+	if (getenv("FM_TEST_SIGNAL")) {
+		raise(SIGTERM);
+		errno = EINTR;
+		return -1;
+	}
+	if (getenv("FM_TEST_SERVICE_GONE")) {
+		fds[0].revents = POLLHUP;
+		return 1;
+	}
+	nanosleep(&delay, NULL);
+	return 0;
+}
 
 int open(const char *path, int flags, ...)
 {
@@ -47,6 +109,8 @@ int close(int fd)
 {
 	if (fd == 17)
 		fputs("RADIO_CLOSE\n", stderr);
+	if (fd == 18)
+		fputs("LEASE_CLOSE\n", stderr);
 	return 0;
 }
 
@@ -60,34 +124,22 @@ int ioctl(int fd, unsigned long request, ...)
 	data = va_arg(arguments, void *);
 	va_end(arguments);
 	if (request == VIDIOC_QUERYCAP) {
-		struct v4l2_capability *capability = data;
-
-		capability->capabilities = V4L2_CAP_RADIO |
-					   V4L2_CAP_HW_FREQ_SEEK;
+		((struct v4l2_capability *)data)->capabilities =
+			V4L2_CAP_RADIO | V4L2_CAP_HW_FREQ_SEEK;
 	} else if (request == VIDIOC_G_TUNER) {
 		struct v4l2_tuner *tuner = data;
 
 		tuner->type = V4L2_TUNER_RADIO;
 		tuner->capability = V4L2_TUNER_CAP_LOW |
 				    V4L2_TUNER_CAP_HWSEEK_BOUNDED;
-		tuner->signal = 0;
 	} else if (request == VIDIOC_S_FREQUENCY) {
-		if (getenv("FM_TEST_FAIL_TUNE")) {
-			errno = ETIMEDOUT;
-			return -1;
-		}
 		frequency = ((struct v4l2_frequency *)data)->frequency;
-		if (getenv("FM_TEST_EXPECT_983") && frequency != 983U * 1600U) {
-			errno = EINVAL;
-			return -1;
-		}
 	} else if (request == VIDIOC_S_HW_FREQ_SEEK) {
 		const struct v4l2_hw_freq_seek *seek = data;
 
 		if (seek->type != V4L2_TUNER_RADIO || !seek->seek_upward ||
-		    seek->wrap_around || seek->spacing != 100000U ||
-		    seek->rangelow != 875U * 1600U ||
-		    seek->rangehigh != 1080U * 1600U) {
+		    seek->wrap_around || seek->spacing != 100000 ||
+		    seek->rangelow != 1400000 || seek->rangehigh != 1728000) {
 			errno = EINVAL;
 			return -1;
 		}
@@ -95,118 +147,24 @@ int ioctl(int fd, unsigned long request, ...)
 			errno = ENODATA;
 			return -1;
 		}
-		if (frequency <= 875U * 1600U)
-			frequency = 875U * 1600U;
-		else if (frequency <= 881U * 1600U)
-			frequency = 881U * 1600U;
-		else if (frequency <= 934U * 1600U)
-			frequency = 934U * 1600U;
-		else if (frequency <= 1080U * 1600U)
-			frequency = 1080U * 1600U;
+		if (frequency <= 1400000)
+			frequency = 1400000;
+		else if (frequency <= 1409600)
+			frequency = 1409600;
+		else if (frequency <= 1494400)
+			frequency = 1494400;
+		else if (frequency <= 1728000)
+			frequency = 1728000;
 		else {
 			errno = ENODATA;
 			return -1;
 		}
 	} else if (request == VIDIOC_G_FREQUENCY) {
 		((struct v4l2_frequency *)data)->frequency = frequency;
-	} else if (request == VIDIOC_S_CTRL) {
-		const struct v4l2_control *control_value = data;
-
-		if (control_value->id != V4L2_CID_AUDIO_MUTE) {
-			errno = EINVAL;
-			return -1;
-		}
-		fputs(control_value->value ? "V4L2_MUTE\n" : "V4L2_UNMUTE\n",
-		      stderr);
-		if ((control_value->value &&
-		     getenv("FM_TEST_FAIL_V4L2_MUTE")) ||
-		    (!control_value->value &&
-		     getenv("FM_TEST_FAIL_V4L2_UNMUTE"))) {
-			errno = EIO;
-			return -1;
-		}
-		if (!control_value->value && getenv("FM_TEST_SIGNAL"))
-			raise(SIGTERM);
 	} else {
-		errno = EINVAL;
+		/* The frontend may seek, but must never change audio controls. */
+		errno = EPERM;
 		return -1;
 	}
 	return 0;
-}
-
-int snd_ctl_open(snd_ctl_t **result, const char *name, int mode)
-{
-	(void)name;
-	(void)mode;
-	*result = &control;
-	return 0;
-}
-
-int snd_ctl_close(snd_ctl_t *result)
-{
-	(void)result;
-	return 0;
-}
-
-void snd_ctl_elem_id_set_interface(snd_ctl_elem_id_t *id, int interface)
-{
-	id->interface = interface;
-}
-
-void snd_ctl_elem_id_set_name(snd_ctl_elem_id_t *id, const char *name)
-{
-	snprintf(id->name, sizeof(id->name), "%s", name);
-}
-
-void snd_ctl_elem_value_set_id(snd_ctl_elem_value_t *value,
-			       const snd_ctl_elem_id_t *id)
-{
-	value->id = *id;
-}
-
-static int is_fm_control(const snd_ctl_elem_value_t *value)
-{
-	return value->id.interface == 2 &&
-	       !strcmp(value->id.name, "FM Playback Switch");
-}
-
-int snd_ctl_elem_read(snd_ctl_t *result, snd_ctl_elem_value_t *value)
-{
-	(void)result;
-	if (!is_fm_control(value))
-		return -ENOENT;
-	value->enabled = getenv("FM_TEST_ALREADY_ACTIVE") != NULL;
-	return 0;
-}
-
-int snd_ctl_elem_value_get_boolean(const snd_ctl_elem_value_t *value,
-				   unsigned int index)
-{
-	(void)index;
-	return value->enabled;
-}
-
-void snd_ctl_elem_value_set_boolean(snd_ctl_elem_value_t *value,
-				    unsigned int index, long enabled)
-{
-	(void)index;
-	value->enabled = enabled;
-}
-
-int snd_ctl_elem_write(snd_ctl_t *result, snd_ctl_elem_value_t *value)
-{
-	(void)result;
-	if (!is_fm_control(value))
-		return -ENOENT;
-	fputs(value->enabled ? "FM_ON\n" : "FM_OFF\n", stderr);
-	if ((value->enabled && getenv("FM_TEST_FAIL_FM_ON")) ||
-	    (!value->enabled && getenv("FM_TEST_FAIL_FM_OFF")))
-		return -EIO;
-	return 0;
-}
-
-const char *snd_strerror(int error)
-{
-	(void)error;
-	return "test ALSA error";
 }

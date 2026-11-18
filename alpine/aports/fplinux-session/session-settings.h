@@ -13,6 +13,8 @@
 enum fplinux_session_setting {
 	FPLINUX_SESSION_SETTING_BRIGHTNESS,
 	FPLINUX_SESSION_SETTING_VOLUME,
+	FPLINUX_SESSION_SETTING_ALARM_VOLUME,
+	FPLINUX_SESSION_SETTING_AUDIO_OUTPUT,
 	FPLINUX_SESSION_SETTING_SCREEN_OFF,
 	FPLINUX_SESSION_SETTING_AUTO_LOCK,
 	FPLINUX_SESSION_SETTING_LOCALE,
@@ -34,6 +36,9 @@ struct fplinux_session_settings {
 	unsigned int brightness;
 	bool has_volume;
 	unsigned int volume;
+	bool has_alarm_volume;
+	unsigned int alarm_volume;
+	char audio_output[16];
 	unsigned int screen_off_seconds;
 	int auto_lock_seconds;
 	char locale[FPLINUX_UI_SESSION_LOCALE_BYTES];
@@ -45,7 +50,7 @@ struct fplinux_session_settings {
 /*
  * languages is the directory of language files; NULL means none is installed.
  * A locale is a code of two or three letters a-z whose file there says
- * system=yes. The default locale is ru, else en, else the built-in English.
+ * system=yes. The default locale is en, else ru, else the built-in English.
  * Input uses the selected locale if its file says input=yes, else English.
  */
 void fplinux_session_settings_defaults(
