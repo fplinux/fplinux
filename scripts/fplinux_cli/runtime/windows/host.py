@@ -8,9 +8,11 @@ import json
 import os
 import platform
 import re
+import shutil
 import struct
 import subprocess
 import sys
+import tempfile
 import time
 from contextlib import suppress
 from pathlib import Path
@@ -281,42 +283,91 @@ class WindowsHost:
         result = self.ps("driver-consent.ps1", timeout=300)
         return result["accepted"] is True
 
+    def bootrom_driver_missing(
+        self, vendor: int, product: int, *, cancelled: Callable[[], bool] | None = None
+    ) -> bool:
+        """Recognize a missing driver only on the selected physical USB root."""
+        snapshot = self.ps(
+            "devices.ps1",
+            "-DriverInfo",
+            "-VendorId",
+            str(vendor),
+            "-ProductId",
+            str(product),
+            cancelled=cancelled,
+        )
+        devices = set(exact_usb_devices(snapshot, vendor, product))
+        return any(
+            device["id"] in devices and device.get("problem_code") == 28
+            for device in snapshot["devices"]
+        )
+
     def install_bootrom_driver(
         self, helper: Path, directory: Path, *, log: Path | None = None
     ) -> None:
-        """Elevate before driver preparation and keep the fixed installer output locally."""
+        """Prepare the driver in private temporary storage, independent of the archive path."""
         self.require_private(directory)
         if log is None:
             log = directory / "driver.log"
-        request = directory / "driver-request.json"
+        workspace = Path(tempfile.mkdtemp(prefix="fplinux-driver-")).resolve()
+        request = workspace / "driver-request.json"
+        invoked = False
+        completed = False
         try:
+            self.secure_new(workspace, directory=True)
+            destination = workspace / "driver"
+            # The native helper has separate UTF-16 directory and UTF-8 file-path limits.
+            directory_units = len(str(destination).encode("utf-16-le")) // 2
+            inf_bytes = len(str(destination / "fplinux-bootrom.inf").encode("utf-8"))
+            if directory_units >= 248 or inf_bytes >= 260:
+                fail("The Windows temporary path is too long for USB driver preparation")
             with request.open("x", encoding="utf-8") as stream:
                 json.dump(
-                    {"installer": str(helper), "directory": str(directory), "log": str(log)},
+                    {
+                        "installer": str(helper.resolve()),
+                        "directory": str(workspace),
+                        "driver_directory": str(destination),
+                        "log": str(log.resolve()),
+                    },
                     stream,
                 )
                 stream.write("\n")
             self.secure_new(request)
-            result = self.ps("driver-elevate.ps1", "-RequestPath", str(request), timeout=300)
-        except subprocess.TimeoutExpired:
-            fail(
-                "USB driver setup exceeded its 300s deadline. Let the Windows installer "
-                f"finish, then disconnect the phone and restart Run.cmd; see {log}"
-            )
-        except SystemExit as error:
-            fail(
-                f"USB driver setup could not complete: {error}. "
-                "Disconnect the phone and restart Run.cmd to retry"
-            )
+            with log.open("a", encoding="utf-8") as stream:
+                stream.write(f"Driver setup workspace: {workspace}\n")
+            invoked = True
+            try:
+                result = self.ps("driver-elevate.ps1", "-RequestPath", str(request), timeout=300)
+            except subprocess.TimeoutExpired:
+                fail(
+                    "USB driver setup exceeded its 300s deadline. Let the Windows installer "
+                    f"finish, then disconnect the phone and restart Run.cmd; see {log}. "
+                    f"Driver files are retained in {workspace}"
+                )
+            except SystemExit as error:
+                fail(
+                    f"USB driver setup could not complete: {error}. "
+                    f"Driver files are retained in {workspace}. "
+                    "Disconnect the phone and restart Run.cmd to retry"
+                )
+            completed = True
+            if result["cancelled"] is True:
+                fail(
+                    "USB driver setup was not authorized; disconnect the phone and restart Run.cmd"
+                )
+            if result["status"] != 0:
+                fail(
+                    f"USB driver setup failed with status {result['status']}; see {log}. "
+                    "Disconnect the phone and restart Run.cmd to retry"
+                )
         finally:
-            request.unlink(missing_ok=True)
-        if result["cancelled"] is True:
-            fail("USB driver setup was not authorized; disconnect the phone and restart Run.cmd")
-        if result["status"] != 0:
-            fail(
-                f"USB driver setup failed with status {result['status']}; see {log}. "
-                "Disconnect the phone and restart Run.cmd to retry"
-            )
+            if not invoked or completed:
+                original_error = sys.exception()
+                try:
+                    shutil.rmtree(workspace)
+                except OSError:
+                    if original_error is None:
+                        raise
 
     def require_private(self, path: Path) -> None:
         """Reject links and permissions granted outside the account and Windows administrators."""

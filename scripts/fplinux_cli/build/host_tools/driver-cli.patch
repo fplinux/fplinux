@@ -1,0 +1,86 @@
+--- a/examples/wdi-simple.c
++++ b/examples/wdi-simple.c
+@@ -26,6 +26,7 @@
+ #include <getopt.h>
+ #endif
+ #include "libwdi.h"
++#include "msapi_utf8.h"
+ 
+ #if defined(_PREFAST_)
+ /* Disable "Banned API Usage:" errors when using WDK's OACR/Prefast */
+@@ -93,7 +94,7 @@
+ 	return hwndFound;
+ }
+ 
+-int __cdecl main(int argc, char** argv)
++static int run_driver(int argc, char** argv)
+ {
+ 	static struct wdi_device_info *ldev, dev = {NULL, VID, PID, FALSE, 0, DESC, NULL, NULL, NULL};
+ 	static struct wdi_options_create_list ocl = { 0 };
+@@ -251,3 +252,24 @@
+ 
+ 	return r;
+ }
++
++int __cdecl wmain(int argc, wchar_t** wide_argv)
++{
++	char** argv;
++	int i, r = WDI_ERROR_RESOURCE;
++
++	argv = (char**)calloc((size_t)argc + 1, sizeof(*argv));
++	if (argv == NULL)
++		return r;
++	for (i = 0; i < argc; i++) {
++		argv[i] = wchar_to_utf8(wide_argv[i]);
++		if (argv[i] == NULL)
++			goto out;
++	}
++	r = run_driver(argc, argv);
++out:
++	for (i = 0; i < argc; i++)
++		free(argv[i]);
++	free(argv);
++	return r;
++}
+--- a/libwdi/libwdi.c
++++ b/libwdi/libwdi.c
+@@ -532,7 +532,8 @@
+ 		wdi_err("Directory name '%s' is too long", path);
+ 		return WDI_ERROR_INVALID_PARAM;
+ 	default:
+-		wdi_err("Unable to create directory '%s' (%s)", path, wdi_windows_error_str(0));
++		wdi_err("Unable to create directory '%s' (Windows status %lu: %s)",
++			path, (unsigned long)r, wdi_windows_error_str((DWORD)r));
+ 		return WDI_ERROR_ACCESS;
+ 	}
+ 
+@@ -586,11 +587,16 @@
+ 
+ 	handle = CreateFileU(filename, access_mode, FILE_SHARE_READ,
+ 		ps, CREATE_ALWAYS, 0, NULL);
+-	if (sid != NULL) LocalFree(sid);
+ 
+ 	if (handle == INVALID_HANDLE_VALUE) {
++		DWORD error = GetLastError();
++		wdi_err("CreateFile failed for '%s' (Windows status %lu)",
++			filename, (unsigned long)error);
++		if (sid != NULL) LocalFree(sid);
++		SetLastError(error);
+ 		return NULL;
+ 	}
++	if (sid != NULL) LocalFree(sid);
+ 
+ 	lowlevel_fd = _open_osfhandle((intptr_t)handle,
+ 		(access_mode&GENERIC_READ)?_O_RDWR:_O_WRONLY);
+--- a/libwdi/pki.c
++++ b/libwdi/pki.c
+@@ -1035,7 +1035,8 @@
+ 	// Sign file with cert
+ 	hResult = pfSignerSignEx(0, &signerSubjectInfo, &signerCert, &signerSignatureInfo, NULL, NULL, NULL, NULL, &pSignerContext);
+ 	if (hResult != S_OK) {
+-		wdi_warn("SignerSignEx failed: %s", hResult, winpki_error_str(hResult));
++		wdi_warn("SignerSignEx failed: 0x%08lx (%s)",
++			(unsigned long)hResult, winpki_error_str(hResult));
+ 		goto out;
+ 	}
+ 	r = TRUE;

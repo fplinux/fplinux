@@ -20,7 +20,8 @@ if TYPE_CHECKING:
     from fplinux_cli.build.host_tools.windows_environment import WindowsBuildEnvironment
 
 _PATCHES = tuple(
-    Path(__file__).with_name(name) for name in ("source-date-epoch.patch", "inbox-winusb.patch")
+    Path(__file__).with_name(name)
+    for name in ("source-date-epoch.patch", "inbox-winusb.patch", "driver-cli.patch")
 )
 
 
@@ -38,7 +39,7 @@ def _configure_driver(source: Path, *, source_date_epoch: int) -> None:
             #define OPT_M64
             #define WINUSB_DRIVER_DATE "{driver_date}"
             #define WINUSB_DRIVER_VERSION "{driver_version}"
-            #define ENABLE_LOGGING 1
+            #define INCLUDE_DEBUG_LOGGING 1
             #define _GNU_SOURCE 1
             """).format(driver_date=driver_date, driver_version=driver_version),
         encoding="utf-8",
@@ -119,6 +120,7 @@ def _build_driver(
         [
             str(compiler),
             *flags,
+            "-municode",
             "-I..",
             "-I../libwdi",
             "-Igetopt",

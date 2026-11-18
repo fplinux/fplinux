@@ -7,17 +7,71 @@ import shutil
 import subprocess
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from pathlib import Path
+from threading import Event
 from typing import TYPE_CHECKING, Any
 
-from .host import BootromDriverRequiredError, WindowsHost, exact_usb_devices, fail
+from .host import (
+    BootromDriverRequiredError,
+    UsbProbeCancelledError,
+    WindowsHost,
+    exact_usb_devices,
+    fail,
+)
 from .session import prepare_session
 from .transport import WindowsTransport
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Iterator
 
     from .bundle import WindowsBundle
+
+
+@contextmanager
+def _watch_bootrom_driver(
+    host: WindowsHost,
+    usb: dict[str, Any],
+    *,
+    on_usb_ready: Callable[[], None],
+    on_wait: Callable[[], None] | None,
+) -> Iterator[tuple[Callable[[], None], Callable[[], None]]]:
+    """Observe missing drivers without blocking native USB acquisition or upload."""
+    cancelled = Event()
+
+    def observe() -> bool:
+        while not cancelled.is_set():
+            try:
+                if host.bootrom_driver_missing(
+                    usb["vendor_id"], usb["product_id"], cancelled=cancelled.is_set
+                ):
+                    return True
+            except UsbProbeCancelledError:
+                return False
+            except subprocess.TimeoutExpired:
+                continue
+            cancelled.wait(0.5)
+        return False
+
+    with ThreadPoolExecutor(max_workers=1, thread_name_prefix="fplinux-driver") as executor:
+        probe = executor.submit(observe)
+
+        def acquired() -> None:
+            # Native acquisition owns the transfer; no later PnP result may interrupt it.
+            cancelled.set()
+            on_usb_ready()
+
+        def waiting() -> None:
+            if on_wait is not None:
+                on_wait()
+            if probe.done() and probe.result():
+                raise BootromDriverRequiredError
+
+        try:
+            yield acquired, waiting
+        finally:
+            cancelled.set()
 
 
 def _setup_bootrom_driver(
@@ -134,17 +188,21 @@ def boot_archive(  # noqa: PLR0913 -- native loading inputs have separate owners
             if events is not None:
                 events("waiting-for-device")
             try:
-                host.run_tool(
-                    [loader_arguments[0], "--verbose", "1", *loader_arguments[1:]]
-                    if loader_trace
-                    else loader_arguments,
-                    timeout=300 + usb["wait_seconds"],
-                    cwd=loader_directory,
-                    log=log,
-                    environment={"LIBUSB_DEBUG": "4"} if loader_trace else None,
-                    on_usb_ready=usb_ready,
-                    on_wait=on_wait,
-                )
+                with _watch_bootrom_driver(host, usb, on_usb_ready=usb_ready, on_wait=on_wait) as (
+                    acquired,
+                    waiting,
+                ):
+                    host.run_tool(
+                        [loader_arguments[0], "--verbose", "1", *loader_arguments[1:]]
+                        if loader_trace
+                        else loader_arguments,
+                        timeout=300 + usb["wait_seconds"],
+                        cwd=loader_directory,
+                        log=log,
+                        environment={"LIBUSB_DEBUG": "4"} if loader_trace else None,
+                        on_usb_ready=acquired,
+                        on_wait=waiting,
+                    )
             except BootromDriverRequiredError:
                 if driver_installed:
                     fail("WinUSB is still unavailable after setup; disconnect and restart Run.cmd")

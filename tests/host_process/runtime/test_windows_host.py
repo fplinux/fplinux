@@ -1215,7 +1215,10 @@ def test_windows_loader_processes_receive_private_capsule_and_retain_one_archive
             timeout: float = 20,
             cancelled: Callable[[], bool] | None = None,
         ) -> dict[str, Any]:
-            del script, arguments, timeout, cancelled
+            del timeout
+            if script == "devices.ps1" and "-DriverInfo" in arguments:
+                assert cancelled is not None
+                return {"devices": []}
             assert "waiting-for-device" not in events or "ram-loader-start" in events
             if "ram-loader-start" in events and not self.selected:
                 self.selected = True

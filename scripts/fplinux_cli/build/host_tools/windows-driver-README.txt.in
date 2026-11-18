@@ -2,8 +2,9 @@ Windows driver helper source and build material
 
 libwdi is licensed under LGPL version 3 or later. Its complete source
 and original copyright notices are in the accompanying source archive.
-The supplied patches select the built-in WinUSB driver on Windows 10/11
-and make embedded resource timestamps honor SOURCE_DATE_EPOCH.
+The supplied patches select the built-in WinUSB driver on Windows 10/11,
+preserve Unicode command-line paths, enable detailed diagnostics and make
+embedded resource timestamps honor SOURCE_DATE_EPOCH.
 The build recipe applies them to a fresh source tree.
 
 On Linux, install GCC and patch. Verify the SHA-256 digests in downloads.json and

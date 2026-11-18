@@ -4,7 +4,10 @@
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
+import tempfile
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, override
 
 import pytest
@@ -15,8 +18,17 @@ from fplinux_cli.runtime.windows import host as windows_host
 from tests.windows_host_support import StubWindowsHost, admitted_windows, archive_files
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
-    from pathlib import Path
+    from collections.abc import Callable, Iterator
+
+
+@pytest.fixture
+def driver_temporary_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
+    """Own temporary driver files; NTFS ACL and elevation remain controlled boundaries."""
+    root = tmp_path / "System Temp Юникод"
+    root.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(root))
+    yield root
+    shutil.rmtree(root)
 
 
 class DriverHost(StubWindowsHost):
@@ -127,13 +139,14 @@ def test_installed_driver_cannot_start_next_attempt_before_disconnect(
 def test_driver_request_preserves_literal_paths_and_cleans_up_after_result(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    driver_temporary_root: Path,
     result: dict[str, Any],
     error: str | None,
 ) -> None:
     host = StubWindowsHost({})
     host.powershell = tmp_path / "WindowsPowerShell/powershell.exe"
-    directory = tmp_path / "Private ' USB $(no-command) Юникод"
-    directory.mkdir()
+    directory = tmp_path / ("long archive directory " * 5) / "private session"
+    directory.mkdir(parents=True)
     helper = tmp_path / "Archive ' USB $(no-command) Юникод/tools/driver/wdi-simple.exe"
     requests: list[tuple[str, tuple[str, ...], int]] = []
     request_paths: list[Path] = []
@@ -147,14 +160,21 @@ def test_driver_request_preserves_literal_paths_and_cleans_up_after_result(
     def native_result(script: str, *arguments: str, timeout: int = 20) -> dict[str, Any]:
         requests.append((script, arguments, timeout))
         assert arguments[0] == "-RequestPath"
-        request = directory / "driver-request.json"
-        assert arguments[1] == str(request)
+        request = Path(arguments[1])
+        assert request.is_absolute()
+        assert request.parent.parent == driver_temporary_root
+        assert request.parent in secured
         assert request in secured
         assert json.loads(request.read_text(encoding="utf-8")) == {
             "installer": str(helper),
-            "directory": str(directory),
+            "directory": str(request.parent),
+            "driver_directory": str(request.parent / "driver"),
             "log": str(directory / "driver.log"),
         }
+        if result["cancelled"] is False:
+            extracted = request.parent / "driver"
+            extracted.mkdir()
+            (extracted / "fplinux-bootrom.inf").write_text("completed native setup\n")
         request_paths.append(request)
         return result
 
@@ -165,15 +185,13 @@ def test_driver_request_preserves_literal_paths_and_cleans_up_after_result(
     else:
         with pytest.raises(SystemExit, match=error):
             host.install_bootrom_driver(helper, directory)
-    assert requests == [
-        ("driver-elevate.ps1", ("-RequestPath", str(directory / "driver-request.json")), 300)
-    ]
     assert request_paths
-    assert all(not request.exists() for request in request_paths)
+    assert requests == [("driver-elevate.ps1", ("-RequestPath", str(request_paths[0])), 300)]
+    assert all(not request.parent.exists() for request in request_paths)
 
 
 def test_uac_deadline_reports_retry_without_starting_another_installer(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, driver_temporary_root: Path
 ) -> None:
     host = StubWindowsHost({})
     host.powershell = tmp_path / "powershell.exe"
@@ -181,17 +199,77 @@ def test_uac_deadline_reports_retry_without_starting_another_installer(
     requests: list[Path] = []
 
     def expired(script: str, *arguments: str, timeout: int = 20) -> dict[str, Any]:
-        request = tmp_path / "driver-request.json"
+        request = Path(arguments[1])
+        assert request.parent.parent == driver_temporary_root
         assert arguments == ("-RequestPath", str(request))
         assert request.exists()
+        (request.parent / "driver").mkdir()
+        (request.parent / "driver/installer_x64.exe").write_bytes(b"running native child")
         requests.append(request)
         raise subprocess.TimeoutExpired(script, timeout)
 
     monkeypatch.setattr(host, "ps", expired)
     with pytest.raises(SystemExit, match=r"Let the Windows installer finish.*restart Run[.]cmd"):
         host.install_bootrom_driver(tmp_path / "helper.exe", tmp_path)
-    assert requests == [tmp_path / "driver-request.json"]
-    assert not requests[0].exists()
+    assert len(requests) == 1
+    assert requests[0].exists()
+    assert (
+        requests[0].parent / "driver/installer_x64.exe"
+    ).read_bytes() == b"running native child"
+
+
+def test_failed_elevation_response_retains_request_outside_disposable_session(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, driver_temporary_root: Path
+) -> None:
+    """The caller cannot infer elevated-child completion from a failed intermediary."""
+    host = StubWindowsHost({})
+    session = tmp_path / "session"
+    session.mkdir()
+    requests: list[Path] = []
+
+    def failed_response(script: str, *arguments: str, timeout: int = 20) -> dict[str, Any]:
+        del script, timeout
+        request = Path(arguments[1])
+        assert request.parent.parent == driver_temporary_root
+        assert request.is_file()
+        requests.append(request)
+        message = "Windows discovery failed: elevated result unavailable"
+        raise SystemExit(message)
+
+    monkeypatch.setattr(host, "ps", failed_response)
+    with pytest.raises(SystemExit, match="Driver files are retained"):
+        host.install_bootrom_driver(tmp_path / "helper.exe", session)
+    shutil.rmtree(session)
+
+    assert len(requests) == 1
+    assert requests[0].is_file()
+    assert json.loads(requests[0].read_text())["directory"] == str(requests[0].parent)
+
+
+def test_unprotected_driver_workspace_is_removed_before_elevation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, driver_temporary_root: Path
+) -> None:
+    host = StubWindowsHost({})
+    attempted: list[Path] = []
+
+    def refused_acl(path: Path, *, directory: bool = False) -> None:
+        assert directory
+        assert path.parent == driver_temporary_root
+        attempted.append(path)
+        message = "Cannot protect temporary driver files"
+        raise SystemExit(message)
+
+    def unexpected_elevation(*arguments: object, **options: object) -> dict[str, Any]:
+        del arguments, options
+        pytest.fail("Unprotected files must not reach the elevated process")
+
+    monkeypatch.setattr(host, "secure_new", refused_acl)
+    monkeypatch.setattr(host, "ps", unexpected_elevation)
+    with pytest.raises(SystemExit, match="Cannot protect temporary driver files"):
+        host.install_bootrom_driver(tmp_path / "helper.exe", tmp_path)
+
+    assert len(attempted) == 1
+    assert not attempted[0].exists()
 
 
 def test_driver_helper_checksum_is_required_before_windows_effects(tmp_path: Path) -> None:
@@ -231,7 +309,9 @@ def test_native_usb_acquisition_controls_progress_and_driver_setup(
             timeout: float = 20,
             cancelled: Callable[[], bool] | None = None,
         ) -> dict[str, Any]:
-            del script, arguments, timeout, cancelled
+            del script, timeout, cancelled
+            if "-DriverInfo" in arguments:
+                return {"devices": []}
             assert "waiting-for-device" not in events or "driver-reconnect" in events
             return self.snapshot if "driver-reconnect" in events else {"devices": []}
 
