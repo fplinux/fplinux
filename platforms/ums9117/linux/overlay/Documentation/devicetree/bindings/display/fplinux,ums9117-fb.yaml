@@ -23,6 +23,7 @@ allOf:
             - fplinux,ums9117-nv3030-lcm-fb
             - fplinux,ums9117-nv3023-lcm-fb
             - fplinux,ums9117-gc9307-lcm-fb
+            - fplinux,ums9117-konrow-senior-280-plus-lcm-fb
     then:
       required:
         - sprd,dbi-timing-ns
@@ -37,6 +38,23 @@ allOf:
         sprd,pinmux-data-offsets: false
         sprd,pinconf-data-values: false
         sprd,pinconf-data-offsets: false
+  - if:
+      properties:
+        compatible:
+          const: fplinux,ums9117-konrow-senior-280-plus-lcm-fb
+    then:
+      properties:
+        sprd,wled-current-levels:
+          items:
+            - const: 0
+            - const: 0
+            - const: 0
+            - minimum: 1
+              maximum: 63
+    else:
+      properties:
+        sprd,wled-default-level:
+          maximum: 63
 
 properties:
   compatible:
@@ -49,6 +67,7 @@ properties:
       - fplinux,ums9117-nv3030-lcm-fb
       - fplinux,ums9117-nv3023-lcm-fb
       - fplinux,ums9117-gc9307-lcm-fb
+      - fplinux,ums9117-konrow-senior-280-plus-lcm-fb
 
   reg:
     minItems: 11
@@ -151,15 +170,19 @@ properties:
     $ref: /schemas/types.yaml#/definitions/uint32-array
     minItems: 4
     maxItems: 4
-    description: Four BLTC current codes, one per WLED channel, each 0 through 63.
+    description: |
+      Four BLTC current codes, one per WLED channel, each 0 through 63.
+      Konrow uses a fixed white-channel current with 8-bit PWM brightness;
+      other profiles vary the equal nonzero current codes with brightness.
 
   sprd,wled-default-level:
     $ref: /schemas/types.yaml#/definitions/uint32
     minimum: 1
-    maximum: 63
+    maximum: 255
     description: |
-      Initial raw WLED current code, no higher than the nonzero code in
-      sprd,wled-current-levels. Defaults to that code when absent.
+      Initial raw brightness. Konrow uses a PWM duty from 1 through 255;
+      other profiles use a current code no higher than the nonzero code in
+      sprd,wled-current-levels. Defaults to the profile maximum when absent.
 
   sprd,dbi-timing-ns:
     items:

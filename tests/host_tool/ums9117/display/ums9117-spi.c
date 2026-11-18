@@ -21,6 +21,7 @@ struct transmitted_word {
 	unsigned int bits;
 	bool data;
 	bool selected;
+	bool cpu_write;
 };
 
 static struct {
@@ -31,6 +32,7 @@ static struct {
 	u32 reset_clear;
 	struct transmitted_word words[8];
 	u32 armed_words[8];
+	bool armed_selected[8];
 	size_t word_count;
 	size_t armed_count;
 	unsigned int selects;
@@ -118,6 +120,8 @@ void writel(u32 value, void *address)
 		peripheral.armed_words[peripheral.armed_count++] =
 			((peripheral.spi[0x054 / 4] & 0x3ff) << 16) |
 			(peripheral.spi[0x058 / 4] & 0xffff);
+		peripheral.armed_selected[peripheral.armed_count - 1] =
+			!(peripheral.spi[0x008 / 4] & 0x100);
 	}
 	if (address == &peripheral.spi[0]) {
 		struct transmitted_word *word;
@@ -133,6 +137,7 @@ void writel(u32 value, void *address)
 			.bits = (peripheral.spi[0x008 / 4] >> 2) & 0x1f,
 			.data = !!(peripheral.spi[0x054 / 4] & 0x8000),
 			.selected = !(peripheral.spi[0x008 / 4] & 0x100),
+			.cpu_write = !!(peripheral.spi[0x00c / 4] & 0x40),
 		};
 		peripheral.spi[0x034 / 4] = 0x100;
 		peripheral.spi[0x028 / 4] = 0;
@@ -363,8 +368,13 @@ static void dual_data_dcs(void)
 		      peripheral.words[0].data_control == 0x0000 &&
 		      peripheral.words[1].data_control == 0x8000,
 	      "DCS must use the single data line and select command or data");
-	CHECK(peripheral.selects == 1 && peripheral.deselects == 0,
-	      "dual-data commands must retain selected CS0");
+	CHECK(peripheral.selects == 3 && peripheral.deselects == 3,
+	      "dual-data must delimit every DCS byte with CS0");
+	CHECK(peripheral.words[0].cpu_write && peripheral.words[1].cpu_write &&
+		      peripheral.words[2].cpu_write,
+	      "dual-data DCS bytes must enable CPU writes");
+	CHECK(peripheral.spi[0x008 / 4] & 0x100,
+	      "completed dual-data DCS must release CS0");
 	CHECK(peripheral.spi[0x04c / 4] == 0xc010 &&
 		      peripheral.spi[0x054 / 4] == 0xa000 &&
 		      ((peripheral.spi[0x008 / 4] >> 2) & 0x1f) == 8,
@@ -391,11 +401,11 @@ static void dual_data_frame(void)
 	CHECK(result == 0 && peripheral.word_count == 1,
 	      "RAMWR must admit the pixel stream");
 	check_word(0, 0x2c, false, 0x10);
-	CHECK(peripheral.words[0].control == 0x90 &&
+	CHECK(peripheral.words[0].control == 0x10 &&
 		      peripheral.words[0].data_control == 0x0000,
-	      "RAMWR must use one data line and transmit hold");
-	CHECK(peripheral.selects == 1 && peripheral.deselects == 0,
-	      "RAMWR and pixels must retain selected CS0");
+	      "RAMWR must use one data line without pixel transmit hold");
+	CHECK(peripheral.selects == 2 && peripheral.deselects == 1,
+	      "RAMWR must release CS0 before selecting the pixel stream");
 	CHECK(peripheral.spi[0x004 / 4] == 1 &&
 		      peripheral.spi[0x04c / 4] == 0xc090 &&
 		      ((peripheral.spi[0x008 / 4] >> 2) & 0x1f) == 8,
@@ -406,6 +416,22 @@ static void dual_data_frame(void)
 	CHECK(peripheral.armed_count == 2 && peripheral.armed_words[0] == 1 &&
 		      peripheral.armed_words[1] == 76800,
 	      "handoff must arm one RAMWR byte then the full pixel count");
+	CHECK(peripheral.armed_selected[0] && peripheral.armed_selected[1],
+	      "RAMWR and pixel transfers must be armed with CS0 selected");
+
+	result = ums9117_drm_spi_begin_frame(&udrm, 30720);
+	CHECK(result == 0 && peripheral.word_count == 2,
+	      "a later frame must restore DCS mode after the pixel stream");
+	check_word(1, 0x2c, false, 0x10);
+	CHECK(peripheral.words[1].control == 0x10 &&
+		      peripheral.words[1].data_control == 0x2000 &&
+		      peripheral.words[1].cpu_write,
+	      "later RAMWR must disable pixel hold and both data lines");
+	CHECK(peripheral.selects == 4 && peripheral.deselects == 3,
+	      "a later frame must end the previous CS0 stream before RAMWR");
+	CHECK(peripheral.armed_count == 4 && peripheral.armed_words[2] == 1 &&
+		      peripheral.armed_words[3] == 30720,
+	      "a later handoff must arm its own RAMWR and pixel count");
 }
 
 static void dual_data_timeout(void)
@@ -424,15 +450,17 @@ static void dual_data_timeout(void)
 	CHECK(peripheral.word_count == 1 && peripheral.armed_count == 1 &&
 		      peripheral.armed_words[0] == 1,
 	      "failed RAMWR must not arm a pixel stream");
-	CHECK(peripheral.selects == 1 && peripheral.deselects == 0,
-	      "timeout must preserve the shared CS0 selection");
+	CHECK(peripheral.selects == 1 && peripheral.deselects == 1,
+	      "failed RAMWR must release CS0");
+	CHECK(peripheral.spi[0x008 / 4] & 0x100,
+	      "failed dual-data frame must leave the panel deselected");
 
 	peripheral.stalled = false;
 	result = ums9117_drm_spi_begin_frame(&udrm, 76800);
 	CHECK(result == 0 && peripheral.word_count == 2,
 	      "transport must accept a frame after the stall clears");
 	check_word(1, 0x2c, false, 0x10);
-	CHECK(peripheral.words[1].control == 0x90 &&
+	CHECK(peripheral.words[1].control == 0x10 &&
 		      peripheral.words[1].data_control == 0x2000,
 	      "retry must restore command mode after failed handoff");
 	CHECK(peripheral.armed_count == 3 && peripheral.armed_words[1] == 1 &&

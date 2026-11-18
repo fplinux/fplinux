@@ -69,3 +69,19 @@ def test_display_initialization_preserves_mapping_errors(
         check=True,
     )
     assert result.stdout == "DRM display resource checks passed\n"
+
+
+@pytest.mark.parametrize(
+    "mode", ["current-backlight", "current-duty", "white-pwm", "white-pwm-error"]
+)
+def test_display_backlight_applies_levels_and_fails_dark(
+    display_resources: Path, mode: str
+) -> None:
+    """Linked register operations preserve current mode and drive white PWM safely."""
+    result = run_process(
+        [str(display_resources), mode],
+        name=f"exercise linked UMS9117 backlight: {mode}",
+        timeout=10,
+        check=True,
+    )
+    assert result.stdout == "DRM display resource checks passed\n"

@@ -18,6 +18,12 @@ struct regmap {
 	u32 words[0x1000 / 4];
 };
 
+struct backlight_device {
+	void *data;
+	const struct backlight_ops *ops;
+	unsigned int brightness;
+};
+
 static struct named_mapping mappings[] = {
 	{ "lcdc", { 0x1000, 0x111f }, {}, 0 },
 	{ "ap-ahb-gate-set", { 0x2000, 0x200f }, {}, 0 },
@@ -34,7 +40,20 @@ static const struct ums9117_drm_profile profile = {
 	.transport = UMS9117_DRM_TRANSPORT_LCM_DBI,
 	.wled_backlight_name = "host-backlight",
 };
+static const struct ums9117_drm_profile current_duty_profile = {
+	.name = "host-current-duty",
+	.transport = UMS9117_DRM_TRANSPORT_LCM_DBI,
+	.wled_backlight_name = "host-backlight",
+	.wled_duty = 0xffff,
+};
+static const struct ums9117_drm_profile white_pwm_profile = {
+	.name = "host-white-pwm",
+	.transport = UMS9117_DRM_TRANSPORT_LCM_DBI,
+	.wled_backlight_name = "host-backlight",
+	.wled_mode = UMS9117_DRM_WLED_WHITE_PWM,
+};
 static struct platform_device device;
+static struct backlight_device backlight;
 static struct regmap aon;
 static struct regmap pmic;
 static const char *failed_mapping;
@@ -44,6 +63,9 @@ static unsigned int invalid_mmio;
 static unsigned int transport_initializations;
 static unsigned int transport_enables;
 static unsigned int irq_requests;
+static unsigned int failed_pmic_register;
+static bool white_pwm;
+static bool backlight_test;
 
 static struct named_mapping *mapping_named(const char *name)
 {
@@ -148,6 +170,8 @@ int regmap_read(struct regmap *map, unsigned int reg, unsigned int *value)
 int regmap_write(struct regmap *map, unsigned int reg, unsigned int value)
 {
 	assert(!(reg % 4) && reg < sizeof(map->words));
+	if (map == &pmic && failed_pmic_register == reg)
+		return -5;
 	map->words[reg / 4] = value;
 	return 0;
 }
@@ -172,10 +196,10 @@ int of_property_read_u32_array(const struct device_node *node, const char *name,
 {
 	if (!strcmp(name, "sprd,wled-current-levels")) {
 		assert(count == 4);
-		values[0] = 16;
-		values[1] = 16;
-		values[2] = 16;
-		values[3] = 16;
+		values[0] = white_pwm ? 0 : 16;
+		values[1] = white_pwm ? 0 : 16;
+		values[2] = white_pwm ? 0 : 16;
+		values[3] = white_pwm ? 34 : 16;
 		return 0;
 	}
 	assert(count == 1);
@@ -251,8 +275,8 @@ void usleep_range(unsigned long minimum, unsigned long maximum)
 int ums9117_drm_lcm_dcs(struct ums9117_drm *udrm, u8 command, const u8 *data,
 			size_t length)
 {
-	assert(!"unexpected panel command");
-	return -22;
+	assert(backlight_test && command == 0x28 && !data && !length);
+	return 0;
 }
 
 void msleep(unsigned int delay)
@@ -262,14 +286,91 @@ void msleep(unsigned int delay)
 
 void *bl_get_data(struct backlight_device *backlight)
 {
-	assert(!"unexpected backlight callback");
-	return NULL;
+	return backlight->data;
 }
 
 int backlight_get_brightness(struct backlight_device *backlight)
 {
-	assert(!"unexpected backlight callback");
-	return 0;
+	return backlight->brightness;
+}
+
+struct backlight_device *
+devm_backlight_device_register(struct device *dev, const char *name,
+			       struct device *parent, void *data,
+			       const struct backlight_ops *ops,
+			       const struct backlight_properties *properties)
+{
+	assert(dev == &device.dev && parent == dev);
+	assert(!strcmp(name, "host-backlight"));
+	assert(properties->max_brightness == (white_pwm ? 255 : 16));
+	assert(properties->brightness == properties->max_brightness);
+	backlight.data = data;
+	backlight.ops = ops;
+	backlight.brightness = properties->brightness;
+	return &backlight;
+}
+
+void synchronize_irq(int irq)
+{
+	assert(irq == 7);
+}
+
+static void check_backlight(struct ums9117_drm *display, bool fail_duty,
+			    u16 expected_current_duty)
+{
+	static const unsigned int pwm_levels[] = { 1, 17, 255 };
+	static const unsigned int current_levels[] = { 1, 9, 16 };
+	const unsigned int *levels = white_pwm ? pwm_levels : current_levels;
+	unsigned int i;
+
+	assert(ums9117_drm_display_register_backlight(display, &device) == 0);
+	display->state = UMS9117_DRM_PANEL_STATE_ACTIVE;
+	if (fail_duty) {
+		backlight.brightness = 17;
+		assert(backlight.ops->update_status(&backlight) == 0);
+		assert(pmic.words[0x180 / 4] & 0x1000);
+		failed_pmic_register = 0x1cc;
+		backlight.brightness = 255;
+		assert(backlight.ops->update_status(&backlight) == -5);
+		assert(display->state == UMS9117_DRM_PANEL_STATE_ERROR);
+		assert(display->stats.wled_errors == 1);
+		assert(display->wled_known && !display->wled_on);
+		assert(!(pmic.words[0x180 / 4] & 0x1000));
+		assert(backlight.ops->get_brightness(&backlight) == 0);
+		return;
+	}
+	for (i = 0; i < ARRAY_SIZE(pwm_levels); i++) {
+		backlight.brightness = levels[i];
+		assert(backlight.ops->update_status(&backlight) == 0);
+		assert(backlight.ops->get_brightness(&backlight) == levels[i]);
+		if (white_pwm) {
+			assert(pmic.words[0x1b8 / 4] == 0xa5a5);
+			assert(pmic.words[0x1bc / 4] == 0xa5a5);
+			assert(pmic.words[0x1c0 / 4] == 0xa5a5);
+			assert(pmic.words[0x1c4 / 4] == 0xa5a2);
+			assert(pmic.words[0x1c8 / 4] == 0xa500);
+			assert(pmic.words[0x1cc / 4] ==
+			       (levels[i] << 8 | 0xff));
+			assert(pmic.words[0x180 / 4] == 0xb5a5);
+			assert(pmic.words[0x1d8 / 4] == 0xa5a5);
+			assert(pmic.words[0xc10 / 4] == 0xb5a5);
+		} else {
+			assert(pmic.words[0x1b8 / 4] == (0xa580 | levels[i]));
+			assert(pmic.words[0x1bc / 4] == (0xa580 | levels[i]));
+			assert(pmic.words[0x1c0 / 4] == (0xa580 | levels[i]));
+			assert(pmic.words[0x1c4 / 4] == (0xa580 | levels[i]));
+			assert(pmic.words[0x1cc / 4] == expected_current_duty);
+			assert(pmic.words[0x180 / 4] == 0xcccc);
+			assert(pmic.words[0xc10 / 4] == 0xa5a5);
+		}
+	}
+	backlight.brightness = 0;
+	assert(backlight.ops->update_status(&backlight) == 0);
+	assert(backlight.ops->get_brightness(&backlight) == 0);
+	assert(display->wled_known && !display->wled_on);
+	assert(pmic.words[0x180 / 4] == (white_pwm ? 0xa5a5 : 0));
+	assert(pmic.words[0xc08 / 4] == 0xa7a5);
+	assert(pmic.words[0xdec / 4] == 0xa5a0);
 }
 
 int main(int argc, char *argv[])
@@ -279,7 +380,21 @@ int main(int argc, char *argv[])
 	int ret;
 
 	assert(argc == 2);
-	failed_mapping = strcmp(argv[1], "success") ? argv[1] : NULL;
+	white_pwm = !strncmp(argv[1], "white-pwm", 9);
+	backlight_test = white_pwm || !strcmp(argv[1], "current-backlight") ||
+			 !strcmp(argv[1], "current-duty");
+	if (white_pwm)
+		display.profile = &white_pwm_profile;
+	else if (!strcmp(argv[1], "current-duty"))
+		display.profile = &current_duty_profile;
+	if (backlight_test) {
+		unsigned int i;
+
+		for (i = 0; i < ARRAY_SIZE(pmic.words); i++)
+			pmic.words[i] = 0xa5a5;
+	}
+	failed_mapping =
+		strcmp(argv[1], "success") && !backlight_test ? argv[1] : NULL;
 	assert(!failed_mapping || mapping_named(failed_mapping));
 	expected = failed_mapping ? -12 : 0;
 	ret = ums9117_drm_display_init(&display, &device);
@@ -303,6 +418,10 @@ int main(int argc, char *argv[])
 		assert(mappings[3].words[0] == 2);
 		assert(pin_allocation_count == 8);
 		assert(display.wled_known && !display.wled_on);
+		if (backlight_test)
+			check_backlight(
+				&display, !strcmp(argv[1], "white-pwm-error"),
+				!strcmp(argv[1], "current-duty") ? 0xffff : 0);
 	}
 	puts("DRM display resource checks passed");
 	return 0;

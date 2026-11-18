@@ -26,6 +26,11 @@ enum ums9117_drm_spi_mode {
 	UMS9117_DRM_SPI_DUAL_DATA,
 };
 
+enum ums9117_drm_wled_mode {
+	UMS9117_DRM_WLED_CURRENT,
+	UMS9117_DRM_WLED_WHITE_PWM,
+};
+
 /*
  * A DCS command followed by zero or more byte parameters and an optional
  * delay. command == 0 with length == 0 is a delay-only script step.
@@ -65,10 +70,13 @@ struct ums9117_drm_profile {
 	u16 spi_init_clock_divider;
 	enum ums9117_drm_spi_mode spi_mode;
 	/*
-	 * Raw backlight name. Its maximum is derived from equal non-zero board
-	 * WLED current levels.
+	 * Raw backlight name. Current mode uses equal nonzero board current
+	 * levels as its maximum; white PWM mode has a fixed current and 255 steps.
 	 */
 	const char *wled_backlight_name;
+	enum ums9117_drm_wled_mode wled_mode;
+	/* Board-required duty register value in current mode. */
+	u16 wled_duty;
 	/* LCDC CTRL bits required by this panel's transport. */
 	u32 lcdc_ctrl_set;
 	u32 lcdc_ctrl_clear;

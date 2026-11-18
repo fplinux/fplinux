@@ -124,12 +124,24 @@ static int ums9117_drm_spi_word(struct ums9117_drm *udrm, u8 value,
 	status = readl(udrm->spi + UMS9117_DRM_SPI_CTL7);
 	status &= ~UMS9117_DRM_SPI_RGB565;
 	if (udrm->profile->spi_mode == UMS9117_DRM_SPI_DUAL_DATA)
-		status &= ~UMS9117_DRM_SPI_DATA_LINE2;
+		status &=
+			~(UMS9117_DRM_SPI_DATA_LINE2 | UMS9117_DRM_SPI_TX_HOLD);
 	writel(status, udrm->spi + UMS9117_DRM_SPI_CTL7);
 	ums9117_drm_spi_channel_length(udrm, 8);
 	if (udrm->profile->spi_mode == UMS9117_DRM_SPI_RAW16)
 		writel(readl(udrm->spi + UMS9117_DRM_SPI_CTL0) & ~0xf00U,
 		       udrm->spi + UMS9117_DRM_SPI_CTL0);
+	if (udrm->profile->spi_mode == UMS9117_DRM_SPI_DUAL_DATA) {
+		/* End a prior pixel stream before selecting the next DCS byte. */
+		writel(readl(udrm->spi + UMS9117_DRM_SPI_CTL0) |
+			       UMS9117_DRM_SPI_CS0,
+		       udrm->spi + UMS9117_DRM_SPI_CTL0);
+		writel(readl(udrm->spi + UMS9117_DRM_SPI_CTL0) &
+			       ~UMS9117_DRM_SPI_CS0,
+		       udrm->spi + UMS9117_DRM_SPI_CTL0);
+		writel(readl(udrm->spi + UMS9117_DRM_SPI_CTL1) | BIT(6),
+		       udrm->spi + UMS9117_DRM_SPI_CTL1);
+	}
 	if (command)
 		writel(readl(udrm->spi + UMS9117_DRM_SPI_CTL8) & ~BIT(15),
 		       udrm->spi + UMS9117_DRM_SPI_CTL8);
@@ -150,8 +162,9 @@ static int ums9117_drm_spi_word(struct ums9117_drm *udrm, u8 value,
 	writel(UMS9117_DRM_SPI_TX_END, udrm->spi + UMS9117_DRM_SPI_INT_CLR);
 	ret = ums9117_drm_spi_wait_idle(udrm->spi, deadline);
 out:
-	if (udrm->profile->spi_mode == UMS9117_DRM_SPI_RAW16 &&
-	    (ret || !command || value != MIPI_DCS_WRITE_MEMORY_START))
+	if (udrm->profile->spi_mode == UMS9117_DRM_SPI_DUAL_DATA ||
+	    (udrm->profile->spi_mode == UMS9117_DRM_SPI_RAW16 &&
+	     (ret || !command || value != MIPI_DCS_WRITE_MEMORY_START)))
 		writel(readl(udrm->spi + UMS9117_DRM_SPI_CTL0) |
 			       UMS9117_DRM_SPI_CS0,
 		       udrm->spi + UMS9117_DRM_SPI_CTL0);
@@ -249,15 +262,27 @@ int ums9117_drm_spi_dcs(struct ums9117_drm *udrm, u8 command, const u8 *data,
 
 int ums9117_drm_spi_begin_frame(struct ums9117_drm *udrm, u32 pixels)
 {
+	bool dual_data = udrm->profile->spi_mode == UMS9117_DRM_SPI_DUAL_DATA;
 	int ret;
 
 	writel(udrm->profile->spi_frame_clock_divider,
 	       udrm->spi + UMS9117_DRM_SPI_CLKD);
-	writel(readl(udrm->spi + UMS9117_DRM_SPI_CTL7) |
-		       UMS9117_DRM_SPI_TX_HOLD,
-	       udrm->spi + UMS9117_DRM_SPI_CTL7);
+	if (!dual_data)
+		writel(readl(udrm->spi + UMS9117_DRM_SPI_CTL7) |
+			       UMS9117_DRM_SPI_TX_HOLD,
+		       udrm->spi + UMS9117_DRM_SPI_CTL7);
 	ret = ums9117_drm_spi_dcs(udrm, MIPI_DCS_WRITE_MEMORY_START, NULL, 0);
 	if (!ret) {
+		if (dual_data) {
+			writel(readl(udrm->spi + UMS9117_DRM_SPI_CTL7) |
+				       UMS9117_DRM_SPI_TX_HOLD,
+			       udrm->spi + UMS9117_DRM_SPI_CTL7);
+			writel(readl(udrm->spi + UMS9117_DRM_SPI_CTL0) &
+				       ~UMS9117_DRM_SPI_CS0,
+			       udrm->spi + UMS9117_DRM_SPI_CTL0);
+			writel(UMS9117_DRM_SPI_TX_END,
+			       udrm->spi + UMS9117_DRM_SPI_INT_CLR);
+		}
 		ums9117_drm_spi_tx_length(udrm, pixels);
 		writel(readl(udrm->spi + UMS9117_DRM_SPI_CTL12) | BIT(1),
 		       udrm->spi + UMS9117_DRM_SPI_CTL12);
@@ -278,6 +303,8 @@ int ums9117_drm_spi_enable_transport(struct ums9117_drm *udrm)
 
 int ums9117_drm_spi_post_reset(struct ums9117_drm *udrm)
 {
+	if (udrm->profile->spi_mode == UMS9117_DRM_SPI_DUAL_DATA)
+		return 0;
 	/* Select the panel chip before the DCS init sequence runs. */
 	writel(readl(udrm->spi + UMS9117_DRM_SPI_CTL0) & ~UMS9117_DRM_SPI_CS0,
 	       udrm->spi + UMS9117_DRM_SPI_CTL0);

@@ -179,7 +179,6 @@ static const struct drm_mode_config_funcs ums9117_drm_mode_config_funcs = {
 
 DEFINE_DRM_GEM_DMA_FOPS(ums9117_drm_fops);
 
-#if IS_ENABLED(CONFIG_DRM_FBDEV_EMULATION)
 static int ums9117_drm_fbdev_probe(struct drm_fb_helper *helper,
 				   struct drm_fb_helper_surface_size *sizes)
 {
@@ -190,15 +189,12 @@ static int ums9117_drm_fbdev_probe(struct drm_fb_helper *helper,
 		helper->info->skip_vt_switch = false;
 	return ret;
 }
-#endif
 
 static const struct drm_driver ums9117_drm_driver = {
 	.driver_features = DRIVER_GEM | DRIVER_MODESET | DRIVER_ATOMIC,
 	.fops = &ums9117_drm_fops,
 	DRM_GEM_DMA_DRIVER_OPS,
-#if IS_ENABLED(CONFIG_DRM_FBDEV_EMULATION)
 	.fbdev_probe = ums9117_drm_fbdev_probe,
-#endif
 	.name = "ums9117",
 	.desc = "UMS9117 command-mode display",
 	.major = 1,

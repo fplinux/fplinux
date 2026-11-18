@@ -50,12 +50,16 @@
 #define SC2720_BLTC_WLED_DUTY 0x1cc
 #define SC2720_BLTC_PD_CTRL 0x1d8
 #define SC2720_BLTC_CURRENT_LEVEL_MASK GENMASK(5, 0)
+#define SC2720_BLTC_WHITE_RUN BIT(12)
+#define SC2720_BLTC_WHITE_TYPE BIT(13)
+#define SC2720_BLTC_WHITE_PWM_MAX 255U
 #define SC2720_BLTC_PD_CTRL_SOFTWARE_POWER_DOWN BIT(0)
 #define SC2720_MODULE_EN0 0xc08
 #define SC2720_RTC_CLK_EN0 0xc10
 #define SC2720_LDO_PD_CTRL 0xdec
 #define SC2720_MODULE_EN0_WLED_MODULE_ENABLE BIT(9)
 #define SC2720_RTC_CLK_EN0_WLED_CLOCK_ENABLE BIT(7)
+#define SC2720_RTC_CLK_EN0_WHITE_PWM_CLOCK_MASK (BIT(12) | BIT(7))
 #define SC2720_LDO_PD_CTRL_WLED_POWER_DOWN_MASK (BIT(2) | BIT(0))
 
 #define UMS9117_AON_PANEL_RESET_SET 0x160c
@@ -91,8 +95,8 @@ static void ums9117_drm_set_wled_state(struct ums9117_drm *udrm, bool known,
 	spin_unlock_irqrestore(&udrm->lock, flags);
 }
 
-static int ums9117_drm_wled_set(struct ums9117_drm *udrm, bool on,
-				unsigned int brightness)
+static int ums9117_drm_wled_current_set(struct ums9117_drm *udrm, bool on,
+					unsigned int brightness)
 {
 	static const u32 current_regs[UMS9117_DRM_WLED_CHANNEL_COUNT] = {
 		SC2720_BLTC_CURRENT0,
@@ -105,8 +109,6 @@ static int ums9117_drm_wled_set(struct ums9117_drm *udrm, bool on,
 	unsigned int i;
 	int ret;
 
-	if (on && (!brightness || brightness > udrm->backlight_max_brightness))
-		return -EINVAL;
 	ret = regmap_update_bits(udrm->pmic, SC2720_MODULE_EN0,
 				 SC2720_MODULE_EN0_WLED_MODULE_ENABLE,
 				 SC2720_MODULE_EN0_WLED_MODULE_ENABLE);
@@ -147,7 +149,8 @@ static int ums9117_drm_wled_set(struct ums9117_drm *udrm, bool on,
 		ret = regmap_update_bits(udrm->pmic, SC2720_BLTC_WLED_PRESCALER,
 					 0xff, 0);
 	if (!ret && on)
-		ret = regmap_write(udrm->pmic, SC2720_BLTC_WLED_DUTY, 0);
+		ret = regmap_write(udrm->pmic, SC2720_BLTC_WLED_DUTY,
+				   udrm->profile->wled_duty);
 	if (!ret && on) {
 		ret = regmap_read(udrm->pmic, SC2720_BLTC_PD_CTRL, &value);
 		if (!ret)
@@ -157,6 +160,58 @@ static int ums9117_drm_wled_set(struct ums9117_drm *udrm, bool on,
 	}
 	if (!ret && on)
 		ret = regmap_write(udrm->pmic, SC2720_BLTC_CTRL, active_mask);
+	return ret;
+}
+
+static int ums9117_drm_wled_white_pwm_set(struct ums9117_drm *udrm, bool on,
+					  unsigned int brightness)
+{
+	int ret;
+
+	if (!on)
+		return regmap_update_bits(udrm->pmic, SC2720_BLTC_CTRL,
+					  SC2720_BLTC_WHITE_RUN, 0);
+	ret = regmap_update_bits(udrm->pmic, SC2720_MODULE_EN0,
+				 SC2720_MODULE_EN0_WLED_MODULE_ENABLE,
+				 SC2720_MODULE_EN0_WLED_MODULE_ENABLE);
+	if (!ret)
+		ret = regmap_update_bits(
+			udrm->pmic, SC2720_RTC_CLK_EN0,
+			SC2720_RTC_CLK_EN0_WHITE_PWM_CLOCK_MASK,
+			SC2720_RTC_CLK_EN0_WHITE_PWM_CLOCK_MASK);
+	if (!ret)
+		ret = regmap_update_bits(
+			udrm->pmic, SC2720_LDO_PD_CTRL,
+			SC2720_LDO_PD_CTRL_WLED_POWER_DOWN_MASK, 0);
+	if (!ret)
+		ret = regmap_update_bits(udrm->pmic, SC2720_BLTC_WLED_PRESCALER,
+					 0xff, 0);
+	if (!ret)
+		ret = regmap_update_bits(udrm->pmic, SC2720_BLTC_CURRENT3,
+					 SC2720_BLTC_CURRENT_LEVEL_MASK,
+					 udrm->wled_levels[3]);
+	if (!ret)
+		ret = regmap_write(udrm->pmic, SC2720_BLTC_WLED_DUTY,
+				   (brightness << 8) | 0xff);
+	if (!ret)
+		ret = regmap_update_bits(
+			udrm->pmic, SC2720_BLTC_CTRL,
+			SC2720_BLTC_WHITE_RUN | SC2720_BLTC_WHITE_TYPE,
+			SC2720_BLTC_WHITE_RUN | SC2720_BLTC_WHITE_TYPE);
+	return ret;
+}
+
+static int ums9117_drm_wled_set(struct ums9117_drm *udrm, bool on,
+				unsigned int brightness)
+{
+	int ret;
+
+	if (on && (!brightness || brightness > udrm->backlight_max_brightness))
+		return -EINVAL;
+	if (udrm->profile->wled_mode == UMS9117_DRM_WLED_WHITE_PWM)
+		ret = ums9117_drm_wled_white_pwm_set(udrm, on, brightness);
+	else
+		ret = ums9117_drm_wled_current_set(udrm, on, brightness);
 	if (ret)
 		udrm->stats.wled_errors++;
 	ums9117_drm_set_wled_state(udrm, !ret, on, on ? brightness : 0);
@@ -774,12 +829,20 @@ static int ums9117_drm_map_common_resources(struct ums9117_drm *udrm,
 	for (i = 0; i < ARRAY_SIZE(udrm->wled_levels); i++) {
 		if (udrm->wled_levels[i] > SC2720_BLTC_CURRENT_LEVEL_MASK)
 			return -EINVAL;
+		if (udrm->profile->wled_mode == UMS9117_DRM_WLED_WHITE_PWM)
+			continue;
 		if (!udrm->wled_levels[i])
 			continue;
 		if (!udrm->backlight_max_brightness)
 			udrm->backlight_max_brightness = udrm->wled_levels[i];
 		else if (udrm->wled_levels[i] != udrm->backlight_max_brightness)
 			return -EINVAL;
+	}
+	if (udrm->profile->wled_mode == UMS9117_DRM_WLED_WHITE_PWM) {
+		if (udrm->wled_levels[0] || udrm->wled_levels[1] ||
+		    udrm->wled_levels[2] || !udrm->wled_levels[3])
+			return -EINVAL;
+		udrm->backlight_max_brightness = SC2720_BLTC_WHITE_PWM_MAX;
 	}
 	if (!udrm->backlight_max_brightness)
 		return -EINVAL;
