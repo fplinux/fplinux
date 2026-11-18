@@ -88,6 +88,12 @@ BLUEZ_ADAPTER_SOURCES = (
     "lib/fplinux-shared/fplinux-bluez-adapter.c",
     "include/fplinux/fplinux-bluez-adapter.h",
 )
+BLUETOOTH_OPP_SOURCES = (
+    "lib/fplinux-shared/fplinux-bluetooth-common.c",
+    "include/fplinux/fplinux-bluetooth-common.h",
+    "lib/fplinux-shared/fplinux-bluetooth-opp.c",
+    "include/fplinux/fplinux-bluetooth-opp.h",
+)
 INPUT_DEVICE_SOURCES = ("include/fplinux/fplinux-input-device.h",)
 KEYPAD_CODE_SOURCES = ("include/fplinux/fplinux-keypad.h",)
 KEYPAD_LIGHT_SOURCES = (
@@ -114,7 +120,7 @@ SHARED_APORT_SOURCES = {
         *CLI_SOURCES,
         *BRIGHTNESS_CLIENT_SOURCES,
     ),
-    "fplinux-bluetooth": CLI_SOURCES,
+    "fplinux-bluetooth": (*CLI_SOURCES, *BLUETOOTH_OPP_SOURCES),
     "fplinux-brand": (
         "alpine/aports/fplinux-icons/svgraster.py",
         "lib/fplinux/fplinux-ui-profile.json",

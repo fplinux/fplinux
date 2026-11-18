@@ -11,6 +11,7 @@
 #include <fcntl.h>
 #include <signal.h>
 #include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -18,13 +19,18 @@
 #include <unistd.h>
 
 #define OBEX_NAME "org.bluez.obex"
-#define TRANSFER_PATH "/org/bluez/obex/transfer0"
 #define SESSION_PATH "/org/bluez/obex/session0"
+#define TRANSFER_PATH SESSION_PATH "/transfer0"
 #define DEVICE_PATH "/org/bluez/hci0/dev_01_23_45_67_89_AB"
 
 enum mode {
 	SEND_FAST,
+	SEND_FAST_UNRELATED,
+	SEND_STALL,
 	RECEIVE,
+	RECEIVE_SLOW,
+	RECEIVE_OWNER_LOSS,
+	RECEIVE_AGENT_CANCEL,
 	NETWORK_EARLY,
 	NETWORK_LATE,
 	NETWORK_SNAPSHOT_MISSING,
@@ -37,6 +43,8 @@ struct service {
 	char *agent_path;
 	DBusPendingCall *agent_call;
 	bool agent_started;
+	bool interrupted_authorization;
+	long long authorization_started_ms;
 	dbus_bool_t connected;
 	long long stop_at;
 };
@@ -110,7 +118,8 @@ static void reply_object(DBusConnection *connection, DBusMessage *message,
 static void reply_property(DBusConnection *connection, DBusMessage *message,
 			   int type, const void *value)
 {
-	const char *signature = type == DBUS_TYPE_BOOLEAN     ? "b" :
+	const char *signature = type == DBUS_TYPE_UINT64      ? "t" :
+				type == DBUS_TYPE_BOOLEAN     ? "b" :
 				type == DBUS_TYPE_OBJECT_PATH ? "o" :
 								"s";
 	DBusMessage *reply = dbus_message_new_method_return(message);
@@ -151,7 +160,9 @@ static void emit_property(DBusConnection *connection, const char *path,
 			  const char *interface, const char *key, int type,
 			  const void *value)
 {
-	const char *signature = type == DBUS_TYPE_BOOLEAN ? "b" : "s";
+	const char *signature = type == DBUS_TYPE_UINT64  ? "t" :
+				type == DBUS_TYPE_BOOLEAN ? "b" :
+							    "s";
 	DBusMessage *signal = dbus_message_new_signal(
 		path, "org.freedesktop.DBus.Properties", "PropertiesChanged");
 	DBusMessageIter root, array, entry, variant, invalidated;
@@ -207,6 +218,7 @@ static void begin_authorization(struct service *service)
 	}
 	dbus_message_unref(message);
 	service->agent_started = true;
+	service->authorization_started_ms = milliseconds();
 }
 
 static void finish_authorization(struct service *service)
@@ -223,8 +235,10 @@ static void finish_authorization(struct service *service)
 		service->agent_call = NULL;
 		return;
 	}
-	int file = open(target, O_WRONLY | O_CREAT | O_EXCL, 0600);
-	if (file < 0 || write(file, "fixture", 7) != 7 || close(file) < 0) {
+	int file = open(target, O_WRONLY | O_CREAT | O_TRUNC, 0600);
+	size_t length = service->mode == RECEIVE_SLOW ? 3 : 7;
+	if (file < 0 || write(file, "fixture", length) != (ssize_t)length ||
+	    close(file) < 0) {
 		if (file >= 0)
 			close(file);
 		dbus_message_unref(reply);
@@ -233,6 +247,12 @@ static void finish_authorization(struct service *service)
 	dbus_message_unref(reply);
 	dbus_pending_call_unref(service->agent_call);
 	service->agent_call = NULL;
+	uint64_t transferred = length;
+	emit_property(service->connection, TRANSFER_PATH,
+		      "org.bluez.obex.Transfer1", "Transferred",
+		      DBUS_TYPE_UINT64, &transferred);
+	if (service->mode == RECEIVE_SLOW)
+		return;
 	const char *complete = "complete";
 	emit_property(service->connection, TRANSFER_PATH,
 		      "org.bluez.obex.Transfer1", "Status", DBUS_TYPE_STRING,
@@ -255,6 +275,10 @@ static DBusHandlerResult handle_property(DBusConnection *connection,
 		const char *value = SESSION_PATH;
 		reply_property(connection, message, DBUS_TYPE_OBJECT_PATH,
 			       &value);
+	} else if (strcmp(interface, "org.bluez.obex.Transfer1") == 0 &&
+		   strcmp(property, "Size") == 0) {
+		uint64_t value = 7;
+		reply_property(connection, message, DBUS_TYPE_UINT64, &value);
 	} else if (strcmp(interface, "org.bluez.obex.Transfer1") == 0 &&
 		   strcmp(property, "Filename") == 0) {
 		reply_unknown_property(connection, message);
@@ -284,7 +308,8 @@ static DBusHandlerResult handle_property(DBusConnection *connection,
 	return DBUS_HANDLER_RESULT_HANDLED;
 }
 
-static bool copy_sent_file(DBusConnection *connection, DBusMessage *message)
+static bool copy_sent_file(DBusConnection *connection, DBusMessage *message,
+			   uint64_t *transferred)
 {
 	const char *path;
 	char bytes[4096];
@@ -311,6 +336,7 @@ static bool copy_sent_file(DBusConnection *connection, DBusMessage *message)
 			continue;
 		if (size <= 0)
 			break;
+		*transferred += (uint64_t)size;
 		for (ssize_t used = 0; used < size;) {
 			ssize_t written = write(destination, bytes + used,
 						(size_t)(size - used));
@@ -333,6 +359,8 @@ static DBusHandlerResult handle(DBusConnection *connection,
 	struct service *service = data;
 	if (dbus_message_is_method_call(message, "org.bluez.obex.Client1",
 					"CreateSession")) {
+		if (service->mode == SEND_STALL)
+			return DBUS_HANDLER_RESULT_HANDLED;
 		const char *session = SESSION_PATH;
 		reply_object(connection, message, session);
 		return DBUS_HANDLER_RESULT_HANDLED;
@@ -340,13 +368,33 @@ static DBusHandlerResult handle(DBusConnection *connection,
 	if (dbus_message_is_method_call(message, "org.bluez.obex.ObjectPush1",
 					"SendFile")) {
 		const char *complete = "complete";
+		uint64_t transferred = 0;
 
-		if (!copy_sent_file(connection, message))
+		if (!copy_sent_file(connection, message, &transferred))
 			return DBUS_HANDLER_RESULT_HANDLED;
+		emit_property(connection, TRANSFER_PATH,
+			      "org.bluez.obex.Transfer1", "Transferred",
+			      DBUS_TYPE_UINT64, &transferred);
 		emit_property(connection, TRANSFER_PATH,
 			      "org.bluez.obex.Transfer1", "Status",
 			      DBUS_TYPE_STRING, &complete);
+		if (service->mode == SEND_FAST_UNRELATED) {
+			const char *error = "error";
+			emit_property(connection,
+				      "/org/bluez/obex/other_session/transfer0",
+				      "org.bluez.obex.Transfer1", "Status",
+				      DBUS_TYPE_STRING, &error);
+		}
 		reply_object(connection, message, TRANSFER_PATH);
+		return DBUS_HANDLER_RESULT_HANDLED;
+	}
+	if (dbus_message_is_method_call(message, "org.bluez.obex.Transfer1",
+					"Cancel")) {
+		int file = open("cancelled", O_WRONLY | O_CREAT | O_EXCL, 0600);
+		if (file < 0 || write(file, "cancelled\n", 10) != 10 ||
+		    close(file) < 0)
+			fail("cannot record transfer cancellation");
+		reply_empty(connection, message);
 		return DBUS_HANDLER_RESULT_HANDLED;
 	}
 	if (dbus_message_is_method_call(message, "org.bluez.obex.AgentManager1",
@@ -408,8 +456,18 @@ static enum mode parse_mode(const char *argument)
 {
 	if (strcmp(argument, "send-fast") == 0)
 		return SEND_FAST;
+	if (strcmp(argument, "send-fast-unrelated") == 0)
+		return SEND_FAST_UNRELATED;
+	if (strcmp(argument, "send-stall") == 0)
+		return SEND_STALL;
 	if (strcmp(argument, "receive") == 0)
 		return RECEIVE;
+	if (strcmp(argument, "receive-slow") == 0)
+		return RECEIVE_SLOW;
+	if (strcmp(argument, "receive-owner-loss") == 0)
+		return RECEIVE_OWNER_LOSS;
+	if (strcmp(argument, "receive-agent-cancel") == 0)
+		return RECEIVE_AGENT_CANCEL;
 	if (strcmp(argument, "network-early") == 0)
 		return NETWORK_EARLY;
 	if (strcmp(argument, "network-late") == 0)
@@ -432,11 +490,18 @@ static void publish_ready(const char *path)
 
 int main(int argc, char **argv)
 {
-	if (argc != 3) {
-		fprintf(stderr, "usage: %s MODE READY_FILE\n", argv[0]);
+	if ((argc != 3 && argc != 4) ||
+	    (argc == 4 && strcmp(argv[3], "--obex-only") != 0)) {
+		fprintf(stderr, "usage: %s MODE READY_FILE [--obex-only]\n",
+			argv[0]);
 		return 2;
 	}
+	bool obex_only = argc == 4;
 	struct service service = { .mode = parse_mode(argv[1]) };
+	if (obex_only &&
+	    (service.mode == NETWORK_EARLY || service.mode == NETWORK_LATE ||
+	     service.mode == NETWORK_SNAPSHOT_MISSING))
+		fail("network scenarios require the BlueZ service name");
 	struct sigaction action = { .sa_handler = on_sigusr1 };
 	sigemptyset(&action.sa_mask);
 	if (sigaction(SIGUSR1, &action, NULL) < 0)
@@ -447,8 +512,9 @@ int main(int argc, char **argv)
 	if (service.connection == NULL ||
 	    dbus_bus_request_name(service.connection, OBEX_NAME, 0, &error) !=
 		    DBUS_REQUEST_NAME_REPLY_PRIMARY_OWNER ||
-	    dbus_bus_request_name(service.connection, "org.bluez", 0, &error) !=
-		    DBUS_REQUEST_NAME_REPLY_PRIMARY_OWNER) {
+	    (!obex_only && dbus_bus_request_name(service.connection,
+						 "org.bluez", 0, &error) !=
+				   DBUS_REQUEST_NAME_REPLY_PRIMARY_OWNER)) {
 		fprintf(stderr,
 			"fplinux Bluetooth test service: cannot claim names: %s\n",
 			dbus_error_is_set(&error) ? error.message :
@@ -468,6 +534,30 @@ int main(int argc, char **argv)
 		if (service.agent_call != NULL &&
 		    dbus_pending_call_get_completed(service.agent_call))
 			finish_authorization(&service);
+		if (service.agent_started &&
+		    !service.interrupted_authorization &&
+		    milliseconds() - service.authorization_started_ms >= 150 &&
+		    (service.mode == RECEIVE_OWNER_LOSS ||
+		     service.mode == RECEIVE_AGENT_CANCEL)) {
+			service.interrupted_authorization = true;
+			if (service.mode == RECEIVE_OWNER_LOSS) {
+				dbus_bus_release_name(service.connection,
+						      OBEX_NAME, &error);
+				if (dbus_error_is_set(&error))
+					fail("cannot release OBEX name");
+			} else {
+				DBusMessage *message =
+					dbus_message_new_method_call(
+						service.agent_owner,
+						service.agent_path,
+						"org.bluez.obex.Agent1",
+						"Cancel");
+				if (message == NULL)
+					fail("cannot form authorization cancellation");
+				dbus_message_set_no_reply(message, true);
+				send_reply(service.connection, message);
+			}
+		}
 		if (service.mode == NETWORK_LATE && service.connected &&
 		    release_network) {
 			const char *key = "Connected";
@@ -481,5 +571,9 @@ int main(int argc, char **argv)
 	}
 	free(service.agent_owner);
 	free(service.agent_path);
+	if (service.agent_call != NULL) {
+		dbus_pending_call_cancel(service.agent_call);
+		dbus_pending_call_unref(service.agent_call);
+	}
 	return service.stop_at == 0 ? 2 : 0;
 }

@@ -40,6 +40,7 @@ class BluetoothTools:
 
     client: Path
     service: Path
+    transfer: Path
 
 
 @pytest.fixture(scope="module")
@@ -63,20 +64,33 @@ def bluetooth_tools(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Blueto
             message = "pkg-config dbus-1 development files are required"
             pytest.skip(message)
         work = cleanup.enter_context(c_build_directory(tmp_path_factory, "fplinux-bluetooth"))
-        tools = BluetoothTools(work / "fplinux-bluetooth", work / "fplinux-bluetooth-service")
+        tools = BluetoothTools(
+            work / "fplinux-bluetooth",
+            work / "fplinux-bluetooth-service",
+            work / "fplinux-bluetooth-transfer",
+        )
         for source, output, name, extra_sources in (
             (
                 CLIENT_SOURCE,
                 tools.client,
                 "compile FPLinux Bluetooth client",
                 [
-                    str(CLIENT_SOURCE.with_name("fplinux-bluetooth-opp.c")),
+                    str(ROOT / "lib/fplinux-shared/fplinux-bluetooth-opp.c"),
                     str(CLIENT_SOURCE.with_name("fplinux-bluetooth-pan.c")),
-                    str(CLIENT_SOURCE.with_name("fplinux-bluetooth-common.c")),
+                    str(ROOT / "lib/fplinux-shared/fplinux-bluetooth-common.c"),
                     str(ROOT / "lib/fplinux-shared/fplinux-cli.c"),
                 ],
             ),
             (SERVICE_SOURCE, tools.service, "compile FPLinux Bluetooth test service", []),
+            (
+                SERVICE_SOURCE.with_name("fplinux-bluetooth-transfer.c"),
+                tools.transfer,
+                "compile FPLinux Bluetooth transfer callbacks client",
+                [
+                    str(ROOT / "lib/fplinux-shared/fplinux-bluetooth-opp.c"),
+                    str(ROOT / "lib/fplinux-shared/fplinux-bluetooth-common.c"),
+                ],
+            ),
         ):
             compile_c(
                 output,
@@ -170,6 +184,18 @@ class BluetoothContext:
         return run_process(
             [str(self.tools.client), *arguments],
             name="run FPLinux Bluetooth client",
+            timeout=5,
+            env=self.child_environment(),
+            cwd=self.root,
+        )
+
+    def run_transfer(
+        self, command: str, path: Path, policy: str
+    ) -> subprocess.CompletedProcess[str]:
+        """Invoke the shared blocking API with test-owned consent callbacks."""
+        return run_process(
+            [str(self.tools.transfer), command, str(path), policy],
+            name="run FPLinux Bluetooth transfer callbacks client",
             timeout=5,
             env=self.child_environment(),
             cwd=self.root,
@@ -435,6 +461,129 @@ class FplinuxBluetoothHostToolTests:
         assert (result.returncode) != (0)
         assert (existing.read_bytes()) == (b"old-fixture")
         assert ("refusing to overwrite incoming.txt") in (result.stderr)
+
+    def test_shared_send_reports_cumulative_bytes_from_transfer_signals(
+        self, bluetooth_case: BluetoothContext
+    ) -> None:
+        """The shared caller observes transferred bytes and a known source size."""
+        payload = bluetooth_case.root / "payload"
+        payload.write_bytes(b"1234567")
+        bluetooth_case.start_service("send-fast")
+
+        result = bluetooth_case.run_transfer("send", payload, "accept")
+
+        assert result.returncode == 0, result.stderr
+        assert f"{payload} 7 7 1\n" in result.stdout
+        assert (bluetooth_case.service_directory / "sent-bytes").read_bytes() == b"1234567"
+
+    def test_shared_send_preserves_early_completion_across_an_unrelated_transfer_signal(
+        self, bluetooth_case: BluetoothContext
+    ) -> None:
+        """Another session's status cannot replace this sender's early completion."""
+        payload = bluetooth_case.root / "payload"
+        payload.write_bytes(b"1234567")
+        bluetooth_case.start_service("send-fast-unrelated")
+
+        result = bluetooth_case.run_transfer("send", payload, "accept")
+
+        assert result.returncode == 0, result.stderr
+        assert "result 2 0 0 " in result.stdout
+
+    def test_shared_send_cancels_a_pending_session_call_promptly(
+        self, bluetooth_case: BluetoothContext
+    ) -> None:
+        """A missing method reply cannot delay cancellation by its 15 second timeout."""
+        payload = bluetooth_case.root / "payload"
+        payload.write_bytes(b"1234567")
+        bluetooth_case.start_service("send-stall")
+
+        started = time.monotonic()
+        result = bluetooth_case.run_transfer("send", payload, "cancel-wait")
+        elapsed = time.monotonic() - started
+
+        assert result.returncode == 1
+        assert "result 1 " in result.stdout
+        assert "message interrupted\n" in result.stdout
+        assert elapsed < 1.5
+        assert not (bluetooth_case.service_directory / "sent-bytes").exists()
+
+    @pytest.mark.parametrize("policy", ["reject", "cancel-offer"])
+    def test_shared_receive_declined_offer_never_publishes_or_leaves_staging(
+        self, bluetooth_case: BluetoothContext, policy: str
+    ) -> None:
+        """Consent is explicit and cancellation while authorizing creates no file."""
+        destination = bluetooth_case.root / "received"
+        destination.mkdir()
+        bluetooth_case.start_service("receive")
+
+        result = bluetooth_case.run_transfer("receive", destination, policy)
+
+        assert result.returncode == 1
+        assert f"offer {PEER} incoming.txt 7 1\n" in result.stdout
+        assert list(destination.iterdir()) == []
+
+    def test_shared_receive_cancel_after_progress_removes_partial_file(
+        self, bluetooth_case: BluetoothContext
+    ) -> None:
+        """Cancel reaches the daemon and removes incomplete private staging bytes."""
+        destination = bluetooth_case.root / "received"
+        destination.mkdir()
+        bluetooth_case.start_service("receive-slow")
+
+        result = bluetooth_case.run_transfer("receive", destination, "cancel-progress")
+
+        assert result.returncode == 1
+        assert "incoming.txt 3 7 1\n" in result.stdout
+        assert "result 1 " in result.stdout
+        assert list(destination.iterdir()) == []
+        assert (bluetooth_case.service_directory / "cancelled").read_bytes() == b"cancelled\n"
+
+    @pytest.mark.parametrize(
+        ("service_mode", "expected_message"),
+        [
+            ("receive-owner-loss", "stopped while transfer was active"),
+            ("receive-agent-cancel", "transfer ended with status error"),
+        ],
+    )
+    def test_shared_receive_services_daemon_events_while_consent_is_pending(
+        self, bluetooth_case: BluetoothContext, service_mode: str, expected_message: str
+    ) -> None:
+        """A pending user decision cannot hide daemon disappearance or Agent.Cancel."""
+        destination = bluetooth_case.root / "received"
+        destination.mkdir()
+        bluetooth_case.start_service(service_mode)
+
+        result = bluetooth_case.run_transfer("receive", destination, "pending")
+
+        assert result.returncode == 1
+        assert f"offer {PEER} incoming.txt 7 1\n" in result.stdout
+        assert expected_message in result.stdout
+        assert list(destination.iterdir()) == []
+
+    @pytest.mark.parametrize(
+        ("policy", "expected_name", "existing_bytes"),
+        [("keep-both", "incoming (1).txt", b"original"), ("replace", "incoming.txt", b"fixture")],
+    )
+    def test_shared_receive_conflict_choice_controls_real_publication(
+        self,
+        bluetooth_case: BluetoothContext,
+        policy: str,
+        expected_name: str,
+        existing_bytes: bytes,
+    ) -> None:
+        """Keep both preserves old bytes; explicit replacement publishes new bytes."""
+        destination = bluetooth_case.root / "received"
+        destination.mkdir()
+        (destination / "incoming.txt").write_bytes(b"original")
+        bluetooth_case.start_service("receive")
+
+        result = bluetooth_case.run_transfer("receive", destination, policy)
+
+        assert result.returncode == 0, result.stderr
+        assert "conflict incoming.txt\n" in result.stdout
+        assert (destination / expected_name).read_bytes() == b"fixture"
+        assert (destination / "incoming.txt").read_bytes() == existing_bytes
+        assert not list(destination.glob(".fplinux-bluetooth-*"))
 
     def test_network_rejects_disconnect_before_connect_reply(
         self, bluetooth_case: BluetoothContext

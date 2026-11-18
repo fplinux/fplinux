@@ -162,6 +162,64 @@ struct options {
 	int seconds;
 };
 
+static bool transfer_cancelled(void *data)
+{
+	(void)data;
+	return interrupted != 0;
+}
+
+static enum fplinux_bluetooth_opp_consent
+accept_transfer(const struct fplinux_bluetooth_opp_offer *offer, void *data)
+{
+	(void)offer;
+	(void)data;
+	return FPLINUX_BLUETOOTH_OPP_ACCEPT;
+}
+
+static void
+transfer_progress(const struct fplinux_bluetooth_opp_progress *progress,
+		  void *data)
+{
+	const struct options *options = data;
+	if (progress->state == FPLINUX_BLUETOOTH_OPP_WAITING)
+		printf("accepting one OPP file from %s for %d seconds\n",
+		       options->peer, options->seconds);
+}
+
+static int command_transfer(struct options *options)
+{
+	struct fplinux_bluetooth_opp_callbacks callbacks = {
+		.cancelled = transfer_cancelled,
+		.progress = transfer_progress,
+		.authorize = accept_transfer,
+		.data = options,
+	};
+	struct fplinux_bluetooth_opp_result result;
+	int status;
+
+	if (options->command == COMMAND_SEND)
+		status = fplinux_bluetooth_opp_send(
+			options->peer, options->path, &callbacks, &result);
+	else
+		status = fplinux_bluetooth_opp_receive(options->peer,
+						       options->path,
+						       options->seconds,
+						       &callbacks, &result);
+	if (status != 0) {
+		fplinux_bluetooth_fail("%s", result.message);
+		if (!result.published && result.path[0] != '\0')
+			fprintf(stderr,
+				"fplinux-bluetooth: staging retained at %s\n",
+				result.path);
+		return status;
+	}
+	if (options->command == COMMAND_SEND)
+		printf("sent %s to %s\n", options->path, options->peer);
+	else
+		printf("received %s\n", result.path);
+	return 0;
+}
+
 static const char *parse_option(size_t option, const char *value, void *data)
 {
 	struct options *options = data;
@@ -340,12 +398,8 @@ int main(int argc, char **argv)
 	case COMMAND_ENABLE:
 		return command_enable(options.if_present);
 	case COMMAND_SEND:
-		return fplinux_bluetooth_opp_send(options.peer, options.path,
-						  &interrupted);
 	case COMMAND_RECEIVE:
-		return fplinux_bluetooth_opp_receive(options.peer, options.path,
-						     options.seconds,
-						     &interrupted);
+		return command_transfer(&options);
 	case COMMAND_NETWORK:
 		return fplinux_bluetooth_pan_connect(options.peer,
 						     &interrupted);
