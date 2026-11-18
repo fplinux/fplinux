@@ -55,6 +55,16 @@ def _host_main(selected_root: Path) -> None:
     targets = discover_targets()
     parser, check_parser = create_parser(targets)
     args = parser.parse_args()
+    if args.command == "console":
+        if args.allow_other_build and any(
+            value is not None for value in (args.build_type, args.profile, args.phone_data)
+        ):
+            parser.error(
+                "--allow-other-build cannot be combined with "
+                "--build-type, --profile or --phone-data"
+            )
+        if args.build_type is None:
+            args.build_type = "release"
     if args.command == "format" and not args.paths and not args.changed:
         parser.error("format requires PATH or --changed")
     # Each tier session without recorded failures would otherwise run completely.

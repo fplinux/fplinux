@@ -82,6 +82,81 @@ def run_dispatch(
 class CliCacheLockTests:
     """Keep lock-mode selection at the in-process command dispatcher."""
 
+    @pytest.mark.parametrize(
+        ("command", "callback_name"),
+        [
+            ("console", "fplinux_cli.cli.runtime.console_target"),
+            ("verify", "fplinux_cli.cli.runtime.verify_booted"),
+        ],
+    )
+    def test_live_commands_can_select_the_only_phone(
+        self, dispatch_root: Path, command: str, callback_name: str
+    ) -> None:
+        """A missing target reaches the live-session selector under the shared lock."""
+        events, callback = run_dispatch(dispatch_root, [command], callback_name)
+
+        assert events == [
+            ("lock", dispatch_root / ".data", False, command, None, None),
+            "command",
+            "unlock",
+        ]
+        assert callback.call_args.args == (None,)
+        assert callback.call_args.kwargs["build_type"] == "release"
+
+    @pytest.mark.parametrize("target", [[], ["target"]], ids=["automatic", "filtered"])
+    def test_console_forwards_diagnostic_policy_and_target(
+        self, dispatch_root: Path, target: list[str]
+    ) -> None:
+        """The explicit bypass keeps a target filter when one is supplied."""
+        _events, console = run_dispatch(
+            dispatch_root,
+            ["console", *target, "--allow-other-build", "--exec", "id"],
+            "fplinux_cli.cli.runtime.console_target",
+        )
+
+        assert console.call_args.args == (target[0] if target else None,)
+        assert console.call_args.kwargs["allow_other_build"] is True
+        assert console.call_args.kwargs["exec_command"] == "id"
+
+    @pytest.mark.parametrize(
+        "selector",
+        [["--build-type", "release"], ["--profile", "default"], ["--phone-data", "phone"]],
+    )
+    def test_diagnostic_console_rejects_explicit_build_selectors_before_locking(
+        self, selector: list[str], capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """An explicit default is still a conflicting selector in diagnostic mode."""
+        with (
+            mock.patch.object(
+                sys, "argv", ["fplinux", "console", "--allow-other-build", *selector]
+            ),
+            mock.patch("fplinux_cli.manifests.paths.discover_targets", return_value=("target",)),
+            mock.patch.object(lifecycle, "cache_lock") as lock,
+            pytest.raises(SystemExit) as stopped,
+        ):
+            cli.main()
+
+        assert stopped.value.code == 2
+        assert "--allow-other-build cannot be combined" in capsys.readouterr().err
+        lock.assert_not_called()
+
+    @pytest.mark.parametrize("option", [["--exec", "id"], ["--allow-other-build"], ["--json"]])
+    def test_verify_rejects_actions_and_diagnostic_options(
+        self, option: list[str], capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Verification cannot execute commands or bypass the current-build policy."""
+        with (
+            mock.patch.object(sys, "argv", ["fplinux", "verify", *option]),
+            mock.patch("fplinux_cli.manifests.paths.discover_targets", return_value=("target",)),
+            mock.patch.object(lifecycle, "cache_lock") as lock,
+            pytest.raises(SystemExit) as stopped,
+        ):
+            cli.main()
+
+        assert stopped.value.code == 2
+        assert "error:" in capsys.readouterr().err
+        lock.assert_not_called()
+
     def test_console_forwards_the_explicit_lock_timeout(self, dispatch_root: Path) -> None:
         """The waiting limit reaches the same shared lock that protects the action."""
         events, _console = run_dispatch(
@@ -505,6 +580,38 @@ class CliCacheLockTests:
         assert callback.call_args.kwargs["from_originals"] == Path("originals.json")
         assert callback.call_args.kwargs["from_dump"] is None
         assert callback.call_args.kwargs["events"] is None
+
+    def test_conflicting_phone_data_sources_fail_before_locking(self, dispatch_root: Path) -> None:
+        """Source selection is unambiguous before any cache or phone-data mutation."""
+        with (
+            mock.patch.object(
+                sys,
+                "argv",
+                [
+                    "fplinux",
+                    "device-data",
+                    "prepare",
+                    "target",
+                    "--from-dump",
+                    "nand.bin",
+                    "--from-originals",
+                    "settings.json",
+                ],
+            ),
+            mock.patch.object(lifecycle, "ROOT", dispatch_root),
+            mock.patch("fplinux_cli.manifests.paths.discover_targets", return_value=("target",)),
+            mock.patch.object(
+                lifecycle,
+                "cache_lock",
+                side_effect=AssertionError("ambiguous sources must not lock"),
+            ),
+            contextlib.redirect_stderr(io.StringIO()),
+            pytest.raises(SystemExit) as error,
+        ):
+            cli.main()
+
+        assert error.value.code == 2
+        assert not (dispatch_root / ".data").exists()
 
     def test_format_forwards_only_the_explicit_paths(self, dispatch_root: Path) -> None:
         """Pass the ordered source selection through the exclusive command boundary."""

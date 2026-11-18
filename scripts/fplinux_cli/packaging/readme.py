@@ -128,7 +128,8 @@ def ordinary_readme(target: str, config: dict[str, Any]) -> bytes:
     documentation = phone_documentation_path(target)
     external_root = config["linux"]["root"]["kind"] == "external"
     source_loaders = config.get("platform") == "sc9820e"
-    preparation = device_data_descriptor(target, config) is not None
+    descriptor = device_data_descriptor(target, config)
+    preparation = descriptor is not None and bool(descriptor["required_groups"])
     emmc = config.get("emmc") is not None
     sections = [
         dedent("""\
@@ -196,11 +197,11 @@ def ordinary_readme(target: str, config: dict[str, Any]) -> bytes:
                 on your computer using SSH. Type exit or press Ctrl+D to close this
                 terminal; FPLinux keeps running on the phone.
 
-                While the phone is still running FPLinux, connect USB and run the same
-                command from the same extracted folder. Do not turn the phone off or
-                hold its boot key. To reconnect without starting a new boot, use:
+                While the phone is still running FPLinux, connect USB and run these
+                commands from the extracted folder to reconnect or check the build:
 
-                  python3.14 -I fplinux.py run --reconnect
+                  python3.14 -I fplinux.py console
+                  python3.14 -I fplinux.py verify
 
                 Ctrl+C cancels loading or waiting; it does not turn the phone off.
                 """).removesuffix("\n"),
@@ -209,6 +210,9 @@ def ordinary_readme(target: str, config: dict[str, Any]) -> bytes:
             ).removesuffix("\n"),
             dedent("""\
                 Help and saved files
+
+                Optional applications and their required APKs are in apks/.
+                Install them manually using docs/guides/packages/index.html.
 
                 Each launch saves a runtime.log file and shows its full path.
                 Include that log when reporting a startup problem.

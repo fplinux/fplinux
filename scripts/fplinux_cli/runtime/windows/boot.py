@@ -254,9 +254,10 @@ def boot_archive(  # noqa: PLR0913 -- native loading inputs have separate owners
             time.sleep(0.2)
         if events is not None:
             events("linux-transition")
-        transport = WindowsTransport(host, bundle)
+        wait_seconds = bundle.runtime["usb"]["linux_gadget"]["wait_seconds"]
+        transport = WindowsTransport(host, bundle.tools, wait_seconds=wait_seconds)
         transport.authenticate(
-            session, timeout=bundle.runtime["usb"]["linux_gadget"]["wait_seconds"]
+            session, expected_device_identity=bundle.device_identity, timeout=wait_seconds
         )
         ready = True
         transport.retire_previous_sessions(session)

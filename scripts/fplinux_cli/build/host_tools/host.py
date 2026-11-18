@@ -7,7 +7,6 @@ import argparse
 import os
 import shlex
 import shutil
-import stat
 import struct
 import subprocess
 import tarfile
@@ -17,6 +16,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from fplinux_cli import common
+from fplinux_cli.artifacts import host_tools as host_tool_artifacts
 from fplinux_cli.build import environment as build_env
 from fplinux_cli.build import inputs as inputs_build
 from fplinux_cli.build import process as process_build
@@ -25,7 +25,6 @@ from fplinux_cli.build.runtime import selected_host_tool_recipes
 from fplinux_cli.common import (
     canonical_json_bytes,
     fail,
-    read_json_object,
     replace_file_atomically,
     sha256_bytes,
     sha256_file,
@@ -274,6 +273,7 @@ def _host_tool_recipe(sources: dict[str, Any], recipe: dict[str, Any]) -> str:
             Path(downloads.__file__),
             Path(manifest_values.__file__),
             Path(build_env.__file__),
+            Path(host_tool_artifacts.__file__),
         )
     }
     environment_recipe, environment_content = inputs_build.environment_identity()
@@ -295,14 +295,8 @@ def _cached_host_tool(
     slot: Path, recipe_digest: str, recipe: dict[str, Any], output: Path
 ) -> Path | None:
     """Copy a complete cached binary into this build after current validation."""
-    receipt = slot / "receipt.json"
-    binary = slot / "binary"
-    if receipt.is_symlink() or binary.is_symlink() or not binary.is_file():
-        return None
-    record = read_json_object(receipt)
-    if record is None or record.get("recipe") != recipe_digest:
-        return None
-    if stat.S_IMODE(binary.stat().st_mode) != 0o755 or sha256_file(binary) != record.get("sha256"):
+    binary = host_tool_artifacts.read_cached_host_tool(slot, recipe=recipe_digest)
+    if binary is None:
         return None
     try:
         _verify_static_host_binary(binary)

@@ -57,7 +57,7 @@ if TYPE_CHECKING:
         ),
     ],
 )
-def test_fresh_boot_reports_clock_result_and_reconnect_preserves_clock_and_command_stdout(  # noqa: PLR0913
+def test_fresh_boot_reports_clock_result_and_reconnect_preserves_clock(  # noqa: PLR0913
     *,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -79,7 +79,7 @@ def test_fresh_boot_reports_clock_result_and_reconnect_preserves_clock_and_comma
         monkeypatch.setattr(ssh_commands, "require_tool", lambda _name: str(peer))
     else:
         transport = native_process_transport(tmp_path)
-        transport.bundle.tools["ssh"] = peer
+        transport.tools["ssh"] = peer
         connection = (transport, endpoint_session(tmp_path / "session"))
     response = tmp_path / "response.json"
     response.write_text(json.dumps(reply))
@@ -118,14 +118,12 @@ def test_fresh_boot_reports_clock_result_and_reconnect_preserves_clock_and_comma
     fresh_output = capfd.readouterr()
     assert fresh_output.out.count(expected) == 1
     assert fresh_output.err == ""
-    assert (
-        workflow.run_phone(tmp_path, data, logs, reconnect=True, exec_command="printf ready") == 0
-    )
+    assert workflow.run_phone(tmp_path, data, logs) == 0
 
     output = capfd.readouterr()
-    assert output.out == "ready"
-    assert expected not in output.err
-    assert commands.read_text().splitlines() == ["fplinux-clock 1788739200", "printf ready"]
+    assert "Connecting to the running phone..." in output.out
+    assert expected not in output.out
+    assert commands.read_text().splitlines() == ["fplinux-clock 1788739200"]
     runtime_logs = sorted(logs.glob("*/runtime.log"))
     assert len(runtime_logs) == 2
     assert expected in runtime_logs[0].read_text()

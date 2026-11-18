@@ -278,7 +278,7 @@ def wait_for_bound_session(
 def _authenticate_bound_session(
     session: dict[str, Any],
     *,
-    expected_device_identity: str,
+    expected_device_identity: str | None,
     scan_host_key: bool,
     on_linux_usb: Callable[[], None] | None = None,
 ) -> dict[str, Any]:
@@ -295,10 +295,11 @@ def _authenticate_bound_session(
     )
     if remaining <= 0:
         fail(timeout_message)
-    try:
-        require_device_identity(candidate, expected_device_identity, timeout=remaining)
-    except subprocess.TimeoutExpired:
-        fail(timeout_message)
+    if expected_device_identity is not None:
+        try:
+            require_device_identity(candidate, expected_device_identity, timeout=remaining)
+        except subprocess.TimeoutExpired:
+            fail(timeout_message)
     if scan_host_key:
         return mark_current(candidate)
     return candidate
@@ -315,7 +316,7 @@ def usb_present(session: dict[str, Any], *, cancelled: Callable[[], bool] | None
 
 
 def reacquire_bound_session(
-    session: dict[str, Any], *, expected_device_identity: str
+    session: dict[str, Any], *, expected_device_identity: str | None
 ) -> dict[str, Any]:
     """Survive a physical replug without weakening USB, host-key or session binding."""
     session = validate_session(session)

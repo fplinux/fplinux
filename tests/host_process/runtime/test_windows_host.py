@@ -23,7 +23,11 @@ from typing import TYPE_CHECKING, Any, override
 import pytest
 from fplinux_cli.device_data.cpio import create_device_data_initramfs
 from fplinux_cli.runtime import state
-from fplinux_cli.runtime.connection import ConnectionLostError, SessionResumedError
+from fplinux_cli.runtime.connection import (
+    ConnectionLostError,
+    SessionResumedError,
+    read_running_build,
+)
 from fplinux_cli.runtime.windows import boot as windows_boot
 from fplinux_cli.runtime.windows import bundle as windows_bundle
 from fplinux_cli.runtime.windows import host as windows_host
@@ -477,6 +481,36 @@ def test_remote_command_keeps_captured_output_without_a_console(tmp_path: Path) 
     assert result.stderr == "reader failed\n"
 
 
+def test_running_build_uses_windows_transport_to_read_kernel_and_build_id(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    transport = native_process_transport(tmp_path)
+    session = endpoint_session(tmp_path / "session")
+    monkeypatch.setenv("FPLINUX_TEST_KERNEL", "6.12.0-fplinux-1212121212121212")
+    monkeypatch.setenv("FPLINUX_TEST_BUILD_ID", "old-build-20261112")
+
+    observed = read_running_build((transport, session))
+
+    assert observed.kernel_release == "6.12.0-fplinux-1212121212121212"
+    assert observed.build_id == "old-build-20261112"
+
+
+def test_running_build_timeout_reaps_windows_ssh_reader(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    transport = native_process_transport(tmp_path)
+    session = endpoint_session(tmp_path / "session")
+    session["wait_seconds"] = 0.5
+    pid_file = tmp_path / "build-reader.pid"
+    monkeypatch.setenv("FPLINUX_TEST_BUILD_READER_PID", str(pid_file))
+
+    with pytest.raises(subprocess.TimeoutExpired) as caught:
+        read_running_build((transport, session))
+
+    assert caught.value.timeout == 0.5
+    assert not (Path("/proc") / pid_file.read_text()).exists()
+
+
 def test_loader_keeps_diagnostics_without_a_console(tmp_path: Path) -> None:
     loader = tmp_path / "loader.exe"
     install_python_script(
@@ -712,7 +746,7 @@ def test_authenticated_handoff_requires_ram_and_kernel_identity(
         "6.12.0-fplinux-1212121212121212" if identity != "wrong-kernel" else "6.12.0-other",
     )
     if identity == "correct":
-        transport.authenticate(session, timeout=3)
+        transport.authenticate(session, expected_device_identity="12" * 32, timeout=3)
         assert session["status"] == "ready"
         assert (
             "fplinux-0123456789abcdef0123456789abcdef ssh-ed25519 "
@@ -722,17 +756,23 @@ def test_authenticated_handoff_requires_ram_and_kernel_identity(
         with pytest.raises(
             SystemExit, match=r"another RAM session identity|another kernel build identity"
         ):
-            transport.authenticate(session, timeout=3)
+            transport.authenticate(session, expected_device_identity="12" * 32, timeout=3)
         assert session["status"] == "prepared"
 
 
 @pytest.mark.parametrize("identity", ["correct", "wrong-session", "wrong-kernel"])
+@pytest.mark.parametrize(
+    "expected_identity", [None, "12" * 32], ids=["saved-build", "selected-build"]
+)
 def test_saved_connection_reuses_the_pinned_key_and_requires_live_identities(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, identity: str
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    identity: str,
+    expected_identity: str | None,
 ) -> None:
     """Reconnect through real SSH children while replacing native USB and peer boundaries."""
     transport = native_process_transport(tmp_path)
-    saved = saved_connection(transport)
+    saved = saved_connection(transport, tmp_path)
     host = transport.host
     assert isinstance(host, StubWindowsHost)
     host.snapshot["devices"] = [{"id": f"USB\\VID_0525&PID_A4A6\\{saved['usb_serial']}"}]
@@ -753,13 +793,14 @@ def test_saved_connection_reuses_the_pinned_key_and_requires_live_identities(
     assert transport.usb_present(current)
     if identity == "correct":
         assert (
-            transport.reacquire_bound_session(current, expected_device_identity="12" * 32) == saved
+            transport.reacquire_bound_session(current, expected_device_identity=expected_identity)
+            == saved
         )
     else:
         with pytest.raises(
             SystemExit, match=r"another RAM session identity|another kernel build identity"
         ):
-            transport.reacquire_bound_session(current, expected_device_identity="12" * 32)
+            transport.reacquire_bound_session(current, expected_device_identity=expected_identity)
 
     assert known_hosts.read_bytes() == pinned
     assert not Path(saved["image"]).exists()
@@ -769,7 +810,7 @@ def test_saved_ready_binding_and_keys_survive_absence_without_usb_or_ssh_discove
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     transport = native_process_transport(tmp_path)
-    saved = saved_connection(transport)
+    saved = saved_connection(transport, tmp_path)
     host = transport.host
     assert isinstance(host, StubWindowsHost)
     state_path = Path(saved["directory"]) / "session.json"
@@ -795,7 +836,7 @@ def test_reappearing_ready_binding_authenticates_with_a_new_network_interface_in
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     transport = native_process_transport(tmp_path)
-    saved = saved_connection(transport)
+    saved = saved_connection(transport, tmp_path)
     host = transport.host
     assert isinstance(host, StubWindowsHost)
     host.snapshot["devices"] = [{"id": f"USB\\VID_0525&PID_A4A6\\{saved['usb_serial']}"}]
@@ -826,8 +867,10 @@ def test_ready_connection_reopens_while_an_owned_boot_candidate_is_prepared(
         install_python_script(
             ROOT / "tests/fixtures/ssh_transport/windows_peer.py", bundle.tools[role]
         )
-    transport = windows_transport.WindowsTransport(StubWindowsHost({}), bundle)
-    saved = saved_connection(transport)
+    transport = windows_transport.WindowsTransport(
+        StubWindowsHost({}), bundle.tools, wait_seconds=3
+    )
+    saved = saved_connection(transport, tmp_path)
     saved["target"] = "demo"
     (Path(saved["directory"]) / "session.json").write_text(json.dumps(saved), encoding="utf-8")
     host = transport.host
@@ -856,7 +899,7 @@ def test_reacquiring_another_archive_identity_stops_before_ssh_authentication(
     tmp_path: Path,
 ) -> None:
     transport = native_process_transport(tmp_path)
-    saved = saved_connection(transport)
+    saved = saved_connection(transport, tmp_path)
 
     with pytest.raises(SystemExit, match="another kernel build identity"):
         transport.reacquire_bound_session(saved, expected_device_identity="34" * 32)
@@ -867,7 +910,7 @@ def test_concurrent_ready_authentication_preserves_saved_session_and_pinned_keys
 ) -> None:
     """Two ordinary reconnects authenticate through real children without republishing state."""
     transport = native_process_transport(tmp_path)
-    saved = saved_connection(transport)
+    saved = saved_connection(transport, tmp_path)
     host = transport.host
     assert isinstance(host, StubWindowsHost)
     host.snapshot["devices"] = [{"id": f"USB\\VID_0525&PID_A4A6\\{saved['usb_serial']}"}]
@@ -909,7 +952,7 @@ def test_saved_usb_presence_is_independent_of_network_readiness(
 ) -> None:
     """An exact USB root remains detectable while its network endpoint is unavailable."""
     transport = native_process_transport(tmp_path)
-    saved = saved_connection(transport)
+    saved = saved_connection(transport, tmp_path)
     host = transport.host
     assert isinstance(host, StubWindowsHost)
     host.snapshot["devices"] = (
@@ -943,7 +986,7 @@ def test_ambiguous_saved_phone_connections_stop_before_authentication(
 ) -> None:
     """Two valid saved identities cannot select one retained RAM session."""
     transport = native_process_transport(tmp_path)
-    saved = saved_connection(transport)
+    saved = saved_connection(transport, tmp_path)
     second_id = "ef" * 32
     serial = hashlib.sha256(bytes.fromhex(second_id)).hexdigest()[:32]
     directory = tmp_path / "data/session" / serial
@@ -1060,8 +1103,10 @@ def test_resuming_saved_session_discards_only_the_unstarted_windows_boot_candida
         ROOT / "tests/host_process/runtime/fixtures/windows-host/windows_loader_output.py",
         bundle.tools["loader"],
     )
-    transport = windows_transport.WindowsTransport(StubWindowsHost({}), bundle)
-    saved = saved_connection(transport)
+    transport = windows_transport.WindowsTransport(
+        StubWindowsHost({}), bundle.tools, wait_seconds=3
+    )
+    saved = saved_connection(transport, archive)
     saved["target"] = "demo"
     state_path = Path(saved["directory"]) / "session.json"
     state_path.write_text(json.dumps(saved), encoding="utf-8")
@@ -1242,9 +1287,13 @@ def test_windows_loader_processes_receive_private_capsule_and_retain_one_archive
         return session
 
     def authenticated(
-        _transport: windows_transport.WindowsTransport, selected: dict[str, Any], *, timeout: int
+        _transport: windows_transport.WindowsTransport,
+        selected: dict[str, Any],
+        *,
+        expected_device_identity: str,
+        timeout: int,
     ) -> None:
-        del timeout
+        del expected_device_identity, timeout
         selected["status"] = "ready"
 
     monkeypatch.setattr(windows_boot, "prepare_session", prepared_session)

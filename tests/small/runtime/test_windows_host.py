@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import copy
+import json
 import subprocess
 from typing import TYPE_CHECKING
 
@@ -43,6 +44,39 @@ def test_changed_native_tool_is_rejected_before_windows_discovery(tmp_path: Path
     (root / "tools/openssh/ssh.exe").write_bytes(b"different tool\n")
     with pytest.raises(SystemExit, match=r"Windows file checksum differs: tools/openssh/ssh.exe"):
         admitted_windows(root)
+
+
+@pytest.mark.parametrize("platform", ["ums9117", "sc9820e"])
+def test_connection_tools_do_not_require_current_ram_payload(
+    tmp_path: Path, platform: str
+) -> None:
+    root = archive_files(tmp_path, platform=platform)
+    (root / "image/ramboot.bin").unlink()
+    (root / "build-manifest.json").unlink()
+    (root / "runtime-manifest.json").unlink()
+
+    tools = windows_bundle.validate_connection_tools(root)
+
+    assert tools["ssh"] == root / "tools/openssh/ssh.exe"
+    assert tools["keyscan"] == root / "tools/openssh/ssh-keyscan.exe"
+    assert "loader" not in tools
+
+
+@pytest.mark.parametrize("damage", ["changed-tool", "missing-hash", "wrong-path"])
+def test_connection_tools_reject_unverified_executables(tmp_path: Path, damage: str) -> None:
+    root = archive_files(tmp_path)
+    manifest_path = root / "windows-host.json"
+    manifest = json.loads(manifest_path.read_text())
+    if damage == "changed-tool":
+        (root / "tools/openssh/ssh.exe").write_bytes(b"different tool\n")
+    elif damage == "missing-hash":
+        del manifest["sha256"]["tools/openssh/ssh.exe"]
+    else:
+        manifest["host_tools"]["ssh"] = "tools/other.exe"
+    manifest_path.write_text(json.dumps(manifest))
+
+    with pytest.raises(SystemExit, match=r"checksum|host tools"):
+        windows_bundle.validate_connection_tools(root)
 
 
 def test_sc9820e_archive_admits_its_compact_ram_image_without_a_bridge(tmp_path: Path) -> None:
@@ -91,7 +125,8 @@ def test_usb_presence_requires_the_saved_device_root_without_a_network_index(
     tmp_path: Path, usb_id: str, *, present: bool
 ) -> None:
     host = StubWindowsHost({"devices": [{"id": usb_id}]})
-    transport = windows_transport.WindowsTransport(host, admitted_windows(archive_files(tmp_path)))
+    bundle = admitted_windows(archive_files(tmp_path))
+    transport = windows_transport.WindowsTransport(host, bundle.tools, wait_seconds=3)
 
     assert transport.usb_present(endpoint_session(tmp_path / "session")) is present
 

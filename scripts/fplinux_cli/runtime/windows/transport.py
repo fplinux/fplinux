@@ -33,16 +33,15 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from typing import BinaryIO
 
-    from .bundle import WindowsBundle
-
 
 class WindowsTransport:
-    """The selected archive's SSH client and its exact live USB session."""
+    """The packaged SSH client and its exact live USB session."""
 
-    def __init__(self, host: WindowsHost, bundle: WindowsBundle) -> None:
-        """Keep Windows effects and archive identity at their respective boundaries."""
+    def __init__(self, host: WindowsHost, tools: dict[str, Path], *, wait_seconds: int) -> None:
+        """Keep Windows effects and admitted executable paths at their boundaries."""
         self.host = host
-        self.bundle = bundle
+        self.tools = tools
+        self.wait_seconds = wait_seconds
 
     def _ssh_arguments(
         self, session: dict[str, Any], command: str | None = None, *, connect_timeout: int = 5
@@ -57,7 +56,7 @@ class WindowsTransport:
             ("HostKeyAlgorithms", "ssh-ed25519"),
             ("GlobalKnownHostsFile", "NUL"),
         ]
-        argv = [str(self.bundle.tools["ssh"]), "-4", "-F", "NUL", "-i", session["private_key"]]
+        argv = [str(self.tools["ssh"]), "-4", "-F", "NUL", "-i", session["private_key"]]
         for name, value in options:
             rendered = commands.ssh_config_value(value)
             if name in {"IdentityAgent", "ProxyCommand", "ProxyJump"}:
@@ -107,6 +106,7 @@ class WindowsTransport:
         *,
         capture_output: bool = False,
         shared: bool = False,
+        timeout: float | None = None,
     ) -> subprocess.CompletedProcess[str]:
         """Run dedicated SSH; shared metadata operations leave caller input untouched."""
         self._require_bound(session)
@@ -116,6 +116,7 @@ class WindowsTransport:
             capture_output=capture_output,
             text=True,
             check=False,
+            timeout=timeout,
             creationflags=console_creation_flags(),
         )
 
@@ -203,7 +204,12 @@ class WindowsTransport:
                 )
 
     def authenticate(
-        self, session: dict[str, Any], *, timeout: float, scan_host_key: bool = True
+        self,
+        session: dict[str, Any],
+        *,
+        expected_device_identity: str,
+        timeout: float,
+        scan_host_key: bool = True,
     ) -> None:
         """Pin a key only after USB binding, then verify RAM and kernel identities."""
         deadline = time.monotonic() + timeout
@@ -231,7 +237,7 @@ class WindowsTransport:
                         continue
                     scan = subprocess.run(
                         [
-                            str(self.bundle.tools["keyscan"]),
+                            str(self.tools["keyscan"]),
                             "-4",
                             "-T",
                             "3",
@@ -289,7 +295,7 @@ class WindowsTransport:
             lines = result.stdout.splitlines()
             if len(lines) != 2 or not hmac.compare_digest(lines[0], session["session_id"]):
                 fail("The authenticated phone returned another RAM session identity")
-            if not lines[1].endswith(f"-fplinux-{self.bundle.device_identity[:16]}"):
+            if not lines[1].endswith(f"-fplinux-{expected_device_identity[:16]}"):
                 fail("The authenticated phone returned another kernel build identity")
             try:
                 if current_interface() != index:
@@ -305,7 +311,9 @@ class WindowsTransport:
             "did not become ready before the deadline"
         )
 
-    def _validate_saved_session(self, value: object, directory: Path) -> dict[str, Any]:
+    def _validate_saved_session(
+        self, value: object, directory: Path, *, target: str
+    ) -> dict[str, Any]:
         required = {
             "target",
             "session_id",
@@ -330,9 +338,18 @@ class WindowsTransport:
             fail("Saved phone connection is not ready")
         session_id = value["session_id"]
         if (
-            value["target"] != self.bundle.runtime["target"]
-            or value["generation"] != self.bundle.generation
-            or value["device_identity"] != self.bundle.device_identity
+            value["target"] != target
+            or not isinstance(value["generation"], str)
+            or not is_sha256(value["generation"])
+            or not isinstance(value["device_identity"], str)
+            or not is_sha256(value["device_identity"])
+            or (
+                value["prepared_data_sha256"] is not None
+                and (
+                    not isinstance(value["prepared_data_sha256"], str)
+                    or not is_sha256(value["prepared_data_sha256"])
+                )
+            )
             or not isinstance(session_id, str)
             or not is_sha256(session_id)
             or value["usb_serial"] != hashlib.sha256(bytes.fromhex(session_id)).hexdigest()[:32]
@@ -358,9 +375,11 @@ class WindowsTransport:
             or macs[0] == macs[1]
         ):
             fail("Saved phone connection has invalid private USB addresses")
-        usb = self.bundle.runtime["usb"]["linux_gadget"]
-        if (value["vendor_id"], value["product_id"]) != (usb["vendor_id"], usb["product_id"]):
-            fail("Saved phone connection has another USB identity")
+        if any(
+            type(value[field]) is not int or not 0 <= value[field] <= 0xFFFF
+            for field in ("vendor_id", "product_id")
+        ):
+            fail("Saved phone connection has an invalid USB identity")
         if directory.name != value["usb_serial"] or value["directory"] != str(directory):
             fail("Saved phone connection directory does not match its RAM identity")
         for field, name in (
@@ -379,9 +398,8 @@ class WindowsTransport:
             self.host.require_private(path)
         return value
 
-    def _saved_sessions(self, target: str, session_root: Path) -> list[dict[str, Any]]:
-        if target != self.bundle.runtime["target"]:
-            fail("The requested connection belongs to another target")
+    def load_saved_sessions(self, target: str, *, session_root: Path) -> list[dict[str, Any]]:
+        """Read ready bindings without requiring a connected USB device or SSH peer."""
         root = self.host.runtime_root(session_root)
         candidates: list[dict[str, Any]] = []
         for state_path in root.glob("*/session.json"):
@@ -391,7 +409,9 @@ class WindowsTransport:
                 fail(f"Saved phone connection cannot be read: {error}")
             if isinstance(value, dict) and value.get("status") == "prepared":
                 continue
-            candidates.append(self._validate_saved_session(value, state_path.parent))
+            candidates.append(
+                self._validate_saved_session(value, state_path.parent, target=target)
+            )
         return candidates
 
     def load_saved_session(
@@ -401,7 +421,7 @@ class WindowsTransport:
         session_root: Path,
     ) -> dict[str, Any] | None:
         """Read one ready binding without requiring a connected USB device or SSH peer."""
-        candidates = self._saved_sessions(target, session_root)
+        candidates = self.load_saved_sessions(target, session_root=session_root)
         if not candidates:
             return None
         if len(candidates) > 1:
@@ -409,14 +429,18 @@ class WindowsTransport:
         return candidates[0]
 
     def reacquire_bound_session(
-        self, session: dict[str, Any], *, expected_device_identity: str
+        self, session: dict[str, Any], *, expected_device_identity: str | None = None
     ) -> dict[str, Any]:
         """Authenticate a reappearing RAM session against its existing pinned host key."""
-        if expected_device_identity != self.bundle.device_identity:
+        if (
+            expected_device_identity is not None
+            and expected_device_identity != session["device_identity"]
+        ):
             fail("The requested connection belongs to another kernel build identity")
         self.authenticate(
             session,
-            timeout=self.bundle.runtime["usb"]["linux_gadget"]["wait_seconds"],
+            expected_device_identity=session["device_identity"],
+            timeout=self.wait_seconds,
             scan_host_key=False,
         )
         return session
@@ -430,7 +454,7 @@ class WindowsTransport:
                 continue
             try:
                 value = json.loads(state_path.read_text(encoding="utf-8"))
-                self._validate_saved_session(value, directory)
+                self._validate_saved_session(value, directory, target=current["target"])
             except OSError, ValueError, SystemExit:
                 continue
             files = [

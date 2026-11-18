@@ -98,31 +98,3 @@ def prepare_target(  # noqa: PLR0913 -- bundle selection and phone preparation p
     result = subprocess.run(arguments, stdin=subprocess.DEVNULL, check=False)
     if result.returncode:
         raise SystemExit(result.returncode)
-
-
-def reconnect_bundle(  # noqa: PLR0913 -- each remote action is an existing CLI mode.
-    bundle: CurrentBundle,
-    target: str,
-    *,
-    profile: str | None,
-    exec_command: str | None = None,
-    upload: list[str] | None = None,
-    pull: list[str] | None = None,
-    phone_data: Path | None = None,
-) -> None:
-    """Use the selected runtime's authenticated session without allowing a fresh boot."""
-    arguments = bundle_session.bundle_runtime_command(
-        bundle, "run", target=target, profile=profile
-    )
-    arguments.append("--reconnect")
-    if phone_data is not None:
-        arguments.extend(["--phone-data", str(phone_data.resolve())])
-    if exec_command is not None:
-        arguments.extend(["--exec", exec_command])
-    elif upload is not None:
-        arguments.extend(["--upload", *upload])
-    elif pull is not None:
-        arguments.extend(["--pull", *pull])
-    result = subprocess.run(arguments, check=False)
-    if result.returncode:
-        raise SystemExit(result.returncode)

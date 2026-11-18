@@ -72,12 +72,14 @@ def _profile_name(value: str) -> str:
     return value
 
 
-def _add_build_type_option(parser: argparse.ArgumentParser) -> None:
+def _add_build_type_option(
+    parser: argparse.ArgumentParser, *, default: str | None = "release"
+) -> None:
     """Use the same explicit kernel type selector for every bundle consumer."""
     parser.add_argument(
         "--build-type",
         choices=BUILD_TYPES,
-        default="release",
+        default=default,
         help="select the kernel build type (default: release)",
     )
 
@@ -533,14 +535,19 @@ def create_parser(
     _add_boot_profile_options(run_parser, "run")
 
     console_parser = commands.add_parser("console", help="connect to a running target over USB")
-    _add_build_type_option(console_parser)
+    _add_build_type_option(console_parser, default=None)
     _add_phone_data_option(console_parser)
-    console_parser.add_argument("target", choices=targets)
+    console_parser.add_argument("target", nargs="?", choices=targets)
     console_parser.add_argument(
         "--profile",
         type=_profile_name,
         metavar="NAME",
         help="reconnect to a session started with this build profile",
+    )
+    console_parser.add_argument(
+        "--allow-other-build",
+        action="store_true",
+        help="use the saved connection without requiring a current build or prepared phone data",
     )
     console_actions = console_parser.add_mutually_exclusive_group()
     console_actions.add_argument("--keyboard", metavar="EVDEV")
@@ -601,7 +608,7 @@ def create_parser(
     )
     _add_build_type_option(verify_parser)
     _add_phone_data_option(verify_parser)
-    verify_parser.add_argument("target", choices=targets)
+    verify_parser.add_argument("target", nargs="?", choices=targets)
     verify_parser.add_argument("--profile", type=_profile_name, metavar="NAME")
     for name in (
         "build",

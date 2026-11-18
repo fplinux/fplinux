@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 from fplinux_cli import common
+from fplinux_cli.alpine import lock as alpine_lock
 from fplinux_cli.alpine import selection, signing
 from fplinux_cli.artifacts.bundles import publish_current_bundle
 from fplinux_cli.artifacts.release import ReleaseContext
@@ -82,7 +83,17 @@ def archive_inputs(
     platform = platforms.load_platform(config["platform"])
     rootfs_packages = selection.selected_packages(platform, config)
     selected_bundle_packages = selection.bundle_packages(platform, config, rootfs_packages)
-    release = releases.load_release(target, bundle_packages=selected_bundle_packages)
+    lock = {
+        "runtime": {
+            "packages": ["openrc-1-r0.apk"],
+            "additions": {"fplinux-phoneme": ["fixture-runtime-2-r0.apk"]},
+        }
+    }
+    bundle_apk_packages = (
+        *selected_bundle_packages,
+        *alpine_lock.bundle_runtime_packages(lock, rootfs_packages, selected_bundle_packages),
+    )
+    release = releases.load_release(target, bundle_packages=bundle_apk_packages)
     source_files = [
         "LICENSE",
         "LICENSES/Unlicense.txt",
@@ -125,6 +136,7 @@ def archive_inputs(
     signing_digest = hashlib.sha256(public_key.read_bytes()).hexdigest()
     generation = "c" * 64
     bundle = tmp_path / ".data/out" / target / "builds/release/bundles" / generation
+    monkeypatch.setattr(package, "load_alpine_lock", lambda _root: lock)
     normalized = package.load_release_manifest(target, config)
     runtime_sources = runtime_source_files(target, config, root=source)
     if config.get("emmc") is not None and device_data_descriptor(target, config) is not None:

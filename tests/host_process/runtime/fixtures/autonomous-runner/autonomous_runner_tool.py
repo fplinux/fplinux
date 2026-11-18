@@ -41,6 +41,9 @@ def _ssh(boundary: Path) -> None:
     elif command == "uname -r":
         suffix = "34" * 8 if mode == "kernel-identity" else "12" * 8
         print(f"6.18.42-fplinux-{suffix}")
+    elif command == "uname -r; sed -n 's/^BUILD_ID=//p' /etc/os-release":
+        print("6.18.42-fplinux-" + "12" * 8)
+        print("e268349a31ad")
     elif command.startswith("fplinux-clock "):
         print("system=1234 rtc=kept")
     elif command == "printf ready":

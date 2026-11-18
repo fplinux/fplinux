@@ -457,10 +457,10 @@ def test_explicit_reconnect_does_not_retire_or_promote_a_pending_reader(
     saved = reader.read_bytes()
     mounted.unlink()
 
-    result = archive.prepared.run("--reconnect", "--exec", "printf ready")
+    result = archive.prepared.run_entrypoint("fplinux.py", "console", "--exec", "printf ready")
 
     assert result.returncode == 1
-    assert "No ready normal phone session" in result.stderr
+    assert "No known live phone connection is available" in result.stderr
     assert result.stdout == ""
     assert reader.read_bytes() == saved
     assert not (archive.data / "session").exists()
@@ -711,7 +711,7 @@ def test_read_only_archive_writes_admission_diagnostics_to_external_data_only(
             path.chmod(mode & ~0o222)
 
         result = subprocess.run(
-            [sys.executable, "-I", str(root / "fplinux.py"), "run", "--reconnect"],
+            [sys.executable, "-I", str(root / "fplinux.py"), "run"],
             cwd=tmp_path,
             env=environment,
             capture_output=True,

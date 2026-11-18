@@ -163,11 +163,19 @@ def test_ready_archive_preserves_manifests_modes_sources_and_omits_personal_data
         & files.keys()
     )
     assert not any(
-        name.startswith(
-            ("data/", "logs/", ".cache/", ".data/", ".private/", "apks/", "docs/", "sources/")
-        )
+        name.startswith(("data/", "logs/", ".cache/", ".data/", ".private/", "docs/", "sources/"))
         for name in files
     )
+    assert files["apks/fplinux-phoneme.apk"] == (
+        b"synthetic built file: apks/fplinux-phoneme.apk\n"
+    )
+    assert files["apks/fixture-runtime.apk"] == (
+        b"synthetic built file: apks/fixture-runtime.apk\n"
+    )
+    assert {name: files[name] for name in files if name.startswith("apks/")} == {
+        path.relative_to(inputs.bundle).as_posix(): path.read_bytes()
+        for path in (inputs.bundle / "apks").iterdir()
+    }
     assert b"BUILDER PERSONAL DATA MUST STAY PRIVATE" not in b"".join(files.values())
     assert "host/fplinux-usb-keyboard" not in files
     build = json.loads(files["build-manifest.json"])

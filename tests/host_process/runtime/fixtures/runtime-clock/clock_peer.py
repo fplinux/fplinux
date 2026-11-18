@@ -19,9 +19,6 @@ def main() -> int:
         sys.stdout.write(reply["stdout"])
         sys.stderr.write(reply["stderr"])
         return int(reply["status"])
-    if command == "printf ready":
-        print("ready", end="", flush=True)
-        return 0
     print("Unexpected remote command: " + command, file=sys.stderr)
     return 9
 

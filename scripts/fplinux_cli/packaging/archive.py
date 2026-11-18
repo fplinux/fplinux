@@ -408,8 +408,7 @@ def package_target(
         omitted = {
             relative
             for relative in files
-            if relative.startswith("apks/")
-            or relative == "host/fplinux-usb-keyboard"
+            if relative == "host/fplinux-usb-keyboard"
             or (host == "windows" and relative.startswith("host/"))
         }
         for relative in omitted:

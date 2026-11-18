@@ -17,9 +17,10 @@ def installation_id(anchor: Path) -> str:
     return hashlib.sha256(os.fsencode(canonical)).hexdigest()
 
 
-def checkout_runtime_root(managed_root: Path, anchor: Path, target: str) -> Path:
+def checkout_runtime_root(managed_root: Path, anchor: Path, target: str | None = None) -> Path:
     """Keep checkout sessions apart even when installations share a data root."""
-    return managed_root / "runtime/checkouts" / installation_id(anchor) / target
+    scope = managed_root / "runtime/checkouts" / installation_id(anchor)
+    return scope / target if target is not None else scope
 
 
 def archive_runtime_root(managed_root: Path, anchor: Path) -> Path:

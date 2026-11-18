@@ -33,28 +33,28 @@ The phone is always the USB device on this cable. It cannot act as a USB host, s
 	<TabItem label="Source checkout">
 
 ```sh title="PC"
-./fplinux console <target>
+./fplinux console
 ```
 
     </TabItem>
     <TabItem label="Linux RAM ZIP">
 
 ```sh title="PC"
-sh Run.sh --reconnect
+sh Run.sh console
 ```
 
     </TabItem>
     <TabItem label="Windows RAM ZIP">
 
 ```bat title="PC"
-Run.cmd --reconnect
+Run.cmd console
 ```
 
     </TabItem>
     <TabItem label="Linux system-card export">
 
 ```sh title="PC"
-python3.14 -I fplinux.py run --reconnect
+python3.14 -I fplinux.py console
 ```
 
     </TabItem>
@@ -65,9 +65,15 @@ You get a root shell. It is authenticated with a key created for the current ses
 
 :::note[Match the running build]
 
-Use the target, profile and build type that started the phone. For a microSD system card, pass the selected `--profile` to every `./fplinux console` and `./fplinux verify` command; see [system-card profiles](/fplinux/guides/microsd-system-card/). For a debug build, also add `--build-type debug`. The defaults select the release RAM build; a command for a different build refuses the session.
+A checkout selects the only connected phone with a saved session. If several phones match, specify the target. The default check expects the current release RAM build. Select the matching `--profile` for a [system-card profile](/fplinux/guides/microsd-system-card/) or `--build-type debug` for a debug build.
+
+To inspect or shut down an earlier build that is still running, use `./fplinux console --allow-other-build`. You can also pass a single command, for example `./fplinux console --allow-other-build --exec 'uname -r'`. The launcher authenticates the saved USB and SSH session and reports the running build ID. This also works with `sh Run.sh console --allow-other-build` or `Run.cmd console --allow-other-build` in the archive that started that session. Use ordinary `console` or `verify` to check your current build.
 
 :::
+
+## Verify the running build
+
+Run `./fplinux verify` from a checkout, `sh Run.sh verify` from a Linux RAM archive, or `Run.cmd verify` from a Windows RAM archive. For a Linux system-card export, use `python3.14 -I fplinux.py verify`. The command authenticates the running session, checks the selected build and exits with the result. You can open `console` directly when you need a shell.
 
 ## Reconnect after unplugging
 
@@ -92,21 +98,21 @@ Use `--exec` when you do not need an interactive shell. The command runs on the 
     <TabItem label="Linux RAM ZIP">
 
 ```sh title="PC"
-sh Run.sh --reconnect --exec 'uname -r'
+sh Run.sh console --exec 'uname -r'
 ```
 
     </TabItem>
     <TabItem label="Windows RAM ZIP">
 
 ```bat title="PC"
-Run.cmd --reconnect --exec "uname -r"
+Run.cmd console --exec "uname -r"
 ```
 
     </TabItem>
     <TabItem label="Linux system-card export">
 
 ```sh title="PC"
-python3.14 -I fplinux.py run --reconnect --exec 'uname -r'
+python3.14 -I fplinux.py console --exec 'uname -r'
 ```
 
     </TabItem>
@@ -133,16 +139,16 @@ On a Linux PC, upload a file to the phone or pull one from it. The Windows launc
     <TabItem label="Linux RAM ZIP">
 
 ```sh title="PC"
-sh Run.sh --reconnect --upload ./song.wav /tmp/song.wav
-sh Run.sh --reconnect --pull /tmp/recording.wav ./recording.wav
+sh Run.sh console --upload ./song.wav /tmp/song.wav
+sh Run.sh console --pull /tmp/recording.wav ./recording.wav
 ```
 
     </TabItem>
     <TabItem label="Linux system-card export">
 
 ```sh title="PC"
-python3.14 -I fplinux.py run --reconnect --upload ./song.wav /tmp/song.wav
-python3.14 -I fplinux.py run --reconnect --pull /tmp/recording.wav ./recording.wav
+python3.14 -I fplinux.py console --upload ./song.wav /tmp/song.wav
+python3.14 -I fplinux.py console --pull /tmp/recording.wav ./recording.wav
 ```
 
     </TabItem>

@@ -202,7 +202,17 @@ def _phone_connection(
             assert (session_root / "session.json").exists()
             with (record / "reader-commands").open("a") as commands:
                 commands.write(command + "\n")
-            if command.startswith("cat "):
+            if "FPLINUX_NAND_AUDIT_BEFORE" in command:
+                destination.write(
+                    b"\x1eFPLINUX_NAND_AUDIT_BEFORE\nstate=idle total_commands=0\n"
+                    b"\x1eFPLINUX_NAND_GEOMETRY\n"
+                )
+                destination.write((bundle / "phone-geometry.txt").read_bytes())
+                destination.write(
+                    b"\x1eFPLINUX_NAND_AUDIT_AFTER\nstate=idle total_commands=2\n"
+                    b"\x1eFPLINUX_NAND_END\n"
+                )
+            elif command.startswith("cat "):
                 destination.write((bundle / "phone-geometry.txt").read_bytes())
             elif command.startswith("exec dd if=/dev/raw-nand "):
                 while (bundle / "phone-hold-read").exists():

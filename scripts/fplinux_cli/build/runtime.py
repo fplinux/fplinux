@@ -32,6 +32,7 @@ _RUNTIME_MODULES = (
     "runtime/__init__.py",
     "runtime/cli.py",
     "runtime/data_paths.py",
+    "runtime/live.py",
     "runtime/workflow.py",
     "runtime/bundle.py",
     "runtime/boot.py",

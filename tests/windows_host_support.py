@@ -8,13 +8,12 @@ import json
 import os
 import shutil
 from dataclasses import replace
-from types import ModuleType, SimpleNamespace
+from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 from unittest import mock
 
 from fplinux_cli.build.runtime import runtime_source_files
 from fplinux_cli.runtime import bundle as bundle_runtime
-from fplinux_cli.runtime.windows.bundle import WindowsBundle
 from fplinux_cli.runtime.windows.host import WindowsHost
 from fplinux_cli.runtime.windows.transport import WindowsTransport
 
@@ -28,6 +27,8 @@ from tests.small.runtime.adapter_fixtures import adapter_data
 if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
+
+    from fplinux_cli.runtime.windows.bundle import WindowsBundle
 
 
 def admitted_windows(directory: Path) -> WindowsBundle:
@@ -137,33 +138,24 @@ def native_process_transport(directory: Path) -> WindowsTransport:
         destination = tools / name
         shutil.copyfile(ROOT / "tests/fixtures/ssh_transport/windows_peer.py", destination)
         destination.chmod(0o755)
-    bundle = WindowsBundle(
-        directory,
-        {
-            "target": "test-phone",
-            "usb": {
-                "linux_gadget": {"vendor_id": 0x0525, "product_id": 0xA4A6, "wait_seconds": 3}
-            },
-        },
+    return WindowsTransport(
+        StubWindowsHost(endpoint_snapshot()),
         {"ssh": tools / "ssh", "keyscan": tools / "keyscan"},
-        ModuleType("unused_adapter"),
-        "cd" * 32,
-        "12" * 32,
+        wait_seconds=3,
     )
-    return WindowsTransport(StubWindowsHost(endpoint_snapshot()), bundle)
 
 
-def saved_connection(transport: WindowsTransport) -> dict[str, Any]:
+def saved_connection(transport: WindowsTransport, root: Path) -> dict[str, Any]:
     """Persist an independently constructed ready session with an exact live USB snapshot."""
     session_id = bytes.fromhex("ab" * 32)
     serial = hashlib.sha256(session_id).hexdigest()[:32]
-    directory = transport.bundle.root / "data/session" / serial
+    directory = root / "data/session" / serial
     session = endpoint_session(directory)
     session.update(
         {
             "usb_serial": serial,
-            "generation": transport.bundle.generation,
-            "device_identity": transport.bundle.device_identity,
+            "generation": "cd" * 32,
+            "device_identity": "12" * 32,
             "image": str(directory / "image.bin"),
         }
     )

@@ -49,6 +49,7 @@ def _readme(config: dict[str, Any], *, target: str, host: str, preparation: bool
                 "\nUSB loading and SSH from Windows have not been verified with this phone."
             )
         launch_instructions = "Double-click Run.cmd in the extracted folder."
+        launcher = "Run.cmd"
         dump_command = 'Run.cmd --from-dump "C:\\path\\to\\nand.bin"'
         saved_files_instructions = (
             f"The phone's {saved_data} and prepared data are saved on the PC in:\n"
@@ -64,6 +65,7 @@ def _readme(config: dict[str, Any], *, target: str, host: str, preparation: bool
             phone USB access rules are not installed.
             """).removesuffix("\n")
         launch_instructions = "Open a terminal in the extracted folder and run:\n  sh Run.sh"
+        launcher = "sh Run.sh"
         dump_command = "sh Run.sh --from-dump /path/to/nand.bin"
         saved_files_instructions = (
             f"The phone's {saved_data} and prepared data are saved on the PC in:\n"
@@ -124,12 +126,20 @@ def _readme(config: dict[str, Any], *, target: str, host: str, preparation: bool
                 terminal on your PC where you can enter phone commands.
 
                 Type exit or press Ctrl+D to close the phone terminal. The phone
-                keeps running. To reconnect, leave it powered and connected by USB,
-                then open the same launcher from the same folder again.
-                """).removesuffix("\n"),
+                keeps running. Leave it powered and connected by USB. From a terminal
+                in this folder, reconnect or check the running build:
+
+                  {launcher} console
+                  {launcher} verify
+                """)
+            .removesuffix("\n")
+            .format(launcher=launcher),
             shutdown.removesuffix("\n"),
             dedent("""\
                 Help and saved files
+
+                Optional applications and their required APKs are in apks/.
+                Manual installation: https://fplinux.github.io/fplinux/guides/packages/
 
                 Launcher state, private connection keys and launch logs are saved
                 inside .data in the extracted folder. FPLINUX_DATA_DIR can select
@@ -264,7 +274,10 @@ def autonomous_payload(
     descriptor = runtime["device_data"]
     files = {
         "README.txt": _readme(
-            config, target=runtime["target"], host=host, preparation=descriptor is not None
+            config,
+            target=runtime["target"],
+            host=host,
+            preparation=descriptor is not None and bool(descriptor["required_groups"]),
         )
     }
     platform = config["platform"]

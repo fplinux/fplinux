@@ -332,6 +332,7 @@ def command_action(
             exec_command=args.exec_command,
             upload=args.upload,
             pull=args.pull,
+            allow_other_build=args.allow_other_build,
         )
     elif args.command == "nand":
         if args.nand_command == "backup":

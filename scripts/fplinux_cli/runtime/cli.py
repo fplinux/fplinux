@@ -16,9 +16,11 @@ from .workflow import run_phone
 
 def arguments(bundle_root: Path) -> argparse.Namespace:
     """Keep target discovery and build commands outside the delivered runtime."""
-    parser = argparse.ArgumentParser(description="Start FPLinux or reconnect to its USB session.")
+    parser = argparse.ArgumentParser(description="Start FPLinux or connect to its USB session.")
     commands = parser.add_subparsers(dest="command", required=True)
     run = commands.add_parser("run", help="start the selected phone or open its existing session")
+    console = commands.add_parser("console", help="connect to a running phone")
+    verify = commands.add_parser("verify", help="check that the running phone matches this build")
     prepare = commands.add_parser("prepare", help="prepare the selected phone's required data")
     nand = commands.add_parser("nand", help="read the running phone's NAND")
     nand_actions = nand.add_subparsers(dest="nand_action", required=True)
@@ -27,7 +29,7 @@ def arguments(bundle_root: Path) -> argparse.Namespace:
     backup.add_argument(
         "output", type=Path, help="backup file; a receipt is saved beside it as FILE.json"
     )
-    for command in (run, prepare, identify, backup):
+    for command in (run, console, verify, prepare, identify, backup):
         command.add_argument(
             "--bundle",
             type=Path,
@@ -41,12 +43,13 @@ def arguments(bundle_root: Path) -> argparse.Namespace:
             metavar="PATH",
             help="keep launcher state and connection keys here (default: installation data scope)",
         )
-        command.add_argument(
-            "--phone-data",
-            type=Path,
-            metavar="PATH",
-            help="use another personal phone-data directory",
-        )
+        if command is not console:
+            command.add_argument(
+                "--phone-data",
+                type=Path,
+                metavar="PATH",
+                help="use another personal phone-data directory",
+            )
         command.add_argument(
             "--log-root",
             type=Path,
@@ -70,39 +73,35 @@ def arguments(bundle_root: Path) -> argparse.Namespace:
             "--loader-trace", action="store_true", help="retain loader protocol diagnostics"
         )
     prepare.add_argument("--replace", action="store_true", help="replace prepared phone data")
-    run.add_argument("--reconnect", action="store_true", help="require an existing ready session")
-    action = run.add_mutually_exclusive_group()
+    selection = console.add_mutually_exclusive_group()
+    selection.add_argument(
+        "--phone-data", type=Path, metavar="PATH", help="use another personal phone-data directory"
+    )
+    selection.add_argument(
+        "--allow-other-build",
+        action="store_true",
+        help="use the saved connection without requiring this RAM image or prepared phone data",
+    )
+    action = console.add_mutually_exclusive_group()
     action.add_argument(
         "--exec",
         dest="exec_command",
         metavar="COMMAND",
-        help="run one command on the phone; requires --reconnect",
+        help="run one command on the phone",
     )
     action.add_argument(
         "--upload",
         nargs=2,
         metavar=("LOCAL", "REMOTE"),
-        help=argparse.SUPPRESS
-        if os.name == "nt"
-        else "copy one file to an absolute phone path; requires --reconnect",
+        help=argparse.SUPPRESS if os.name == "nt" else "copy one file to an absolute phone path",
     )
     action.add_argument(
         "--pull",
         nargs=2,
         metavar=("REMOTE", "LOCAL"),
-        help=argparse.SUPPRESS
-        if os.name == "nt"
-        else "copy one file from an absolute phone path; requires --reconnect",
+        help=argparse.SUPPRESS if os.name == "nt" else "copy one file from an absolute phone path",
     )
-    options = parser.parse_args()
-    if options.command == "run":
-        if not options.reconnect and any(
-            value is not None for value in (options.exec_command, options.upload, options.pull)
-        ):
-            parser.error("--exec, --upload and --pull require --reconnect")
-        if options.reconnect and any((options.events, options.loader_trace, options.from_dump)):
-            parser.error("--events, --loader-trace and --from-dump require a fresh launch")
-    return options
+    return parser.parse_args()
 
 
 def main(*, bundle_root: Path) -> None:
@@ -119,12 +118,29 @@ def main(*, bundle_root: Path) -> None:
             logs = options.log_root.resolve() if options.log_root is not None else scope / "logs"
     except (OSError, ValueError) as error:
         fail(str(error))
+    phone_data = options.phone_data.resolve() if options.phone_data is not None else None
+    if options.command in {"console", "verify"}:
+        from .live import console_bundle  # noqa: PLC0415 -- selected runtime action.
+
+        raise SystemExit(
+            console_bundle(
+                bundle,
+                data,
+                logs,
+                allow_other_build=getattr(options, "allow_other_build", False),
+                exec_command=getattr(options, "exec_command", None),
+                upload=getattr(options, "upload", None),
+                pull=getattr(options, "pull", None),
+                phone_data=phone_data,
+                verify_only=options.command == "verify",
+            )
+        )
     raise SystemExit(
         run_phone(
             bundle,
             data,
             logs,
-            phone_data=options.phone_data.resolve() if options.phone_data is not None else None,
+            phone_data=phone_data,
             from_dump=(
                 options.from_dump.resolve()
                 if getattr(options, "from_dump", None) is not None
@@ -132,10 +148,6 @@ def main(*, bundle_root: Path) -> None:
             ),
             prepare_only=options.command == "prepare",
             replace=getattr(options, "replace", False),
-            reconnect=getattr(options, "reconnect", False),
-            exec_command=getattr(options, "exec_command", None),
-            upload=getattr(options, "upload", None),
-            pull=getattr(options, "pull", None),
             events=getattr(options, "events", None),
             loader_trace=getattr(options, "loader_trace", False),
             nand_action=getattr(options, "nand_action", None),

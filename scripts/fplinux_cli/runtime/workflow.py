@@ -11,6 +11,7 @@ import sys
 import tempfile
 import traceback
 from contextlib import contextmanager, nullcontext
+from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -50,12 +51,36 @@ def cancellation_signals() -> Iterator[None]:
             signal.signal(signum, handler)
 
 
-def _interactive_shell(
-    admitted: ValidatedBundle,
+def report_runtime_error(error: BaseException, log: RunLog | None) -> tuple[str, int]:
+    """Report one runtime failure and return its journal status and exit code."""
+    if isinstance(error, KeyboardInterrupt) or (
+        isinstance(error, SystemExit) and error.code in (129, 130, 143)
+    ):
+        if log is not None:
+            log.message("Cancelled. Cancelling does not power the phone off.")
+        code = error.code if isinstance(error, SystemExit) and isinstance(error.code, int) else 130
+        return "interrupted", code
+    if log is not None:
+        traceback.print_exception(error, file=log.stream)
+    detail = (
+        f"Computer connection setup timed out after {error.timeout:g} seconds."
+        if isinstance(error, subprocess.TimeoutExpired)
+        else str(error)
+    )
+    for prefix in ("FPLinux: ", "fplinux: ", "fplinux run: ", "fplinux ssh: "):
+        detail = detail.removeprefix(prefix)
+    print(f"FPLinux: {detail}", file=sys.stderr, flush=True)
+    if log is not None:
+        print(f"See {log.path} for details.", file=sys.stderr, flush=True)
+    code = error.code if isinstance(error, SystemExit) and isinstance(error.code, int) else 1
+    return "failed", code
+
+
+def interactive_shell(
     connection: tuple[Any, dict[str, Any]],
     log: RunLog,
     *,
-    prepared_data_sha256: str | None,
+    reconnect: Callable[[tuple[Any, dict[str, Any]]], tuple[Any, dict[str, Any]]],
 ) -> None:
     """Reauthenticate interrupted interactive SSH without replaying remote commands."""
     while True:
@@ -66,9 +91,7 @@ def _interactive_shell(
         except ConnectionLostError:
             log.event("connection-lost", invitation="")
             with log.capture():
-                connection = boot.reconnect_saved_connection(
-                    admitted, connection, prepared_data_sha256=prepared_data_sha256
-                )
+                connection = reconnect(connection)
             log.event("session-resumed", invitation="")
             continue
         if status:
@@ -87,26 +110,17 @@ def _run_phone(  # noqa: PLR0913 -- runtime actions and explicit paths preserve 
     from_dump: Path | None,
     prepare_only: bool,
     replace: bool,
-    reconnect: bool,
-    exec_command: str | None,
-    upload: list[str] | None,
-    pull: list[str] | None,
     loader_trace: bool,
 ) -> None:
     bundle, runtime = admitted.root, admitted.runtime
     log.message(f"FPLinux — {runtime['identity']['target']['display_name']}")
-    if os.name == "nt" and (upload is not None or pull is not None):
-        fail("File transfer is available from a Linux host")
     spec = phone_data_runtime.device_data_spec(bundle, runtime)
     selected = None
     if spec is not None:
         from fplinux_cli.device_data.store import locked_phone_store  # noqa: PLC0415
 
         with locked_phone_store(runtime["target"], root=phone_data) as store:
-            if reconnect:
-                if not phone_data_runtime.phone_preparation_current(admitted, spec, store):
-                    fail("Prepare the phone data before reconnecting")
-            else:
+            if spec.required_declarations or prepare_only or from_dump is not None:
                 reader_used = phone_data_runtime.prepare_phone_data(
                     admitted,
                     data,
@@ -122,7 +136,7 @@ def _run_phone(  # noqa: PLR0913 -- runtime actions and explicit paths preserve 
             selected = phone_data_runtime.selected_phone_data(spec, store / "phone")
     elif prepare_only or from_dump is not None:
         fail("This bundle boots directly and does not require phone-data preparation")
-    if not reconnect and (data / "reader").exists():
+    if (data / "reader").exists():
         with log.capture():
             reader_connection = boot.reconnect_live_bundle(
                 admitted,
@@ -144,7 +158,6 @@ def _run_phone(  # noqa: PLR0913 -- runtime actions and explicit paths preserve 
             admitted,
             session_root=data / "session",
             prepared_data_sha256=identity,
-            required=reconnect,
         )
     if connection is None:
         log.message("Starting FPLinux...")
@@ -165,19 +178,16 @@ def _run_phone(  # noqa: PLR0913 -- runtime actions and explicit paths preserve 
             )
     else:
         log.message("Connecting to the running phone...")
-    transport, session = connection
-    if exec_command is not None:
-        result = transport.run_remote(session, exec_command)
-        if result.returncode:
-            raise SystemExit(result.returncode)
-    elif upload is not None:
-        transport.upload(session, *upload)
-    elif pull is not None:
-        transport.pull(session, *pull)
-    elif not reconnect and not os.isatty(0):
+    if not os.isatty(0):
         log.message("No interactive terminal is attached; the loader is complete.")
     else:
-        _interactive_shell(admitted, connection, log, prepared_data_sha256=identity)
+        interactive_shell(
+            connection,
+            log,
+            reconnect=partial(
+                boot.reconnect_saved_connection, admitted, prepared_data_sha256=identity
+            ),
+        )
 
 
 def run_phone(  # noqa: PLR0913 -- explicit CLI policies keep preparation and remote actions distinct.
@@ -189,10 +199,6 @@ def run_phone(  # noqa: PLR0913 -- explicit CLI policies keep preparation and re
     from_dump: Path | None = None,
     prepare_only: bool = False,
     replace: bool = False,
-    reconnect: bool = False,
-    exec_command: str | None = None,
-    upload: list[str] | None = None,
-    pull: list[str] | None = None,
     events: Path | None = None,
     loader_trace: bool = False,
     nand_action: str | None = None,
@@ -203,9 +209,7 @@ def run_phone(  # noqa: PLR0913 -- explicit CLI policies keep preparation and re
     status = "failed"
     try:
         data = private_directory(data_root)
-        remote_action = nand_action is not None or any(
-            value is not None for value in (exec_command, upload, pull)
-        )
+        remote_action = nand_action is not None
         lock = (
             nullcontext()
             if remote_action
@@ -256,38 +260,19 @@ def run_phone(  # noqa: PLR0913 -- explicit CLI policies keep preparation and re
                         from_dump=from_dump,
                         prepare_only=prepare_only,
                         replace=replace,
-                        reconnect=reconnect,
-                        exec_command=exec_command,
-                        upload=upload,
-                        pull=pull,
                         loader_trace=loader_trace,
                     )
             status = "success"
             return 0
-    except KeyboardInterrupt:
-        status = "interrupted"
-        if log is not None:
-            log.message("Cancelled. Cancelling does not power the phone off.")
-        return 130
-    except (OSError, ValueError, SystemExit, subprocess.TimeoutExpired) as error:
-        if isinstance(error, SystemExit) and error.code in (129, 130, 143):
-            status = "interrupted"
-            if log is not None:
-                log.message("Cancelled. Cancelling does not power the phone off.")
-            return int(error.code)
-        if log is not None:
-            traceback.print_exception(error, file=log.stream)
-        detail = (
-            f"Computer connection setup timed out after {error.timeout:g} seconds."
-            if isinstance(error, subprocess.TimeoutExpired)
-            else str(error)
-        )
-        for prefix in ("FPLinux: ", "fplinux: ", "fplinux run: ", "fplinux ssh: "):
-            detail = detail.removeprefix(prefix)
-        print(f"FPLinux: {detail}", file=sys.stderr, flush=True)
-        if log is not None:
-            print(f"See {log.path} for details.", file=sys.stderr, flush=True)
-        return error.code if isinstance(error, SystemExit) and isinstance(error.code, int) else 1
+    except (
+        KeyboardInterrupt,
+        OSError,
+        ValueError,
+        SystemExit,
+        subprocess.TimeoutExpired,
+    ) as error:
+        status, code = report_runtime_error(error, log)
+        return code
     finally:
         if log is not None:
             log.close(status)

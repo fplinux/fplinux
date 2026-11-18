@@ -18,11 +18,13 @@ def main() -> int:
     probe = sys.argv[2]
     capture_output = sys.argv[3] == "capture"
     transport = native_process_transport(state_path.parent)
-    install_python_script(Path(__file__).with_name("stdin_peer.py"), transport.bundle.tools["ssh"])
+    install_python_script(Path(__file__).with_name("stdin_peer.py"), transport.tools["ssh"])
 
     if probe in {"authentication", "both"}:
         session["status"] = "prepared"
-        transport.authenticate(session, timeout=3, scan_host_key=False)
+        transport.authenticate(
+            session, expected_device_identity="12" * 32, timeout=3, scan_host_key=False
+        )
     if probe in {"metadata", "both"}:
         metadata = transport.run_remote(session, "uname -r", capture_output=True, shared=True)
         metadata.check_returncode()

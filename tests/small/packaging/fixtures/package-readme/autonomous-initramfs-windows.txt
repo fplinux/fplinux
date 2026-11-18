@@ -52,8 +52,11 @@ Once FPLinux is running, the launcher opens SSH: a command-line
 terminal on your PC where you can enter phone commands.
 
 Type exit or press Ctrl+D to close the phone terminal. The phone
-keeps running. To reconnect, leave it powered and connected by USB,
-then open the same launcher from the same folder again.
+keeps running. Leave it powered and connected by USB. From a terminal
+in this folder, reconnect or check the running build:
+
+  Run.cmd console
+  Run.cmd verify
 
 Shut down safely
 
@@ -72,6 +75,9 @@ normally, without holding the USB boot key, to use its original system.
 To use FPLinux again after power-off, repeat the startup instructions.
 
 Help and saved files
+
+Optional applications and their required APKs are in apks/.
+Manual installation: https://fplinux.github.io/fplinux/guides/packages/
 
 Launcher state, private connection keys and launch logs are saved
 inside .data in the extracted folder. FPLINUX_DATA_DIR can select

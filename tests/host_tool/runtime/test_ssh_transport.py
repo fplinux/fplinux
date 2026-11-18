@@ -41,7 +41,7 @@ def test_linux_openssh_parses_windows_archive_arguments(
 ) -> None:
     """Linux OpenSSH interprets archive-loaded Windows argv; no native Windows tools run."""
     bundle = admitted_windows(archive_files(tmp_path / "archive"))
-    transport = WindowsTransport(StubWindowsHost({}), bundle)
+    transport = WindowsTransport(StubWindowsHost({}), bundle.tools, wait_seconds=3)
     session = endpoint_session(tmp_path / path_component)
     session["known_hosts"] = r'C:\session with spaces\known"hosts'
     arguments = transport._ssh_arguments(session, connect_timeout=2)  # noqa: SLF001

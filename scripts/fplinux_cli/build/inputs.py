@@ -75,6 +75,7 @@ _BUILD_STAGE_SOURCES = (
     "scripts/fplinux_cli/build/assets.py",
     "scripts/fplinux_cli/build/host_tools/__init__.py",
     "scripts/fplinux_cli/build/host_tools/host.py",
+    "scripts/fplinux_cli/artifacts/host_tools.py",
     "scripts/fplinux_cli/build/publish.py",
     "scripts/fplinux_cli/build/runtime.py",
     "scripts/fplinux_cli/build/phone_data.py",

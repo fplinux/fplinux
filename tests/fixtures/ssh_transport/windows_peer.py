@@ -41,6 +41,13 @@ def main() -> int:  # noqa: PLR0911 -- each branch supplies a distinct external 
             print(os.environ["FPLINUX_TEST_SESSION_ID"])
         print(os.environ["FPLINUX_TEST_KERNEL"])
         return 0
+    if command == "uname -r; sed -n 's/^BUILD_ID=//p' /etc/os-release":
+        if pid_file := os.environ.get("FPLINUX_TEST_BUILD_READER_PID"):
+            Path(pid_file).write_text(str(os.getpid()))
+            time.sleep(60)
+        print(os.environ["FPLINUX_TEST_KERNEL"])
+        print(os.environ["FPLINUX_TEST_BUILD_ID"])
+        return 0
     if command.startswith("root@"):
         print("controlled shell output", flush=True)
         print("controlled shell diagnostic", file=sys.stderr, flush=True)

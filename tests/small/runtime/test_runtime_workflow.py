@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Any
 import pytest
 from fplinux_cli.cli.logs import read_run
 from fplinux_cli.device_data import prepare as device_data_prepare
-from fplinux_cli.runtime import boot, phone_data, workflow
+from fplinux_cli.runtime import boot, live, phone_data, workflow
 from fplinux_cli.runtime import bundle as bundle_runtime
 from fplinux_cli.runtime.bundle import ValidatedBundle
 from fplinux_cli.runtime.events import RunLog
@@ -43,6 +43,17 @@ def saved_backup_workspace(tmp_path: Path) -> Iterator[Path]:
         yield Path(temporary)
 
 
+def _nand_identification_stream(report: str) -> bytes:
+    """Return a controlled reader report with its two diagnostic snapshots."""
+    return (
+        "\x1eFPLINUX_NAND_AUDIT_BEFORE\nstate=idle total_commands=0\n"
+        "\x1eFPLINUX_NAND_GEOMETRY\n"
+        f"{report}"
+        "\x1eFPLINUX_NAND_AUDIT_AFTER\nstate=idle total_commands=2\n"
+        "\x1eFPLINUX_NAND_END\n"
+    ).encode("ascii")
+
+
 def test_unknown_nand_identify_reports_feature_bytes_without_reading_raw_pages(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -66,7 +77,7 @@ def test_unknown_nand_identify_reports_feature_bytes_without_reading_raw_pages(
         ) -> None:
             del timeout, progress
             commands.append(command)
-            destination.write(report.encode())
+            destination.write(_nand_identification_stream(report))
 
     monkeypatch.setattr(boot, "reconnect_live_bundle", lambda *_args, **_kwargs: (Phone(), {}))
     logs = tmp_path / "logs"
@@ -91,7 +102,9 @@ def test_unknown_nand_identify_reports_feature_bytes_without_reading_raw_pages(
         log.close("success")
 
     assert capsys.readouterr().out == report
-    assert commands == ["cat /sys/class/misc/raw-nand/device/geometry 3</dev/raw-nand"]
+    assert len(commands) == 1
+    assert "NAND audit before:\nstate=idle total_commands=0\n" in log.path.read_text()
+    assert "NAND audit after:\nstate=idle total_commands=2\n" in log.path.read_text()
 
 
 def test_remote_command_can_use_a_live_shell_session_and_journals_its_own_result(
@@ -103,24 +116,34 @@ def test_remote_command_can_use_a_live_shell_session_and_journals_its_own_result
     commands = []
 
     class Phone:
+        def reacquire_bound_session(
+            self, session: dict[str, Any], *, expected_device_identity: str | None
+        ) -> dict[str, Any]:
+            assert expected_device_identity in {None, "b" * 64}
+            return session
+
         def run_remote(
-            self, _session: dict[str, Any], command: str
+            self, _session: dict[str, Any], command: str, **_options: object
         ) -> subprocess.CompletedProcess[str]:
+            if command.startswith("uname -r;"):
+                return subprocess.CompletedProcess(command, 0, "Linux\ntest-build\n")
             commands.append(command)
             return subprocess.CompletedProcess(command, 0)
 
     runtime: dict[str, Any] = {
-        "identity": {"target": {"display_name": "Test phone"}},
         "device_data": None,
+        "target": "phone",
     }
     admitted = ValidatedBundle(tmp_path, runtime, "a" * 64, "b" * 64, None)
-    monkeypatch.setattr(workflow, "admit_bundle", lambda _bundle: admitted)
-    monkeypatch.setattr(boot, "reconnect_live_bundle", lambda *_args, **_kwargs: (Phone(), {}))
-    runtime.update(target="phone", profile=None, build_type="release")
+    monkeypatch.setattr(boot, "host_preflight", lambda: None)
 
     with exclusive_lock(data / ".launcher.lock", message="launcher occupied"):
-        result = workflow.run_phone(
-            tmp_path, data, tmp_path / "logs", reconnect=True, exec_command="printf ready"
+        result = live.console_connection(
+            (Phone(), {"target": "phone", "generation": "a" * 64, "prepared_data_sha256": None}),
+            data,
+            tmp_path / "logs",
+            admitted=admitted,
+            exec_command="printf ready",
         )
 
     assert result == 0
@@ -365,11 +388,20 @@ def test_saved_backup_reconnects_reader_before_extraction_and_preserves_failed_p
         assert hashlib.file_digest(stream, "sha256").hexdigest() == digest
 
 
-@pytest.mark.parametrize("platform_name", ["ums9117", "sc9820e"])
+@pytest.mark.parametrize(
+    ("platform_name", "with_optional_data"),
+    [
+        pytest.param("ums9117", False, id="ums9117-direct"),
+        pytest.param("sc9820e", False, id="sc9820e-direct"),
+        pytest.param("ums9117", True, id="ums9117-optional-calibration"),
+    ],
+)
 def test_windows_direct_boot_reuses_its_transport_capsule_identity(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     platform_name: str,
+    *,
+    with_optional_data: bool,
 ) -> None:
     """Real capsule selection and staging use controlled native ACL, boot and SSH boundaries."""
     data = tmp_path / "data"
@@ -379,14 +411,33 @@ def test_windows_direct_boot_reuses_its_transport_capsule_identity(
     log = RunLog(logs, protect=lambda _path: None)
     runtime: dict[str, Any] = {
         "identity": {
-            "target": {"display_name": "Headless phone"},
+            "target": {"display_name": "Headless phone", "compatible": "test,phone"},
             "platform": {"name": platform_name},
         },
         "device_data": None,
         "target": "phone",
         "transport": "usb-ncm",
         "nand": {"raw_device": "/dev/raw-nand"} if platform_name == "ums9117" else None,
+        "emmc": None,
     }
+    if with_optional_data:
+        runtime["device_data"] = {
+            "parser": None,
+            "originals_parser": "optional_data.py",
+            "ecc_module": None,
+            "required_groups": [],
+            "groups": {
+                "audio-profile": [
+                    {"source": "audio.bin", "destination": "fplinux/audio.bin", "size": 3}
+                ]
+            },
+            "audio_policy": {
+                "speaker_vibration": False,
+                "speaker_from_headphones": False,
+                "headfree_headphones_only": False,
+            },
+            "preparation_recipe": "c" * 64,
+        }
     capsules: list[bytes] = []
     capsule_paths: list[Path] = []
     boot_hashes: list[str | None] = []
@@ -403,6 +454,11 @@ def test_windows_direct_boot_reuses_its_transport_capsule_identity(
 
     class Phone:
         """Return only the explicit identification report through the real NAND reader."""
+
+        def run_shell(self, session: dict[str, Any]) -> int:
+            """Close the explicitly reconnected terminal through the controlled SSH peer."""
+            assert session == {"status": "ready"}
+            return 0
 
         def run_remote(
             self,
@@ -430,7 +486,9 @@ def test_windows_direct_boot_reuses_its_transport_capsule_identity(
             """Expose the command sent to the controlled authenticated endpoint."""
             del timeout, progress
             commands.append(command)
-            destination.write(b"chip=UNKNOWN\ngeometry_source=unknown\n")
+            destination.write(
+                _nand_identification_stream("chip=UNKNOWN\ngeometry_source=unknown\n")
+            )
 
     phone = Phone()
     admitted = ValidatedBundle(tmp_path, runtime, "a" * 64, "b" * 64, None)
@@ -467,20 +525,16 @@ def test_windows_direct_boot_reuses_its_transport_capsule_identity(
     monkeypatch.setattr(boot, "run_bundle", start_phone)
     monkeypatch.setattr(boot, "reconnect_live_bundle", live_phone)
     try:
-        for _launch in range(2):
+        for _ in range(2):
             workflow._run_phone(  # noqa: SLF001 -- real shared launch selection and lifetime.
                 admitted,
                 data,
                 log,
                 lambda _stage: None,
-                phone_data=None,
+                phone_data=tmp_path / "phone-store",
                 from_dump=None,
                 prepare_only=False,
                 replace=False,
-                reconnect=False,
-                exec_command=None,
-                upload=None,
-                pull=None,
                 loader_trace=False,
             )
         assert commands == []
@@ -493,7 +547,12 @@ def test_windows_direct_boot_reuses_its_transport_capsule_identity(
         assert not capsule_paths[0].exists()
         expected_identity = hashlib.sha256(capsules[0]).hexdigest()
         assert boot_hashes == [expected_identity]
-        assert phone_data.prepared_content_identity(tmp_path, runtime) == expected_identity
+        assert (
+            phone_data.prepared_content_identity(
+                tmp_path, runtime, phone_data=tmp_path / "phone-store"
+            )
+            == expected_identity
+        )
 
         assert reconnect_hashes == [expected_identity, expected_identity]
         if platform_name == "ums9117":
@@ -503,10 +562,14 @@ def test_windows_direct_boot_reuses_its_transport_capsule_identity(
                 log,
                 action="identify",
                 output=None,
-                phone_data=None,
+                phone_data=tmp_path / "phone-store",
             )
-            assert reconnect_hashes == [expected_identity, expected_identity, expected_identity]
-            assert commands == ["cat /sys/class/misc/raw-nand/device/geometry 3</dev/raw-nand"]
+            assert reconnect_hashes == [
+                expected_identity,
+                expected_identity,
+                expected_identity,
+            ]
+            assert len(commands) == 1
     finally:
         log.close("success")
 

@@ -284,7 +284,7 @@ def test_explicit_remote_command_stdout_contains_only_the_remote_bytes(
     """The actual entrypoint keeps runtime progress off the remote command's stdout."""
     archive = live_runner_archive
 
-    result = archive.run_direct("run", "--reconnect", "--exec", "printf ready")
+    result = archive.run_direct("console", "--exec", "printf ready")
 
     assert result.returncode == 0, result.stderr
     assert result.stdout == "ready"
@@ -299,11 +299,34 @@ def test_explicit_reconnect_shell_requires_a_terminal_without_starting_another_b
     archive = live_runner_archive
     saved_session = archive.shells()[0]
 
-    result = archive.run_direct("run", "--reconnect")
+    result = archive.run_direct("console")
 
     assert result.returncode == 1
     assert "interactive SSH requires a terminal" in result.stderr
     assert archive.shells() == [saved_session]
+    assert (archive.root / "boundary/ram-loads.txt").read_text() == "RAM load\n"
+
+
+@pytest.mark.parametrize("mismatch", [False, True], ids=["matching-build", "different-build"])
+def test_verify_checks_running_build_without_opening_shell_or_loading(
+    live_runner_archive: AutonomousRunnerArchive, *, mismatch: bool
+) -> None:
+    """The delivered verify command authenticates and rejects a wrong running kernel."""
+    archive = live_runner_archive
+    saved_shells = archive.shells()
+    if mismatch:
+        (archive.root / "boundary/reconnect-mode").write_text("kernel-identity", encoding="ascii")
+
+    result = archive.run_direct("verify")
+
+    if mismatch:
+        assert result.returncode == 1
+        assert "current SSH session exposes a different kernel identity" in result.stderr
+    else:
+        assert result.returncode == 0, result.stderr
+        assert "The running phone matches the selected build." in result.stderr
+    assert result.stdout == ""
+    assert archive.shells() == saved_shells
     assert (archive.root / "boundary/ram-loads.txt").read_text() == "RAM load\n"
 
 

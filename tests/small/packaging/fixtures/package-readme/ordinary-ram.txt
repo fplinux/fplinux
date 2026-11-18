@@ -49,11 +49,11 @@ After loading, the launcher opens the phone's command-line terminal
 on your computer using SSH. Type exit or press Ctrl+D to close this
 terminal; FPLinux keeps running on the phone.
 
-While the phone is still running FPLinux, connect USB and run the same
-command from the same extracted folder. Do not turn the phone off or
-hold its boot key. To reconnect without starting a new boot, use:
+While the phone is still running FPLinux, connect USB and run these
+commands from the extracted folder to reconnect or check the build:
 
-  python3.14 -I fplinux.py run --reconnect
+  python3.14 -I fplinux.py console
+  python3.14 -I fplinux.py verify
 
 Ctrl+C cancels loading or waiting; it does not turn the phone off.
 
@@ -75,6 +75,9 @@ To use FPLinux again after power-off, repeat the startup instructions.
 Full shutdown instructions are included in docs/use/power/index.html.
 
 Help and saved files
+
+Optional applications and their required APKs are in apks/.
+Install them manually using docs/guides/packages/index.html.
 
 Each launch saves a runtime.log file and shows its full path.
 Include that log when reporting a startup problem.

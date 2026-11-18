@@ -55,24 +55,13 @@ def validate_archive(
                 fail("The RAM payload does not have its required header")
     else:
         fail("This platform has no Windows RAM loader")
-    try:
-        windows = json.loads((root / "windows-host.json").read_text(encoding="utf-8"))
-    except (OSError, ValueError) as error:
-        fail(f"Windows host manifest cannot be read: {error}")
-    windows = runner.require_object(windows, {"host_tools", "sha256"}, "Windows host manifest")
+    windows = _validate_windows_manifest(root)
     if windows["host_tools"] != tool_paths:
         fail("Windows host tools do not match this archive format")
     hashes = windows["sha256"]
     required_files = set(tool_paths.values())
-    if not isinstance(hashes, dict) or not required_files.issubset({*runtime["sha256"], *hashes}):
+    if not required_files.issubset({*runtime["sha256"], *hashes}):
         fail("Windows host manifest lacks native tool checksums")
-    for relative, expected in hashes.items():
-        name = runner.relative_name(relative, "Windows file")
-        if not isinstance(expected, str) or not is_sha256(expected):
-            fail(f"Windows file checksum is invalid: {name}")
-        runner.require_file(root / name)
-        if runner.digest(root / name) != expected:
-            fail(f"Windows file checksum differs: {name}")
     return WindowsBundle(
         root,
         runtime,
@@ -81,3 +70,38 @@ def validate_archive(
         generation,
         device_identity,
     )
+
+
+def _validate_windows_manifest(root: Path) -> dict[str, Any]:
+    runner = bundle_runtime
+    try:
+        windows = json.loads((root / "windows-host.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError) as error:
+        fail(f"Windows host manifest cannot be read: {error}")
+    windows = runner.require_object(windows, {"host_tools", "sha256"}, "Windows host manifest")
+    hashes = windows["sha256"]
+    if not isinstance(hashes, dict):
+        fail("Windows host manifest has invalid checksums")
+    for relative, expected in hashes.items():
+        name = runner.relative_name(relative, "Windows file")
+        if not isinstance(expected, str) or not is_sha256(expected):
+            fail(f"Windows file checksum is invalid: {name}")
+        runner.require_file(root / name)
+        if runner.digest(root / name) != expected:
+            fail(f"Windows file checksum differs: {name}")
+    return windows
+
+
+def validate_connection_tools(root: Path) -> dict[str, Path]:
+    """Admit packaged SSH tools without reading the current RAM build."""
+    windows = _validate_windows_manifest(root)
+    tool_paths = windows["host_tools"]
+    if not isinstance(tool_paths, dict) or tool_paths not in (
+        windows_tool_paths({"loader": WINDOWS_TOOLS["loader"]}),
+        windows_tool_paths({"loader": WINDOWS_TOOLS["loader"], "bridge": WINDOWS_TOOLS["bridge"]}),
+    ):
+        fail("Windows host tools do not match this archive format")
+    roles = ("ssh", "keygen", "keyscan", "driver")
+    if any(tool_paths[role] not in windows["sha256"] for role in roles):
+        fail("Windows host manifest lacks native tool checksums")
+    return {role: root / tool_paths[role] for role in roles}

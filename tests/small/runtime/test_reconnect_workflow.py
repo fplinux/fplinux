@@ -13,7 +13,7 @@ from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
 import pytest
-from fplinux_cli.runtime import boot, workflow
+from fplinux_cli.runtime import boot, live, workflow
 from fplinux_cli.runtime.bundle import ValidatedBundle
 from fplinux_cli.runtime.connection import ConnectionLostError, SessionResumedError
 from fplinux_cli.runtime.events import RunLog
@@ -104,10 +104,12 @@ def test_lost_shell_reauthenticates_original_session_and_reopens_without_rebooti
     monkeypatch.setattr(workflow, "admit_bundle", lambda _bundle: admitted_bundle)
     monkeypatch.setattr(workflow, "host_preflight", lambda: None)
     monkeypatch.setattr(boot, "host_preflight", lambda: None)
+    monkeypatch.setattr("fplinux_cli.runtime.workflow.os.isatty", lambda _fd: True)
+    monkeypatch.setattr(ssh_transport, "usb_present", lambda _session: True)
     monkeypatch.setattr(ssh_transport, "run_shell", shell)
     monkeypatch.setattr(ssh_transport, "reacquire_bound_session", reacquire)
 
-    result = workflow.run_phone(tmp_path, data, tmp_path / "logs", reconnect=True)
+    result = workflow.run_phone(tmp_path, data, tmp_path / "logs")
 
     assert result == 0
     assert shells == [("ab" * 32, str(key), "usb0"), ("ab" * 32, str(key), "usb7")]
@@ -132,7 +134,6 @@ def test_lost_shell_reauthenticates_original_session_and_reopens_without_rebooti
 
 @pytest.mark.parametrize("shell_status", [0, 17], ids=["exit", "remote-failure"])
 def test_normal_shell_exit_ends_terminal_without_reconnecting(
-    admitted_bundle: ValidatedBundle,
     saved_session: dict[str, Any],
     runtime_log: RunLog,
     monkeypatch: pytest.MonkeyPatch,
@@ -145,26 +146,25 @@ def test_normal_shell_exit_ends_terminal_without_reconnecting(
         opened.append(session["session_id"])
         return shell_status
 
-    def unexpected_reconnect(*_args: object, **_kwargs: object) -> dict[str, Any]:
+    def unexpected_reconnect(
+        _connection: tuple[Any, dict[str, Any]],
+    ) -> tuple[Any, dict[str, Any]]:
         pytest.fail("a normal SSH exit must not reconnect")
 
     monkeypatch.setattr(ssh_transport, "run_shell", shell)
-    monkeypatch.setattr(ssh_transport, "reacquire_bound_session", unexpected_reconnect)
     if shell_status:
         with pytest.raises(SystemExit) as result:
-            workflow._interactive_shell(  # noqa: SLF001 -- shared terminal lifetime boundary.
-                admitted_bundle,
+            workflow.interactive_shell(
                 (ssh_transport, saved_session),
                 runtime_log,
-                prepared_data_sha256=None,
+                reconnect=unexpected_reconnect,
             )
         assert result.value.code == 17
     else:
-        workflow._interactive_shell(  # noqa: SLF001 -- shared terminal lifetime boundary.
-            admitted_bundle,
+        workflow.interactive_shell(
             (ssh_transport, saved_session),
             runtime_log,
-            prepared_data_sha256=None,
+            reconnect=unexpected_reconnect,
         )
     assert opened == ["ab" * 32]
     assert "SSH connection lost." not in runtime_log.path.read_text(encoding="utf-8")
@@ -210,10 +210,12 @@ def test_terminal_reconnect_failure_preserves_saved_keys_without_rebooting(  # n
     monkeypatch.setattr(workflow, "admit_bundle", lambda _bundle: admitted_bundle)
     monkeypatch.setattr(workflow, "host_preflight", lambda: None)
     monkeypatch.setattr(boot, "host_preflight", lambda: None)
+    monkeypatch.setattr("fplinux_cli.runtime.workflow.os.isatty", lambda _fd: True)
+    monkeypatch.setattr(ssh_transport, "usb_present", lambda _session: True)
     monkeypatch.setattr(ssh_transport, "reacquire_bound_session", reacquire)
     monkeypatch.setattr(ssh_transport, "run_shell", shell)
 
-    result = workflow.run_phone(tmp_path, data, tmp_path / "logs", reconnect=True)
+    result = workflow.run_phone(tmp_path, data, tmp_path / "logs")
 
     assert result == expected_status
     assert authentications == [saved_session["session_id"], saved_session["session_id"]]
@@ -239,30 +241,37 @@ def test_remote_command_failure_is_reported_once_without_reconnecting_or_replayi
 ) -> None:
     """An explicit command remains a one-shot action even when SSH returns 255."""
     commands: list[tuple[str, str]] = []
-    authentications: list[str] = []
+    authentications: list[str | None] = []
 
-    def reacquire(session: dict[str, Any], *, expected_device_identity: str) -> dict[str, Any]:
-        assert expected_device_identity == "12" * 32
-        authentications.append(session["session_id"])
+    def reacquire(
+        session: dict[str, Any], *, expected_device_identity: str | None
+    ) -> dict[str, Any]:
+        authentications.append(expected_device_identity)
         return session
 
-    def command(session: dict[str, Any], text: str) -> subprocess.CompletedProcess[str]:
+    def command(
+        session: dict[str, Any], text: str, **_options: object
+    ) -> subprocess.CompletedProcess[str]:
+        if text.startswith("uname -r;"):
+            return subprocess.CompletedProcess(text, 0, "Linux\ntest-build\n")
         commands.append((session["session_id"], text))
         return subprocess.CompletedProcess(text, 255)
 
-    monkeypatch.setattr(workflow, "admit_bundle", lambda _bundle: admitted_bundle)
-    monkeypatch.setattr(workflow, "host_preflight", lambda: None)
     monkeypatch.setattr(boot, "host_preflight", lambda: None)
     monkeypatch.setattr(ssh_transport, "reacquire_bound_session", reacquire)
     monkeypatch.setattr(ssh_transport, "run_remote", command)
 
-    result = workflow.run_phone(
-        tmp_path, tmp_path / "data", tmp_path / "logs", reconnect=True, exec_command="printf sent"
+    result = live.console_connection(
+        (ssh_transport, saved_session),
+        tmp_path / "data",
+        tmp_path / "logs",
+        admitted=admitted_bundle,
+        exec_command="printf sent",
     )
 
     assert result == 255
     assert commands == [("ab" * 32, "printf sent")]
-    assert authentications == ["ab" * 32]
+    assert authentications == [None, "12" * 32]
     assert Path(saved_session["private_key"]).read_bytes() == b"private\n"
 
 

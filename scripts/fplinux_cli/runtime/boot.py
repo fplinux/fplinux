@@ -239,7 +239,11 @@ def saved_bundle_connection(
 
         if admitted.windows is None:
             fail("This bundle has no admitted Windows host tools")
-        transport: Any = WindowsTransport(WindowsHost(), admitted.windows)
+        transport: Any = WindowsTransport(
+            WindowsHost(),
+            admitted.windows.tools,
+            wait_seconds=runtime["usb"]["linux_gadget"]["wait_seconds"],
+        )
         session = transport.load_saved_session(runtime["target"], session_root=session_root)
     else:
         transport = ssh_transport
@@ -261,6 +265,8 @@ def reconnect_saved_connection(
             bundle_generation=admitted.generation,
             prepared_data_sha256=prepared_data_sha256,
         )
+    elif session["generation"] != admitted.generation:
+        fail("The running phone uses a different build")
     elif session["prepared_data_sha256"] != prepared_data_sha256:
         fail("The running phone uses different prepared phone data; shut it down first")
     session = transport.reacquire_bound_session(

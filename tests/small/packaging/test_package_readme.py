@@ -130,3 +130,16 @@ def test_target_without_a_published_page_keeps_new_phone_archive_instructions(
     assert "docs/porting/checklist/index.html" in text
     assert "Hold the left soft key while connecting USB." in text
     assert "confirm it on this phone before use" in " ".join(text.split())
+
+
+def test_optional_calibration_does_not_require_a_backup_in_startup_instructions(
+    readme_config: dict[str, Any],
+) -> None:
+    """Optional phone data must not turn a direct launch into a mandatory acquisition."""
+    readme_config["device_data"]["required_groups"] = []
+
+    text = ordinary_readme("demo-phone", readme_config).decode()
+
+    assert "Start FPLinux" in text
+    assert "When a backup is needed" not in text
+    assert "When phone settings are needed" not in text

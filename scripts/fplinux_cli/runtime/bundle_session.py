@@ -117,15 +117,3 @@ def bundle_runtime_command(
     if phone_data is not None:
         command.extend(("--phone-data", str(phone_data)))
     return command
-
-
-def _manifest_device_identity(manifest: dict[str, Any]) -> str:
-    """Return the exact kernel-visible identity declared by one build manifest."""
-    device_identity = manifest.get("device_identity")
-    if (
-        not isinstance(device_identity, str)
-        or len(device_identity) != 64
-        or any(character not in "0123456789abcdef" for character in device_identity)
-    ):
-        fail("current bundle device identity is invalid")
-    return device_identity
