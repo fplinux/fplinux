@@ -1,0 +1,16 @@
+# SPDX-License-Identifier: GPL-2.0-only
+if ARCH_UMS9117
+
+config MACH_KONROW_SENIOR_280_PLUS
+	bool "Konrow Senior 280 Plus"
+	select GPIOLIB
+	select GPIO_PMIC_EIC_SPRD
+	select MFD_SYSCON
+	help
+	  Board support for the Konrow Senior 280 Plus, loaded into RAM
+	  over USB with a 48 MiB memory layout. The board provides a USB
+	  session, LCM display, matrix keypad, fixed-session microSD access,
+	  headphone playback, battery measurements and parallel NAND identification.
+	  Internal storage reads, speaker playback and Bluetooth are not enabled.
+
+endif

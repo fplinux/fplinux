@@ -56,6 +56,7 @@ def test_release_contains_the_complete_matrix_sources_and_dependency_transport(
     sources, modes = read_zip(source)
     assert modes["project/fplinux"] == 0o100755
     assert sources["project/common/example.c"] == b"one shared project source\n"
+    assert "project/targets/konrow-senior-280-plus/target.toml" in sources
     assert sources["upstream/shared.tar.xz"] == b"same exact upstream input"
     assert sources["licenses/host-tools/COPYING"] == b"retained license\n"
     metadata = json.loads((output / "RELEASE.json").read_bytes())
@@ -143,6 +144,20 @@ def test_source_distribution_parser_rejects_duplicate_runtime_selection() -> Non
         distribution.distribution_records(
             json_bytes({**release_fields(), "runtimes": [record, record]})
         )
+
+
+def test_automatic_release_rejects_a_locally_packaged_opted_out_target(
+    inputs: tuple[Path, Path], tmp_path: Path
+) -> None:
+    packages, transport = inputs
+    write_pair(packages, "konrow-senior-280-plus", "linux")
+
+    with pytest.raises(SystemExit, match=r"extra=\[\('konrow-senior-280-plus', 'linux'\)\]"):
+        distribution.assemble_distribution(
+            packages, tmp_path / "final", inputs_directory=transport
+        )
+
+    assert not (tmp_path / "final").exists()
 
 
 @pytest.mark.parametrize(

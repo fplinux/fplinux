@@ -215,6 +215,9 @@ def _write_peripheral_binding_stubs(include: Path) -> None:
         "KEY_ENTER": 28,
         "KEY_MENU": 139,
         "KEY_BACK": 158,
+        "KEY_UNKNOWN": 240,
+        "KEY_VOLUMEDOWN": 114,
+        "KEY_VOLUMEUP": 115,
     }
     bindings = {
         "interrupt-controller/arm-gic.h": (
@@ -374,6 +377,50 @@ def test_qin_compiled_keymaps_publish_phone_role_codes(tmp_path: Path) -> None:
     assert nodes["/gpio-keys"]["compatible"] == b"xiaomi,qin1s-plus-gpio-keys\0"
     for key, expected_code in gpio_codes.items():
         assert nodes[f"/gpio-keys/{key}"]["linux,code"] == bytes.fromhex(expected_code)
+
+
+def test_konrow_compiled_keymap_uses_measured_keys_for_navigation(tmp_path: Path) -> None:
+    """The physical green and side keys provide OK and arrows without phantom roles."""
+    dtb = _compile_target_dtb(tmp_path, "konrow-senior-280-plus")
+    path = "/soc/keypad@40250000"
+    keymap = exact_path_properties(dtb, (path,))[path]["linux,keymap"]
+    roles = {}
+    for offset in range(0, len(keymap), 4):
+        entry = int.from_bytes(keymap[offset : offset + 4], "big")
+        code = entry & 0xFFFF
+        if code in (0x0069, 0x006A, 0x0160, 0x01BD):
+            roles[entry >> 16] = code
+    assert roles == {0x0004: 0x006A, 0x0104: 0x0069, 0x0400: 0x0160}
+
+
+def test_konrow_compiled_peripherals_enable_card_headphones_and_battery(tmp_path: Path) -> None:
+    """The DT exposes a fixed-session card, headphone-only audio and calibrated FGU."""
+    dtb = _compile_target_dtb(tmp_path, "konrow-senior-280-plus")
+    nodes = exact_path_properties(
+        dtb,
+        (
+            "/soc/mmc@20300000",
+            "/soc/audio@40000000",
+            "/soc/spi@40600000/pmic@0/fuel-gauge",
+            "/soc/spi@40600000/pmic@0/keypad-backlight@df8",
+        ),
+    )
+    card = nodes["/soc/mmc@20300000"]
+    assert card["status"] == b"okay\0"
+    assert card["non-removable"] == b""
+    audio = nodes["/soc/audio@40000000"]
+    assert audio["status"] == b"okay\0"
+    assert audio["pinctrl-names"] == b"audio\0"
+    assert audio["firmware-name"] == b"fplinux/konrow280plus-audio-profile.bin\0"
+    assert audio["fplinux,headphones-only"] == b""
+    assert "fplinux,microphone-capture" not in audio
+    assert "speaker-enable-gpios" not in audio
+    gauge = nodes["/soc/spi@40600000/pmic@0/fuel-gauge"]
+    assert gauge["status"] == b"okay\0"
+    assert gauge["fplinux,current-calibration"] == bytes.fromhex("0000000a 00000014")
+    light = nodes["/soc/spi@40600000/pmic@0/keypad-backlight@df8"]
+    assert light["status"] == b"okay\0"
+    assert light["fplinux,current-code"] == bytes.fromhex("0000000d")
 
 
 def test_nokia110_compiled_microsd_tree_preserves_the_boot_display_reservation(

@@ -18,12 +18,14 @@ def load_release(target: str, *, bundle_packages: Sequence[str] = ()) -> dict[st
     path = target_release_manifest_path(target)
     if path.is_symlink() or not path.is_file():
         fail(f"target release manifest is missing or invalid: {path}")
-    raw = load_toml(path)
     manifest = exact_table(
-        raw,
-        {"image", "bundle_files", "runtime_files", "documents"},
+        {"publish": True, **load_toml(path)},
+        {"publish", "image", "bundle_files", "runtime_files", "documents"},
         f"target {target} release manifest",
     )
+    publish = manifest["publish"]
+    if not isinstance(publish, bool):
+        fail("release manifest publish must be a boolean")
     image = relative_value(manifest.get("image"), "release manifest image")
     bundle_files = path_array(manifest.get("bundle_files"), "release bundle_files")
     runtime_files = path_array(manifest.get("runtime_files"), "release runtime_files")
@@ -41,6 +43,7 @@ def load_release(target: str, *, bundle_packages: Sequence[str] = ()) -> dict[st
     )
     bundle_files = [*bundle_files, *apk_files]
     return {
+        "publish": publish,
         "image": image,
         "bundle_files": bundle_files,
         "runtime_files": runtime_files,

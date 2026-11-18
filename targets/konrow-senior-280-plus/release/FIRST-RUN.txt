@@ -1,0 +1,76 @@
+Konrow Senior 280 Plus: Linux test build
+
+Keep NixOS; you do not need to install another distribution. Follow README.txt
+for USB permissions and the USB network connection.
+
+On NixOS, install the included USB rule declaratively before starting.
+Copy 60-fplinux.rules next to your NixOS configuration and add this inside
+its module body, where pkgs is available:
+
+    services.udev.packages = [
+      (pkgs.writeTextFile {
+        name = "fplinux-usb-access";
+        destination = "/etc/udev/rules.d/60-fplinux.rules";
+        text = builtins.readFile ./60-fplinux.rules;
+      })
+    ];
+
+For a Git-backed flake, track the rule file before rebuilding. Apply the
+configuration with sudo nixos-rebuild switch. Use an active local login
+session for uaccess. Keep the rule filename 60-fplinux.rules. Your network
+manager must request IPv4 DHCP on the phone's new USB interface;
+NetworkManager normally does this automatically.
+
+Extract the whole ZIP. Keep the phone powered off and disconnected, then run
+from the extracted folder:
+
+    sh Run.sh
+
+Wait until the launcher asks you to connect. Hold only 1, connect USB and keep
+holding the key until the phone has loaded into RAM. Do not hold 2+4 or use
+the microSD boot combination for this test.
+
+The early loader has no screen output. The 240x320 display and graphical interface have started on this phone. Brightness adjustment and the new controls below still need checking.
+
+Controls in this build:
+  Green call key: OK, to open and confirm items.
+  Side Volume -: Left.
+  Side Volume +: Right.
+  Unlock: left soft key, then *.
+
+The side keys provide horizontal navigation. SOS has no assigned action. The torch uses its separate physical switch.
+
+MicroSD access, wired headphone playback, keypad lighting and battery voltage/current readings have worked on this phone. Insert the microSD card before powering on and leave it inserted until the phone is off. This is a data card for the RAM session, not a standalone Linux boot card.
+
+Use wired headphones and start at a low volume before increasing it. Playback uses generic levels. The loudspeaker, microphone, automatic headphone detection, vibration and Bluetooth are not enabled. The displayed battery level is an estimate from voltage and current.
+
+The processor temperature sensor and JPEG/rotation hardware are enabled for testing. Camera capture is not enabled.
+
+This build uses a 48 MiB RAM layout. It does not write internal storage.
+NAND access is limited to identifying the chip; raw backup is unavailable.
+No automatic NAND backup is attempted.
+
+After Linux starts, open a second terminal on the PC in the extracted folder
+and run this single command, keeping USB connected:
+
+    sh Run.sh nand identify
+
+It attempts identification once and saves the reader audit before and after
+the attempt in runtime.log, including an I/O error. Send that runtime.log and
+run.json. Do not repeat the command in that session after an error.
+
+When SSH opens, run:
+
+    uname -a
+    cat /proc/meminfo
+    cat /proc/asound/cards
+    ls /sys/block/mmcblk*
+    cat /sys/class/power_supply/sc2720-battery/voltage_now
+    cat /sys/class/power_supply/sc2720-battery/current_now
+    dmesg
+
+Send the output, runtime.log and run.json, and describe what appears on the
+screen, whether keypad lighting turns on and off, and whether volume changes work through wired headphones. The launcher prints the log location.
+
+When finished, run poweroff in the phone shell before disconnecting USB.
+Disconnect the charger when checking complete power-off.

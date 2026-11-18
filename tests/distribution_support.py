@@ -45,6 +45,7 @@ def project_sources() -> dict[str, bytes]:
         "project/fplinux": b"#!/bin/sh\nexit 0\n",
         "project/LICENSE": b"project license\n",
         "project/THIRD_PARTY_NOTICES.md": b"third-party notices\n",
+        "project/targets/konrow-senior-280-plus/target.toml": b'platform = "test"\n',
         **{
             f"project/targets/{target}/target.toml": b'platform = "test"\n'
             for target, _host in SELECTIONS

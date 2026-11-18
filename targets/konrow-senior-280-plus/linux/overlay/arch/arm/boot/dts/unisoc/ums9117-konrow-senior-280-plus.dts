@@ -1,0 +1,191 @@
+// SPDX-License-Identifier: GPL-2.0-only
+/dts-v1/;
+
+#include <dt-bindings/input/input.h>
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/input/fplinux-keypad.h>
+#include <dt-bindings/leds/common.h>
+#include "ums9117.dtsi"
+#include "ums9117-sc2720.dtsi"
+#include "fplinux-konrow-senior-280-plus-identity.dtsi"
+#include "ums9117-nand-readonly.dtsi"
+#include "fplinux-konrow-senior-280-plus-panel-addresses.h"
+
+/ {
+	memory@80200000 {
+		device_type = "memory";
+		reg = <0x80200000 0x02c00000>;
+	};
+
+	soc {
+		display@20800000 {
+			compatible = "fplinux,ums9117-konrow-senior-280-plus-lcm-fb";
+			reg = <0x20800000 0x00001000>,
+			      <0x20a00000 0x00001000>,
+			      <0x60000000 0x00000002>,
+			      <0x60020000 0x00000002>,
+			      <0x20e01000 0x00000004>,
+			      <0x20e01004 0x00000004>,
+			      <0x20e02004 0x00000004>,
+			      <FPLINUX_PANEL_CONTROL_MUX_PHYS 0x0000001c>,
+			      <FPLINUX_PANEL_CONTROL_CONFIG_PHYS 0x0000001c>,
+			      <FPLINUX_PANEL_DATA_MUX_PHYS 0x0000004c>,
+			      <FPLINUX_PANEL_DATA_CONFIG_PHYS 0x0000004c>;
+			interrupt-names = "lcdc-done";
+			interrupts = <GIC_SPI 19 IRQ_TYPE_LEVEL_HIGH>;
+			memory-region = <&codec_dma>;
+			reg-names = "lcdc", "lcm", "lcm-command", "lcm-data",
+				    "ap-ahb-gate-set", "ap-ahb-reset-set",
+				    "ap-ahb-reset-clear", "pinmux", "pinconf",
+				    "pinmux-data", "pinconf-data";
+			sprd,aon-apb = <&aon_apb>;
+#include "fplinux-konrow-senior-280-plus-panel.dtsi"
+			sprd,pmic = <&sc2720_pmic>;
+			sprd,wled-current-levels = <0 0 0 34>;
+			sprd,wled-default-level = <255>;
+		};
+	};
+};
+
+#include "ums9117-ram-session.dtsi"
+
+&codec_dma {
+	size = <0x00400000>;
+};
+
+&nandc {
+	compatible = "fplinux,ums9117-nandc-parallel-id";
+	/delete-property/ fplinux,nand-id;
+	sprd,pinconf-values = <
+		0x00102001 0x00102001 0x00102001 0x00102001 0x00102001
+		0x00102001 0x00002000 0x00102000 0x00102000 0x00102000
+		0x00102000 0x00102000 0x00102000 0x00102000 0x00102001
+		0x0010208a 0x00102000
+	>;
+};
+
+&keypad_mux {
+	keypad_mux_pins: keypad-pins {
+		pinctrl-single,pins = <
+			0x00 0 0x04 0 0x08 0 0x0c 0 0x10 0
+			0x14 0 0x18 0 0x1c 0 0x20 0 0x24 0
+		>;
+	};
+};
+
+&keypad_pads {
+	keypad_pad_pins: keypad-pins {
+		pinctrl-single,pins = <
+			0x00 0x00080001 0x04 0x00080001 0x08 0x00080001
+			0x0c 0x00080001 0x10 0x00080001
+			0x14 0x0008008a 0x18 0x0008008a 0x1c 0x0008008a
+			0x20 0x0008008a 0x24 0x0008008a
+		>;
+	};
+};
+
+&keypad {
+	compatible = "sprd,ums9117-keypad";
+	eic1-gpios = <&sc2720_eic 1 GPIO_ACTIVE_LOW>;
+	label = "Konrow Senior 280 Plus keypad";
+	pinctrl-0 = <&keypad_mux_pins &keypad_pad_pins>;
+	pinctrl-names = "matrix";
+	keypad,num-columns = <5>;
+	keypad,num-rows = <5>;
+	linux,keymap = <
+		MATRIX_KEY(0, 0, FPLINUX_KEY_1)
+		MATRIX_KEY(0, 1, FPLINUX_KEY_2)
+		MATRIX_KEY(0, 2, FPLINUX_KEY_3)
+		MATRIX_KEY(0, 3, FPLINUX_KEY_SOFT_RIGHT)
+		MATRIX_KEY(0, 4, FPLINUX_KEY_RIGHT)
+		MATRIX_KEY(1, 0, FPLINUX_KEY_4)
+		MATRIX_KEY(1, 1, FPLINUX_KEY_5)
+		MATRIX_KEY(1, 2, FPLINUX_KEY_6)
+		MATRIX_KEY(1, 3, FPLINUX_KEY_SOFT_LEFT)
+		MATRIX_KEY(1, 4, FPLINUX_KEY_LEFT)
+		MATRIX_KEY(2, 0, FPLINUX_KEY_7)
+		MATRIX_KEY(2, 1, FPLINUX_KEY_8)
+		MATRIX_KEY(2, 2, FPLINUX_KEY_9)
+		MATRIX_KEY(2, 3, KEY_UNKNOWN)
+		MATRIX_KEY(3, 0, FPLINUX_KEY_STAR)
+		MATRIX_KEY(3, 1, FPLINUX_KEY_0)
+		MATRIX_KEY(3, 2, FPLINUX_KEY_POUND)
+		MATRIX_KEY(3, 3, KEY_UNKNOWN)
+		MATRIX_KEY(3, 4, KEY_UNKNOWN)
+		MATRIX_KEY(4, 0, FPLINUX_KEY_OK)
+		MATRIX_KEY(4, 1, FPLINUX_KEY_DOWN)
+		MATRIX_KEY(4, 2, KEY_UNKNOWN)
+		MATRIX_KEY(4, 3, FPLINUX_KEY_UP)
+	>;
+	sprd,eic1-keycode = <FPLINUX_KEY_POWER>;
+
+	status = "okay";
+};
+
+&audio_mux {
+	audio_mux_pins: audio-pins {
+		pinctrl-single,pins = <
+			0x00 0 0x08 0 0x0c 0 0x14 0 0x18 0 0x1c 0
+		>;
+	};
+};
+
+&audio_pads {
+	audio_pad_pins: audio-pins {
+		pinctrl-single,pins = <
+			0x00 0x0008e001 0x08 0x0008e001 0x0c 0x0008e001
+			0x14 0x0008e000 0x18 0x0008e000 0x1c 0x0008e001
+		>;
+	};
+};
+
+&audio {
+	firmware-name = "fplinux/konrow280plus-audio-profile.bin";
+	pinctrl-0 = <&audio_mux_pins &audio_pad_pins>;
+	pinctrl-names = "audio";
+	fplinux,card-longname = "Konrow Senior 280 Plus headphone output";
+	fplinux,headphones-only;
+
+	status = "okay";
+};
+
+&sdio0_mmc {
+	non-removable;
+
+	status = "okay";
+};
+
+&thm1 {
+	status = "okay";
+};
+
+&ap_dma {
+	status = "okay";
+};
+
+&rota {
+	status = "okay";
+};
+
+&jpeg {
+	status = "okay";
+};
+
+&sc2720_fgu {
+	fplinux,current-calibration = <10 20>;
+
+	status = "okay";
+};
+
+&sc2720_kpled {
+	fplinux,current-code = <13>;
+
+	status = "okay";
+};
+
+&usb {
+	compatible = "fplinux,ums9117-musb-inherited";
+	dr_mode = "peripheral";
+
+	status = "okay";
+};

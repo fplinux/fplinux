@@ -1,3 +1,4 @@
+publish = false
 image = "linux.bin"
 bundle_files = ["z.apk", "a.apk"]
 runtime_files = ["z.bin", "a.bin"]

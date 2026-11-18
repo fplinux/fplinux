@@ -1,0 +1,84 @@
+# SPDX-License-Identifier: GPL-2.0-only
+platform = "ums9117"
+
+[identity]
+brand = "Konrow"
+product = "Senior 280 Plus"
+hardware_codes = []
+compatible = "konrow,senior-280-plus"
+
+[nand]
+raw_device = "/dev/ums9117-nand-raw"
+
+[display]
+panel = "display/panel.toml"
+boot_font = "7x14"
+
+[display_brightness]
+backlight = "konrow-senior-280-plus-backlight"
+levels = [0, 25, 51, 76, 102, 127, 153, 178, 204, 229, 255]
+
+[rootfs]
+packages = ["fplinux-audio", "fplinux-font-terminus-8x16"]
+
+[bundle]
+packages = []
+
+[linux]
+config_fragment = "linux/config/config.fragment"
+memory = { base = 0x80200000, size = 0x02c00000 }
+dtb = "unisoc/ums9117-konrow-senior-280-plus.dtb"
+debug_dtb = "ums9117-konrow-senior-280-plus.dtb"
+patches = []
+additional_forbidden_dtb_markers = []
+additional_forbidden_config = []
+overlay = "linux/overlay"
+copies = []
+
+[[linux.appends]]
+source = "linux/fragments/arch/arm/mach-ums9117/Kconfig"
+destination = "arch/arm/mach-ums9117/Kconfig"
+
+[[linux.appends]]
+source = "linux/fragments/dts/unisoc.Makefile"
+destination = "arch/arm/boot/dts/unisoc/Makefile"
+
+[[linux.appends]]
+source = "linux/fragments/drivers/gpu/drm/ums9117/drm.Kconfig"
+destination = "drivers/gpu/drm/Kconfig"
+
+[[linux.appends]]
+source = "linux/fragments/drivers/gpu/drm/ums9117/drm.Makefile"
+destination = "drivers/gpu/drm/ums9117/Makefile"
+
+[bootstrap]
+image = "konrow_senior_280_plus_linux_bootstrap.bin"
+map = "obj/konrow_senior_280_plus_linux_bootstrap_map.txt"
+dtb_destination = "konrow_senior_280_plus.dtb"
+record_prefix = "KONROW_SENIOR_280_PLUS"
+
+[bootstrap.layout]
+ram_base = 0x80000000
+ram_size = 0x03000000
+kernel_load = 0x82000000
+kernel_entry = 0x82000000
+kernel_size = 0x00c00000
+fdt_load = 0x82e00000
+fdt_size = 0x00010000
+framebuffer = 0x82f00000
+framebuffer_size = 0x00100000
+timer_hz = 1000
+
+[adapter]
+exec_distance = 0
+session_name = "konrow-senior-280-plus-linux"
+boot_instructions = "Power the phone off, hold 1, then connect USB while keeping 1 pressed."
+
+[device_data]
+originals_parser = "konrow280plus_device_data.py"
+required_groups = []
+
+[audio_profile]
+firmware = [
+  { source = "konrow280plus-audio-profile.bin", destination = "fplinux/konrow280plus-audio-profile.bin", size = 283 },
+]

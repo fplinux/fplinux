@@ -16,7 +16,7 @@ from fplinux_cli import common
 from fplinux_cli.artifacts.release import release_context_from_fields
 from fplinux_cli.common import canonical_json_bytes, fail, is_sha256, sha256_bytes
 from fplinux_cli.data_paths import DATA_DIR_NAME, PRIVATE_DIR_NAME
-from fplinux_cli.manifests import targets
+from fplinux_cli.manifests import releases, targets
 from fplinux_cli.manifests.paths import discover_targets
 from fplinux_cli.packaging.hosts import runtime_hosts
 
@@ -42,10 +42,11 @@ def require_public_runtime_files(files: Collection[str], archive_name: str) -> N
 
 
 def distribution_matrix() -> tuple[tuple[str, str], ...]:
-    """Discover each supported default RAM target and its ready runtime hosts."""
+    """Discover the default RAM archives included in automatic releases."""
     return tuple(
         (target, host)
         for target in discover_targets()
+        if releases.load_release(target)["publish"]
         for host in runtime_hosts(targets.load_target(target))
     )
 

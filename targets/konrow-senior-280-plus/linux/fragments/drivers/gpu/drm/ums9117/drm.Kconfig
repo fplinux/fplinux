@@ -1,0 +1,12 @@
+# SPDX-License-Identifier: GPL-2.0-only
+config DRM_KONROW_SENIOR_280_PLUS
+	bool "Konrow Senior 280 Plus LCDC display"
+	depends on DRM && MACH_KONROW_SENIOR_280_PLUS
+	select DRM_UMS9117
+	select DRM_UMS9117_LCM
+	select DRM_UMS9117_WAKE_REINIT
+	help
+	  Drive the Konrow Senior 280 Plus panel through the UMS9117
+	  parallel LCM/DBI interface with atomic RGB565 and NV16 modesetting,
+	  bounded transfer completion and LCD backlight control.
+	  The in-kernel console uses DRM fbdev emulation.

@@ -1,0 +1,292 @@
+# SPDX-License-Identifier: GPL-2.0-only
+width = 240
+height = 320
+id = 0x9306
+id_mask = 0xffff
+memory_access = 0x48
+transport = "dbi"
+license = "GPL-2.0-only"
+copyright = []
+commands = [
+  { delay_ms = 180 },
+  { command = 0xfe },
+  { command = 0xfe },
+  { command = 0xef },
+  { command = 0x36, data = [
+    0x48,
+  ] },
+  { command = 0x3a, data = [
+    0x05,
+  ] },
+  { command = 0x35, data = [
+    0x00,
+  ] },
+  { command = 0x44, data = [
+    0x00,
+    0x0a,
+  ] },
+  { command = 0xa4, data = [
+    0x44,
+    0x44,
+  ] },
+  { command = 0xa5, data = [
+    0x42,
+    0x42,
+  ] },
+  { command = 0xaa, data = [
+    0x88,
+    0x88,
+  ] },
+  { command = 0xe8, data = [
+    0x13,
+    0x00,
+  ] },
+  { command = 0xff, data = [
+    0x61,
+  ] },
+  { command = 0xac, data = [
+    0x00,
+  ] },
+  { command = 0xad, data = [
+    0x33,
+  ] },
+  { command = 0xaf, data = [
+    0x77,
+  ] },
+  { command = 0xae, data = [
+    0x2f,
+  ] },
+  { command = 0xec, data = [
+    0x33,
+    0x12,
+    0x88,
+  ] },
+  { command = 0xe3, data = [
+    0x01,
+    0x10,
+    0x00,
+    0x03,
+  ] },
+  { command = 0xe1, data = [
+    0x08,
+    0x19,
+  ] },
+  { command = 0xa6, data = [
+    0x24,
+    0x24,
+  ] },
+  { command = 0xa7, data = [
+    0x23,
+    0x23,
+  ] },
+  { command = 0xa8, data = [
+    0x12,
+    0x12,
+  ] },
+  { command = 0xa9, data = [
+    0x22,
+    0x22,
+  ] },
+  { command = 0xf0, data = [
+    0x02,
+    0x00,
+    0x00,
+    0x00,
+    0x01,
+    0x04,
+  ] },
+  { command = 0xf1, data = [
+    0x01,
+    0x03,
+    0x0f,
+    0x17,
+    0x16,
+    0x0d,
+  ] },
+  { command = 0xf2, data = [
+    0x02,
+    0x04,
+    0x1e,
+    0x04,
+    0x04,
+    0x30,
+  ] },
+  { command = 0xf3, data = [
+    0x14,
+    0x0c,
+    0x59,
+    0x05,
+    0x05,
+    0x69,
+  ] },
+  { command = 0xf4, data = [
+    0x0b,
+    0x18,
+    0x17,
+    0x02,
+    0x02,
+    0x0f,
+  ] },
+  { command = 0xf5, data = [
+    0x0b,
+    0x16,
+    0x14,
+    0x38,
+    0x3a,
+    0x0f,
+  ] },
+  { command = 0x11 },
+  { command = 0x29, delay_ms = 120 },
+]
+
+[bootstrap]
+spi_hz = 0
+prepare_pins = true
+reset_ms = 16
+commands_after = "cold_finish"
+
+[linux]
+commands_after = []
+cold_finish = [{ command = 0x2c }]
+wake_finish = "cold_finish"
+
+[dbi]
+timing_ns = [30, 150, 150, 60, 80, 80]
+
+[pins]
+control_base = 0x0b0
+control = [
+  [
+    0x00,
+    0x00000000,
+    0x00182001,
+  ],
+  [
+    0x04,
+    0x00000000,
+    0x00182046,
+  ],
+  [
+    0x08,
+    0x00000010,
+    0x00182001,
+  ],
+  [
+    0x0c,
+    0x00000010,
+    0x00182004,
+  ],
+  [
+    0x10,
+    0x00000010,
+    0x00182004,
+  ],
+  [
+    0x14,
+    0x00000010,
+    0x00182004,
+  ],
+  [
+    0x18,
+    0x00000010,
+    0x00182004,
+  ],
+]
+data_base = 0x1f4
+data = [
+  [
+    0x00,
+    0x00000020,
+    0x00082006,
+  ],
+  [
+    0x04,
+    0x00000020,
+    0x00082046,
+  ],
+  [
+    0x08,
+    0x00000020,
+    0x00082000,
+  ],
+  [
+    0x0c,
+    0x00000020,
+    0x00082000,
+  ],
+  [
+    0x10,
+    0x00000020,
+    0x00082000,
+  ],
+  [
+    0x14,
+    0x00000020,
+    0x00082000,
+  ],
+  [
+    0x18,
+    0x00000000,
+    0x00082040,
+  ],
+  [
+    0x1c,
+    0x00000030,
+    0x00082041,
+  ],
+  [
+    0x20,
+    0x00000000,
+    0x00082040,
+  ],
+  [
+    0x24,
+    0x00000030,
+    0x0008208a,
+  ],
+  [
+    0x28,
+    0x00000030,
+    0x00082001,
+  ],
+  [
+    0x2c,
+    0x00000010,
+    0x00182004,
+  ],
+  [
+    0x30,
+    0x00000030,
+    0x00082045,
+  ],
+  [
+    0x34,
+    0x00000010,
+    0x00182004,
+  ],
+  [
+    0x38,
+    0x00000010,
+    0x00182004,
+  ],
+  [
+    0x3c,
+    0x00000010,
+    0x00182004,
+  ],
+  [
+    0x40,
+    0x00000010,
+    0x00182004,
+  ],
+  [
+    0x44,
+    0x00000010,
+    0x00182004,
+  ],
+  [
+    0x48,
+    0x00000010,
+    0x00182004,
+  ],
+]
