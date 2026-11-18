@@ -117,11 +117,10 @@ def selected_packages(
         )
     for package in packages:
         owners[package] = "profile"
-    text_consumers = {"fplinux-brightness-ui", "fplinux-showcase"}
     font_sizes = {"fplinux-font-terminus-6x12", "fplinux-font-terminus-8x16"}
     selected_fonts = set(owners) & font_sizes
-    if len(selected_fonts) > 1 or (set(owners) & text_consumers and not selected_fonts):
-        fail("rootfs text applications require exactly one Terminus font size")
+    if len(selected_fonts) > 1:
+        fail("rootfs text applications require at most one Terminus font size")
     return _canonical_packages(tuple(owners), root)
 
 

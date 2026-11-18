@@ -1,0 +1,193 @@
+msgid ""
+msgstr ""
+"Project-Id-Version: fplinux-showcase 1\n"
+"Language: ru\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=3; plural=(n%10==1 && n%100!=11 ? 0 : n%10>=2 && n%10<=4 && (n%100<10 || n%100>=20) ? 1 : 2);\n"
+
+msgid "Start"
+msgstr "Запустить"
+
+msgid "Open"
+msgstr "Открыть"
+
+msgid "Renderer"
+msgstr "Рендерер"
+
+msgid "Not started"
+msgstr "Не запущен"
+
+msgid "Auto"
+msgstr "Авто"
+
+msgid "Software"
+msgstr "Программный"
+
+msgid "GPU"
+msgstr "GPU"
+
+msgid "Screen mode"
+msgstr "Режим экрана"
+
+msgid "Standard"
+msgstr "Обычный"
+
+msgid "Full screen"
+msgstr "На весь экран"
+
+msgid "Cycles"
+msgstr "Циклы"
+
+msgid "Active time"
+msgstr "Активное время"
+
+msgid "Until stopped"
+msgstr "До остановки"
+
+msgid "Effects"
+msgstr "Эффекты"
+
+msgid "Edit"
+msgstr "Изменить"
+
+msgid "Scene brightness"
+msgstr "Яркость по сценарию"
+
+msgid "Keypad light"
+msgstr "Подсветка клавиш"
+
+msgid "Vibration"
+msgstr "Вибрация"
+
+msgid "Off"
+msgstr "Выключены"
+
+msgid "On"
+msgstr "Включены"
+
+msgid "Reset parameters"
+msgstr "Сбросить параметры"
+
+msgid "Last result"
+msgstr "Последний результат"
+
+msgid "Settings not saved"
+msgstr "Параметры не сохранены"
+
+#, c-format
+msgid "These settings apply for this session only.\n\n%s"
+msgstr "Эти параметры действуют только до закрытия приложения.\n\n%s"
+
+msgid "Preparing…"
+msgstr "Подготовка…"
+
+msgid "Preparation failed"
+msgstr "Ошибка подготовки"
+
+#, c-format
+msgid "The run could not start. Review the settings and try again.\n\n%s"
+msgstr "Не удалось запустить. Проверьте параметры и повторите попытку.\n\n%s"
+
+msgid "The screen mode could not be changed. Try again."
+msgstr "Не удалось изменить режим экрана. Повторите попытку."
+
+msgid "The drawing area could not be prepared."
+msgstr "Не удалось подготовить область отрисовки."
+
+msgid "The drawing area became unavailable."
+msgstr "Область отрисовки стала недоступна."
+
+msgid "The frame could not be presented."
+msgstr "Не удалось показать кадр."
+
+msgid "A selected physical effect is unavailable."
+msgstr "Выбранный физический эффект недоступен."
+
+#, c-format
+msgid "Running · %llu s"
+msgstr "Прогон · %llu с"
+
+msgid "Completed"
+msgstr "Завершено"
+
+msgid "Settings"
+msgstr "К настройкам"
+
+msgid "Result"
+msgstr "Результат"
+
+msgid "Run settings"
+msgstr "Параметры запуска"
+
+msgid "Repeat"
+msgstr "Повторить"
+
+msgid "Status"
+msgstr "Статус"
+
+msgid "Stopped"
+msgstr "Остановлен"
+
+msgid "Interrupted"
+msgstr "Прерван"
+
+msgid "Error"
+msgstr "Ошибка"
+
+msgid "Unknown"
+msgstr "Неизвестно"
+
+msgid "Generated FPS"
+msgstr "FPS генерации кадров"
+
+msgid "Resolution"
+msgstr "Разрешение"
+
+msgid "Frames"
+msgstr "Кадры"
+
+msgid "Average render"
+msgstr "Средняя отрисовка"
+
+msgid "Longest render"
+msgstr "Самая долгая отрисовка"
+
+msgid "Model"
+msgstr "Модель"
+
+msgid "Build"
+msgstr "Сборка"
+
+msgid "Reason"
+msgstr "Причина"
+
+#, c-format
+msgid "%.3f ms"
+msgstr "%.3f мс"
+
+#, c-format
+msgid "%.3f s"
+msgstr "%.3f с"
+
+msgid "The selected cycles completed."
+msgstr "Заданные циклы завершены."
+
+msgid "Stopped by user."
+msgstr "Остановлен пользователем."
+
+msgid "The run lost the foreground drawing area."
+msgstr "Прогон потерял активную область отрисовки."
+
+msgid "The application became hidden or inactive."
+msgstr "Приложение скрыто или неактивно."
+
+msgid "The application was closed."
+msgstr "Приложение закрыто."
+
+msgid "The drawing area changed size."
+msgstr "Размер области отрисовки изменился."
+
+msgid "Opened from the application catalogue."
+msgstr "Приложение открыто из каталога."

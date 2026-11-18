@@ -2,7 +2,7 @@
 #include "armada-gpu-renderer.h"
 #include "armada-geometry.h"
 #include "armada-math.h"
-#include "fplinux-gpu-output.h"
+#include "fplinux-gpu-frame.h"
 
 #include <GLES3/gl3.h>
 #include <errno.h>
@@ -164,8 +164,9 @@ struct armada_gpu_program {
 };
 
 struct armada_gpu_renderer {
-	struct fplinux_gpu_output *output;
 	struct fplinux_gpu *gpu;
+	struct fplinux_gpu_frame *readback;
+	uint16_t *pixels;
 	struct armada_gl gl;
 	struct armada_gpu_program programs[ARMADA_GPU_PASS_COUNT];
 	struct armada_gpu_uniforms *uniforms;
@@ -966,13 +967,11 @@ bool armada_gpu_renderer_render(struct armada_gpu_renderer *renderer,
 	}
 	if (!check_gl(renderer, "scene rendering"))
 		return false;
-	if (!fplinux_gpu_output_render(renderer->output,
-				       renderer->scene[0].texture)) {
-		snprintf(renderer->error, sizeof(renderer->error), "%s",
-			 fplinux_gpu_output_error(renderer->output));
-		return false;
-	}
-	return true;
+	gl->BindFramebuffer(GL_FRAMEBUFFER, renderer->scene[0].framebuffer);
+	return fplinux_gpu_frame_read_rgb565(
+		renderer->readback, renderer->pixels,
+		(size_t)renderer->width * renderer->height, renderer->error,
+		sizeof(renderer->error));
 }
 
 static void destroy_target(struct armada_gpu_renderer *renderer,
@@ -989,7 +988,6 @@ static void destroy_target(struct armada_gpu_renderer *renderer,
 bool armada_gpu_renderer_destroy(struct armada_gpu_renderer *renderer)
 {
 	unsigned int index;
-	bool success;
 
 	if (!renderer)
 		return true;
@@ -1006,21 +1004,19 @@ bool armada_gpu_renderer_destroy(struct armada_gpu_renderer *renderer)
 		if (renderer->programs[index].handle)
 			renderer->gl.DeleteProgram(
 				renderer->programs[index].handle);
-	success = fplinux_gpu_output_close(renderer->output);
+	fplinux_gpu_frame_close(renderer->readback);
+	fplinux_gpu_close(renderer->gpu);
 	free(renderer);
-	return success;
+	return true;
 }
 
 struct armada_gpu_renderer *
-armada_gpu_renderer_create(struct fplinux_drm_session *display,
-			   unsigned int width, unsigned int height,
-			   bool *cleanup_complete, char *error,
-			   size_t error_size)
+armada_gpu_renderer_create(unsigned int width, unsigned int height,
+			   uint16_t *pixels, char *error, size_t error_size)
 {
 	struct armada_gpu_renderer *renderer = calloc(1, sizeof(*renderer));
 	unsigned int index;
 
-	*cleanup_complete = true;
 	if (!renderer) {
 		snprintf(error, error_size, "cannot allocate GPU renderer: %s",
 			 strerror(errno));
@@ -1028,12 +1024,16 @@ armada_gpu_renderer_create(struct fplinux_drm_session *display,
 	}
 	renderer->width = width;
 	renderer->height = height;
-	renderer->output = fplinux_gpu_output_open(display, FPLINUX_GPU_GLES3,
-						   width, height, false,
-						   renderer->error,
-						   sizeof(renderer->error));
-	renderer->gpu = fplinux_gpu_output_gpu(renderer->output);
+	renderer->pixels = pixels;
+	renderer->gpu = fplinux_gpu_open(FPLINUX_GPU_GLES3, width, height, NULL,
+					 renderer->error,
+					 sizeof(renderer->error));
 	if (!renderer->gpu || !load_gl(renderer))
+		goto failed;
+	renderer->readback = fplinux_gpu_frame_open(renderer->gpu, width,
+						    height, renderer->error,
+						    sizeof(renderer->error));
+	if (!renderer->readback)
 		goto failed;
 	for (index = 0; index < ARMADA_GPU_PASS_COUNT; ++index)
 		if (!create_program(renderer, (enum armada_gpu_pass)index))
@@ -1065,20 +1065,8 @@ armada_gpu_renderer_create(struct fplinux_drm_session *display,
 
 failed:
 	snprintf(error, error_size, "%s", renderer->error);
-	*cleanup_complete = armada_gpu_renderer_destroy(renderer);
-	if (!*cleanup_complete && error_size) {
-		size_t length = strlen(error);
-
-		snprintf(error + length, error_size - length,
-			 "; GPU cleanup failed");
-	}
+	armada_gpu_renderer_destroy(renderer);
 	return NULL;
-}
-
-struct fplinux_gpu_output *
-armada_gpu_renderer_output(const struct armada_gpu_renderer *renderer)
-{
-	return renderer->output;
 }
 
 const char *armada_gpu_renderer_name(const struct armada_gpu_renderer *renderer)

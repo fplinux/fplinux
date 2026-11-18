@@ -19,6 +19,7 @@ enum expected_output_field {
 	EXPECT_RUMBLE = 1U << 1,
 	EXPECT_CUE_ID = 1U << 2,
 	EXPECT_LCD_LEVEL = 1U << 3,
+	EXPECT_RUMBLE_REMAINING = 1U << 4,
 };
 
 struct output_expectation {
@@ -27,6 +28,7 @@ struct output_expectation {
 	bool rumble;
 	uint16_t cue_id;
 	int lcd_level;
+	unsigned int rumble_remaining_ms;
 	unsigned int fields;
 };
 
@@ -64,21 +66,7 @@ static int frame_has_detail(const uint16_t *pixels, size_t count)
 	return different > count / 16U;
 }
 
-static size_t color_count(const uint16_t *pixels, unsigned int width,
-			  unsigned int first_row, unsigned int rows,
-			  uint16_t color)
-{
-	size_t count = 0;
-
-	for (unsigned int row = first_row; row < first_row + rows; ++row)
-		for (unsigned int column = 0; column < width; ++column)
-			if (pixels[(size_t)row * width + column] == color)
-				++count;
-	return count;
-}
-
 static int output_cases_match(struct armada_scene *scene,
-			      const struct armada_metrics *metrics,
 			      const struct output_expectation *expectations,
 			      size_t count)
 {
@@ -89,8 +77,7 @@ static int output_cases_match(struct armada_scene *scene,
 			&expectations[index];
 		struct armada_outputs actual;
 
-		if (!armada_scene_render(scene, expected->frame, metrics,
-					 &actual) ||
+		if (!armada_scene_render(scene, expected->frame, &actual) ||
 		    ((expected->fields & EXPECT_KEYPAD) &&
 		     actual.keypad != expected->keypad) ||
 		    ((expected->fields & EXPECT_RUMBLE) &&
@@ -98,7 +85,10 @@ static int output_cases_match(struct armada_scene *scene,
 		    ((expected->fields & EXPECT_CUE_ID) &&
 		     actual.cue_id != expected->cue_id) ||
 		    ((expected->fields & EXPECT_LCD_LEVEL) &&
-		     actual.lcd_level != expected->lcd_level)) {
+		     actual.lcd_level != expected->lcd_level) ||
+		    ((expected->fields & EXPECT_RUMBLE_REMAINING) &&
+		     actual.rumble_remaining_ms !=
+			     expected->rumble_remaining_ms)) {
 			fprintf(stderr, "outputs at frame %u differ\n",
 				(unsigned int)expected->frame);
 			return 0;
@@ -107,8 +97,7 @@ static int output_cases_match(struct armada_scene *scene,
 	return 1;
 }
 
-static int render_case(unsigned int width, unsigned int height,
-		       const char *font_path)
+static int render_case(unsigned int width, unsigned int height)
 {
 	static const uint32_t frames[] = {
 		0U,   42U,   43U,   44U,   45U,	  45U,	 58U,	42U,
@@ -124,12 +113,19 @@ static int render_case(unsigned int width, unsigned int height,
 		  .rumble = true,
 		  .cue_id = 1U,
 		  .lcd_level = 6,
+		  .rumble_remaining_ms = 100U,
 		  .fields = EXPECT_KEYPAD | EXPECT_RUMBLE | EXPECT_CUE_ID |
-			    EXPECT_LCD_LEVEL },
+			    EXPECT_LCD_LEVEL | EXPECT_RUMBLE_REMAINING },
+		{ .frame = 721U,
+		  .rumble_remaining_ms = 66U,
+		  .fields = EXPECT_RUMBLE_REMAINING },
+		{ .frame = 722U,
+		  .rumble_remaining_ms = 33U,
+		  .fields = EXPECT_RUMBLE_REMAINING },
 		{ .frame = 723U,
 		  .lcd_level = 6,
 		  .fields = EXPECT_KEYPAD | EXPECT_RUMBLE | EXPECT_CUE_ID |
-			    EXPECT_LCD_LEVEL },
+			    EXPECT_LCD_LEVEL | EXPECT_RUMBLE_REMAINING },
 		{ .frame = 726U,
 		  .keypad = true,
 		  .rumble = true,
@@ -139,7 +135,9 @@ static int render_case(unsigned int width, unsigned int height,
 		  .keypad = true,
 		  .rumble = true,
 		  .cue_id = 3U,
-		  .fields = EXPECT_KEYPAD | EXPECT_RUMBLE | EXPECT_CUE_ID },
+		  .rumble_remaining_ms = 33U,
+		  .fields = EXPECT_KEYPAD | EXPECT_RUMBLE | EXPECT_CUE_ID |
+			    EXPECT_RUMBLE_REMAINING },
 		{ .frame = 756U,
 		  .keypad = true,
 		  .rumble = true,
@@ -158,12 +156,6 @@ static int render_case(unsigned int width, unsigned int height,
 		{ .frame = 855U, .lcd_level = 6, .fields = EXPECT_LCD_LEVEL },
 		{ .frame = 1139U, .lcd_level = 10, .fields = EXPECT_LCD_LEVEL },
 	};
-	struct armada_metrics metrics = {
-		.average_fps_tenths = 300,
-		.minimum_fps_tenths = 280,
-		.maximum_frame_us = 35714,
-		.valid = true,
-	};
 	size_t count = (size_t)width * height;
 	uint16_t *storage =
 		malloc((count + 2U * GUARD_PIXELS) * sizeof(*storage));
@@ -172,7 +164,6 @@ static int render_case(unsigned int width, unsigned int height,
 	struct armada_scene *scene;
 	struct armada_renderer *renderer;
 	struct armada_storyboard storyboard = { 0 };
-	struct fplinux_font font = { 0 };
 	char error[512];
 	const char *check = "scene creation";
 	uint32_t frame = 0U;
@@ -186,61 +177,23 @@ static int render_case(unsigned int width, unsigned int height,
 	for (index = 0; index < count + 2U * GUARD_PIXELS; ++index)
 		storage[index] = GUARD_VALUE;
 	pixels = storage + GUARD_PIXELS;
-	if (!fplinux_font_open(&font, font_path)) {
-		fprintf(stderr, "showcase %ux%u: cannot load font %s\n", width,
-			height, font_path);
-		free(storage);
-		return EXIT_FAILURE;
-	}
-	scene = armada_scene_create_with_renderer(width, height, &font, NULL,
-						  ARMADA_RENDER_SOFTWARE, error,
-						  sizeof(error));
+	scene = armada_scene_create_with_renderer(
+		width, height, ARMADA_RENDER_SOFTWARE, error, sizeof(error));
 	if (!scene) {
 		fprintf(stderr, "showcase %ux%u: %s failed\n", width, height,
 			check);
-		fplinux_font_close(&font);
 		free(storage);
 		return EXIT_FAILURE;
 	}
 	scene_pixels = armada_scene_pixels(scene);
-	renderer = armada_renderer_create(width, height, pixels, &font);
+	renderer = armada_renderer_create(width, height, pixels);
 	if (!renderer) {
 		fprintf(stderr,
 			"showcase %ux%u: guarded renderer creation failed\n",
 			width, height);
 		armada_scene_destroy(scene);
-		fplinux_font_close(&font);
 		free(storage);
 		return EXIT_FAILURE;
-	}
-	{
-		struct armada_outputs outputs;
-		unsigned int glyph_height = width == 128U ? 12U : 16U;
-
-		check = "opening frame render";
-		if (!armada_scene_render(scene, 0U, &metrics, &outputs))
-			goto fail;
-		/* Complete solid glyphs prove both overlay lines fit their surfaces. */
-		check = "opening overlay layout";
-		if (color_count(scene_pixels, width, height / 12U, glyph_height,
-				0xe7bfU) != (width == 128U ? 936U : 1664U) ||
-		    color_count(scene_pixels, width, height - glyph_height - 2U,
-				glyph_height,
-				0x3f1fU) != (width == 128U ? 1296U : 2304U))
-			goto fail;
-		frame = 1020U;
-		check = "closing frame render";
-		if (!armada_scene_render(scene, frame, &metrics, &outputs))
-			goto fail;
-		check = "closing overlay layout";
-		if (color_count(scene_pixels, width, height * 3U / 4U,
-				glyph_height,
-				0x3f1fU) != (width == 128U ? 720U : 1280U) ||
-		    color_count(scene_pixels, width,
-				height * 3U / 4U + glyph_height + 2U,
-				glyph_height,
-				0xe7bfU) != (width == 128U ? 1008U : 1792U))
-			goto fail;
 	}
 	for (index = 0; index < sizeof(frames) / sizeof(frames[0]); ++index) {
 		struct armada_outputs first_outputs;
@@ -255,13 +208,12 @@ static int render_case(unsigned int width, unsigned int height,
 		frame = frames[index];
 		memset(pixels, 0, count * sizeof(*pixels));
 		check = "frame render";
-		if (!armada_scene_render(scene, frame, &metrics,
-					 &first_outputs))
+		if (!armada_scene_render(scene, frame, &first_outputs))
 			goto fail;
 		first_hash = frame_hash(scene_pixels, count);
 		armada_storyboard_update(&storyboard, frame, &prepared,
 					 &guarded_outputs);
-		armada_renderer_render(renderer, &prepared, &metrics);
+		armada_renderer_render(renderer, &prepared);
 		check = "guarded detailed render";
 		if (!guards_are_intact(storage, count) ||
 		    !frame_has_detail(scene_pixels, count) ||
@@ -269,19 +221,18 @@ static int render_case(unsigned int width, unsigned int height,
 			goto fail;
 		/* The borrowed renderer surface's previous contents are not inputs. */
 		memset(pixels, 0xa5, count * sizeof(*pixels));
-		armada_renderer_render(renderer, &prepared, &metrics);
+		armada_renderer_render(renderer, &prepared);
 		if (!guards_are_intact(storage, count) ||
 		    frame_hash(pixels, count) != first_hash)
 			goto fail;
 		/* Playback, repeated frames and seeks must produce the same image/cues. */
 		check = "fresh scene creation";
 		fresh = armada_scene_create_with_renderer(
-			width, height, &font, NULL, ARMADA_RENDER_SOFTWARE,
-			error, sizeof(error));
+			width, height, ARMADA_RENDER_SOFTWARE, error,
+			sizeof(error));
 		if (!fresh)
 			goto fail;
-		rendered = armada_scene_render(fresh, frame, &metrics,
-					       &second_outputs);
+		rendered = armada_scene_render(fresh, frame, &second_outputs);
 		second_hash = frame_hash(armada_scene_pixels(fresh), count);
 		armada_scene_destroy(fresh);
 		check = "repeatable render";
@@ -299,16 +250,15 @@ static int render_case(unsigned int width, unsigned int height,
 
 		frame = 0U;
 		check = "output cues";
-		if (!output_cases_match(scene, &metrics, output_expectations,
+		if (!output_cases_match(scene, output_expectations,
 					ARRAY_SIZE(output_expectations)))
 			goto fail;
 		check = "first loop frame render";
-		if (!armada_scene_render(scene, 0U, &metrics, &first))
+		if (!armada_scene_render(scene, 0U, &first))
 			goto fail;
 		first_hash = frame_hash(scene_pixels, count);
 		check = "wrapped loop frame render";
-		if (!armada_scene_render(scene, ARMADA_DURATION_FRAMES,
-					 &metrics, &wrapped))
+		if (!armada_scene_render(scene, 1140U, &wrapped))
 			goto fail;
 		wrapped_hash = frame_hash(scene_pixels, count);
 		check = "loop wrap";
@@ -318,7 +268,6 @@ static int render_case(unsigned int width, unsigned int height,
 	}
 	armada_scene_destroy(scene);
 	armada_renderer_destroy(renderer);
-	fplinux_font_close(&font);
 	free(storage);
 	return EXIT_SUCCESS;
 
@@ -327,18 +276,18 @@ fail:
 		(unsigned int)frame, check);
 	armada_scene_destroy(scene);
 	armada_renderer_destroy(renderer);
-	fplinux_font_close(&font);
 	free(storage);
 	return EXIT_FAILURE;
 }
 
 int main(int argc, char **argv)
 {
-	return argc == 3 && render_case(240U, 320U, argv[2]) == EXIT_SUCCESS &&
-			       render_case(320U, 240U, argv[2]) ==
-				       EXIT_SUCCESS &&
-			       render_case(128U, 160U, argv[1]) ==
-				       EXIT_SUCCESS ?
-		       EXIT_SUCCESS :
-		       EXIT_FAILURE;
+	unsigned int width;
+	unsigned int height;
+
+	if (argc != 3)
+		return EXIT_FAILURE;
+	width = (unsigned int)strtoul(argv[1], NULL, 10);
+	height = (unsigned int)strtoul(argv[2], NULL, 10);
+	return render_case(width, height);
 }

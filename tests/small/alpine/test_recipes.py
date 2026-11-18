@@ -239,10 +239,10 @@ class AlpineRecipesTests:
                 id="status-renderer",
             ),
             pytest.param(
-                "fplinux-showcase",
+                "fplinux-terminal",
                 "lib/fplinux-shared/fplinux-font.c",
                 "include/fplinux/fplinux-font.h",
-                "fplinux-session",
+                "fplinux-showcase",
                 id="psf-reader",
             ),
         ],

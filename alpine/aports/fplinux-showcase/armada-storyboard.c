@@ -432,12 +432,15 @@ static void compute_outputs(uint32_t frame, struct armada_outputs *outputs)
 	outputs->keypad = false;
 	outputs->rumble = false;
 	outputs->cue_id = 0;
+	outputs->rumble_remaining_ms = 0U;
 	outputs->lcd_level = cycle_lcd_level(frame);
 	if (!morse_symbol_for_frame(frame, &symbol))
 		return;
 	outputs->keypad = true;
 	outputs->rumble = true;
 	outputs->cue_id = symbol.cue_id;
+	outputs->rumble_remaining_ms = (symbol.duration - symbol.elapsed) *
+				       1000U / ARMADA_FRAMES_PER_SECOND;
 }
 
 void armada_storyboard_update(struct armada_storyboard *storyboard,

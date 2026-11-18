@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-2.0-only
-"""Target package selection keeps optional GPU delivery on GPU-capable phones."""
+"""Target package selection keeps GPU resources on GPU-capable phones."""
 
 from __future__ import annotations
 
@@ -13,6 +13,8 @@ TARGET_PROFILES = [
         ("bq-2830l-tank-connect-max", False),
         ("inoi-240-modern-4g", False),
         ("inoi-244-modern-4g", False),
+        ("itel-neo-r60-plus", False),
+        ("konrow-senior-280-plus", False),
         ("maxvi-k15n-4g", False),
         ("nokia-110-4g", False),
         ("nokia-ta1618", False),
@@ -35,7 +37,9 @@ def test_target_delivery_keeps_cpu_applications_and_selects_gpu_packages_only_fo
     bundle = selection.bundle_packages(platform, config, rootfs)
     order = selection.aport_build_order((*rootfs, *bundle))
 
-    assert {"fplinux-showcase", "fplinux-tyrquake"} <= set(bundle)
+    assert "fplinux-showcase" in rootfs
+    assert "fplinux-showcase" not in bundle
+    assert "fplinux-tyrquake" in bundle
     assert "fplinux-mesa-gbm" in order
     assert order.index("fplinux-mesa-gbm") < order.index("fplinux-libweston")
     assert order.index("fplinux-mesa-gbm") < order.index("fplinux-showcase")
@@ -46,7 +50,9 @@ def test_target_delivery_keeps_cpu_applications_and_selects_gpu_packages_only_fo
 
     gpu_addons = {"fplinux-showcase-gpu", "fplinux-tyrquake-gpu"}
     if gpu_packages:
-        assert gpu_addons <= set(bundle)
+        assert "fplinux-showcase-gpu" in rootfs
+        assert "fplinux-showcase-gpu" not in bundle
+        assert "fplinux-tyrquake-gpu" in bundle
         assert {"fplinux-mesa", "fplinux-libweston-gl"} <= set(rootfs)
         assert order.index("fplinux-mesa-gbm") < order.index("fplinux-mesa")
         assert order.index("fplinux-mesa") < order.index("fplinux-libweston-gl")

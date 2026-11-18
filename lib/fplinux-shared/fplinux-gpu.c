@@ -570,6 +570,11 @@ fail:
 	return NULL;
 }
 
+bool fplinux_gpu_is_current(const struct fplinux_gpu *gpu)
+{
+	return gpu && gpu->egl.get_current_context() == gpu->context;
+}
+
 const char *fplinux_gpu_device(const struct fplinux_gpu *gpu)
 {
 	return gpu ? gpu->device : NULL;

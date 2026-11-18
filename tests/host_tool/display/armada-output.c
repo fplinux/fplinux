@@ -1,9 +1,10 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
-/* Linked ARMADA scene with controlled GPU and native-output boundaries. */
+/* Linked ARMADA scene with controlled offscreen GPU entry points. */
 #define _POSIX_C_SOURCE 200809L
 #include "armada-scene.h"
-#include "fplinux-drm-session.h"
-#include "fplinux-gpu-output.h"
+#include "armada-gpu-renderer.h"
+#include "armada-storyboard.h"
+#include "fplinux-gpu-frame.h"
 
 #include <GLES3/gl3.h>
 #include <assert.h>
@@ -13,9 +14,8 @@
 #include <string.h>
 
 #define OBJECT_CAPACITY 128U
-#define GUARD_BYTES 32U
-#define GUARD_VALUE 0xa5
-#define BACKGROUND 0x1234U
+#define GUARD_PIXELS 16U
+#define GUARD_VALUE 0xa55aU
 
 enum object_kind {
 	OBJECT_NONE,
@@ -38,29 +38,38 @@ struct gl_object {
 
 struct fplinux_gpu {
 	bool live;
-};
-
-struct fplinux_gpu_output {
-	struct fplinux_drm_session *display;
-	struct fplinux_gpu gpu;
+	bool current;
 	unsigned int width;
 	unsigned int height;
-	unsigned int page;
-	bool ready;
-	bool cpu_access;
 };
 
 static struct gl_object objects[OBJECT_CAPACITY];
 static GLuint next_object = 1U;
 static GLuint bound_texture;
 static GLuint bound_framebuffer;
-static struct fplinux_gpu_output *live_output;
+static GLuint scene_framebuffers[2];
+static unsigned int scene_target_count;
+static struct fplinux_gpu *live_gpu;
 static const char *scenario;
-static const char *output_error = "controlled output failure";
+static void *readback_buffer;
+static GLenum pending_error;
+static bool frame_started;
+static GLint pack_alignment;
+static GLint pack_row_length;
+static GLint pack_skip_pixels;
+static GLint pack_skip_rows;
+static GLuint pack_buffer;
 
 static bool fails(const char *name)
 {
 	return strcmp(scenario, name) == 0;
+}
+
+static void assert_pack_state_restored(void)
+{
+	assert(pack_alignment == 8 && pack_row_length == 449);
+	assert(pack_skip_pixels == 2 && pack_skip_rows == 3 &&
+	       pack_buffer == 47U);
 }
 
 FILE *__real_fopen(const char *path, const char *mode);
@@ -85,7 +94,7 @@ static GLuint allocate_object(enum object_kind kind)
 {
 	GLuint object = next_object++;
 
-	assert(live_output && live_output->gpu.live);
+	assert(live_gpu && live_gpu->live);
 	assert(object < OBJECT_CAPACITY);
 	objects[object].kind = kind;
 	return object;
@@ -93,7 +102,7 @@ static GLuint allocate_object(enum object_kind kind)
 
 static void delete_object(GLuint object, enum object_kind kind)
 {
-	assert(live_output && live_output->gpu.live);
+	assert(live_gpu && live_gpu->live);
 	assert(object < OBJECT_CAPACITY && objects[object].kind == kind);
 	objects[object].kind = OBJECT_NONE;
 }
@@ -269,6 +278,11 @@ void glGenBuffers(GLsizei count, GLuint *buffers)
 
 void glBindBuffer(GLenum target, GLuint buffer)
 {
+	if (target == GL_PIXEL_PACK_BUFFER) {
+		assert(buffer == 0U || buffer == 47U);
+		pack_buffer = buffer;
+		return;
+	}
 	assert(target == GL_ARRAY_BUFFER &&
 	       objects[buffer].kind == OBJECT_BUFFER);
 }
@@ -382,14 +396,18 @@ void glFramebufferTexture2D(GLenum target, GLenum attachment,
 	assert(target == GL_FRAMEBUFFER && attachment == GL_COLOR_ATTACHMENT0);
 	assert(texture_target == GL_TEXTURE_2D && level == 0);
 	objects[bound_framebuffer].texture = texture;
+	if (objects[texture].width == (GLsizei)live_gpu->width &&
+	    objects[texture].height == (GLsizei)live_gpu->height) {
+		assert(scene_target_count < 2U);
+		scene_framebuffers[scene_target_count++] = bound_framebuffer;
+	}
 }
 
 GLenum glCheckFramebufferStatus(GLenum target)
 {
 	assert(target == GL_FRAMEBUFFER);
-	return fails("target-failure") || fails("cleanup-failure") ?
-		       GL_FRAMEBUFFER_INCOMPLETE_ATTACHMENT :
-		       GL_FRAMEBUFFER_COMPLETE;
+	return fails("target-failure") ? GL_FRAMEBUFFER_INCOMPLETE_ATTACHMENT :
+					 GL_FRAMEBUFFER_COMPLETE;
 }
 
 void glDeleteFramebuffers(GLsizei count, const GLuint *framebuffers)
@@ -472,17 +490,94 @@ void glDepthFunc(GLenum function)
 void glDrawArrays(GLenum mode, GLint first, GLsizei count)
 {
 	assert(mode == GL_TRIANGLES && first >= 0 && count > 0);
+	frame_started = true;
+	if (fails("render-failure"))
+		pending_error = GL_INVALID_OPERATION;
 }
 
 GLenum glGetError(void)
 {
-	return GL_NO_ERROR;
+	GLenum error = pending_error;
+
+	pending_error = GL_NO_ERROR;
+	return error;
+}
+
+static GLint *pack_parameter(GLenum parameter)
+{
+	switch (parameter) {
+	case GL_PACK_ALIGNMENT:
+		return &pack_alignment;
+	case GL_PACK_ROW_LENGTH:
+		return &pack_row_length;
+	case GL_PACK_SKIP_PIXELS:
+		return &pack_skip_pixels;
+	case GL_PACK_SKIP_ROWS:
+		return &pack_skip_rows;
+	default:
+		assert(0 && "unexpected pixel-pack parameter");
+		return NULL;
+	}
+}
+
+void glGetIntegerv(GLenum parameter, GLint *value)
+{
+	if (parameter == GL_PIXEL_PACK_BUFFER_BINDING)
+		*value = (GLint)pack_buffer;
+	else
+		*value = *pack_parameter(parameter);
+}
+
+void glPixelStorei(GLenum parameter, GLint value)
+{
+	*pack_parameter(parameter) = value;
+}
+
+void glReadPixels(GLint x, GLint y, GLsizei width, GLsizei height,
+		  GLenum format, GLenum type, void *pixels)
+{
+	const struct gl_object *texture =
+		&objects[objects[bound_framebuffer].texture];
+	uint8_t *rgba = pixels;
+
+	assert(live_gpu && live_gpu->live && frame_started);
+	assert(x == 0 && y == 0 && width == (GLsizei)live_gpu->width &&
+	       height == (GLsizei)live_gpu->height);
+	assert(format == GL_RGBA && type == GL_UNSIGNED_BYTE && pixels);
+	assert(pack_alignment == 1 && !pack_row_length && !pack_skip_pixels &&
+	       !pack_skip_rows && !pack_buffer);
+	assert(texture->kind == OBJECT_TEXTURE && texture->format == GL_RGBA8);
+	assert(texture->width == width && texture->height == height);
+	assert(scene_target_count == 2U &&
+	       bound_framebuffer == scene_framebuffers[0]);
+	if (readback_buffer)
+		assert(readback_buffer == pixels);
+	readback_buffer = pixels;
+	if (fails("readback-failure")) {
+		memset(rgba, 0xff, (size_t)width * (size_t)height * 4U);
+		pending_error = GL_INVALID_OPERATION;
+		return;
+	}
+	memset(rgba, 0, (size_t)width * (size_t)height * 4U);
+	memcpy(rgba, (const uint8_t[]){ 255, 0, 0, 255 }, 4U);
+	memcpy(rgba + (size_t)(width - 1) * 4U,
+	       (const uint8_t[]){ 0, 255, 0, 19 }, 4U);
+	memcpy(rgba + (size_t)(height - 1) * (size_t)width * 4U,
+	       (const uint8_t[]){ 0, 0, 255, 0 }, 4U);
+	memcpy(rgba + ((size_t)height * (size_t)width - 1U) * 4U,
+	       (const uint8_t[]){ 255, 255, 255, 255 }, 4U);
+	memcpy(rgba + ((size_t)width + 1U) * 4U,
+	       (const uint8_t[]){ 128, 64, 192, 3 }, 4U);
+	memcpy(rgba + ((size_t)width * 2U + 1U) * 4U,
+	       (const uint8_t[]){ 4, 2, 4, 255 }, 4U);
+	memcpy(rgba + ((size_t)width * 2U + 2U) * 4U,
+	       (const uint8_t[]){ 5, 3, 5, 255 }, 4U);
 }
 
 void *fplinux_gpu_get_proc(struct fplinux_gpu *gpu, const char *name)
 {
 	assert(gpu && gpu->live);
-	if (fails("missing-procedure") && strcmp(name, "glTexParameteri") == 0)
+	if (fails("missing-procedure") && strcmp(name, "glReadPixels") == 0)
 		return NULL;
 #define PROCEDURE(member)                    \
 	if (strcmp(name, "gl" #member) == 0) \
@@ -545,9 +640,17 @@ void *fplinux_gpu_get_proc(struct fplinux_gpu *gpu, const char *name)
 	PROCEDURE(Clear);
 	PROCEDURE(DepthFunc);
 	PROCEDURE(DrawArrays);
+	PROCEDURE(ReadPixels);
+	PROCEDURE(GetIntegerv);
+	PROCEDURE(PixelStorei);
 	PROCEDURE(GetError);
 #undef PROCEDURE
 	return NULL;
+}
+
+bool fplinux_gpu_is_current(const struct fplinux_gpu *gpu)
+{
+	return gpu && gpu->live && gpu->current;
 }
 
 const char *fplinux_gpu_device(const struct fplinux_gpu *gpu)
@@ -568,208 +671,185 @@ const char *fplinux_gpu_version(const struct fplinux_gpu *gpu)
 	return "OpenGL ES 3.0";
 }
 
-struct fplinux_gpu_output *
-fplinux_gpu_output_open(struct fplinux_drm_session *display,
-			enum fplinux_gpu_api api, unsigned int width,
-			unsigned int height, bool clockwise, char *error,
-			size_t error_size)
+struct fplinux_gpu *fplinux_gpu_open(enum fplinux_gpu_api api,
+				     unsigned int width, unsigned int height,
+				     const char *device, char *error,
+				     size_t error_size)
 {
-	assert(!live_output && display && display->active);
-	assert(api == FPLINUX_GPU_GLES3 && !clockwise);
-	assert(width == display->width && height == display->height);
-	if (fails("output-failure") || fails("forced-gpu-failure")) {
-		snprintf(error, error_size, "%s", output_error);
+	assert(!live_gpu && api == FPLINUX_GPU_GLES3 && !device);
+	assert(width > 0U && height > 0U);
+	if (fails("context-failure") || fails("forced-gpu-failure")) {
+		snprintf(error, error_size, "controlled context failure");
 		errno = ENODEV;
 		return NULL;
 	}
-	live_output = calloc(1, sizeof(*live_output));
-	assert(live_output);
-	live_output->display = display;
-	live_output->width = width;
-	live_output->height = height;
-	live_output->gpu.live = true;
-	return live_output;
+	live_gpu = calloc(1, sizeof(*live_gpu));
+	assert(live_gpu);
+	live_gpu->width = width;
+	live_gpu->height = height;
+	live_gpu->live = true;
+	live_gpu->current = true;
+	pack_alignment = 8;
+	pack_row_length = 449;
+	pack_skip_pixels = 2;
+	pack_skip_rows = 3;
+	pack_buffer = 47U;
+	frame_started = false;
+	readback_buffer = NULL;
+	scene_target_count = 0U;
+	return live_gpu;
 }
 
-struct fplinux_gpu *
-fplinux_gpu_output_gpu(const struct fplinux_gpu_output *output)
+void fplinux_gpu_close(struct fplinux_gpu *gpu)
 {
-	return output ? (struct fplinux_gpu *)&output->gpu : NULL;
-}
-
-bool fplinux_gpu_output_render(struct fplinux_gpu_output *output,
-			       unsigned int texture)
-{
-	struct gl_object *source = &objects[texture];
-
-	assert(output == live_output && !output->ready && !output->cpu_access);
-	assert(output->display->active && source->kind == OBJECT_TEXTURE);
-	assert(source->width == (GLsizei)output->width);
-	assert(source->height == (GLsizei)output->height &&
-	       source->format == GL_RGBA8);
-	assert(objects[bound_framebuffer].texture == texture);
-	if (fails("render-failure"))
-		return false;
-	output->page = 1U - output->display->shown_page;
-	for (unsigned int row = 0; row < output->height; ++row) {
-		uint16_t *pixels =
-			(uint16_t *)(output->display->mapping +
-				     output->page *
-					     output->display->page_bytes +
-				     row * output->display->stride);
-
-		for (unsigned int column = 0; column < output->width; ++column)
-			pixels[column] = BACKGROUND;
-	}
-	output->ready = true;
-	return true;
-}
-
-bool fplinux_gpu_output_begin_cpu(struct fplinux_gpu_output *output,
-				  void **pixels, size_t *stride)
-{
-	assert(output == live_output && output->ready && !output->cpu_access);
-	if (fails("begin-failure"))
-		return false;
-	output->cpu_access = true;
-	*pixels = output->display->mapping +
-		  output->page * output->display->page_bytes;
-	*stride = output->display->stride;
-	return true;
-}
-
-bool fplinux_gpu_output_end_cpu(struct fplinux_gpu_output *output)
-{
-	assert(output == live_output && output->cpu_access);
-	if (fails("end-failure"))
-		return false;
-	output->cpu_access = false;
-	return true;
-}
-
-bool fplinux_gpu_output_present(struct fplinux_gpu_output *output)
-{
-	assert(output == live_output && output->ready && !output->cpu_access);
-	output->display->shown_page = output->page;
-	output->ready = false;
-	return true;
-}
-
-const char *fplinux_gpu_output_error(const struct fplinux_gpu_output *output)
-{
-	assert(output == live_output);
-	return output_error;
-}
-
-bool fplinux_gpu_output_close(struct fplinux_gpu_output *output)
-{
-	if (!output)
-		return true;
-	assert(output == live_output && output->gpu.live);
+	if (!gpu)
+		return;
+	assert(gpu == live_gpu && gpu->live);
+	assert_pack_state_restored();
 	assert_scene_resources_released();
-	output->gpu.live = false;
-	free(output);
-	live_output = NULL;
-	if (fails("cleanup-failure")) {
-		errno = EIO;
-		return false;
-	}
-	return true;
+	gpu->live = false;
+	free(gpu);
+	live_gpu = NULL;
 }
 
-static void assert_untouched(const void *buffer, size_t size)
+static void assert_readback(const uint16_t *pixels, unsigned int width,
+			    unsigned int height)
 {
-	const unsigned char *bytes = buffer;
-
-	for (size_t index = 0; index < size; ++index)
-		assert(bytes[index] == GUARD_VALUE);
+	assert(pixels[0] == 0x001fU);
+	assert(pixels[width - 1U] == 0xffffU);
+	assert(pixels[(size_t)(height - 1U) * width] == 0xf800U);
+	assert(pixels[(size_t)height * width - 1U] == 0x07e0U);
+	assert(pixels[(size_t)(height - 2U) * width + 1U] == 0x8217U);
+	assert(pixels[(size_t)(height - 3U) * width + 1U] == 0x0000U);
+	assert(pixels[(size_t)(height - 3U) * width + 2U] == 0x0821U);
+	assert(pixels[width + 1U] == 0x0000U);
 }
 
-static void assert_page(const struct fplinux_drm_session *display,
-			unsigned int page, unsigned int glyph_height)
+static void guarded_readback(unsigned int width, unsigned int height)
 {
-	const uint8_t *pixels = display->mapping + page * display->page_bytes;
-	size_t white = 0;
-	size_t cyan = 0;
+	struct armada_storyboard storyboard = { 0 };
+	struct armada_frame frame;
+	struct armada_outputs cues;
+	struct armada_gpu_renderer *renderer;
+	size_t count = (size_t)width * height;
+	uint16_t *storage =
+		malloc((count + 2U * GUARD_PIXELS) * sizeof(*storage));
+	uint16_t *pixels;
+	char error[512] = { 0 };
 
-	for (unsigned int row = 0; row < display->height; ++row) {
-		const uint16_t *line =
-			(const uint16_t *)(pixels + row * display->stride);
-
-		for (unsigned int column = 0; column < display->width;
-		     ++column) {
-			assert(line[column] == BACKGROUND ||
-			       line[column] == 0xe7bfU ||
-			       line[column] == 0x3f1fU);
-			if (line[column] == 0xe7bfU) {
-				assert(row >= display->height / 12U &&
-				       row < display->height / 12U +
-						       glyph_height);
-				++white;
-			}
-			if (line[column] == 0x3f1fU) {
-				assert(row >= display->height - glyph_height -
-						       2U &&
-				       row < display->height - 2U);
-				++cyan;
-			}
-		}
-		assert_untouched(pixels + row * display->stride +
-					 display->width * 2U,
-				 display->stride - display->width * 2U);
+	assert(storage);
+	for (size_t index = 0; index < count + 2U * GUARD_PIXELS; ++index)
+		storage[index] = GUARD_VALUE;
+	pixels = storage + GUARD_PIXELS;
+	renderer = armada_gpu_renderer_create(width, height, pixels, error,
+					      sizeof(error));
+	assert(renderer);
+	armada_storyboard_update(&storyboard, 720U, &frame, &cues);
+	assert(armada_gpu_renderer_render(renderer, &frame));
+	assert_pack_state_restored();
+	assert_readback(pixels, width, height);
+	memset(pixels, 0xa5, count * sizeof(*pixels));
+	assert(armada_gpu_renderer_render(renderer, &frame));
+	assert_pack_state_restored();
+	assert_readback(pixels, width, height);
+	for (size_t index = 0; index < GUARD_PIXELS; ++index) {
+		assert(storage[index] == GUARD_VALUE);
+		assert(storage[GUARD_PIXELS + count + index] == GUARD_VALUE);
 	}
-	assert(white == (display->width == 128U ? 936U : 1664U));
-	assert(cyan == (display->width == 128U ? 1296U : 2304U));
+	assert(armada_gpu_renderer_destroy(renderer));
+	free(storage);
+}
+
+static void frame_contract(unsigned int width, unsigned int height)
+{
+	size_t count = (size_t)width * height;
+	uint16_t *pixels = malloc(count * sizeof(*pixels));
+	struct fplinux_gpu_frame *frame;
+	char error[256] = { 0 };
+
+	assert(pixels && live_gpu);
+	for (size_t index = 0; index < count; ++index)
+		pixels[index] = GUARD_VALUE;
+	if (fails("frame-invalid-dimensions")) {
+		assert(!fplinux_gpu_frame_open(live_gpu, 0U, height, error,
+					       sizeof(error)));
+		assert(strstr(error, "dimensions"));
+		assert(!fplinux_gpu_frame_open(live_gpu, UINT32_MAX, UINT32_MAX,
+					       error, sizeof(error)));
+		assert(strstr(error, "dimensions"));
+	}
+	frame = fplinux_gpu_frame_open(live_gpu, width, height, error,
+				       sizeof(error));
+	assert(frame && !error[0]);
+	if (fails("frame-small-output")) {
+		assert(!fplinux_gpu_frame_read_rgb565(frame, pixels, count - 1U,
+						      error, sizeof(error)));
+		assert(strstr(error, "capacity"));
+	} else if (fails("frame-wrong-context")) {
+		live_gpu->current = false;
+		assert(!fplinux_gpu_frame_open(live_gpu, width, height, error,
+					       sizeof(error)));
+		assert(strstr(error, "context is not current"));
+		assert(!fplinux_gpu_frame_read_rgb565(frame, pixels, count,
+						      error, sizeof(error)));
+		assert(strstr(error, "context is not current"));
+		live_gpu->current = true;
+	} else if (fails("frame-pending-error")) {
+		pending_error = GL_INVALID_OPERATION;
+		assert(!fplinux_gpu_frame_read_rgb565(frame, pixels, count,
+						      error, sizeof(error)));
+		assert(strstr(error, "pending GL error"));
+	}
+	assert_pack_state_restored();
+	for (size_t index = 0; index < count; ++index)
+		assert(pixels[index] == GUARD_VALUE);
+	/* The second adapter has its own reusable scratch, on the same GPU. */
+	readback_buffer = NULL;
+	assert(fplinux_gpu_frame_read_rgb565(frame, pixels, count, error,
+					     sizeof(error)));
+	assert(!error[0]);
+	assert_readback(pixels, width, height);
+	assert_pack_state_restored();
+	fplinux_gpu_frame_close(frame);
+	free(pixels);
 }
 
 int main(int argc, char **argv)
 {
-	struct fplinux_drm_session display = { .pages = 2U, .active = true };
-	struct fplinux_font font = { 0 };
 	struct armada_scene *scene;
 	struct armada_outputs cues;
-	uint8_t *storage;
+	unsigned int width;
+	unsigned int height;
 	enum armada_render_mode mode;
 	char error[512] = { 0 };
 
-	assert(argc == 5);
+	assert(argc == 4);
 	scenario = argv[1];
-	display.width = (uint32_t)strtoul(argv[2], NULL, 10);
-	display.height = (uint32_t)strtoul(argv[3], NULL, 10);
-	display.stride = display.width * 2U + 32U;
-	display.page_bytes = display.stride * display.height;
-	display.size = 2U * display.page_bytes;
-	storage = malloc(display.size + 2U * GUARD_BYTES);
-	assert(storage && fplinux_font_open(&font, argv[4]));
-	memset(storage, GUARD_VALUE, display.size + 2U * GUARD_BYTES);
-	display.mapping = storage + GUARD_BYTES;
+	width = (unsigned int)strtoul(argv[2], NULL, 10);
+	height = (unsigned int)strtoul(argv[3], NULL, 10);
 	if (fails("forced-gpu-failure") || fails("missing-shaders-gpu"))
 		mode = ARMADA_RENDER_GPU;
 	else if (fails("missing-shaders-software"))
 		mode = ARMADA_RENDER_SOFTWARE;
 	else
 		mode = ARMADA_RENDER_AUTO;
-	scene = armada_scene_create_with_renderer(display.width, display.height,
-						  &font, &display, mode, error,
+	scene = armada_scene_create_with_renderer(width, height, mode, error,
 						  sizeof(error));
-	if (fails("forced-gpu-failure") || fails("cleanup-failure") ||
-	    fails("missing-shaders-gpu")) {
+	if (fails("forced-gpu-failure") || fails("missing-shaders-gpu")) {
 		assert(!scene && error[0]);
-		if (fails("cleanup-failure"))
-			assert(strstr(error, "GPU cleanup failed"));
 		if (fails("missing-shaders-gpu")) {
 			assert(strstr(error, "cannot read ARMADA shader"));
 			assert(strstr(error, "No such file or directory"));
 		}
-	} else if (fails("output-failure") || fails("missing-procedure") ||
+	} else if (fails("context-failure") || fails("missing-procedure") ||
 		   fails("shader-failure") || fails("link-failure") ||
 		   fails("target-failure") || fails("missing-shaders-auto") ||
 		   fails("missing-shaders-software")) {
 		const uint16_t *pixels;
-		size_t count = (size_t)display.width * display.height;
+		size_t count = (size_t)width * height;
 		size_t different = 0;
 
-		assert(scene && !live_output && !armada_scene_output(scene));
+		assert(scene && !live_gpu);
 		assert(armada_scene_pixels(scene));
 		assert(strcmp(armada_scene_renderer(scene), "software") == 0);
 		if (fails("missing-shaders-software"))
@@ -782,46 +862,47 @@ int main(int argc, char **argv)
 			assert(strstr(armada_scene_fallback_reason(scene),
 				      "No such file or directory"));
 		}
-		assert(armada_scene_render(scene, 0U, NULL, &cues));
+		assert(armada_scene_render(scene, 0U, &cues));
 		pixels = armada_scene_pixels(scene);
 		for (size_t index = 1; index < count; ++index)
 			if (pixels[index] != pixels[0])
 				++different;
 		assert(different > count / 16U);
-		assert_untouched(display.mapping, display.size);
 	} else {
-		assert(scene && armada_scene_output(scene) == live_output);
-		assert(!armada_scene_pixels(scene));
+		assert(scene && live_gpu && armada_scene_pixels(scene));
 		assert(strncmp(armada_scene_renderer(scene), "gpu (", 5U) == 0);
 		assert(!armada_scene_fallback_reason(scene)[0]);
-		if (fails("render-failure") || fails("begin-failure") ||
-		    fails("end-failure")) {
-			assert(!armada_scene_render(scene, 720U, NULL, &cues));
-			assert(strcmp(armada_scene_error(scene),
-				      output_error) == 0);
-			assert(display.shown_page == 0U);
+		if (fails("render-failure") || fails("readback-failure")) {
+			const uint16_t *pixels = armada_scene_pixels(scene);
+
+			assert(!armada_scene_render(scene, 720U, &cues));
+			assert(strstr(armada_scene_error(scene),
+				      fails("render-failure") ?
+					      "scene rendering" :
+					      "frame readback"));
+			assert_pack_state_restored();
+			for (size_t index = 0; index < (size_t)width * height;
+			     ++index)
+				assert(pixels[index] == 0U);
 		} else {
-			assert(armada_scene_render(scene, 720U, NULL, &cues));
+			assert(armada_scene_render(scene, 720U, &cues));
+			assert_pack_state_restored();
 			assert(cues.keypad && cues.rumble && cues.cue_id == 1U);
-			assert(display.shown_page == 0U);
-			assert_page(&display, 1U, font.height);
-			assert_untouched(display.mapping, display.page_bytes);
-			assert(fplinux_gpu_output_present(
-				armada_scene_output(scene)));
-			assert(display.shown_page == 1U);
-			assert(armada_scene_render(scene, 0U, NULL, &cues));
-			assert_page(&display, 0U, font.height);
-			assert(fplinux_gpu_output_present(
-				armada_scene_output(scene)));
-			assert(display.shown_page == 0U);
+			assert(cues.rumble_remaining_ms == 100U);
+			assert_readback(armada_scene_pixels(scene), width,
+					height);
+			assert(armada_scene_render(scene, 0U, &cues));
+			assert_pack_state_restored();
+			assert_readback(armada_scene_pixels(scene), width,
+					height);
+			if (strncmp(scenario, "frame-", 6U) == 0)
+				frame_contract(width, height);
 		}
 	}
 	assert(armada_scene_destroy(scene));
-	assert(!live_output && display.active);
+	assert(!live_gpu);
 	assert_scene_resources_released();
-	assert_untouched(storage, GUARD_BYTES);
-	assert_untouched(storage + GUARD_BYTES + display.size, GUARD_BYTES);
-	fplinux_font_close(&font);
-	free(storage);
+	if (fails("render"))
+		guarded_readback(width, height);
 	return EXIT_SUCCESS;
 }

@@ -1,6 +1,6 @@
 ---
 title: 'FPLinux: ARMADA'
-description: A 3D showcase in which the screen, LCD brightness, keypad light and vibration follow one timeline.
+description: A configurable 3D scene with rendering statistics and physical effects.
 source:
   - alpine/aports/fplinux-showcase
 ---
@@ -10,7 +10,7 @@ import armada from '../../../assets/screens/armada.png';
 import FeatureStatus from '../../../components/FeatureStatus.astro';
 import Key from '../../../components/Key.astro';
 
-FPLinux: ARMADA is a showcase for the phone. It renders a 3D scene while the LCD brightness, the keypad light and the vibrator follow the same timeline. One cycle of the presentation lasts 38 seconds; it repeats until you exit. Choose [software or GPU rendering](/fplinux/apps/#choose-a-renderer) with `--renderer`.
+FPLinux: ARMADA plays a 3D scene and measures how quickly it generates frames. It can synchronize screen brightness, keypad lighting and vibration where those effects are available. One scene cycle lasts 38 seconds.
 
 <FeatureStatus feature="fplinux-armada" />
 
@@ -18,32 +18,38 @@ Check [phone support status](/fplinux/phones/#support-status) for the physical e
 
 <PhoneScreen src={armada} alt="ARMADA scene: the FPLINUX title above water on a 240×320 screen" caption="ARMADA at 240×320." />
 
-## Install and start
+## Start
 
-Install `fplinux-showcase.apk` as described in [Packages](/fplinux/guides/packages/). Its installed package name is `fplinux-showcase`. Stop the graphical session and run the application from the USB shell, following [Direct-display applications](/fplinux/use/session/#direct-display-applications):
+ARMADA is included in the system. Open **ARMADA** from the application catalog. It opens a setup screen and waits for you to choose **Start**.
 
-```sh title="Phone"
-fplinux-showcase
-```
+Press <Key>Centre</Key> on a parameter to open its choices; selecting a value returns to the same setup row. Focus **Start** and press <Key>Centre</Key> to begin. **Options → Reset parameters** restores Auto rendering, Full screen, one cycle and all available effects. Your choices are remembered. Opening ARMADA from the catalog returns to setup; selecting it in Tasks restores its retained view.
 
-To stop on its own after a number of complete cycles, pass `--runs`:
+The same application adapts to compact, portrait and landscape screens. **Standard** keeps the system bars; **Full screen** gives the display to the scene. Choose the screen mode before starting. Settings stay fixed throughout a run.
 
-```sh title="Phone"
-fplinux-showcase --runs 1
-```
+The renderer choices use the same [software and GPU support](/fplinux/apps/#choose-a-renderer) as other graphical applications. Auto selects an available renderer during preparation. A run explicitly requesting GPU reports an error when it cannot use it.
 
-`--runs N` requires a positive decimal count; without it, the presentation repeats until you exit. `--keypad-led DIR` selects the keypad light's brightness directory instead of discovering it automatically.
+## Choose the run length
 
-The same application package supports `240×320`, `128×160` and `320×240` displays. It needs the right soft key, the system brightness service, the keypad light and the vibrator. If one of them is missing, it does not start and names the missing part.
+**Cycles** offers **1**, **2**, **3**, **5**, **10** and **Until stopped**. Five cycles take about three minutes and ten seconds. The scene uses the selected screen's drawing area and renders continuously while its animation and physical effects keep their normal timing.
+
+Hiding ARMADA, losing foreground or changing the drawing area interrupts the run and records a result. Use **Repeat** from that result to start again.
 
 ## What you see and feel
 
-Daylight and LCD brightness change throughout the presentation. The keypad light and the vibrator switch on and off in time with the scene; their pulse timing changes, not their intensity. During the hardware act, the keypad light and the vibrator spell `FPLINUX` in Morse code while the matching letter pulses on the screen. The cycle ends with two seconds of water after the letters sink.
+The **Effects** checklist enables screen brightness, keypad lighting and vibration independently. Unsupported effects are omitted. Disabling a light effect leaves ordinary system lighting in control; it does not switch that light off.
+
+Enabled effects follow the scene: daylight and LCD brightness change, and the keypad light and vibrator pulse. Their timing changes, not vibration strength. During the hardware act, the keypad light and vibrator spell `FPLINUX` in Morse code while the matching letter pulses on screen. The cycle ends with two seconds of water after the letters sink.
 
 There is no soundtrack. On phones that vibrate through the speaker, its low vibration tone can be audible; see [Vibration](/fplinux/use/display-and-lights/#vibration).
 
-## Exit
+## Read the result
 
-Press <Key>Right soft</Key> at any time. The LCD returns to your brightness level, including a level you changed while the presentation ran, the keypad light returns to its level before the start, and the vibration stops. Restart the graphical session from the USB shell after the application exits.
+The result identifies completion, stopping, interruption or a rendering error. It includes generated frames per second, active time, frame count and rendering times, followed by the actual renderer, resolution and other run settings. **Repeat** uses the same actual renderer and settings; return to setup to edit them. **Last result** appears on setup while a result is available in the open application.
 
-After it exits, the application prints one line of figures for the run: the number of completed cycles, the frames shown, frame rates and frame times, its CPU use and its peak memory.
+Generated FPS measures how quickly the application produces frames. It is not the panel's refresh rate. GPU rendering times include reading back and converting the image for display. Compare runs with the same renderer, resolution, settings and build.
+
+## Stop or exit
+
+Press <Key>Right soft</Key> during a run to stop and open its result. In full screen, this key works while the scene fills the display. Use Back on setup to close ARMADA.
+
+Stopping, hiding or closing ARMADA clears its temporary physical effects and restores the current system lighting policy, including your latest brightness setting.

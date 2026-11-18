@@ -463,6 +463,11 @@ int main(int argc, char **argv)
 		return 0;
 	}
 	assert(gpu && !error[0]);
+	assert(!fplinux_gpu_is_current(NULL));
+	assert(fplinux_gpu_is_current(gpu));
+	current_context = EGL_NO_CONTEXT;
+	assert(!fplinux_gpu_is_current(gpu));
+	current_context = TEST_CONTEXT;
 	assert(!strcmp(fplinux_gpu_device(gpu), "/dev/dri/renderD131"));
 	assert(!strcmp(fplinux_gpu_renderer(gpu), "Mali-T820 (Panfrost)"));
 	assert(!strcmp(fplinux_gpu_version(gpu),

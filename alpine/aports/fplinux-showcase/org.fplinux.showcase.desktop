@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=ARMADA
+Name[ru]=ARMADA
+Exec=/usr/bin/fplinux-showcase
+Icon=org.fplinux.showcase
+Categories=Graphics;
+X-FPLinux-Mode=integrated
+X-FPLinux-LightEffects=true

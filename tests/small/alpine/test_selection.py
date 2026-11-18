@@ -479,51 +479,50 @@ class AlpineSelectionTests:
             alpine_lock.load_alpine_lock(alpine_source.root)
 
     @pytest.mark.parametrize(
-        "consumer",
+        ("base", "profile", "selected_font", "conflict"),
         [
-            pytest.param("fplinux-showcase", id="showcase"),
-        ],
-    )
-    @pytest.mark.parametrize(
-        ("base", "profile", "selected_font"),
-        [
-            pytest.param((), (), None, id="missing-font"),
+            pytest.param((), (), None, False, id="gui-without-terminal-font"),
             pytest.param(
                 ("fplinux-font-terminus-6x12", "fplinux-font-terminus-8x16"),
                 (),
                 None,
+                True,
                 id="conflicting-base-fonts",
             ),
             pytest.param(
                 ("fplinux-font-terminus-6x12",),
                 ("fplinux-font-terminus-8x16",),
                 None,
+                True,
                 id="conflicting-profile-font",
             ),
             pytest.param(
                 ("fplinux-font-terminus-6x12",),
                 (),
                 "fplinux-font-terminus-6x12",
+                False,
                 id="small-font",
             ),
             pytest.param(
                 ("fplinux-font-terminus-8x16",),
                 (),
                 "fplinux-font-terminus-8x16",
+                False,
                 id="large-font",
             ),
         ],
     )
-    def test_text_rootfs_requires_one_font_payload(
+    def test_rootfs_allows_gui_without_font_and_rejects_competing_terminal_fonts(
         self,
         alpine_source: AlpineSourceContext,
         *,
-        consumer: str,
         base: tuple[str, ...],
         profile: tuple[str, ...],
         selected_font: str | None,
+        conflict: bool,
     ) -> None:
-        """Text applications cannot start with no default font or competing defaults."""
+        """GUI apps need no terminal font; terminal payloads cannot compete."""
+        consumer = "fplinux-showcase"
         alpine_source.write(
             "alpine/aports/fplinux-font-terminus/APKBUILD", b"pkgname=fplinux-font-terminus\n"
         )
@@ -535,8 +534,8 @@ class AlpineSelectionTests:
             }
         }
         with mock.patch.object(alpine_registration, "COMMON_PACKAGES", (consumer,)):
-            if selected_font is None:
-                with pytest.raises(SystemExit, match="exactly one Terminus font size"):
+            if conflict:
+                with pytest.raises(SystemExit, match="at most one Terminus font size"):
                     alpine_selection.selected_packages(
                         {"rootfs": {"packages": []}}, target, alpine_source.root
                     )
@@ -544,4 +543,6 @@ class AlpineSelectionTests:
                 selected = alpine_selection.selected_packages(
                     {"rootfs": {"packages": []}}, target, alpine_source.root
                 )
-                assert (set(selected)) == ({consumer, selected_font})
+                assert set(selected) == (
+                    {consumer, selected_font} if selected_font else {consumer}
+                )

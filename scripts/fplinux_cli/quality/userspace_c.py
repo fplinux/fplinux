@@ -164,8 +164,10 @@ def userspace_c_include_flags(source: str) -> list[str]:
     if source == "lib/fplinux-shared/fplinux-input-session.c":
         flags.extend(pkg_config_cflags("libevdev"))
     shared = registration.SHARED_APORT_SOURCES.get(path.parent.name, ())
-    uses_gpu = source in registration.GPU_OUTPUT_SOURCES or (
-        "include/fplinux/fplinux-gpu.h" in shared
+    uses_gpu = (
+        source in registration.GPU_OUTPUT_SOURCES
+        or source == "lib/fplinux-shared/fplinux-gpu-frame.c"
+        or "include/fplinux/fplinux-gpu.h" in shared
     )
     if uses_gpu:
         flags.extend(("-isystem", _QUALITY_INCLUDE))

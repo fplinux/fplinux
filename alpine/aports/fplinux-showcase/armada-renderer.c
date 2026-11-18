@@ -2,7 +2,6 @@
 #include "armada-renderer.h"
 #include "armada-geometry.h"
 #include "armada-math.h"
-#include "armada-overlay.h"
 
 #include <float.h>
 #include <stdlib.h>
@@ -29,7 +28,6 @@ struct armada_shadow_bounds {
 };
 
 struct armada_renderer {
-	const struct fplinux_font *font;
 	unsigned int width;
 	unsigned int height;
 	unsigned int low_width;
@@ -1794,8 +1792,7 @@ static void render_scene(struct armada_renderer *renderer)
 
 struct armada_renderer *armada_renderer_create(unsigned int width,
 					       unsigned int height,
-					       uint16_t *pixels,
-					       const struct fplinux_font *font)
+					       uint16_t *pixels)
 {
 	struct armada_renderer *renderer;
 	unsigned int y;
@@ -1803,7 +1800,6 @@ struct armada_renderer *armada_renderer_create(unsigned int width,
 	renderer = calloc(1, sizeof(*renderer));
 	if (!renderer)
 		return NULL;
-	renderer->font = font;
 	renderer->width = width;
 	renderer->height = height;
 	renderer->low_width = (width + ARMADA_BACKGROUND_SCALE - 1U) /
@@ -1891,8 +1887,7 @@ void armada_renderer_destroy(struct armada_renderer *renderer)
 }
 
 void armada_renderer_render(struct armada_renderer *renderer,
-			    const struct armada_frame *frame,
-			    const struct armada_metrics *metrics)
+			    const struct armada_frame *frame)
 {
 	renderer->frame = frame;
 	renderer->cloud_transmittance =
@@ -1901,6 +1896,4 @@ void armada_renderer_render(struct armada_renderer *renderer,
 				   frame->environment.celestial_direction) *
 			0.20f;
 	render_scene(renderer);
-	armada_overlay_draw(renderer->width, renderer->height, renderer->pixels,
-			    renderer->font, frame->number, metrics);
 }

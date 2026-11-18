@@ -1,10 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-only
 #include "armada-scene.h"
 #include "armada-gpu-renderer.h"
-#include "armada-overlay.h"
 #include "armada-renderer.h"
 #include "armada-storyboard.h"
-#include "fplinux-gpu-output.h"
 
 #include <errno.h>
 #include <stdio.h>
@@ -16,24 +14,19 @@ struct armada_scene {
 	struct armada_frame frame;
 	struct armada_renderer *renderer;
 	struct armada_gpu_renderer *gpu_renderer;
-	unsigned int width;
-	unsigned int height;
 	uint16_t *pixels;
-	const struct fplinux_font *font;
 	char fallback_reason[512];
 	char error[512];
 };
 
-struct armada_scene *armada_scene_create_with_renderer(
-	unsigned int width, unsigned int height,
-	const struct fplinux_font *font, struct fplinux_drm_session *display,
-	enum armada_render_mode mode, char *error, size_t error_size)
+struct armada_scene *
+armada_scene_create_with_renderer(unsigned int width, unsigned int height,
+				  enum armada_render_mode mode, char *error,
+				  size_t error_size)
 {
 	struct armada_scene *scene;
-	bool cleanup_complete;
 
-	if (!font || !font->bitmap || !font->width || !font->height ||
-	    width == 0U || height == 0U || width > 320U || height > 320U ||
+	if (width == 0U || height == 0U || width > 320U || height > 320U ||
 	    (size_t)width * height > 240U * 320U ||
 	    (mode != ARMADA_RENDER_AUTO && mode != ARMADA_RENDER_SOFTWARE &&
 	     mode != ARMADA_RENDER_GPU)) {
@@ -47,22 +40,6 @@ struct armada_scene *armada_scene_create_with_renderer(
 			 strerror(errno));
 		return NULL;
 	}
-	scene->width = width;
-	scene->height = height;
-	scene->font = font;
-	if (mode != ARMADA_RENDER_SOFTWARE) {
-		scene->gpu_renderer = armada_gpu_renderer_create(
-			display, width, height, &cleanup_complete, error,
-			error_size);
-		if (scene->gpu_renderer)
-			return scene;
-		if (mode == ARMADA_RENDER_GPU || !cleanup_complete) {
-			free(scene);
-			return NULL;
-		}
-		snprintf(scene->fallback_reason, sizeof(scene->fallback_reason),
-			 "%s", error);
-	}
 	scene->pixels = calloc((size_t)width * height, sizeof(*scene->pixels));
 	if (!scene->pixels) {
 		snprintf(error, error_size,
@@ -70,8 +47,19 @@ struct armada_scene *armada_scene_create_with_renderer(
 		free(scene);
 		return NULL;
 	}
-	scene->renderer =
-		armada_renderer_create(width, height, scene->pixels, font);
+	if (mode != ARMADA_RENDER_SOFTWARE) {
+		scene->gpu_renderer = armada_gpu_renderer_create(
+			width, height, scene->pixels, error, error_size);
+		if (scene->gpu_renderer)
+			return scene;
+		if (mode == ARMADA_RENDER_GPU) {
+			armada_scene_destroy(scene);
+			return NULL;
+		}
+		snprintf(scene->fallback_reason, sizeof(scene->fallback_reason),
+			 "%s", error);
+	}
+	scene->renderer = armada_renderer_create(width, height, scene->pixels);
 	if (!scene->renderer) {
 		snprintf(error, error_size,
 			 "cannot allocate software renderer: %s",
@@ -96,7 +84,6 @@ bool armada_scene_destroy(struct armada_scene *scene)
 }
 
 bool armada_scene_render(struct armada_scene *scene, uint32_t frame,
-			 const struct armada_metrics *metrics,
 			 struct armada_outputs *outputs)
 {
 	if (!scene || !outputs)
@@ -104,10 +91,6 @@ bool armada_scene_render(struct armada_scene *scene, uint32_t frame,
 	armada_storyboard_update(&scene->storyboard, frame, &scene->frame,
 				 outputs);
 	if (scene->gpu_renderer) {
-		struct fplinux_gpu_output *output = armada_scene_output(scene);
-		void *pixels;
-		size_t stride;
-
 		if (!armada_gpu_renderer_render(scene->gpu_renderer,
 						&scene->frame)) {
 			snprintf(
@@ -115,29 +98,10 @@ bool armada_scene_render(struct armada_scene *scene, uint32_t frame,
 				armada_gpu_renderer_error(scene->gpu_renderer));
 			return false;
 		}
-		if (!fplinux_gpu_output_begin_cpu(output, &pixels, &stride))
-			goto output_failed;
-		armada_overlay_draw_stride(scene->width, scene->height, pixels,
-					   stride, scene->font,
-					   scene->frame.number, metrics);
-		if (!fplinux_gpu_output_end_cpu(output))
-			goto output_failed;
 	} else {
-		armada_renderer_render(scene->renderer, &scene->frame, metrics);
+		armada_renderer_render(scene->renderer, &scene->frame);
 	}
 	return true;
-
-output_failed:
-	snprintf(scene->error, sizeof(scene->error), "%s",
-		 fplinux_gpu_output_error(armada_scene_output(scene)));
-	return false;
-}
-
-struct fplinux_gpu_output *armada_scene_output(const struct armada_scene *scene)
-{
-	return scene->gpu_renderer ?
-		       armada_gpu_renderer_output(scene->gpu_renderer) :
-		       NULL;
 }
 
 const char *armada_scene_renderer(const struct armada_scene *scene)
@@ -145,6 +109,12 @@ const char *armada_scene_renderer(const struct armada_scene *scene)
 	return scene->gpu_renderer ?
 		       armada_gpu_renderer_name(scene->gpu_renderer) :
 		       "software";
+}
+
+enum armada_render_mode
+armada_scene_render_mode(const struct armada_scene *scene)
+{
+	return scene->gpu_renderer ? ARMADA_RENDER_GPU : ARMADA_RENDER_SOFTWARE;
 }
 
 const uint16_t *armada_scene_pixels(const struct armada_scene *scene)

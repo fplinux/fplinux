@@ -11,7 +11,6 @@ import pytest
 
 from tests import ROOT
 from tests.c_harness import c_build_directory, compile_c
-from tests.fixtures.psf_font import write_solid_ascii_font
 from tests.process import run_process
 
 if TYPE_CHECKING:
@@ -25,12 +24,10 @@ SCENE = APORT / "armada-scene.c"
 
 @dataclass(frozen=True)
 class ShowcaseHarness:
-    """Linked scene renderer and its two immutable fixture fonts."""
+    """Linked scene renderer and controlled offscreen GPU boundary."""
 
     executable: Path
     output_executable: Path
-    small_font: Path
-    large_font: Path
 
 
 class FplinuxShowcaseHostToolTests:
@@ -43,14 +40,10 @@ class FplinuxShowcaseHostToolTests:
         with c_build_directory(tmp_path_factory, "fplinux-showcase") as temporary:
             executable = temporary / "fplinux-showcase-test"
             output_executable = temporary / "armada-output-test"
-            small_font = temporary / "small.psf"
-            large_font = temporary / "large.psf"
-            write_solid_ascii_font(small_font, width=6, height=12)
-            write_solid_ascii_font(large_font, width=8, height=16)
             drm_flags = shlex.split(
                 run_process(
                     ["pkg-config", "--cflags", "--libs", "libdrm"],
-                    name="read DRM flags for the Showcase GPU boundary",
+                    name="read render-node library flags for the Showcase GPU context",
                     timeout=10,
                     check=True,
                 ).stdout
@@ -72,13 +65,9 @@ class FplinuxShowcaseHostToolTests:
                     str(APORT / "armada-storyboard.c"),
                     str(APORT / "armada-renderer.c"),
                     str(APORT / "armada-geometry.c"),
-                    str(APORT / "armada-overlay.c"),
                     str(APORT / "armada-gpu-renderer.c"),
-                    str(ROOT / "lib/fplinux-shared/fplinux-font.c"),
-                    str(ROOT / "lib/fplinux/fplinux-utf8.c"),
                     str(ROOT / "lib/fplinux-shared/fplinux-gpu.c"),
-                    str(ROOT / "lib/fplinux-shared/fplinux-gpu-output.c"),
-                    str(ROOT / "lib/fplinux-shared/fplinux-drm-session.c"),
+                    str(ROOT / "lib/fplinux-shared/fplinux-gpu-frame.c"),
                     "-ldl",
                     *drm_flags,
                 ],
@@ -103,25 +92,26 @@ class FplinuxShowcaseHostToolTests:
                     str(APORT / "armada-storyboard.c"),
                     str(APORT / "armada-renderer.c"),
                     str(APORT / "armada-geometry.c"),
-                    str(APORT / "armada-overlay.c"),
                     str(APORT / "armada-gpu-renderer.c"),
-                    str(ROOT / "lib/fplinux-shared/fplinux-font.c"),
-                    str(ROOT / "lib/fplinux/fplinux-utf8.c"),
+                    str(ROOT / "lib/fplinux-shared/fplinux-gpu-frame.c"),
                     "-Wl,--wrap=fopen",
-                    *drm_flags,
                 ],
-                name="compile ARMADA native output host harness",
+                name="compile ARMADA offscreen GPU host harness",
                 check=True,
             )
-            yield ShowcaseHarness(executable, output_executable, small_font, large_font)
+            yield ShowcaseHarness(executable, output_executable)
 
-    def test_software_renderer_and_timeline_at_supported_display_sizes(
-        self, harness: ShowcaseHarness
+    @pytest.mark.parametrize(
+        ("width", "height"),
+        [(128, 128), (128, 160), (176, 220), (240, 320), (320, 240), (237, 269), (127, 113)],
+    )
+    def test_software_renderer_and_timeline_at_supported_frame_sizes(
+        self, harness: ShowcaseHarness, width: int, height: int
     ) -> None:
         """Protect bounds, frame-history independence, cues, and loop wrapping."""
         run_process(
-            [str(harness.executable), str(harness.small_font), str(harness.large_font)],
-            name="run FPLinux showcase host harness",
+            [str(harness.executable), str(width), str(height)],
+            name=f"render ARMADA software frames at {width}x{height}",
             timeout=30,
             check=True,
         )
@@ -148,7 +138,6 @@ class FplinuxShowcaseHostToolTests:
                 f"missing-shaders-{mode}",
                 "240",
                 "320",
-                str(harness.large_font),
             ],
             name=f"render ARMADA in {mode} mode without optional shaders",
             timeout=10,
@@ -156,15 +145,17 @@ class FplinuxShowcaseHostToolTests:
             check=True,
         )
 
-    @pytest.mark.parametrize(("width", "height"), [(240, 320), (128, 160), (320, 240)])
-    def test_gpu_scene_uses_the_padded_native_back_page(
+    @pytest.mark.parametrize(
+        ("width", "height"),
+        [(128, 128), (128, 160), (176, 220), (240, 320), (320, 240), (237, 269), (127, 113)],
+    )
+    def test_gpu_readback_is_top_down_tight_rgb565(
         self, harness: ShowcaseHarness, width: int, height: int
     ) -> None:
-        """Exercise actual scene objects with synthetic GPU and display output."""
-        font = harness.small_font if width == 128 else harness.large_font
+        """Check literal asymmetric colors, row orientation, guards and buffer reuse."""
         run_process(
-            [str(harness.output_executable), "render", str(width), str(height), str(font)],
-            name=f"render ARMADA into a padded {width}x{height} native output",
+            [str(harness.output_executable), "render", str(width), str(height)],
+            name=f"read ARMADA offscreen frame into tight {width}x{height} RGB565",
             timeout=10,
             check=True,
         )
@@ -172,25 +163,43 @@ class FplinuxShowcaseHostToolTests:
     @pytest.mark.parametrize(
         "scenario",
         [
-            "output-failure",
+            "context-failure",
             "forced-gpu-failure",
             "missing-procedure",
             "shader-failure",
             "link-failure",
             "target-failure",
-            "cleanup-failure",
             "render-failure",
-            "begin-failure",
-            "end-failure",
+            "readback-failure",
         ],
     )
     def test_gpu_failure_cleanup_and_software_fallback(
         self, harness: ShowcaseHarness, scenario: str
     ) -> None:
-        """Keep ownership ordered and stop failed frames before presentation."""
+        """Release GL objects before the context and surface failed frames to callers."""
         run_process(
-            [str(harness.output_executable), scenario, "240", "320", str(harness.large_font)],
-            name=f"exercise ARMADA native output {scenario}",
+            [str(harness.output_executable), scenario, "240", "320"],
+            name=f"exercise ARMADA offscreen GPU {scenario}",
+            timeout=10,
+            check=True,
+        )
+
+    @pytest.mark.parametrize(
+        "scenario",
+        [
+            "frame-small-output",
+            "frame-wrong-context",
+            "frame-pending-error",
+            "frame-invalid-dimensions",
+        ],
+    )
+    def test_shared_gpu_frame_rejects_invalid_reads_without_changing_pixels(
+        self, harness: ShowcaseHarness, scenario: str
+    ) -> None:
+        """Link the frame adapter and recover after capacity/context/GL errors."""
+        run_process(
+            [str(harness.output_executable), scenario, "237", "269"],
+            name=f"exercise shared GPU frame {scenario}",
             timeout=10,
             check=True,
         )

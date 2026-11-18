@@ -1,162 +1,24 @@
 // SPDX-License-Identifier: GPL-2.0-only
-#define _GNU_SOURCE
-
-#include "armada-scene.h"
-#include "showcase-hardware.h"
+#define _POSIX_C_SOURCE 200809L
+#include "showcase-app.h"
 #include "fplinux-cli.h"
-#include "fplinux-drm-session.h"
-#include "fplinux-gpu-output.h"
+#include "fplinux-system-info.h"
 
+#include <fplinux/fplinux-ui-menu.h>
+#include <fplinux/fplinux-ui-session.h>
+#include <fplinux/fplinux-ui-vibration.h>
 #include <errno.h>
-#include <inttypes.h>
-#include <signal.h>
-#include <stdbool.h>
-#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/resource.h>
 #include <time.h>
-#include <unistd.h>
 
-#define ARRAY_SIZE(array) (sizeof(array) / sizeof((array)[0]))
-#define SHOWCASE_TTY "/dev/tty0"
-#define SHOWCASE_NANOSECONDS_PER_SECOND 1000000000ULL
-#define SHOWCASE_MICROSECONDS_PER_SECOND 1000000ULL
-#define SHOWCASE_FRAME_PERIOD_NS \
-	(SHOWCASE_NANOSECONDS_PER_SECOND / ARMADA_FRAMES_PER_SECOND)
-#define SHOWCASE_CYCLE_DURATION_NS \
-	(SHOWCASE_FRAME_PERIOD_NS * ARMADA_DURATION_FRAMES)
+#define LOAD_TIMER_MS 1U
+#define PREPARATION_TIMEOUT_NS 5000000000ULL
 
-struct showcase_options {
-	uint64_t runs;
-	const char *keypad_led;
-	enum armada_render_mode renderer;
-};
-
-struct frame_statistics {
-	uint64_t started_ns;
-	uint64_t render_us_sum;
-	uint64_t rendered;
-	uint32_t render_us_max;
-};
-
-enum showcase_option {
-	SHOWCASE_OPTION_RUNS,
-	SHOWCASE_OPTION_KEYPAD_LED,
-	SHOWCASE_OPTION_RENDERER,
-};
-
-static volatile sig_atomic_t stop_requested;
-
-static bool parse_positive_runs(const char *value, uint64_t *runs,
-				const char **error)
-{
-	char *end;
-	const char *cursor;
-	uint64_t parsed;
-
-	if (value[0] == '\0') {
-		*error = "--runs requires a positive decimal count";
-		return false;
-	}
-	for (cursor = value; *cursor; ++cursor)
-		if (*cursor < '0' || *cursor > '9') {
-			*error = "--runs requires a positive decimal count";
-			return false;
-		}
-	errno = 0;
-	parsed = strtoull(value, &end, 10);
-	if (errno == ERANGE || end == value || *end != '\0' || parsed == 0 ||
-	    parsed > UINT64_MAX / SHOWCASE_CYCLE_DURATION_NS) {
-		*error = "--runs count is out of range";
-		return false;
-	}
-	*runs = parsed;
-	return true;
-}
-
-static const char *parse_showcase_option(size_t option, const char *value,
-					 void *data)
-{
-	struct showcase_options *options = data;
-	const char *argument_error;
-
-	switch (option) {
-	case SHOWCASE_OPTION_RUNS:
-		if (!parse_positive_runs(value, &options->runs,
-					 &argument_error))
-			return argument_error;
-		break;
-	case SHOWCASE_OPTION_KEYPAD_LED:
-		options->keypad_led = value;
-		break;
-	case SHOWCASE_OPTION_RENDERER:
-		if (strcmp(value, "auto") == 0)
-			options->renderer = ARMADA_RENDER_AUTO;
-		else if (strcmp(value, "software") == 0)
-			options->renderer = ARMADA_RENDER_SOFTWARE;
-		else if (strcmp(value, "gpu") == 0)
-			options->renderer = ARMADA_RENDER_GPU;
-		else
-			return "--renderer must be auto, software, or gpu";
-		break;
-	}
-	return NULL;
-}
-
-static enum fplinux_cli_result parse_options(int argc, char **argv,
-					     struct showcase_options *parsed)
-{
-	struct fplinux_cli_option options[] = {
-		{
-			.name = "runs",
-			.metavar = "N",
-			.help = "run the showcase N times",
-		},
-		{
-			.name = "keypad-led",
-			.metavar = "DIR",
-			.help = "use the keypad LED brightness directory",
-		},
-		{
-			.name = "renderer",
-			.metavar = "auto|software|gpu",
-			.help = "select rendering (default: auto)",
-		},
-	};
-	struct fplinux_cli cli = {
-		.program = argv[0],
-		.description = "Display the Armada showcase.",
-		.options = options,
-		.option_count = ARRAY_SIZE(options),
-		.parse_option = parse_showcase_option,
-		.data = parsed,
-	};
-
-	memset(parsed, 0, sizeof(*parsed));
-	return fplinux_cli_parse(&cli, argc, argv);
-}
-
-static void catch_signal(int signal_number)
-{
-	stop_requested = signal_number;
-}
-
-static bool install_signal_handlers(void)
-{
-	static const int handled[] = { SIGHUP, SIGINT, SIGQUIT, SIGTERM };
-	struct sigaction action = {
-		.sa_handler = catch_signal,
-	};
-	size_t index;
-
-	sigemptyset(&action.sa_mask);
-	for (index = 0; index < ARRAY_SIZE(handled); ++index)
-		if (sigaction(handled[index], &action, NULL) < 0)
-			return false;
-	return true;
-}
+static void show_finished(void *context);
+static void finish(struct showcase_app *app, enum showcase_status status,
+		   const char *reason);
 
 static uint64_t monotonic_ns(void)
 {
@@ -164,372 +26,595 @@ static uint64_t monotonic_ns(void)
 
 	if (clock_gettime(CLOCK_MONOTONIC, &now) < 0)
 		return 0;
-	return (uint64_t)now.tv_sec * SHOWCASE_NANOSECONDS_PER_SECOND +
-	       (uint64_t)now.tv_nsec;
+	return (uint64_t)now.tv_sec * 1000000000ULL + (uint64_t)now.tv_nsec;
 }
 
-static bool process_usage(uint64_t *cpu_us, long *peak_rss_kib)
+static bool is_attempt(const struct showcase_app *app)
 {
-	struct rusage usage;
+	return app->state == SHOWCASE_PREPARING ||
+	       app->state == SHOWCASE_RUNNING;
+}
 
-	if (getrusage(RUSAGE_SELF, &usage) != 0)
+static bool is_eligible(const struct showcase_app *app)
+{
+	return !app->closing && app->canvas_active &&
+	       fplinux_ui_is_visible(app->ui) &&
+	       fplinux_ui_lifecycle(app->ui) == FPLINUX_UI_FOREGROUND;
+}
+
+static uint64_t active_ms(const struct showcase_app *app)
+{
+	uint64_t now_ms = fplinux_ui_now_ms();
+	return app->running && now_ms >= app->run.started_ms ?
+		       now_ms - app->run.started_ms :
+		       0;
+}
+
+static void clear_effects(struct showcase_app *app)
+{
+	if (app->lights_sent &&
+	    fplinux_ui_light_effects_clear(app->ui, &app->light_serial))
+		app->lights = (struct fplinux_ui_light_effect){ 0 };
+	app->lights_sent = false;
+	app->lights_applied = false;
+	app->light_retry_ms = 0;
+	if (app->vibration_sent)
+		fplinux_ui_vibration_stop(app->ui);
+	app->vibration_sent = false;
+}
+
+static void update_running(struct showcase_app *app)
+{
+	bool running = app->state == SHOWCASE_RUNNING && is_eligible(app);
+	bool preparing = app->state == SHOWCASE_PREPARING && is_eligible(app);
+
+	if (running != app->running) {
+		app->running = running;
+		if (!running)
+			clear_effects(app);
+	}
+	if (app->frame && app->timer)
+		fplinux_ui_frame_set_timer(app->frame, app->timer,
+					   running || preparing);
+	if (running != app->kept_on &&
+	    fplinux_ui_keep_screen_on(app->ui, running))
+		app->kept_on = running;
+}
+
+void showcase_show_alert(struct showcase_app *app,
+			 enum fplinux_ui_alert_kind kind, const char *title,
+			 const char *text)
+{
+	struct fplinux_ui_screen *alert =
+		fplinux_ui_alert_new(app->ui, kind, title, text, 0);
+
+	if (alert)
+		fplinux_ui_push(app->ui, alert);
+}
+
+static bool release_drawing(struct showcase_app *app)
+{
+	bool released;
+
+	clear_effects(app);
+	if (app->timer) {
+		if (app->frame)
+			fplinux_ui_frame_set_timer(app->frame, NULL, false);
+		lv_timer_delete(app->timer);
+		app->timer = NULL;
+	}
+	released = armada_scene_destroy(app->scene);
+	if (!released)
+		fputs("fplinux-showcase: renderer cleanup was incomplete\n",
+		      stderr);
+	app->scene = NULL;
+	fplinux_ui_frame_delete(app->frame);
+	app->frame = NULL;
+	app->message = NULL;
+	return released;
+}
+
+static void reset_drawing(struct showcase_app *app)
+{
+	app->state = SHOWCASE_SETUP;
+	lv_async_call_cancel(show_finished, app);
+	update_running(app);
+	release_drawing(app);
+	app->canvas = NULL;
+	app->results = NULL;
+	app->canvas_active = false;
+	fplinux_ui_pop_to(app->ui, app->setup);
+}
+
+void showcase_show_setup(struct showcase_app *app)
+{
+	reset_drawing(app);
+	fplinux_ui_set_fullscreen(app->ui, false);
+	showcase_setup_refresh(app, false);
+}
+
+void showcase_restart(struct showcase_app *app,
+		      const struct showcase_effective *effective)
+{
+	struct showcase_config config = effective->config;
+
+	config.renderer = effective->renderer;
+	reset_drawing(app);
+	showcase_start(app, &config);
+}
+
+static void preparation_error(struct showcase_app *app, const char *reason)
+{
+	char text[768];
+
+	snprintf(
+		text, sizeof(text),
+		_("The run could not start. Review the settings and try again.\n\n%s"),
+		reason);
+	fprintf(stderr, "fplinux-showcase: %s\n", reason);
+	showcase_show_setup(app);
+	showcase_show_alert(app, FPLINUX_UI_ALERT_ERROR,
+			    _("Preparation failed"), text);
+}
+
+static bool same_lights(const struct fplinux_ui_light_effect *first,
+			const struct fplinux_ui_light_effect *second)
+{
+	return first->resources == second->resources &&
+	       first->display_level == second->display_level &&
+	       first->keypad_on == second->keypad_on;
+}
+
+static void effect_unavailable(struct showcase_app *app, unsigned int effects)
+{
+	if (!is_attempt(app))
+		return;
+	if (effects & (SHOWCASE_EFFECT_SCREEN | SHOWCASE_EFFECT_KEYPAD))
+		app->light_resources = 0;
+	if (effects & SHOWCASE_EFFECT_VIBRATION)
+		app->vibration_available = false;
+	finish(app, SHOWCASE_STATUS_ERROR,
+	       _("A selected physical effect is unavailable."));
+}
+
+static void apply_effects(struct showcase_app *app,
+			  const struct armada_outputs *outputs,
+			  uint64_t elapsed_ms, uint32_t frame)
+{
+	struct fplinux_ui_light_effect lights = {
+		.resources = app->light_resources
+	};
+	uint64_t cycle = elapsed_ms / SHOWCASE_CYCLE_MS;
+	uint64_t now_ms = active_ms(app);
+	uint64_t pulse_elapsed_ms = elapsed_ms % SHOWCASE_CYCLE_MS -
+				    frame * 1000U / ARMADA_FRAMES_PER_SECOND;
+	unsigned int remaining_ms = outputs->rumble_remaining_ms;
+
+	if (now_ms > elapsed_ms)
+		pulse_elapsed_ms += now_ms - elapsed_ms;
+	if (lights.resources & FPLINUX_UI_LIGHT_SCREEN)
+		lights.display_level = (unsigned int)outputs->lcd_level;
+	if (lights.resources & FPLINUX_UI_LIGHT_KEYPAD)
+		lights.keypad_on = outputs->keypad;
+	if (lights.resources && !app->light_serial &&
+	    fplinux_ui_now_ms() >= app->light_retry_ms &&
+	    (!app->lights_applied || !same_lights(&lights, &app->lights))) {
+		app->lights = lights;
+		if (fplinux_ui_light_effects_apply(app->ui, &lights,
+						   &app->light_serial)) {
+			app->lights_sent = true;
+		} else if (errno == EAGAIN) {
+			app->light_retry_ms = fplinux_ui_now_ms() + 250U;
+		} else {
+			effect_unavailable(app, SHOWCASE_EFFECT_SCREEN |
+							SHOWCASE_EFFECT_KEYPAD);
+			return;
+		}
+	}
+	if (!outputs->rumble || !app->vibration_available ||
+	    (app->vibration_sent && app->vibration_cycle == cycle &&
+	     app->vibration_cue == outputs->cue_id))
+		return;
+	remaining_ms = remaining_ms > pulse_elapsed_ms ?
+			       remaining_ms - (unsigned int)pulse_elapsed_ms :
+			       0;
+	if (remaining_ms >= 50U) {
+		unsigned int pattern[] = { 0, remaining_ms };
+
+		if (fplinux_ui_vibration_play(app->ui, pattern, 2, false)) {
+			app->vibration_cycle = cycle;
+			app->vibration_cue = outputs->cue_id;
+			app->vibration_sent = true;
+		} else if (errno != EAGAIN) {
+			effect_unavailable(app, SHOWCASE_EFFECT_VIBRATION);
+		}
+	}
+}
+
+static void update_status(struct showcase_app *app, bool force)
+{
+	uint64_t now_ms = fplinux_ui_now_ms();
+	char text[128];
+
+	if (!app->message || (!force && now_ms - app->run.status_ms < 250U))
+		return;
+	app->run.status_ms = now_ms;
+	snprintf(text, sizeof(text), _("Running · %llu s"),
+		 (unsigned long long)(active_ms(app) / 1000U));
+	lv_label_set_text(app->message, text);
+}
+
+static bool present(struct showcase_app *app)
+{
+	uint16_t *pixels = fplinux_ui_frame_pixels(app->frame, NULL, NULL);
+
+	memcpy(pixels, armada_scene_pixels(app->scene),
+	       (size_t)app->effective.width * (size_t)app->effective.height *
+		       sizeof(*pixels));
+	fplinux_ui_frame_damage(app->frame, NULL);
+	if (fplinux_ui_frame_present(app->frame))
+		return true;
+	finish(app,
+	       errno == EAGAIN ? SHOWCASE_STATUS_INTERRUPTED :
+				 SHOWCASE_STATUS_ERROR,
+	       errno == EAGAIN ? _("The drawing area became unavailable.") :
+				 _("The frame could not be presented."));
+	return false;
+}
+
+static bool draw_frame(struct showcase_app *app, uint32_t frame,
+		       uint64_t elapsed_ms)
+{
+	struct armada_outputs outputs;
+	uint64_t started_ns = monotonic_ns();
+	bool rendered = armada_scene_render(app->scene, frame, &outputs);
+	uint64_t ended_ns = monotonic_ns();
+	uint64_t render_ns = ended_ns >= started_ns ? ended_ns - started_ns : 0;
+
+	if (!rendered) {
+		finish(app, SHOWCASE_STATUS_ERROR,
+		       armada_scene_error(app->scene));
 		return false;
-	*cpu_us = (uint64_t)usage.ru_utime.tv_sec *
-			  SHOWCASE_MICROSECONDS_PER_SECOND +
-		  (uint64_t)usage.ru_utime.tv_usec +
-		  (uint64_t)usage.ru_stime.tv_sec *
-			  SHOWCASE_MICROSECONDS_PER_SECOND +
-		  (uint64_t)usage.ru_stime.tv_usec;
-	*peak_rss_kib = usage.ru_maxrss;
+	}
+	++app->run.frames;
+	app->run.render_ns_sum += render_ns;
+	if (render_ns > app->run.render_ns_max)
+		app->run.render_ns_max = render_ns;
+	if (!present(app))
+		return false;
+	if (app->running)
+		apply_effects(app, &outputs, elapsed_ms, frame);
+	return is_attempt(app);
+}
+
+static bool prepare(struct showcase_app *app)
+{
+	struct showcase_effective *effective = &app->effective;
+	char error[512] = { 0 };
+	const struct fplinux_ui_metrics *metrics = fplinux_ui_metrics(app->ui);
+
+	if (fplinux_ui_is_fullscreen(app->ui) != effective->config.fullscreen) {
+		if (monotonic_ns() - app->run.preparation_ns >=
+		    PREPARATION_TIMEOUT_NS)
+			preparation_error(
+				app,
+				_("The screen mode could not be changed. Try again."));
+		return false;
+	}
+	if (!fplinux_ui_screen_get_content_size(app->canvas, &effective->width,
+						&effective->height)) {
+		preparation_error(app,
+				  _("The drawing area could not be prepared."));
+		return false;
+	}
+	if (!fplinux_ui_frame_resize(app->frame, effective->width,
+				     effective->height)) {
+		preparation_error(app,
+				  _("The drawing area could not be prepared."));
+		return false;
+	}
+	lv_obj_align(fplinux_ui_frame_object(app->frame), LV_ALIGN_CENTER, 0,
+		     0);
+	lv_obj_set_width(app->message, effective->width - 2 * metrics->margin);
+	lv_obj_align(app->message, LV_ALIGN_TOP_MID, 0, metrics->margin);
+	app->scene = armada_scene_create_with_renderer(
+		(unsigned int)effective->width, (unsigned int)effective->height,
+		effective->config.renderer, error, sizeof(error));
+	if (!app->scene) {
+		preparation_error(app, error);
+		return false;
+	}
+	effective->renderer = armada_scene_render_mode(app->scene);
+	snprintf(effective->renderer_name, sizeof(effective->renderer_name),
+		 "%s", armada_scene_renderer(app->scene));
+	if (armada_scene_fallback_reason(app->scene)[0])
+		fprintf(stderr,
+			"fplinux-showcase: GPU unavailable: %s; using software\n",
+			armada_scene_fallback_reason(app->scene));
+	effective->effects = effective->config.effects & app->capabilities;
+	app->light_resources = effective->effects & (SHOWCASE_EFFECT_SCREEN |
+						     SHOWCASE_EFFECT_KEYPAD);
+	app->vibration_available =
+		(effective->effects & SHOWCASE_EFFECT_VIBRATION) != 0;
+	app->run.started_ms = fplinux_ui_now_ms();
+	app->state = SHOWCASE_RUNNING;
+	lv_obj_set_hidden(fplinux_ui_frame_object(app->frame), false);
+	if (effective->config.fullscreen) {
+		lv_obj_delete(app->message);
+		app->message = NULL;
+	}
+	lv_timer_set_period(app->timer, LOAD_TIMER_MS);
+	update_running(app);
+	update_status(app, true);
 	return true;
 }
 
-static struct timespec nanoseconds_to_timespec(uint64_t nanoseconds)
+static void timed_tick(struct showcase_app *app)
 {
-	struct timespec result = {
-		.tv_sec =
-			(time_t)(nanoseconds / SHOWCASE_NANOSECONDS_PER_SECOND),
-		.tv_nsec =
-			(long)(nanoseconds % SHOWCASE_NANOSECONDS_PER_SECOND),
+	uint64_t elapsed_ms = active_ms(app);
+	uint64_t now_ns = monotonic_ns();
+	uint64_t duration_ns = (uint64_t)app->effective.config.cycles *
+			       SHOWCASE_CYCLE_MS * 1000000ULL;
+	uint32_t frame = (uint32_t)((elapsed_ms % SHOWCASE_CYCLE_MS) *
+				    ARMADA_FRAMES_PER_SECOND / 1000U);
+
+	if (!app->run.measured_started_ns)
+		app->run.measured_started_ns = now_ns;
+	if (duration_ns && app->run.frames &&
+	    now_ns - app->run.measured_started_ns >= duration_ns) {
+		finish(app, SHOWCASE_STATUS_COMPLETED,
+		       _("The selected cycles completed."));
+		return;
+	}
+	update_status(app, false);
+	if (!draw_frame(app, frame, elapsed_ms))
+		return;
+	if (duration_ns &&
+	    monotonic_ns() - app->run.measured_started_ns >= duration_ns) {
+		finish(app, SHOWCASE_STATUS_COMPLETED,
+		       _("The selected cycles completed."));
+	}
+}
+
+static void tick(lv_timer_t *timer)
+{
+	struct showcase_app *app = lv_timer_get_user_data(timer);
+
+	if (app->state == SHOWCASE_PREPARING) {
+		if (is_eligible(app))
+			prepare(app);
+		return;
+	}
+	if (!app->running)
+		return;
+	timed_tick(app);
+}
+
+static void finish(struct showcase_app *app, enum showcase_status status,
+		   const char *reason)
+{
+	uint64_t now_ns = monotonic_ns();
+
+	if (!is_attempt(app))
+		return;
+	app->result = (struct showcase_result){
+		.effective = app->effective,
+		.status = status,
+		.frames = app->run.frames,
+		.duration_ns = app->run.measured_started_ns ?
+				       now_ns - app->run.measured_started_ns :
+				       0,
+		.render_ns_sum = app->run.render_ns_sum,
+		.render_ns_max = app->run.render_ns_max,
+		.available = true,
+	};
+	snprintf(app->result.reason, sizeof(app->result.reason), "%s", reason);
+	app->state = SHOWCASE_RESULT;
+	update_running(app);
+	clear_effects(app);
+	if (!fplinux_system_info_read_line("/proc/device-tree/model",
+					   app->result.model,
+					   sizeof(app->result.model)))
+		snprintf(app->result.model, sizeof(app->result.model), "%s",
+			 _("Unknown"));
+	if (!fplinux_system_info_read_os_field("/etc/os-release", "BUILD_ID",
+					       app->result.build,
+					       sizeof(app->result.build)))
+		snprintf(app->result.build, sizeof(app->result.build), "%s",
+			 _("Unknown"));
+	if (!app->closing)
+		lv_async_call(show_finished, app);
+}
+
+static void show_finished(void *context)
+{
+	struct showcase_app *app = context;
+
+	if (app->closing || app->state != SHOWCASE_RESULT)
+		return;
+	showcase_show_setup(app);
+	showcase_show_result(app);
+}
+
+static void active(struct fplinux_ui *ui, struct fplinux_ui_screen *canvas,
+		   bool enabled, void *context)
+{
+	struct showcase_app *app = context;
+
+	(void)ui;
+	(void)canvas;
+	app->canvas_active = enabled;
+	if (!enabled && is_attempt(app))
+		finish(app, SHOWCASE_STATUS_INTERRUPTED,
+		       _("The run lost the foreground drawing area."));
+	update_running(app);
+}
+
+static void command(struct fplinux_ui *ui, struct fplinux_ui_screen *screen,
+		    int command_id, void *context)
+{
+	struct showcase_app *app = context;
+
+	(void)ui;
+	(void)screen;
+	if (command_id == SHOWCASE_STOP)
+		finish(app, SHOWCASE_STATUS_STOPPED, _("Stopped by user."));
+}
+
+void showcase_start(struct showcase_app *app,
+		    const struct showcase_config *config)
+{
+	const struct fplinux_ui_theme *theme = fplinux_ui_theme(app->ui);
+	const struct fplinux_ui_command stop = {
+		.id = SHOWCASE_STOP,
+		.type = FPLINUX_UI_COMMAND_STOP,
+		.keep_visible = true,
 	};
 
-	return result;
-}
-
-static void update_metrics(const struct frame_statistics *statistics,
-			   uint64_t now_ns, struct armada_metrics *metrics)
-{
-	uint64_t elapsed_us;
-
-	memset(metrics, 0, sizeof(*metrics));
-	if (statistics->rendered < 2 || now_ns <= statistics->started_ns)
+	if (app->state != SHOWCASE_SETUP || app->closing)
 		return;
-	elapsed_us = (now_ns - statistics->started_ns) / 1000U;
-	if (elapsed_us == 0)
-		return;
-	metrics->average_fps_tenths =
-		(uint32_t)(statistics->rendered * 10000000ULL / elapsed_us);
-	metrics->minimum_fps_tenths =
-		statistics->render_us_max ?
-			(uint32_t)(10000000ULL / statistics->render_us_max) :
-			0;
-	metrics->maximum_frame_us = statistics->render_us_max;
-	metrics->valid = true;
+	app->effective = (struct showcase_effective){
+		.config = *config,
+		.renderer = config->renderer,
+	};
+	app->run = (struct showcase_run){ .preparation_ns = monotonic_ns() };
+	app->state = SHOWCASE_PREPARING;
+	app->canvas = fplinux_ui_canvas_new(
+		app->ui, config->fullscreen ? NULL : "ARMADA");
+	if (!app->canvas)
+		goto failed;
+	app->frame =
+		fplinux_ui_frame_new(app->ui, 1, 1, FPLINUX_UI_FRAME_DIRECT);
+	if (!app->frame)
+		goto failed;
+	lv_obj_set_parent(fplinux_ui_frame_object(app->frame),
+			  fplinux_ui_canvas_object(app->canvas));
+	lv_obj_set_hidden(fplinux_ui_frame_object(app->frame), true);
+	app->message = lv_label_create(fplinux_ui_canvas_object(app->canvas));
+	if (!app->message)
+		goto failed;
+	lv_obj_set_style_text_font(app->message, theme->font, 0);
+	lv_obj_set_style_text_color(app->message, theme->foreground, 0);
+	lv_obj_set_style_bg_color(app->message, theme->background, 0);
+	lv_obj_set_style_bg_opa(app->message, LV_OPA_COVER, 0);
+	lv_obj_set_style_text_align(app->message, LV_TEXT_ALIGN_CENTER, 0);
+	lv_label_set_long_mode(app->message, LV_LABEL_LONG_WRAP);
+	lv_label_set_text(app->message, _("Preparing…"));
+	app->timer = lv_timer_create(tick, LOAD_TIMER_MS, app);
+	if (!app->timer)
+		goto failed;
+	fplinux_ui_frame_set_timer(app->frame, app->timer, false);
+	fplinux_ui_screen_add_command(app->canvas, &stop);
+	fplinux_ui_screen_set_listener(app->canvas, command, NULL, app);
+	fplinux_ui_canvas_set_active_listener(app->canvas, active, app);
+	if (!fplinux_ui_set_fullscreen(app->ui, config->fullscreen) ||
+	    !fplinux_ui_push(app->ui, app->canvas))
+		goto failed;
+	update_running(app);
+	return;
+
+failed:
+	preparation_error(app, _("The drawing area could not be prepared."));
 }
 
-static void print_result(uint64_t runs,
-			 const struct frame_statistics *statistics,
-			 uint64_t finished_ns, uint64_t started_cpu_us,
-			 uint64_t finished_cpu_us, long peak_rss_kib)
+static void session_event(struct showcase_app *app,
+			  const struct fplinux_ui_session_message *reply)
 {
-	uint64_t elapsed_us = 0;
-	uint64_t average_fps_tenths = 0;
-	uint64_t minimum_fps_tenths = 0;
-	uint64_t average_frame_us = 0;
-	uint64_t maximum_frame_us = statistics->render_us_max;
-	uint64_t cpu_percent_tenths = 0;
+	bool light_error = reply->type == FPLINUX_UI_SESSION_ERROR &&
+			   !strcmp(reply->name, "light_effect");
 
-	if (finished_ns > statistics->started_ns)
-		elapsed_us = (finished_ns - statistics->started_ns) / 1000U;
-	if (statistics->rendered && elapsed_us)
-		average_fps_tenths = statistics->rendered *
-				     (10U * SHOWCASE_MICROSECONDS_PER_SECOND) /
-				     elapsed_us;
-	if (statistics->render_us_max)
-		minimum_fps_tenths = (10U * SHOWCASE_MICROSECONDS_PER_SECOND) /
-				     statistics->render_us_max;
-	if (statistics->rendered)
-		average_frame_us =
-			statistics->render_us_sum / statistics->rendered;
-	if (elapsed_us && finished_cpu_us >= started_cpu_us)
-		cpu_percent_tenths =
-			(finished_cpu_us - started_cpu_us) * 1000U / elapsed_us;
-	printf("runs=%" PRIu64 " rendered=%" PRIu64 " average_fps=%" PRIu64
-	       ".%" PRIu64 " minimum_fps=%" PRIu64 ".%" PRIu64
-	       " average_frame_ms=%" PRIu64 ".%" PRIu64
-	       " maximum_frame_ms=%" PRIu64 ".%" PRIu64 " cpu_percent=%" PRIu64
-	       ".%" PRIu64 " peak_rss_kib=%ld\n",
-	       runs, statistics->rendered, average_fps_tenths / 10U,
-	       average_fps_tenths % 10U, minimum_fps_tenths / 10U,
-	       minimum_fps_tenths % 10U, average_frame_us / 1000U,
-	       (average_frame_us / 100U) % 10U, maximum_frame_us / 1000U,
-	       (maximum_frame_us / 100U) % 10U, cpu_percent_tenths / 10U,
-	       cpu_percent_tenths % 10U, peak_rss_kib);
+	if (reply->type == FPLINUX_UI_SESSION_LIGHT_EFFECT || light_error) {
+		if (!app->light_serial || reply->serial != app->light_serial)
+			return;
+		app->light_serial = 0;
+		app->lights_applied =
+			!light_error &&
+			same_lights(&reply->light_effect, &app->lights) &&
+			app->lights.resources && app->running;
+		if (light_error) {
+			if (!strcmp(reply->reason, "not-visible"))
+				app->light_retry_ms =
+					fplinux_ui_now_ms() + 250U;
+			else
+				effect_unavailable(
+					app, SHOWCASE_EFFECT_SCREEN |
+						     SHOWCASE_EFFECT_KEYPAD);
+		}
+	} else if (reply->type == FPLINUX_UI_SESSION_ERROR &&
+		   !strcmp(reply->name, "vibration") &&
+		   strcmp(reply->reason, "not-visible") &&
+		   app->vibration_available && app->vibration_sent) {
+		effect_unavailable(app, SHOWCASE_EFFECT_VIBRATION);
+	}
 }
 
-static void copy_frame(struct fplinux_drm_session *display,
-		       const uint16_t *pixels, unsigned int page)
+static void event(struct fplinux_ui *ui, const struct fplinux_ui_event *event,
+		  void *context)
 {
-	uint8_t *destination = display->mapping + page * display->page_bytes;
-	unsigned int row;
+	struct showcase_app *app = context;
 
-	for (row = 0; row < display->height; ++row)
-		memcpy(destination + (size_t)row * display->stride,
-		       pixels + (size_t)row * display->width,
-		       (size_t)display->width * sizeof(*pixels));
+	if (event->type == FPLINUX_UI_EVENT_CLOSE) {
+		app->closing = true;
+		lv_async_call_cancel(show_finished, app);
+		finish(app, SHOWCASE_STATUS_INTERRUPTED,
+		       _("The application was closed."));
+		update_running(app);
+		clear_effects(app);
+	} else if (event->type == FPLINUX_UI_EVENT_ACTIVATION &&
+		   event->activation == FPLINUX_UI_ACTIVATION_OPEN) {
+		fplinux_ui_menu_close(ui);
+		if (is_attempt(app))
+			finish(app, SHOWCASE_STATUS_INTERRUPTED,
+			       _("Opened from the application catalogue."));
+		if (app->setup)
+			showcase_show_setup(app);
+	} else if (event->type == FPLINUX_UI_EVENT_VISIBILITY ||
+		   event->type == FPLINUX_UI_EVENT_LIFECYCLE) {
+		if (is_attempt(app) && !is_eligible(app))
+			finish(app, SHOWCASE_STATUS_INTERRUPTED,
+			       _("The application became hidden or inactive."));
+		update_running(app);
+	} else if (event->type == FPLINUX_UI_EVENT_RESIZE && app->canvas) {
+		if (app->state == SHOWCASE_RUNNING)
+			finish(app, SHOWCASE_STATUS_INTERRUPTED,
+			       _("The drawing area changed size."));
+	} else if (event->type == FPLINUX_UI_EVENT_SESSION && event->session) {
+		session_event(app, event->session);
+	}
 }
 
 int main(int argc, char **argv)
 {
-	struct fplinux_drm_session display;
-	struct showcase_hardware hardware;
-	struct showcase_options options;
-	struct frame_statistics statistics = { 0 };
-	struct armada_scene *scene = NULL;
-	struct fplinux_gpu_output *gpu_output = NULL;
-	struct fplinux_font font = { 0 };
-	const uint16_t *pixels = NULL;
-	uint64_t frame_limit;
-	uint64_t completed_runs = 0;
-	uint64_t finished_ns = 0;
-	uint64_t started_cpu_us = 0;
-	uint64_t finished_cpu_us = 0;
-	long peak_rss_kib = 0;
-	uint64_t frame_period = SHOWCASE_FRAME_PERIOD_NS;
-	uint64_t next_frame = 0;
-	bool display_open = false;
-	bool hardware_open = false;
-	bool success = false;
-	bool report_result = false;
-	enum fplinux_cli_result parse_result;
-	char error[160] = { 0 };
+	struct fplinux_cli cli = {
+		.program = "fplinux-showcase",
+		.description = "Display the ARMADA showcase.",
+	};
+	struct showcase_app app = { 0 };
+	int result = fplinux_cli_parse(&cli, argc, argv);
 
-	memset(&display, 0, sizeof(display));
-	parse_result = parse_options(argc, argv, &options);
-	if (parse_result != FPLINUX_CLI_READY)
-		return parse_result;
-	frame_limit = options.runs * ARMADA_DURATION_FRAMES;
-	if (!install_signal_handlers()) {
-		fprintf(stderr,
-			"fplinux-showcase: cannot install signal handlers: %s\n",
-			strerror(errno));
+	if (result != FPLINUX_CLI_READY)
+		return result;
+	app.ui = fplinux_ui_open(SHOWCASE_APP_ID, event, &app);
+	if (!app.ui) {
+		perror("fplinux-showcase: fplinux_ui_open");
 		return EXIT_FAILURE;
 	}
-	if (!showcase_hardware_open(&hardware, options.keypad_led, error,
-				    sizeof(error))) {
-		fprintf(stderr, "fplinux-showcase: %s: %s\n", error,
-			strerror(errno));
-		hardware_open = true;
-		goto cleanup;
+	app.capabilities = fplinux_ui_light_effects_supported(app.ui);
+	if (fplinux_ui_vibration_supported(app.ui))
+		app.capabilities |= SHOWCASE_EFFECT_VIBRATION;
+	showcase_setup_load(&app);
+	if (!showcase_setup_create(&app)) {
+		perror("fplinux-showcase: create view");
+		result = -1;
+	} else {
+		result = fplinux_ui_run(app.ui);
 	}
-	hardware_open = true;
-	if (!fplinux_drm_session_open(&display, NULL, SHOWCASE_TTY,
-				      DRM_FORMAT_RGB565, error,
-				      sizeof(error))) {
-		fprintf(stderr, "fplinux-showcase: %s\n", error);
-		goto cleanup;
-	}
-	display_open = true;
-	if (!fplinux_drm_session_set_active_handler(
-		    &display, showcase_hardware_set_display_active,
-		    &hardware)) {
-		perror("fplinux-showcase: display activation");
-		goto cleanup;
-	}
-	if (display.pages != 2U ||
-	    !((display.width == 240U && display.height == 320U) ||
-	      (display.width == 128U && display.height == 160U) ||
-	      (display.width == 320U && display.height == 240U))) {
-		fprintf(stderr,
-			"fplinux-showcase: expected two-page RGB565 240x320, 128x160, or 320x240 framebuffer\n");
-		goto cleanup;
-	}
-	if (!fplinux_font_open_default(&font, display.width, error,
-				       sizeof(error))) {
-		fprintf(stderr, "fplinux-showcase: %s\n", error);
-		goto cleanup;
-	}
-	scene = armada_scene_create_with_renderer(display.width, display.height,
-						  &font, &display,
-						  options.renderer, error,
-						  sizeof(error));
-	if (!scene) {
-		fprintf(stderr, "fplinux-showcase: cannot create scene: %s\n",
-			error);
-		goto cleanup;
-	}
-	gpu_output = armada_scene_output(scene);
-	pixels = armada_scene_pixels(scene);
-	if (armada_scene_fallback_reason(scene)[0])
-		fprintf(stderr,
-			"fplinux-showcase: GPU unavailable: %s; using software\n",
-			armada_scene_fallback_reason(scene));
-	fprintf(stderr, "fplinux-showcase: renderer=%s\n",
-		armada_scene_renderer(scene));
-	if (!process_usage(&started_cpu_us, &peak_rss_kib)) {
-		fprintf(stderr,
-			"fplinux-showcase: cannot read process resource usage: %s\n",
-			strerror(errno));
-		goto cleanup;
-	}
-	statistics.started_ns = monotonic_ns();
-	if (!statistics.started_ns) {
-		fprintf(stderr,
-			"fplinux-showcase: CLOCK_MONOTONIC is unavailable\n");
-		goto cleanup;
-	}
-
-	while (!stop_requested) {
-		struct armada_metrics metrics;
-		struct armada_outputs outputs;
-		uint64_t now_ns = monotonic_ns();
-		uint64_t desired_frame;
-		uint64_t render_started;
-		uint64_t render_finished;
-		uint64_t render_us;
-		unsigned int page;
-		struct timespec deadline;
-		int sleep_result;
-		int key_result;
-
-		if (!now_ns) {
-			fprintf(stderr,
-				"fplinux-showcase: cannot read CLOCK_MONOTONIC\n");
-			goto cleanup;
-		}
-		if (!fplinux_drm_session_dispatch(&display)) {
-			fprintf(stderr,
-				"fplinux-showcase: display event handling failed: %s\n",
-				strerror(errno));
-			goto cleanup;
-		}
-		if (!display.active) {
-			usleep(20000);
-			continue;
-		}
-		key_result = showcase_hardware_exit_key_pressed(&hardware);
-		if (key_result < 0) {
-			fprintf(stderr,
-				"fplinux-showcase: cannot read keypad: %s\n",
-				strerror(errno));
-			goto cleanup;
-		}
-		if (key_result > 0) {
-			success = true;
-			break;
-		}
-		desired_frame = (now_ns - statistics.started_ns) / frame_period;
-		if (options.runs && desired_frame >= frame_limit) {
-			completed_runs = options.runs;
-			success = true;
-			break;
-		}
-		if (desired_frame > next_frame)
-			next_frame = desired_frame;
-		if (options.runs && next_frame >= frame_limit) {
-			completed_runs = options.runs;
-			success = true;
-			break;
-		}
-		update_metrics(&statistics, now_ns, &metrics);
-		render_started = monotonic_ns();
-		if (!armada_scene_render(
-			    scene,
-			    (uint32_t)(next_frame % ARMADA_DURATION_FRAMES),
-			    &metrics, &outputs)) {
-			fprintf(stderr, "fplinux-showcase: render failed: %s\n",
-				armada_scene_error(scene));
-			goto cleanup;
-		}
-		page = 1U - display.shown_page;
-		if (!gpu_output)
-			copy_frame(&display, pixels, page);
-		if (!showcase_hardware_apply_outputs(&hardware, &outputs)) {
-			fprintf(stderr,
-				"fplinux-showcase: cannot apply synchronized hardware cue: %s\n",
-				strerror(errno));
-			goto cleanup;
-		}
-		if (gpu_output) {
-			if (!fplinux_gpu_output_present(gpu_output)) {
-				fprintf(stderr,
-					"fplinux-showcase: cannot present frame: %s\n",
-					fplinux_gpu_output_error(gpu_output));
-				goto cleanup;
-			}
-		} else {
-			__sync_synchronize();
-			if (!fplinux_drm_session_present(&display, page)) {
-				fprintf(stderr,
-					"fplinux-showcase: cannot present frame: %s\n",
-					strerror(errno));
-				goto cleanup;
-			}
-		}
-		render_finished = monotonic_ns();
-		render_us = render_finished > render_started ?
-				    (render_finished - render_started) / 1000U :
-				    0;
-		statistics.render_us_sum += render_us;
-		++statistics.rendered;
-		if (render_us > statistics.render_us_max)
-			statistics.render_us_max = render_us > UINT32_MAX ?
-							   UINT32_MAX :
-							   (uint32_t)render_us;
-		++next_frame;
-		deadline = nanoseconds_to_timespec(statistics.started_ns +
-						   next_frame * frame_period);
-		do {
-			sleep_result = clock_nanosleep(CLOCK_MONOTONIC,
-						       TIMER_ABSTIME, &deadline,
-						       NULL);
-		} while (sleep_result == EINTR && !stop_requested);
-		if (sleep_result != 0 && sleep_result != EINTR) {
-			errno = sleep_result;
-			fprintf(stderr,
-				"fplinux-showcase: frame clock failed: %s\n",
-				strerror(errno));
-			goto cleanup;
-		}
-	}
-	if (stop_requested)
-		success = true;
-	if (success) {
-		if (!process_usage(&finished_cpu_us, &peak_rss_kib)) {
-			fprintf(stderr,
-				"fplinux-showcase: cannot read process resource usage: %s\n",
-				strerror(errno));
-			success = false;
-		} else {
-			finished_ns = monotonic_ns();
-		}
-		if (success && !finished_ns) {
-			fprintf(stderr,
-				"fplinux-showcase: cannot read CLOCK_MONOTONIC\n");
-			success = false;
-		} else if (success && !options.runs) {
-			completed_runs = (finished_ns - statistics.started_ns) /
-					 SHOWCASE_CYCLE_DURATION_NS;
-		} else if (success && !completed_runs) {
-			completed_runs = (finished_ns - statistics.started_ns) /
-					 SHOWCASE_CYCLE_DURATION_NS;
-			if (completed_runs > options.runs)
-				completed_runs = options.runs;
-		}
-		report_result = success;
-	}
-
-cleanup:
-	if (!armada_scene_destroy(scene)) {
-		fprintf(stderr,
-			"fplinux-showcase: renderer cleanup was incomplete\n");
-		success = false;
-	}
-	fplinux_font_close(&font);
-	if (display_open)
-		fplinux_drm_session_set_active_handler(&display, NULL, NULL);
-	if (hardware_open && !showcase_hardware_close(&hardware)) {
-		fprintf(stderr,
-			"fplinux-showcase: hardware restore was incomplete\n");
-		success = false;
-	}
-	if (display_open && !fplinux_drm_session_close(&display)) {
-		fprintf(stderr,
-			"fplinux-showcase: display restore was incomplete\n");
-		success = false;
-	}
-	if (success && report_result)
-		print_result(completed_runs, &statistics, finished_ns,
-			     started_cpu_us, finished_cpu_us, peak_rss_kib);
-	return success ? EXIT_SUCCESS : EXIT_FAILURE;
+	app.closing = true;
+	lv_async_call_cancel(show_finished, &app);
+	update_running(&app);
+	if (!release_drawing(&app))
+		result = -1;
+	fplinux_ui_prefs_close(app.prefs);
+	fplinux_ui_close(app.ui);
+	return result < 0 ? EXIT_FAILURE : EXIT_SUCCESS;
 }

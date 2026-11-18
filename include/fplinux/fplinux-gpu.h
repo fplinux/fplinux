@@ -18,6 +18,7 @@ struct fplinux_gpu *fplinux_gpu_open(enum fplinux_gpu_api api,
 				     const char *device, char *error,
 				     size_t error_size);
 void *fplinux_gpu_get_proc(struct fplinux_gpu *gpu, const char *name);
+bool fplinux_gpu_is_current(const struct fplinux_gpu *gpu);
 const char *fplinux_gpu_device(const struct fplinux_gpu *gpu);
 const char *fplinux_gpu_renderer(const struct fplinux_gpu *gpu);
 const char *fplinux_gpu_version(const struct fplinux_gpu *gpu);

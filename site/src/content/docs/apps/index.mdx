@@ -21,6 +21,7 @@ Open these applications from the [phone interface's catalog](/fplinux/use/sessio
 | [Snake](/fplinux/use/session/#snake) | Play with the D-pad or digit keys |
 | [Terminal](/fplinux/use/terminal/) | Run shell commands and read their output |
 | [API Demos](/fplinux/apps/api-demos/) | Explore supported interface controls and application APIs |
+| [ARMADA](/fplinux/apps/armada/) | Play a configurable 3D scene and view rendering statistics |
 
 The [Phone interface guide](/fplinux/use/session/) owns shared navigation, text input, task switching and saving. To write an application, start with [Your first application](/fplinux/develop/app/first-app/).
 
@@ -38,11 +39,6 @@ These are optional packages that you install when you want them; see [Install an
 		title="Java and MRE applications"
 		description="Open JAR and VXP files from Files. Packages: phoneME and MRE."
 		href="/fplinux/apps/java-and-mre/"
-	/>
-	<LinkCard
-		title="FPLinux: ARMADA"
-		description="Watch a 3D scene with synchronized backlight, keypad light and vibration. Command: <code>fplinux-showcase</code>."
-		href="/fplinux/apps/armada/"
 	/>
 	<LinkCard
 		title="TyrQuake"
@@ -84,13 +80,13 @@ See the [application comparison](/fplinux/phones/#application-support) for a qui
 
 ## Install an optional application
 
-Install the APK as described in [Packages](/fplinux/guides/packages/). In a RAM boot, an installed application lasts until the phone shuts down. On a [microSD system card](/fplinux/guides/microsd-system-card/), it stays installed until you remove it. No optional application starts by itself. Exit an application before you remove its package.
+Follow [Optional packages](/fplinux/guides/packages/) to copy and install the application's APK and its required libraries from the same build. In a RAM boot, an installed application lasts until the phone shuts down. On a [microSD system card](/fplinux/guides/microsd-system-card/), it stays installed until you remove it. No optional application starts by itself. Exit an application before removing it.
 
 ## Start an application
 
 Open graphical applications from the [application catalog](/fplinux/use/session/#home-and-applications). Open [Java and MRE programs](/fplinux/apps/java-and-mre/) by selecting their files in Files. For command-line tools, run their commands in the [USB shell](/fplinux/use/connect/); `--exec` returns when the command exits and shows its output.
 
-ARMADA, TyrQuake, `fplinux-present` and the `fplinux-rotate` preview use the display directly. Follow the [direct-display procedure](/fplinux/use/session/#direct-display-applications) to stop the graphical session before starting them and restart it afterwards. Exiting one of these applications does not restart Home.
+TyrQuake, `fplinux-present` and the `fplinux-rotate` preview use the display directly. Follow the [direct-display procedure](/fplinux/use/session/#direct-display-applications) to stop the graphical session before starting them and restart it afterwards. Exiting one of these applications does not restart Home.
 
 The application pages name the phone keys as follows.
 
@@ -98,12 +94,14 @@ The application pages name the phone keys as follows.
 
 ## Choose a renderer
 
-ARMADA and TyrQuake accept `--renderer auto|software|gpu`. The default, `auto`, uses the installed GPU add-on when a supported hardware context is available and falls back to software when the add-on is absent or GPU initialization fails. The selected renderer is printed at startup. A rendering error after startup ends the application.
+In ARMADA, choose **Renderer** on its [setup screen](/fplinux/apps/armada/#start) before starting. TyrQuake accepts `--renderer auto|software|gpu` in the USB shell. Auto uses the installed GPU add-on when a supported hardware context is available and falls back to software when the add-on is absent or GPU initialization fails.
 
-- `--renderer software` uses the CPU and works without Mesa installed.
-- `--renderer gpu` requires the hardware renderer and reports an error when it cannot start.
+- **Software** uses the CPU and works without Mesa installed.
+- **GPU** requires the hardware renderer and reports an error when it cannot start.
 
-GPU rendering is available on [Xiaomi Qin 1s+](/fplinux/phones/xiaomi-qin-1s-plus/#applications). Its optional packages include `fplinux-showcase-gpu` and `fplinux-tyrquake-gpu`; install the matching add-on with the application to use GPU mode. Choose a renderer for the application you use; GPU mode does not guarantee a higher frame rate. Other supported phones use software rendering.
+ARMADA displays a renderer error in its window; choose Software to continue. A TyrQuake rendering error ends the application and reports the cause in the shell.
+
+The [Xiaomi Qin 1s+](/fplinux/phones/xiaomi-qin-1s-plus/#applications) provides compatible GPU hardware. Its image includes ARMADA's GPU resources; TyrQuake needs the optional `fplinux-tyrquake-gpu` add-on. GPU output in ARMADA's graphical window has not been checked on a phone. GPU mode does not guarantee a higher frame rate. Other supported phones use software rendering.
 
 ## Command-line behavior
 

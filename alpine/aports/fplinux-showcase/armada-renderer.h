@@ -9,11 +9,9 @@ struct armada_renderer;
 
 struct armada_renderer *armada_renderer_create(unsigned int width,
 					       unsigned int height,
-					       uint16_t *pixels,
-					       const struct fplinux_font *font);
+					       uint16_t *pixels);
 void armada_renderer_destroy(struct armada_renderer *renderer);
 void armada_renderer_render(struct armada_renderer *renderer,
-			    const struct armada_frame *frame,
-			    const struct armada_metrics *metrics);
+			    const struct armada_frame *frame);
 
 #endif

@@ -71,18 +71,19 @@ render_armada_and_rotation() {
 		-isystem /opt/quality/include $(pkg-config --cflags libdrm) \
 		"$screens_dir/armada-screen.c" "$common/screen-frame.c" \
 		"$showcase/armada-scene.c" "$showcase/armada-renderer.c" \
-		"$showcase/armada-geometry.c" "$showcase/armada-overlay.c" \
+		"$showcase/armada-geometry.c" \
 		"$showcase/armada-gpu-renderer.c" "$root/lib/fplinux-shared/fplinux-gpu.c" \
-		"$showcase/armada-storyboard.c" "$root/lib/fplinux-shared/fplinux-font.c" \
+		"$root/lib/fplinux-shared/fplinux-gpu-frame.c" \
+		"$showcase/armada-storyboard.c" \
 		$(pkg-config --libs libdrm) -ldl -o "$work/armada-screen"
 	compile -O2 -I"$rotate" -I"$screens_dir" -I"$common" \
 		"$screens_dir/rotate-screen.c" "$common/screen-frame.c" \
 		"$rotate/fplinux-rotate-core.c" -o "$work/rotate-screen"
-	"$work/armada-screen" "$armada_frame" "$work/ter-u16n.psf" \
+	"$work/armada-screen" "$armada_frame" \
 		"$work/armada.rgb565"
 	png 240 320 "$work/armada.rgb565" armada.png
 	# Use one portrait scene for both sides of the rotation example.
-	"$work/armada-screen" "$rotate_frame" "$work/ter-u16n.psf" \
+	"$work/armada-screen" "$rotate_frame" \
 		"$work/portrait.rgb565"
 	"$work/rotate-screen" "$work/portrait.rgb565" 240 320 270 \
 		"$work/rotate-source.rgb565"
