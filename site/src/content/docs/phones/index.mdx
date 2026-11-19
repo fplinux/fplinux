@@ -36,11 +36,10 @@ The comparisons below group phones by [platform](/fplinux/platforms/). Each phon
 - Calls, SMS and mobile data do not work.
 - Indicator LEDs are not supported. Wi-Fi availability is listed on each phone page.
 - USB works only as a device attached to a PC. USB host and OTG are not supported.
-- Linux cannot reboot the phone. To start FPLinux again, end the session and load it from the PC.
-- The phone cannot start FPLinux on its own; every start needs the PC and the USB loader.
+- Linux cannot reboot the phone. To start FPLinux again, end the session and power the phone off.
 - FPLinux cannot be installed to the phone's internal storage or mount it. Targets with a read-only NAND interface can save a raw backup for [device data](/fplinux/guides/device-data/); other targets provide no internal-storage access.
 
-Every boot uses the PC's USB loader, including a [microSD system card](/fplinux/guides/microsd-system-card/). Start the loader before connecting the powered-off phone and use its exact boot key; see [Run FPLinux](/fplinux/start/run/). Booting normally starts the stock firmware.
+For a USB start, run the loader before connecting the powered-off phone and hold its exact boot key. See [Run FPLinux](/fplinux/start/run/). Some phones can also [start from an installed microSD system card](/fplinux/guides/microsd-system-card/#boot-from-the-card) without a PC. The phone's support checklist shows whether this has been verified. Booting normally starts the stock firmware.
 
 ## Hardware support
 

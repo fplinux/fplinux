@@ -59,7 +59,7 @@ The boundaries run both ways:
 - A target never duplicates SoC addresses, controller support or the platform loader sequence.
 - `bootstrap/` contains no SoC loader policy and no phone addresses, register setup, panel sequences, keymaps or assets.
 - `common/` does not depend on a phone memory map, board register layout or bootstrap protocol. Phone programs and services are maintained as Alpine aports, even when they are target-neutral.
-- Every selected bundle and standalone archive uses the shared minimal runtime through `fplinux.py`; target and platform configuration supply its loading and preparation requirements.
+- Source bundles and standalone ZIPs use the shared runtime. Target and platform configuration supply its loading and preparation requirements.
 
 ## Where code goes
 

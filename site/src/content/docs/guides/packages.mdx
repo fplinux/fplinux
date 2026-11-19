@@ -5,7 +5,7 @@ description: Install and remove optional FPLinux applications on a running phone
 
 import { Tabs, TabItem } from "@astrojs/starlight/components";
 
-Optional applications come as APK files built together with the FPLinux image. Each build and extracted ZIP includes an `apks/` directory with the optional packages and their additional required libraries. Install them manually on the running phone; the launcher does not install them. Check your phone's [application support](/fplinux/phones/#application-support) before choosing a package.
+Optional applications come as APK files built together with the FPLinux image. A source build includes an `apks/` directory. With a standalone ZIP, start the desired model and use the directory printed after `Optional APKs`. Install the packages manually on the running phone. Check your phone's [application support](/fplinux/phones/#application-support) before choosing a package.
 
 ## How long a package stays
 
@@ -37,28 +37,18 @@ The APKs are in the `apks/` folder of the output directory printed by `./fplinux
 Use the target, profile and build type of the running session. For a system card, pass its `--profile` to both commands; see [system-card profiles](/fplinux/guides/microsd-system-card/).
 
 </TabItem>
-<TabItem label="Linux RAM ZIP">
+<TabItem label="Linux ZIP">
 
-Run from the extracted archive:
+Run from the extracted Release ZIP. Replace `<apk-directory>` with the directory printed by the launcher and `nokia-ta1618` with the selected target ID:
 
 ```sh title="PC"
-sh Run.sh console --upload \
-  ./apks/fplinux-tyrquake.apk /tmp/fplinux-tyrquake.apk
-sh Run.sh console --exec \
+sh Run.sh console --target nokia-ta1618 --upload \
+  "<apk-directory>/fplinux-tyrquake.apk" /tmp/fplinux-tyrquake.apk
+sh Run.sh console --target nokia-ta1618 --exec \
   'apk add --no-network --allow-untrusted --force-non-repository /tmp/fplinux-tyrquake.apk'
 ```
 
-</TabItem>
-<TabItem label="Linux system-card export">
-
-Run from the extracted archive:
-
-```sh title="PC"
-python3.14 -I fplinux.py console --upload \
-  ./apks/fplinux-tyrquake.apk /tmp/fplinux-tyrquake.apk
-python3.14 -I fplinux.py console --exec \
-  'apk add --no-network --allow-untrusted --force-non-repository /tmp/fplinux-tyrquake.apk'
-```
+For a system-card session, add `--boot microsd` to both commands.
 
 </TabItem>
 </Tabs>
@@ -73,7 +63,7 @@ Close the application through **Open applications** first. Remove it by its pack
 apk del fplinux-tyrquake
 ```
 
-The same command can be run from Linux with `./fplinux console nokia-ta1618 --exec 'apk del fplinux-tyrquake'` or `sh Run.sh console --exec 'apk del fplinux-tyrquake'`. Use the target of your connected phone.
+The same command can be run from Linux with `./fplinux console nokia-ta1618 --exec 'apk del fplinux-tyrquake'` or `sh Run.sh console --target nokia-ta1618 --exec 'apk del fplinux-tyrquake'`. Use the target of your connected phone.
 
 ## Java and MRE
 

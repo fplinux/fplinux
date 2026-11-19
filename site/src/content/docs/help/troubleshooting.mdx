@@ -77,7 +77,7 @@ Storage is still mounted or used as swap, or the runtime could not verify its st
 
 `current SSH session exposes a different kernel identity` means the phone runs a different build from the one you selected:
 
-- Pass the same profile and build type that started the session. For a microSD system card, use the profile selected in [Boot from the card](/fplinux/guides/microsd-system-card/#boot-from-the-card).
+- From a checkout, pass the profile and build type that started the session. From the standalone ZIP that started a system card, pass `--boot microsd`.
 - If `verify` reports `build output is stale; rebuild it`, your checkout changed inputs that affect the selected runtime after the build. Rebuild, then start a fresh session to run the new build. Changes only to documentation or optional APKs do not require a fresh RAM load.
 
 See [Check which build is running](/fplinux/start/run/#check-which-build-is-running).
@@ -153,10 +153,9 @@ See [microSD card](/fplinux/use/microsd/).
 
 ### The system card does not start
 
-- Check that your phone supports a [microSD system-card profile](/fplinux/guides/microsd-system-card/#build-the-card-image).
-- The image must come from a build of that profile for your exact target.
-- `FPLINUX.img.xz` must be decompressed and written to the whole card device, not to a partition or copied as a file, and read back for comparison. See [Prepare the card](/fplinux/guides/microsd-system-card/#prepare-the-card).
-- Start the loader with the same profile and build type, following [Boot from the card](/fplinux/guides/microsd-system-card/#boot-from-the-card).
+- Check your [phone page](/fplinux/phones/) for system-card support and use the exact model.
+- For a card installed from a ZIP, use the same release and choose [Start from microSD](/fplinux/guides/microsd-system-card/#boot-from-the-card).
+- For a card written from `FPLINUX.img.xz`, check that you [wrote and verified the whole image](/fplinux/guides/microsd-system-card/#prepare-the-card). Start the loader from the checkout with the same profile and build type.
 - Leave the card in the phone for the whole session.
 
 See [microSD system card](/fplinux/guides/microsd-system-card/).

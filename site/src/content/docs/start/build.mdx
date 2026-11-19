@@ -77,15 +77,15 @@ Each build has an 8 GiB memory limit. Add `--memory-mib N` to set a positive lim
 
 Where supported, Bluetooth, FM radio, the speaker and tuned audio levels need data from your own phone. UMS9117 RAM builds keep this data separate from the kernel and root filesystem: `run` reuses compatible saved data or prepares it as needed without rebuilding. A live NAND backup requires a second launch. For a microSD system card or Qin's optional original-file import, prepare the data before building the image; see [Device data](/fplinux/guides/device-data/).
 
-Add `--without-device-data` to build without prepared personal data while keeping it in your personal store. A later build without this option includes the selected prepared data again. Use this option when building a Qin image for a standalone RAM archive; see [Packaging](/fplinux/develop/packaging/#create-a-ram-archive).
+Add `--without-device-data` to build without prepared personal data while keeping it in your personal store. A later build without this option includes the selected prepared data again. The [package command](/fplinux/develop/packaging/#create-a-distribution) always uses builds without prepared personal data.
 
-The [Xiaomi Qin 1s+](/fplinux/phones/xiaomi-qin-1s-plus/) build also compiles its RAM-loading stages and includes them in the bundle. Use `xiaomi-qin-1s-plus` with the same `build`, `run`, `console` and `verify` commands; no separate loader files or phone backup are needed to start it. Its standalone archives run on Linux x86-64.
+The [Xiaomi Qin 1s+](/fplinux/phones/xiaomi-qin-1s-plus/) build also compiles its RAM-loading stages and includes them in the bundle. Use `xiaomi-qin-1s-plus` with the same `build`, `run`, `console` and `verify` commands. Startup uses the bundled loader and reads the required sound settings from eMMC on first use.
 
 ## Choose a build
 
 Two choices change what you build:
 
-- **Boot mode.** The default build runs entirely from RAM and leaves nothing behind after power-off. Supported UMS9117 targets use `--profile microsd-uboot` for a microSD system card; the Xiaomi Qin 1s+ implementation uses `--profile microsd-root`, which loads Linux over USB and uses the card for the system root. Both require the PC at every start. See [microSD system card](/fplinux/guides/microsd-system-card/) for profile selection and the shared procedure, and check your phone's [support status](/fplinux/phones/#support-status) before selecting a profile.
+- **Boot mode.** The default build runs entirely from RAM. Supported UMS9117 targets use `--profile microsd-uboot` for a microSD system card. Xiaomi Qin 1s+ uses `--profile microsd-root` to load Linux over USB and mount the card as the system root. See [microSD system card](/fplinux/guides/microsd-system-card/) for both procedures and check your phone's [support status](/fplinux/phones/#support-status) before selecting a profile.
 - **Build type.** `release` is the default. `--build-type debug` adds kernel diagnostics; see [Debugging](/fplinux/develop/debugging/).
 
 Use the same profile and build type in every command for that build. If you built with options, pass the same options to `run`, `console`, `verify` and `inspect`. Packaging accepts release builds only:

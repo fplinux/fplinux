@@ -1,17 +1,17 @@
 ---
 title: Shared Linux integration
-description: Shared sources, separate compilation contexts and target-owned card detection.
+description: Shared kernel builds, board inputs and microSD card detection.
 ---
 
-Use this contract when adding platform or target Linux inputs. Select a target, profile and build type as described in [Build FPLinux](/fplinux/start/build/); these selectors define the separate compilation context.
+Use this contract when adding platform or target Linux inputs. Select the phone, boot profile and build type as described in [Build FPLinux](/fplinux/start/build/).
 
 ## Shared Linux sources
 
 Targets and platforms pinned to the same Linux archive SHA-256 share one prepared source tree. Their integrations must coexist even when building only one target.
 
-Kernel configuration, generated profile inputs and compilation output use separate Kbuild `O=` directories for each target, profile and build type. Sharing sources does not enable other boards' drivers in the selected image.
+Targets on a platform share the kernel configuration and Kbuild output for each build type. Each target uses its own compiled Devicetree. The selected boot profile supplies the root filesystem settings.
 
-Keep board drivers guarded by their target configuration and use distinct destinations for board-owned files. Target copies add new board-owned files; use patches or platform copies to change upstream files. Conflicting file ownership, patches that cannot apply together and profile-specific Linux patches are rejected. A missing integration input or invalid shared Kconfig can prevent other targets from building too. Source sharing does not establish support for another platform, architecture or userspace ABI.
+Use distinct destinations for board-owned files. Target copies add new board-owned files. Use platform or target `linux.patches` to change the kernel sources for all boot profiles. Conflicting file ownership, incompatible patches and missing integration inputs can prevent other targets from building too.
 
 ## Declaring Linux inputs
 
@@ -23,6 +23,8 @@ Keep configuration inputs in `linux/config`, patches in `linux/patches`, and add
 
 ## microSD card detection
 
-A slot that permits card replacement during a powered session declares `cd-gpios` and enables `CONFIG_MMC_REMOVABLE` and `CONFIG_MMC_GPIO`. For the UMS9117 EIC card-detect input, also enable `CONFIG_GPIO_EIC_SPRD`. These choices belong to the target configuration.
+UMS9117 U-Boot probes the system card directly on both USB-assisted and autonomous starts. Use the Linux Devicetree to describe how the running system detects data cards.
 
-A slot whose card stays installed throughout the session declares `non-removable`. Its kernel disables removable-card and MMC GPIO support; the card is probed when the host starts. Initial discovery, SD transfers, request recovery and suspend/resume remain available. General GPIO support for the keypad, camera or PMIC is independent of MMC GPIO support.
+A board that supports replacing an unmounted data card while Linux runs declares the slot's detection line in `cd-gpios`. The shared UMS9117 kernel provides `CONFIG_MMC_REMOVABLE`, `CONFIG_MMC_GPIO` and the EIC GPIO driver used by the Nokia TA-1618.
+
+A board that expects the data card to stay installed declares `non-removable`. Linux probes the card when the host starts. On every board, keep a card mounted as the system root installed until shutdown.

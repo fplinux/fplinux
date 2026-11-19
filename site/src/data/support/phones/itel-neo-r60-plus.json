@@ -102,8 +102,8 @@
     "note": "FPLinux does not support SIM cards or cellular service."
   },
   "removable-system-root": {
-    "status": "unsupported",
-    "note": "There is no microSD system-card profile for this phone."
+    "status": "untested",
+    "note": "The system-card profile is configured. Loading Linux and mounting the ext4 system root on this phone are unverified."
   },
   "internal-phone-storage": {
     "hardware": "present",

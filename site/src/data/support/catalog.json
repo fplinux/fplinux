@@ -22,7 +22,7 @@
       "id": "persistent-boot",
       "label": "Boot without the USB loader",
       "kind": "system",
-      "guide": "features#not-implemented",
+      "guide": "guides/microsd-system-card#boot-from-the-card",
       "group": "Startup and access",
       "scope": "both"
     },

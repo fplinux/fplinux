@@ -4,8 +4,8 @@
     "note": ""
   },
   "persistent-boot": {
-    "status": "unsupported",
-    "note": "A USB-loaded RAM bootstrap is required for every Linux boot."
+    "status": "verified",
+    "note": "Starts from the installed microSD system card on battery power."
   },
   "local-console": {
     "hardware": "present",
@@ -95,7 +95,7 @@
   "removable-system-root": {
     "hardware": "present",
     "status": "partial",
-    "note": "FAT32 boot files plus an ext4 system root; card initialization at boot is unverified."
+    "note": "Linux reached the interface from the system card through a Linux PC and autonomously on battery power. USB start from Windows is unverified."
   },
   "internal-phone-storage": {
     "hardware": "present",

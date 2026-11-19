@@ -4,8 +4,8 @@
     "note": "RAM boot through D-pad Up and the USB loader, with a readable 320×240 landscape terminal."
   },
   "persistent-boot": {
-    "status": "unsupported",
-    "note": ""
+    "status": "verified",
+    "note": "Starts from the installed microSD system card on battery power."
   },
   "local-console": {
     "status": "partial",
@@ -25,7 +25,7 @@
   },
   "usb-networking": {
     "status": "verified",
-    "note": "USB-NCM in RAM and microSD profiles."
+    "note": "USB NCM in RAM and microSD sessions. SSH and SFTP work when the installing Linux PC is connected after autonomous startup."
   },
   "ssh-access": {
     "status": "verified",
@@ -92,7 +92,7 @@
   },
   "removable-system-root": {
     "status": "verified",
-    "note": "ext4 root grows to fill the card; installed packages and files persist after a cold start. Each start requires the USB loader; keep the card installed while powered."
+    "note": "The ext4 root grows to fill the card. Installed packages and files persist across cold starts. Start through the PC loader or directly from the card on battery power."
   },
   "internal-phone-storage": {
     "hardware": "present",

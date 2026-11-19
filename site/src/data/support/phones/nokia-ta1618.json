@@ -4,8 +4,8 @@
     "note": ""
   },
   "persistent-boot": {
-    "status": "unsupported",
-    "note": "The RAM bootstrap must be loaded over USB for every Linux boot."
+    "status": "verified",
+    "note": "Starts from the installed microSD system card on battery power."
   },
   "local-console": {
     "hardware": "present",
@@ -95,7 +95,7 @@
   "removable-system-root": {
     "hardware": "present",
     "status": "verified",
-    "note": "microSD FAT32 FIT plus writable ext4; the system card stays installed."
+    "note": "The Linux PC launcher and autonomous battery startup open the same writable ext4 system. Files persist across both starts."
   },
   "internal-phone-storage": {
     "hardware": "present",

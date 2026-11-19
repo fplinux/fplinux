@@ -30,7 +30,9 @@ The held <Key>D-pad Up</Key> key is detected by Linux. The other physical keys a
 
 ## Storage and power
 
-Insert a microSD card before boot and keep it installed throughout the powered session; hot-swap is not supported. Every start, including a [microSD system card](/fplinux/guides/microsd-system-card/), requires the PC loader. RAM files disappear when power is removed.
+Insert a microSD card before boot and leave it installed until shutdown. RAM files disappear when power is removed.
+
+To start the [installed microSD system card](/fplinux/guides/microsd-system-card/) on battery power, disconnect USB, hold <Key>D-pad Up</Key>, <Key>OK</Key> and <Key>1</Key>, then press the red power key. Release the keys when startup begins. After the home screen appears, you can plug the phone into the PC that installed the card and use the SSH command printed during installation.
 
 Use the shared [Power](/fplinux/use/power/) interfaces within the checklist conditions. For sleep with a microSD system card, make the system root read-only and stop active peripherals first. Sleep with a writable root or a battery is unverified.
 

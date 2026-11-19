@@ -9,18 +9,70 @@ import { Steps } from '@astrojs/starlight/components';
 import Figure from '../../../components/Figure.astro';
 import MicrosdBoot from '../../../assets/diagrams/microsd-boot.svg';
 
-The default FPLinux build runs entirely from RAM and forgets everything at power-off. The microSD system card keeps the Linux system on a microSD card instead: installed packages, Bluetooth pairings and your files survive a cold start. The profile selects boot and storage behavior; it does not establish hardware support.
+The microSD system card keeps the Linux system, installed packages, Bluetooth pairings and your files across power cycles. A Windows or Linux ZIP can install and start the system card for the UMS9117 models that offer these actions. Check your [phone page](/fplinux/phones/) for hardware verification, card limits and features tested only in RAM.
 
-Every cold start still begins from the PC with a fresh USB load. The profile determines which parts come from the PC and which come from the card:
+During a USB start, the profile determines which parts come from the PC and which come from the card:
 
 | Target | Profile | Loaded over USB | Read from the card |
 | --- | --- | --- | --- |
 | UMS9117 targets with system-card support | `microsd-uboot` | U-Boot | Linux boot image and ext4 system root |
 | Xiaomi Qin 1s+ | `microsd-root` | Linux | ext4 system root |
 
-Use a profile only if your phone supports it. Check its [support status](/fplinux/phones/#support-status) and phone page for card and feature limits, including any features tested only in the RAM profile. The Qin profile uses a Linux source checkout or ordinary Linux runner archive, with its loader stages included in the build.
+The Qin ZIP starts FPLinux in RAM. For a Qin system card, use the [manual image procedure](#build-the-card-image) from a Linux source checkout.
 
 <Figure caption="UMS9117 system-card boot with microsd-uboot"><MicrosdBoot /></Figure>
+
+## Install using the phone
+
+Leave the microSD card in the powered-off phone. Open `Run.cmd` on Windows or `sh Run.sh` on Linux from the extracted [Release ZIP](/fplinux/guides/standalone-archive/). Choose your phone and **Install on microSD**. Connect only when prompted. The launcher displays the card it found and asks before erasing it.
+
+FPLinux prepares the phone data on the PC and reuses a compatible saved backup. The installer writes the system and your phone's data from the same RAM session and reads the written files back for verification. Wait for the success message and power off the phone before booting the card. This operation erases the entire selected microSD.
+
+The installer also sets up SSH for your user account on the installing PC. Save the connection command it prints. The private client key and the card's SSH host key pin are saved together with `ssh_config` under `$XDG_DATA_HOME/fplinux/cards/` on Linux (`~/.local/share/fplinux/cards/` by default) or `%LOCALAPPDATA%\FPLinux\cards\` on Windows. Each installation has its own directory under the target ID and card CID. The files stay available after you close the launcher or reboot the computer.
+
+For commands without the menu, first inspect the card with the exact target ID. Keep the phone powered and connected while running the install command. Replace `CID` with the identifier printed by `inspect`.
+
+```bat title="Windows PC"
+Run.cmd card inspect --target inoi-240-modern-4g
+Run.cmd card install --target inoi-240-modern-4g --erase-card CID
+```
+
+```sh title="Linux PC"
+sh Run.sh card inspect --target inoi-240-modern-4g
+sh Run.sh card install --target inoi-240-modern-4g --erase-card CID
+```
+
+Add `--from-dump FILE` to import a backup for this handset. The source checkout uses the same installer with locally built card files:
+
+```sh
+./fplinux card install inoi-240-modern-4g
+```
+
+Use `./fplinux card inspect inoi-240-modern-4g` to discover the card before passing `--erase-card CID` in a non-interactive checkout session.
+
+## Boot from the card
+
+From the extracted archive, open the launcher, select your model and choose **Start from microSD**. Keep the prepared card in the powered-off phone and connect USB only when the launcher asks for it. You can start the same card on Linux or Windows and keep the same installed system and files. Use the archive for the release you installed.
+
+To start from the command line:
+
+```bat title="Windows PC"
+Run.cmd run --target inoi-240-modern-4g --boot microsd
+```
+
+```sh title="Linux PC"
+sh Run.sh run --target inoi-240-modern-4g --boot microsd
+```
+
+For another model, use its target ID. Keep `--boot microsd` with `console` and `verify` for the running card session. Follow [Connect from a computer](/fplinux/use/connect/) for shell and transfer commands.
+
+The UMS9117 system card includes an autonomous bootloader. Starting it requires the phone's firmware to support starting from a microSD card. On the tested INOI 240 Modern 4G, leave the card and battery installed and disconnect USB. Hold `*`, `0`, `7` and the red power key until startup begins. This uses the same installed system and files as a USB start. Check your phone's status before attempting autonomous startup on another model.
+
+### Connect over SSH after autonomous startup
+
+After FPLinux starts from the card, connect the USB cable to the installing PC. Wait for the USB network to connect, then run the SSH command printed during installation in a Linux terminal or Windows PowerShell. SSH opens a root shell using the saved client key and checks the card's host key against the saved pin. No password is needed. A card installed through this workflow uses USB NCM for a Linux installer or RNDIS for a Windows installer.
+
+If you wrote a generic `FPLINUX.img.xz` manually, use the USB-assisted start for a shell. The generic image has no saved SSH enrollment for autonomous startup.
 
 ## Build the card image
 
@@ -55,13 +107,13 @@ On the first boot, Linux extends partition 2 and its filesystem to the end of th
 
 :::caution[Write the right card, then check it]
 
-FPLinux does not include a card-writing command. Decompress `FPLINUX.img.xz` and write the whole image to the card device itself, not to one of its partitions. Select the intended removable card explicitly. Before the first boot, read the complete image back from the card and compare it with the original.
+For manual installation, decompress `FPLINUX.img.xz` and write the whole image to the card device itself, not to one of its partitions. Select the intended removable card explicitly. Before the first boot, read the complete image back from the card and compare it with the original.
 
 :::
 
 Never write the image from a system that runs from the same card. To rewrite a system card inside the phone, boot the default RAM system first, stop everything that uses the card and unmount all of its filesystems. Read the image back and compare it before the next microSD boot.
 
-## Boot from the card
+## Boot from a checkout
 
 <Steps>
 
@@ -94,7 +146,3 @@ With `microsd-uboot`, keep `FPLBOOT` for the boot image. Do not mount it as appl
 ## Shut down
 
 The system card cannot be unmounted or removed while Linux runs, and `sync` alone does not make it safe to cut power. Before you cut power or remove the card, shut down as described in [Power](/fplinux/use/power/).
-
-## Standalone archives
-
-An ordinary Linux archive packaged for the system-card profile contains `FPLINUX.img.xz`. Pass `--boot microsd` for UMS9117 or `--profile microsd-root` for Qin to `./fplinux package`. Prepare the card from that file first; the archive's runner then loads the phone. See [Standalone archive](/fplinux/guides/standalone-archive/) and [Packaging](/fplinux/develop/packaging/).

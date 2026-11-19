@@ -4,8 +4,8 @@
     "note": ""
   },
   "persistent-boot": {
-    "status": "unsupported",
-    "note": "Load the RAM bootstrap over USB for every Linux boot."
+    "status": "verified",
+    "note": "Starts from the installed microSD system card on battery power."
   },
   "local-console": {
     "hardware": "present",
@@ -94,8 +94,8 @@
   },
   "removable-system-root": {
     "hardware": "present",
-    "status": "unsupported",
-    "note": "Only the RAM root is available."
+    "status": "partial",
+    "note": "Starts on battery power or through the PC launcher. USB networking, SSH and SFTP work with the installing Linux PC after autonomous startup."
   },
   "internal-phone-storage": {
     "hardware": "present",

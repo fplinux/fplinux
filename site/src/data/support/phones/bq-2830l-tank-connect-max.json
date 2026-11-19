@@ -4,8 +4,8 @@
     "note": "RAM boot through the green call key and USB loader."
   },
   "persistent-boot": {
-    "status": "unsupported",
-    "note": ""
+    "status": "verified",
+    "note": "Starts from the installed microSD system card on battery power."
   },
   "local-console": {
     "status": "verified",
@@ -25,7 +25,7 @@
   },
   "usb-networking": {
     "status": "verified",
-    "note": "USB-NCM with a local IPv4 DHCP connection to the PC."
+    "note": "USB NCM with a local IPv4 DHCP connection. SSH and SFTP work when the installing Linux PC connects after autonomous startup."
   },
   "ssh-access": {
     "status": "verified",
@@ -91,8 +91,8 @@
     "note": "FAT32 and ext4 data-card reads and writes in the RAM profile. Keep the card installed while powered; no hot-swap."
   },
   "removable-system-root": {
-    "status": "unsupported",
-    "note": "Only the RAM root is supported on this target."
+    "status": "verified",
+    "note": "The phone starts from the installed card on battery power and mounts its ext4 root read/write."
   },
   "internal-phone-storage": {
     "hardware": "present",

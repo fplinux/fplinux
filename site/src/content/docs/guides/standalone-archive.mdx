@@ -5,11 +5,11 @@ description: Run FPLinux from a packaged archive without a source checkout.
 
 import { Steps } from '@astrojs/starlight/components';
 
-A standalone archive runs FPLinux on one phone without a source checkout or build tools. If you received a ZIP, check that it names your exact phone and PC operating system. Its `README.txt` gives the boot key and startup commands. Check the phone's [support status](/fplinux/phones/#support-status) and [phone page](/fplinux/phones/) for feature, storage and power limits.
+A standalone archive runs FPLinux without a source checkout or build tools. Pick the ZIP for your PC from the [Releases page](https://github.com/fplinux/fplinux/releases), then select your exact phone in its launcher. Check the phone's [support status](/fplinux/phones/#support-status) and [phone page](/fplinux/phones/) for feature, storage and power limits.
 
-No public ZIP release is available yet. You can [build FPLinux](/fplinux/start/build/) and [package an archive](/fplinux/develop/packaging/) locally. Published archives and their matching sources belong on the [Releases page](https://github.com/fplinux/fplinux/releases).
+You can also [build and package the same format](/fplinux/develop/packaging/) locally, including a ZIP with only one phone. Follow the instructions in its `README.txt`.
 
-Names use `FPLinux-<target>-<linux|windows>-x64-<release_id>.zip`. The twelve-character ID is shared by all phone and host variants in that Release. It also appears in Settings → About → Build on the phone. Check downloads against the Release's `SHA256SUMS`, then keep the matching source ZIP available when distributing the runnable archive.
+Release ZIPs are named `FPLinux-linux-x64-<release_id>.zip` and `FPLinux-windows-x64-<release_id>.zip`. The twelve-character ID also appears in Settings → About → Build on the phone. Check downloads against the Release's `SHA256SUMS`, then keep the matching source ZIP available when distributing a runnable archive.
 
 :::note[Verification limits]
 
@@ -17,13 +17,13 @@ Checksums establish that downloaded files match their listed bytes. Packaging an
 
 :::
 
-## RAM archive
+## Start in RAM
 
-This format supports the default RAM profile, with archives for Linux x86-64 and Windows x64. USB loading and SSH from Windows have not been verified with Xiaomi Qin 1s+.
-
-A RAM archive contains the RAM image, phone loader stages, Python, OpenSSH, optional APKs and their required libraries in `apks/`, a short `README.txt`, checksums and license notices. Optional applications are installed manually; their APK files stay on the PC until copied to the phone. Prepared phone data is stored separately. The internal storage is never erased or written.
+The ZIP includes the shared system and kernel, each phone's files, Python, OpenSSH and license notices. The launcher assembles the selected model's bundle in the [working data directory](/fplinux/start/build/#working-data-directory) and prints the location of its optional APKs. Prepared phone data is stored separately. The launcher only reads the phone's internal storage.
 
 The archive includes any required extraction tools. It reuses compatible inputs and prepared data from your [personal phone data store](/fplinux/guides/device-data/#where-phone-data-is-stored), including data saved by another archive or checkout. On first use, UMS9117 phones save a read-only NAND backup and Qin saves selected sound files from eMMC. Qin preparation does not make a full storage backup. Targets without required runtime data start Linux and open SSH immediately.
+
+USB loading and SSH from Windows are unverified on Xiaomi Qin 1s+.
 
 ### What you need
 
@@ -47,7 +47,7 @@ Python and OpenSSH are bundled; no separate installation is needed. On Linux, th
 
    On Windows, double-click `Run.cmd`.
 
-3. Wait until the launcher displays the connection instructions. Only then hold the boot key named in `README.txt` and connect the powered-off phone, keeping the key pressed.
+3. Select your model by number or target ID. Choose **Start in RAM** if the launcher offers more than one action. Wait for its connection instructions, then hold the indicated boot key and connect the powered-off phone, keeping the key pressed.
 
 4. Keep USB connected. If compatible saved inputs are available, the launcher prepares data from them as needed and continues to Linux and SSH. Otherwise, it reads the required data from your phone. UMS9117 shows the progress of its full NAND backup; Qin reads its selected sound files. Wait until preparation and the storage check finish.
 
@@ -55,9 +55,9 @@ Python and OpenSSH are bundled; no separate installation is needed. On Linux, th
 
 </Steps>
 
-Private connection keys and launcher logs are kept under `.data/` beside the extracted launcher. `FPLINUX_DATA_DIR` selects another [working data directory](/fplinux/start/build/#working-data-directory); relative values are anchored to the archive, not the terminal's current directory. Copies in different folders have separate sessions even when they share a working directory. Keep the archive location and selected directory unchanged while reconnecting.
+Private connection keys and launcher logs are kept under `.data/` beside the extracted launcher. `FPLINUX_DATA_DIR` selects another [working data directory](/fplinux/start/build/#working-data-directory), with relative paths anchored to the archive. It must allow execution of the selected bundle's host tools. Each archive and selected model has separate session state. Keep the archive location and selected directory unchanged while reconnecting.
 
-Backups and prepared data use the separate [personal store](/fplinux/guides/device-data/#where-phone-data-is-stored), which survives replacing the archive. Use each store with one physical phone; FPLinux does not distinguish handsets of the same target automatically. Add `--phone-data PATH` to `sh Run.sh` or `Run.cmd` to select a separate store for another phone.
+Backups and prepared data use the separate [personal store](/fplinux/guides/device-data/#where-phone-data-is-stored), which survives replacing the archive. Use each store with one physical phone. For another handset of the same model, select its store with `run --target TARGET --phone-data PATH`.
 
 Each launch prints the exact path to its `runtime.log`, with `run.json` metadata beside it. The log includes launcher and USB loader diagnostics, but does not record your interactive SSH commands or terminal output. If preparation cannot verify that storage is safe to disconnect, it retains reader-session keys in the same working data directory. Keep the phone powered and retain that directory. Run the launcher again to repeat the storage check. `console` selects a running FPLinux session after preparation.
 
@@ -67,101 +67,38 @@ Use the same `sh Run.sh` on Linux or `Run.cmd` on Windows for every later launch
 
 If SSH loses its connection during an interactive shell and the phone stays powered, the launcher waits for the same phone to return, verifies its connection and opens a new shell. It does not repeat commands from the interrupted shell. Reconnect USB if disconnected before the wait times out, or open the launcher again afterward. Ctrl+C cancels the wait. Interactive SSH status 255 starts this recovery; use `exit 0` to close the shell unconditionally.
 
-Type `exit` or press Ctrl+D to close the shell. Linux keeps running on the phone. Use `sh Run.sh console` or `Run.cmd console` to [reconnect or run a command](/fplinux/use/connect/). Only one interactive launcher can run from the same extracted directory at a time. A connection that is present but cannot be verified stops with an error instead of starting another load. Ctrl+C cancels loading or waiting, but does not power the phone off.
+Type `exit` or press Ctrl+D to close the shell. Linux keeps running on the phone. Select the model again in the launcher, or use `sh Run.sh console --target TARGET` or `Run.cmd console --target TARGET` to [reconnect or run a command](/fplinux/use/connect/). Use the target ID shown beside the model in the menu. One interactive session per model can use that archive's saved connection at a time. Ctrl+C cancels loading or waiting, but does not power the phone off.
 
-The matching source ZIP contains the project sources, selected upstream originals and host rebuild material. A complete Release shares `FPLinux-<release_id>-sources.zip` across all its runnable ZIPs; a local package can have its own matching companion. Follow the exact filename in `README.txt`. Component licenses remain in the runnable archive. Dependency inputs for rebuilding are separate Release assets; see [Dependency snapshots](/fplinux/guides/dependencies/).
+The matching `FPLinux-<release_id>-sources.zip` contains the project sources, selected upstream originals and host rebuild material. Both hosts use the source ZIP from the same distribution. Follow the filename in `README.txt`. Component licenses remain in the runnable archive. Dependency inputs for rebuilding are separate Release assets; see [Dependency snapshots](/fplinux/guides/dependencies/).
 
 ### Prepare from an existing backup
 
 For UMS9117, you can select a complete physical NAND backup of the same phone for a RAM launch. On Linux:
 
 ```sh title="PC"
-sh Run.sh --from-dump /path/to/nand.bin
+sh Run.sh run --target nokia-ta1618 --from-dump /path/to/nand.bin
 ```
 
 On Windows, open a terminal in the extracted directory:
 
 ```bat title="PC"
-Run.cmd --from-dump "C:\path\to\nand.bin"
+Run.cmd run --target nokia-ta1618 --from-dump "C:\path\to\nand.bin"
 ```
 
-Keep its `nand.bin.json` receipt beside it. The launcher preserves both input files, imports the backup into the selected personal store and reuses or replaces prepared data there as needed. It then continues the normal boot in the same invocation. Keep the phone disconnected until the loader asks for it. To prepare data from the saved backup and stop there, run `sh Run.sh prepare --from-dump /path/to/nand.bin` or `Run.cmd prepare --from-dump "C:\path\to\nand.bin"`.
+Replace `nokia-ta1618` with your model's target ID. Keep the backup's `nand.bin.json` receipt beside it. The launcher preserves both input files and prepares the data in your personal store before booting. Keep the phone disconnected until the loader asks for it. Use `prepare` in place of `run` to prepare data and stop there.
 
 For Qin, use the same option with a complete eMMC USER-area image containing GPT. The launcher extracts the selected sound files without changing or copying the whole image. A NAND image or a single partition is not an eMMC USER-area image.
 
-On a running phone with NAND support, use `nand identify` or `nand backup FILE` through the same launcher. See [Device data](/fplinux/guides/device-data/) for backup contents and storage.
+On a running phone with NAND support, use `nand identify --target TARGET` or `nand backup FILE --target TARGET` through the same launcher. See [Device data](/fplinux/guides/device-data/) for backup contents and storage.
 
-## Linux system-card export
+For machine-readable progress when starting the phone from the command line, add `--events PATH` to `run`. See [Loader events](/fplinux/start/run/#for-automation-loader-events).
 
-A local [microSD system-card](/fplinux/guides/microsd-system-card/) export uses the shared `fplinux.py` runtime with Python and OpenSSH supplied by your PC. Its filename includes the selected profile, such as `microsd-uboot`. It can contain prepared personal data selected by its build; keep it private. System-card exports are excluded from the public RAM release matrix and include `docs/index.html` for reading the site offline.
+## Use a microSD system card
 
-You need Linux x86-64, Python 3.14, GNU `stdbuf` from coreutils, `ip` from iproute2, and `ssh`, `ssh-keygen`, `ssh-keyscan` and `sftp` from OpenSSH. A network manager must automatically run IPv4 DHCP on the phone's USB network interface.
-
-The phone-side loader stages are included in the archive, including FDL1, FDL2 and SML for Qin.
-
-### Prepare the PC
-
-<Steps>
-
-1. Extract the whole archive, enter its top-level directory and check every file:
-
-   ```sh title="PC"
-   cd <extracted-top-level-directory>
-   sha256sum -c SHA256SUMS
-   ```
-
-2. Install the USB rules and reload them:
-
-   ```sh title="PC"
-   sudo install -m 0644 ./60-fplinux.rules /etc/udev/rules.d/60-fplinux.rules
-   sudo udevadm control --reload-rules
-   ```
-
-   Disconnect the phone if it is attached. On a headless PC, edit your installed copy to use a local group with `MODE="0660"` instead of `TAG+="uaccess"`. Never make the USB devices world-writable.
-
-</Steps>
-
-`SHA256SUMS` checks that the extracted files are complete and unchanged. It does not show that the archive is authentic or that the phone works.
-
-If the archive contains `FPLINUX.img.xz`, it boots from a microSD system card. Prepare the card first; see [microSD system card](/fplinux/guides/microsd-system-card/).
-
-### Start a session
-
-Run the runner as your regular user, not as root.
-
-<Steps>
-
-1. Power the phone off and disconnect USB.
-
-2. Start the runner:
-
-   ```sh title="PC"
-   python3.14 -I fplinux.py run
-   ```
-
-3. Wait until it asks for the phone.
-
-4. Only then hold the boot key named in `README.txt` and connect the powered-off phone, keeping the key pressed.
-
-5. Wait for the runtime to open a shell when the session is ready.
-
-</Steps>
-
-### Use the running phone
-
-The system-card runner uses the same `console` and `verify` commands. Run them with the system Python:
-
-```sh title="PC"
-python3.14 -I fplinux.py console
-python3.14 -I fplinux.py verify
-```
-
-See [Connect to the phone](/fplinux/use/connect/) for commands and file transfer, and [Optional packages](/fplinux/guides/packages/) to install applications.
-
-For machine-readable progress during a fresh runner load, add `--events PATH`; see [loader events](/fplinux/start/run/#for-automation-loader-events).
+For UMS9117 models with a system-card profile, the Linux and Windows launchers offer **Install on microSD** and **Start from microSD**. Installation erases the selected microSD after confirmation. Follow [microSD system card](/fplinux/guides/microsd-system-card/) to install, start and safely shut down the card.
 
 ## Connection order and shutdown
 
-For a fresh RAM load, connect the phone only when the launcher or runner asks. If you connected it too early, disconnect it, power it off and start again. To reopen SSH to the same running phone, leave it connected or reconnect USB while the launcher is waiting.
+For a fresh USB load, connect the phone only when the launcher asks. If you connected it too early, disconnect it, power it off and start again. To reopen SSH to the same running phone, leave it connected or reconnect USB while the launcher is waiting.
 
 Exiting a launcher or shell leaves Linux running. To end the session without losing data, follow [Power](/fplinux/use/power/). Without a battery, disconnecting USB cuts power immediately.

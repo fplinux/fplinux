@@ -1,6 +1,6 @@
 {
   "ram-boot": "implemented",
-  "persistent-boot": "unimplemented",
+  "persistent-boot": "implemented",
   "local-console": "implemented",
   "lcd-backlight": "implemented",
   "keypad-backlight": "implemented",

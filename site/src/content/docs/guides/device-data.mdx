@@ -63,7 +63,7 @@ To explicitly prepare or replace the selected UMS9117 data during development:
 
 This command builds the default RAM bundle when needed and uses the same preparation workflow. It is not needed for an ordinary first run.
 
-RAM boots send the prepared data separately from the reusable kernel and root filesystem. A microSD build stores prepared data in its kernel and system-card image: run `device-data prepare` from the checkout you will build, then explicitly build that profile and write its new card image. Another checkout may have refreshed the shared store with different preparation inputs. A RAM launch does not update an existing system card. Keep images and archives containing prepared data private.
+RAM boots send prepared data alongside the reusable kernel and root filesystem. The [microSD installer](/fplinux/guides/microsd-system-card/#install-using-the-phone) applies it when writing the card. For a manually written image, run `device-data prepare` from the checkout you will build in, then build the card profile and write its new image. A RAM launch does not update an existing system card. Keep card images containing prepared data private.
 
 ## Prepare data from a saved backup
 

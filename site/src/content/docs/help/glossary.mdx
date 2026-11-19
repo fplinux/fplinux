@@ -45,7 +45,7 @@ Radio firmware and calibration, Bluetooth records, FM settings and audio tuning 
 
 ### Loader
 
-The PC side of a start: `./fplinux run` in a source checkout, or `fplinux.py run` in a [standalone archive](/fplinux/guides/standalone-archive/). The shared runtime prepares required phone data on first use, sends FPLinux over USB and opens SSH. Targets without required phone data boot directly. Running the same command again reopens an authenticated live session. See [Run FPLinux](/fplinux/start/run/).
+The PC side of a USB start. Use `./fplinux run` in a source checkout or the `Run.sh` or `Run.cmd` launcher in a [standalone archive](/fplinux/guides/standalone-archive/). The shared runtime prepares required phone data on first use, sends FPLinux over USB and opens SSH. Targets without required phone data boot directly. Running the same command again reopens an authenticated live session. See [Run FPLinux](/fplinux/start/run/).
 
 ### Boot key
 
@@ -87,4 +87,4 @@ An application delivered as an APK file and installed on a running phone with `a
 
 ### Standalone archive
 
-A packaged FPLinux for one phone that runs without a source checkout or build tools. See [Standalone archive](/fplinux/guides/standalone-archive/).
+A packaged FPLinux that runs without a source checkout or build tools. A Release ZIP lets you select a supported phone. See [Standalone archive](/fplinux/guides/standalone-archive/).

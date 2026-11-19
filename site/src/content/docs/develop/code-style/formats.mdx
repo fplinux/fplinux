@@ -34,7 +34,7 @@ Target fields follow their consumer roles:
 | display | `panel`, `boot_font` |
 | display_brightness | `backlight`, `levels` |
 | rootfs, bundle | `packages` |
-| linux | `config_fragment`, `memory`, `dtb`, `debug_dtb`, `patches`, `additional_forbidden_dtb_markers`, `additional_forbidden_config`, `overlay`, `copies`, `appends`, `dt_config_checks` |
+| linux | optional `config_fragment`, `memory`, `dtb`, `debug_dtb`, `patches`, `additional_forbidden_dtb_markers`, `additional_forbidden_config`, `overlay`, `copies`, `appends`, `dt_config_checks` |
 | memory | `base`, `size` |
 | copy, append | `source`, `destination` |
 | linux.dt_config_checks | `path`, `compatible`, `property`, `config` |
@@ -43,11 +43,10 @@ Target fields follow their consumer roles:
 | device_data | `parser`, `originals_parser` |
 | audio_profile | `speaker_vibration`, `speaker_from_headphones`, `headfree_headphones_only`, `firmware` |
 | firmware record | `source`, `destination`, `size`, `sha256` |
-| microsd | `linux_patches`, bootstrap, U-Boot |
-| microsd.bootstrap | `source`, `image`, `map` |
-| microsd.uboot | `defconfig`, `patches`, `copies` |
+| microsd | system-card support; UMS9117 uses the bootstrap table below, SC9820E uses an empty table |
+| microsd.bootstrap | `image`, `map` |
 
-Platform identity uses `vendor`, `soc`, `aliases`, `compatible`. Linux groups source and toolchain, configuration, destinations and outputs, then patches, overlay, copies, appends and configuration checks. Bootstrap groups source and destination paths, files and patches, toolchain and build settings, load limits, copies and memory layout. Runtime groups the load address, adapter and USB identities. Host runtime tools precede tool recipes; recipe members precede nonempty copy tables. Empty copy arrays remain ordinary fields.
+Platform identity uses `vendor`, `soc`, `aliases`, `compatible`. U-Boot groups `source`, `archive_prefix`, `defconfig`, `patches`, `required_config` and `copies`. Linux groups source and toolchain, configuration, destinations and outputs, then patches, overlay, copies, appends and configuration checks. Bootstrap groups source paths including `stage0_source`, destination paths, files and patches, toolchain and build settings, load limits, copies and memory layout. Runtime groups the load address, adapter and USB identities. Host runtime tools precede tool recipes; recipe members precede nonempty copy tables. Empty copy arrays remain ordinary fields.
 
 Platforms declare `linux.dt_config_checks` for shared hardware; targets may add the same array for board-specific devices. The build checks both lists against the compiled device tree and kernel configuration.
 

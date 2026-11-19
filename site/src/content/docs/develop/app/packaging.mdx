@@ -26,7 +26,7 @@ Choose the owner that actually needs the application. A phone's `[bundle].packag
 
 For a local tutorial, add its name to the selected phone's existing `[bundle]` list, preserving the other entries. Also register its shared sources and local build dependencies. The selected package list supplies the bundle's APK inventory; do not maintain a second list of APK filenames in release metadata.
 
-Run `./fplinux build <target>`. Its output directory contains `apks/<package>.apk`. The ordinary RAM ZIP omits these optional APKs; keep that distinction when distributing an application.
+Run `./fplinux build <target>`. Its output directory contains `apks/<package>.apk`. The standalone ZIP also includes the selected phone's optional APKs and prints their location when you start it.
 
 ## Application identity
 

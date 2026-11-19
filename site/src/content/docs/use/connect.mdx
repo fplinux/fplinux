@@ -17,6 +17,8 @@ Use the USB link to open a root shell, run commands, copy files with an integrit
 
 Start the phone first, as described in [Run FPLinux](/fplinux/start/run/) or, for a downloaded archive, in [Standalone archive](/fplinux/guides/standalone-archive/). The commands on this page work once that run reports a ready session.
 
+In an extracted ZIP, use the target ID shown beside your phone in the launcher. For a session started from a [microSD system card](/fplinux/guides/microsd-system-card/), add `--boot microsd` to the archive's `console` and `verify` commands.
+
 ## What the USB link is
 
 The phone appears on your computer as a small USB Ethernet device. Your computer receives its address automatically; do not set addresses by hand or reuse an address from an earlier run. The link carries the shell, file copies and the keyboard bridge described below.
@@ -37,24 +39,17 @@ The phone is always the USB device on this cable. It cannot act as a USB host, s
 ```
 
     </TabItem>
-    <TabItem label="Linux RAM ZIP">
+    <TabItem label="Linux ZIP">
 
 ```sh title="PC"
-sh Run.sh console
+sh Run.sh console --target nokia-ta1618
 ```
 
     </TabItem>
-    <TabItem label="Windows RAM ZIP">
+    <TabItem label="Windows ZIP">
 
 ```bat title="PC"
-Run.cmd console
-```
-
-    </TabItem>
-    <TabItem label="Linux system-card export">
-
-```sh title="PC"
-python3.14 -I fplinux.py console
+Run.cmd console --target nokia-ta1618
 ```
 
     </TabItem>
@@ -67,13 +62,13 @@ You get a root shell. It is authenticated with a key created for the current ses
 
 A checkout selects the only connected phone with a saved session. If several phones match, specify the target. The default check expects the current release RAM build. Select the matching `--profile` for a [system-card profile](/fplinux/guides/microsd-system-card/) or `--build-type debug` for a debug build.
 
-To inspect or shut down an earlier build that is still running, use `./fplinux console --allow-other-build`. You can also pass a single command, for example `./fplinux console --allow-other-build --exec 'uname -r'`. The launcher authenticates the saved USB and SSH session and reports the running build ID. This also works with `sh Run.sh console --allow-other-build` or `Run.cmd console --allow-other-build` in the archive that started that session. Use ordinary `console` or `verify` to check your current build.
+To inspect or shut down an earlier build that is still running, use `./fplinux console --allow-other-build`. You can also pass a single command, for example `./fplinux console --allow-other-build --exec 'uname -r'`. The launcher authenticates the saved USB and SSH session and reports the running build ID. In a release ZIP, add `--allow-other-build` to the `console --target TARGET` command from the archive that started the session. Use ordinary `console` or `verify` to check your current build.
 
 :::
 
 ## Verify the running build
 
-Run `./fplinux verify` from a checkout, `sh Run.sh verify` from a Linux RAM archive, or `Run.cmd verify` from a Windows RAM archive. For a Linux system-card export, use `python3.14 -I fplinux.py verify`. The command authenticates the running session, checks the selected build and exits with the result. You can open `console` directly when you need a shell.
+Run `./fplinux verify` from a checkout, `sh Run.sh verify --target TARGET` from a Linux ZIP, or `Run.cmd verify --target TARGET` from a Windows ZIP. The command authenticates the running session, checks the selected build and exits with the result. You can open `console` directly when you need a shell.
 
 ## Reconnect after unplugging
 
@@ -95,24 +90,17 @@ Use `--exec` when you do not need an interactive shell. The command runs on the 
 ```
 
     </TabItem>
-    <TabItem label="Linux RAM ZIP">
+    <TabItem label="Linux ZIP">
 
 ```sh title="PC"
-sh Run.sh console --exec 'uname -r'
+sh Run.sh console --target nokia-ta1618 --exec 'uname -r'
 ```
 
     </TabItem>
-    <TabItem label="Windows RAM ZIP">
+    <TabItem label="Windows ZIP">
 
 ```bat title="PC"
-Run.cmd console --exec "uname -r"
-```
-
-    </TabItem>
-    <TabItem label="Linux system-card export">
-
-```sh title="PC"
-python3.14 -I fplinux.py console --exec 'uname -r'
+Run.cmd console --target nokia-ta1618 --exec "uname -r"
 ```
 
     </TabItem>
@@ -136,19 +124,11 @@ On a Linux PC, upload a file to the phone or pull one from it. The Windows launc
 ```
 
     </TabItem>
-    <TabItem label="Linux RAM ZIP">
+    <TabItem label="Linux ZIP">
 
 ```sh title="PC"
-sh Run.sh console --upload ./song.wav /tmp/song.wav
-sh Run.sh console --pull /tmp/recording.wav ./recording.wav
-```
-
-    </TabItem>
-    <TabItem label="Linux system-card export">
-
-```sh title="PC"
-python3.14 -I fplinux.py console --upload ./song.wav /tmp/song.wav
-python3.14 -I fplinux.py console --pull /tmp/recording.wav ./recording.wav
+sh Run.sh console --target nokia-ta1618 --upload ./song.wav /tmp/song.wav
+sh Run.sh console --target nokia-ta1618 --pull /tmp/recording.wav ./recording.wav
 ```
 
     </TabItem>
@@ -187,7 +167,7 @@ Replace `program.jar` with your file's name and repeat this step for any compani
 
 The bridge is available on supported [UMS9117](/fplinux/platforms/ums9117/) phones; use it only where your phone checklist lists support for the current profile. The [SC9820E Xiaomi Qin 1s+](/fplinux/platforms/sc9820e/) uses SSH for PC command input and does not support this bridge.
 
-The PC keyboard tool is supplied by a source build or a Linux system-card export. RAM ZIPs do not include it.
+The PC keyboard tool requires a source build.
 
 The keyboard bridge forwards one keyboard from your computer to the phone. On the phone it behaves like any other keyboard: it controls the [graphical interface](/fplinux/use/session/) and types into its text fields, or into direct-display applications such as [TyrQuake](/fplinux/apps/tyrquake/) when the graphical session is stopped.
 
@@ -197,24 +177,9 @@ While the bridge runs, that keyboard's keys no longer reach your computer's desk
 
 :::
 
-<Tabs syncKey="source">
-	<TabItem label="Source checkout">
-
 ```sh title="PC"
 sudo timeout 60s ./fplinux console <target> --keyboard /dev/input/eventN
 ```
-
-    </TabItem>
-    <TabItem label="Linux system-card export">
-
-```sh title="PC"
-sudo timeout 60s ./host/fplinux-usb-keyboard \
-  --interface 0 --keyboard /dev/input/eventN
-```
-
-    </TabItem>
-
-</Tabs>
 
 Replace `/dev/input/eventN` with the input device of the keyboard to forward. On most Linux computers, `ls -l /dev/input/by-id/` lists keyboards under names ending in `-event-kbd`, and you can pass that path instead. Root privileges are usually needed to open the keyboard and the USB interface.
 
