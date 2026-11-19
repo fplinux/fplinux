@@ -13,6 +13,18 @@ if TYPE_CHECKING:
 
 COMMIT = "e" * 40
 RELEASE_ID = "eeeeeeeeeeee"
+CARD_TARGETS = frozenset(
+    {
+        "bq-2830l-tank-connect-max",
+        "itel-neo-r60-plus",
+        "maxvi-k15n-4g",
+        "inoi-240-modern-4g",
+        "inoi-244-modern-4g",
+        "nokia-110-4g",
+        "nokia-ta1618",
+        "uniwa-v1000-4g",
+    }
+)
 SELECTIONS = (
     ("bq-2830l-tank-connect-max", "linux"),
     ("bq-2830l-tank-connect-max", "windows"),
@@ -95,98 +107,145 @@ def read_zip(path: Path) -> tuple[dict[str, bytes], dict[str, int]]:
     return files, modes
 
 
-def write_pair(  # noqa: PLR0913 -- each option selects a distinct archive-boundary scenario.
-    directory: Path,
-    target: str,
-    host: str,
-    *,
-    private_runtime: bool = False,
-    private_member: str | None = None,
-    mismatched_pair: bool = False,
-    conflicting_source: bool = False,
-) -> None:
-    stem = f"FPLinux-{target}-{host}-x64-{RELEASE_ID}"
-    files = {
-        "README.txt": (
-            "Run the archive.\n\nMatching source and build material:\n"
-            f"  {stem}-sources.zip\n"
-            "Keep it available alongside this archive. Licenses remain included here.\n"
-        ).encode(),
-        "image/ramboot.bin": b"small synthetic image",
-        "runtime-manifest.json": json_bytes({"target": target, "sha256": {}}),
-        "Run.cmd" if host == "windows" else "Run.sh": b"launcher\n",
-    }
-    if private_runtime:
-        files["device-data.cpio"] = b"prepared personal phone data"
-    if private_member is not None:
-        files[private_member] = b"private installation state"
-    executables = {"Run.sh"} if host == "linux" else set()
-    manifest: dict[str, Any] = {
+def _manifest(files: dict[str, bytes], modes: set[str], target: str, profile: str | None) -> bytes:
+    body: dict[str, Any] = {
         **release_fields(),
         "target": target,
-        "profile": None,
+        "profile": profile,
         "build_type": "release",
-        "device_identity": "f" * 64,
+        "device_identity": ("f" if profile is None else "a") * 64,
         "files": {
             name: {
                 "sha256": hashlib.sha256(data).hexdigest(),
-                "mode": 0o755 if name in executables else 0o644,
+                "mode": 0o755 if name in modes else 0o644,
                 "size": len(data),
             }
             for name, data in sorted(files.items())
         },
     }
-    manifest["generation"] = hashlib.sha256(json_bytes(manifest)).hexdigest()
-    files["build-manifest.json"] = json_bytes(manifest)
-    runtime = directory / f"{stem}.zip"
-    write_zip(runtime, files, executables)
+    body["generation"] = hashlib.sha256(json_bytes(body)).hexdigest()
+    return json_bytes(body)
+
+
+def bundle_fixture(
+    target: str,
+    host: str,
+    *,
+    card: bool,
+    profile: str | None = None,
+) -> tuple[dict[str, bytes], set[str]]:
+    platform = "sc9820e" if target == "xiaomi-qin-1s-plus" else "ums9117"
+    head = f"board bootstrap for {target}\n".encode()
+    kernel = f"kernel for {platform}\n".encode()
+    root = f"hsqs: shared system for {platform}\n".encode()
+    runtime = {
+        "target": target,
+        "image": "image/ramboot.bin",
+        "identity": {"target": {"display_name": target}, "platform": {"name": platform}},
+        "sha256": {},
+    }
+    files = {
+        "image/ramboot.bin": head + kernel + root
+        if profile is None
+        else b"USB stage0 with U-Boot",
+        "assets.lock.toml": f'target = "{target}"\n'.encode(),
+        "licenses/host-tools/COPYING": b"included host tool license\n",
+        "runtime-manifest.json": json_bytes(runtime),
+    }
+    if profile is None:
+        files["boot-components.json"] = json_bytes(
+            {
+                "platform": platform,
+                "image": "image/ramboot.bin",
+                "kernel": [len(head), len(kernel)],
+                "root": [len(head) + len(kernel), len(root)],
+            }
+        )
+        if card:
+            files.update(
+                {
+                    "card/layout.json": json_bytes({"release_id": RELEASE_ID, "target": target}),
+                    "card/boot.xz": f"card boot for {target}\n".encode(),
+                    "card/root.ext4.xz": b"common card system",
+                    "card/board.tar": f"card system files for {target}\n".encode(),
+                    "card/fit.itb": head + kernel + b"card FIT trailer",
+                }
+            )
+    modes: set[str] = set()
+    if host == "linux":
+        files["runtime/bin/python3.14"] = b"bundled executable\n"
+        modes.add("runtime/bin/python3.14")
+    files["build-manifest.json"] = _manifest(files, modes, target, profile)
+    files["SHA256SUMS"] = "".join(
+        f"{hashlib.sha256(data).hexdigest()}  {name}\n" for name, data in sorted(files.items())
+    ).encode()
+    return files, modes
+
+
+def write_release(
+    directory: Path, *, selections: tuple[tuple[str, str], ...] = SELECTIONS
+) -> None:
+    """Create a small release via the real ZIP writer using literal input bytes."""
+    from fplinux_cli.artifacts.release import release_context_from_fields  # noqa: PLC0415
+    from fplinux_cli.packaging.distribution import _write_distribution  # noqa: PLC0415
+    from fplinux_cli.packaging.sources import SourcePayload  # noqa: PLC0415
+    from fplinux_cli.packaging.universal import HostArchive  # noqa: PLC0415
+
     sources = {
         **project_sources(),
         "project/.fplinux-release.json": json_bytes(release_fields()),
         "upstream/shared.tar.xz": b"same exact upstream input",
-        "upstream/downloads.json": json_bytes(
-            [
-                {
-                    "archive": "upstream/shared.tar.xz",
-                    "algorithm": "sha256",
-                    "checksum": hashlib.sha256(b"same exact upstream input").hexdigest(),
-                }
-            ]
-        ),
-        "upstream/alpine-source-channels.json": b"[]\n",
         "upstream/windows-runtime-source-channels.json": b"Windows source channels\n",
-        "sources/host-tools.zip": f"source projection for {target}/{host}\n".encode(),
         "licenses/host-tools/COPYING": b"retained license\n",
         "BUILD-LINUX.txt": b"retained relinking and build instructions\n",
-        "DISTRIBUTION.json": json_bytes(
-            {
-                **release_fields(),
-                "runtimes": [
-                    {
-                        "archive": runtime.name,
-                        "target": target,
-                        "host": host,
-                        "identity": "f" * 64,
-                        "sha256": "0" * 64
-                        if mismatched_pair
-                        else hashlib.sha256(runtime.read_bytes()).hexdigest(),
-                    }
-                ],
-            }
-        ),
     }
-    if conflicting_source:
-        sources["project/common/example.c"] = b"conflicting source\n"
-    if host == "windows":
+    archives: dict[str, HostArchive] = {}
+    identities = {}
+    for target, host in selections:
+        payload = archives.setdefault(host, HostArchive(host, RELEASE_ID))
+        card = target in CARD_TARGETS
+        files, modes = bundle_fixture(target, host, card=card)
+        microsd = (
+            bundle_fixture(target, host, card=False, profile="microsd-uboot") if card else None
+        )
+        payload.add(target, files, modes, microsd=microsd)
+        identities[target, host] = "f" * 64
+        selection = f"selections/{target}/{host}"
         sources.update(
             {
-                "sources/windows-tools-source.zip": b"source projection\n",
-                "sources/windows-driver/README.txt": b"driver build instructions\n",
-                "sources/windows-driver/build.py": b"driver build program\n",
-                "sources/windows-driver/downloads.json": b"{}\n",
+                f"{selection}/upstream/downloads.json": json_bytes(
+                    [
+                        {
+                            "archive": "upstream/shared.tar.xz",
+                            "algorithm": "sha256",
+                            "checksum": hashlib.sha256(b"same exact upstream input").hexdigest(),
+                        }
+                    ]
+                ),
+                f"{selection}/upstream/alpine-source-channels.json": b"[]\n",
+                f"{selection}/sources/host-tools.zip": (
+                    f"source projection for {target}/{host}\n".encode()
+                ),
             }
         )
-    write_zip(directory / f"{stem}-sources.zip", sources, {"project/fplinux"})
+        if host == "windows":
+            sources.update(
+                {
+                    f"{selection}/sources/windows-tools-source.zip": b"source projection\n",
+                    f"{selection}/sources/windows-driver/README.txt": b"driver instructions\n",
+                    f"{selection}/sources/windows-driver/build.py": b"driver build program\n",
+                    f"{selection}/sources/windows-driver/downloads.json": b"{}\n",
+                }
+            )
+    for archive in archives.values():
+        archive.finish(f"FPLinux-{RELEASE_ID}-sources")
+    _write_distribution(
+        directory,
+        release_context_from_fields(release_fields()),
+        archives,
+        identities,
+        SourcePayload(sources, {"project/fplinux"}, {}),
+    )
 
 
 def write_transport(directory: Path) -> None:

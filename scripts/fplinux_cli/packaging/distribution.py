@@ -1,28 +1,33 @@
 # SPDX-License-Identifier: GPL-2.0-only
-"""Combine runtime archives, corresponding sources and retained dependency inputs."""
+"""Build one set of standalone archives and bind it to its sources."""
 
 from __future__ import annotations
 
 import json
 import re
 import shutil
-import stat
 import tempfile
 import zipfile
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, cast
 
 from fplinux_cli import common
-from fplinux_cli.artifacts.release import release_context_from_fields
-from fplinux_cli.common import canonical_json_bytes, fail, is_sha256, sha256_bytes
-from fplinux_cli.data_paths import DATA_DIR_NAME, PRIVATE_DIR_NAME
+from fplinux_cli.artifacts.release import capture_public_sources, release_context_from_fields
+from fplinux_cli.common import canonical_json_bytes, fail, is_sha256
+from fplinux_cli.data_paths import DATA_DIR_NAME, PRIVATE_DIR_NAME, data_root
 from fplinux_cli.manifests import releases, targets
 from fplinux_cli.manifests.paths import discover_targets
+from fplinux_cli.packaging.card_kit import read_card_files, supports_release_card
 from fplinux_cli.packaging.hosts import runtime_hosts
+from fplinux_cli.packaging.universal import HostArchive, release_archive_name
+from fplinux_cli.runtime.bundle import MICROSD_BOOT_PROFILE
 
 if TYPE_CHECKING:
     from collections.abc import Collection
     from typing import Any
+
+    from fplinux_cli.artifacts.release import ReleaseContext
+    from fplinux_cli.packaging.sources import SourcePayload
 
 _MAX_ASSET_BYTES = 2 * 1024**3
 _SELECTION_METADATA = {
@@ -56,39 +61,6 @@ def _asset_size(path: Path) -> None:
         fail(f"distribution asset must be smaller than 2 GiB: {path.name}")
 
 
-def _read_archive(path: Path) -> tuple[dict[str, bytes], set[str]]:
-    """Admit only complete regular members with the producer's modes and checksums."""
-    _asset_size(path)
-    files: dict[str, bytes] = {}
-    executables: set[str] = set()
-    with zipfile.ZipFile(path) as archive:
-        prefix = f"{path.stem}/"
-        for item in archive.infolist():
-            relative = item.filename.removeprefix(prefix)
-            normalized = PurePosixPath(relative)
-            mode = item.external_attr >> 16
-            if (
-                not item.filename.startswith(prefix)
-                or not relative
-                or normalized.is_absolute()
-                or ".." in normalized.parts
-                or normalized.as_posix() != relative
-                or relative in files
-                or mode not in {stat.S_IFREG | 0o644, stat.S_IFREG | 0o755}
-            ):
-                fail(f"distribution input has an invalid member: {path.name}: {item.filename}")
-            files[relative] = archive.read(item)
-            if mode & 0o111:
-                executables.add(relative)
-    checksums = files.get("SHA256SUMS", b"").decode("utf-8")
-    expected = "".join(
-        f"{sha256_bytes(files[name])}  {name}\n" for name in sorted(files) if name != "SHA256SUMS"
-    )
-    if not expected or checksums != expected:
-        fail(f"distribution input has an invalid checksum inventory: {path.name}")
-    return files, executables
-
-
 def source_distribution(data: bytes) -> dict[str, Any]:
     """Read source metadata without discarding its common release context."""
     try:
@@ -110,7 +82,7 @@ def distribution_records(data: bytes) -> list[dict[str, str]]:
     """Parse the single source-to-runtime contract used by packaging and inspection."""
     metadata = source_distribution(data)
     records = []
-    archives: set[str] = set()
+    archives: dict[str, tuple[str, str]] = {}
     selections: set[tuple[str, str]] = set()
     for record in metadata["runtimes"]:
         if (
@@ -129,21 +101,14 @@ def distribution_records(data: bytes) -> list[dict[str, str]]:
         ):
             fail("source distribution has an invalid runtime record")
         selection = record["target"], record["host"]
-        if record["archive"] in archives or selection in selections:
-            fail("source distribution repeats a runtime archive or target/host selection")
-        archives.add(record["archive"])
+        if selection in selections:
+            fail("source distribution repeats a runtime target/host selection")
+        association = record["host"], record["sha256"]
+        if archives.setdefault(record["archive"], association) != association:
+            fail("source distribution gives conflicting identities for one runtime archive")
         selections.add(selection)
         records.append(cast("dict[str, str]", record))
     return records
-
-
-def _source_record(path: Path) -> tuple[dict[str, str], dict[str, str | None]]:
-    with zipfile.ZipFile(path) as archive:
-        data = archive.read(f"{path.stem}/DISTRIBUTION.json")
-        records = distribution_records(data)
-    if len(records) != 1:
-        fail(f"distribution input must describe one runtime: {path.name}")
-    return records[0], release_context_from_fields(source_distribution(data)).fields()
 
 
 def _merge_sources(  # noqa: PLR0913 -- member payloads, modes and selection remain explicit.
@@ -172,166 +137,230 @@ def _merge_sources(  # noqa: PLR0913 -- member payloads, modes and selection rem
             destination_executables.add(member)
 
 
-def _final_runtime(
-    archive: Path, record: dict[str, str], *, source_stem: str, context: dict[str, str | None]
-) -> tuple[dict[str, bytes], set[str], dict[str, Any]]:
-    from fplinux_cli.packaging.archive import (  # noqa: PLC0415 -- Linux assembly backend.
-        distribution_record,
-        finalize_runtime,
+def _write_metadata(
+    directory: Path,
+    metadata: dict[str, Any],
+) -> None:
+    for path in directory.iterdir():
+        _asset_size(path)
+    common.replace_file_atomically(
+        directory / "RELEASE.json", canonical_json_bytes(metadata), 0o644
     )
-    from fplinux_cli.packaging.readme import (  # noqa: PLC0415 -- Linux assembly backend.
-        append_source_companion,
+    checksums = "".join(
+        f"{common.sha256_file(path)}  {path.name}\n"
+        for path in sorted(directory.iterdir())
+        if path.name != "SHA256SUMS"
     )
+    common.replace_file_atomically(directory / "SHA256SUMS", checksums.encode(), 0o644)
 
-    files, executables = _read_archive(archive)
-    manifest = json.loads(files["build-manifest.json"])
-    if (
-        not isinstance(manifest, dict)
-        or manifest.get("target") != record["target"]
-        or manifest.get("device_identity") != record["identity"]
-        or manifest.get("build_type") != "release"
-        or manifest.get("profile") is not None
-        or release_context_from_fields(manifest).fields() != context
+
+def _publish_directory(staging: Path, destination: Path) -> None:
+    if not destination.exists() and not destination.is_symlink():
+        staging.rename(destination)
+        return
+    if destination.is_symlink() or not destination.is_dir():
+        fail(f"invalid package output directory: {destination}")
+    expected = {path.name for path in staging.iterdir()}
+    if {path.name for path in destination.iterdir()} != expected or any(
+        (path := destination / name).is_symlink()
+        or not path.is_file()
+        or common.sha256_file(path) != common.sha256_file(staging / name)
+        for name in expected
     ):
-        fail(f"distribution runtime has the wrong build identity: {archive.name}")
-    if distribution_record(archive, manifest, record["host"]) != record:
-        fail(f"corresponding sources do not match runtime: {archive.name}")
-    original = dict(files)
-    finalize_runtime(files, manifest, executables)
-    if files != original:
-        fail(f"distribution runtime has an invalid build manifest: {archive.name}")
-    require_public_runtime_files(files, archive.name)
-    launcher = "Run.cmd" if record["host"] == "windows" else "Run.sh"
-    if launcher not in files:
-        fail(f"distribution runtime has no launcher: {archive.name}")
-    companion = append_source_companion(b"", f"{archive.stem}-sources")
-    if not files["README.txt"].endswith(companion):
-        fail(f"distribution runtime does not name its matching sources: {archive.name}")
-    files["README.txt"] = append_source_companion(
-        files["README.txt"].removesuffix(companion), source_stem
-    )
-    finalize_runtime(files, manifest, executables)
-    return files, executables, manifest
+        fail(f"package output directory contains a different release: {destination}")
 
 
-def assemble_distribution(
-    input_directory: Path, output_directory: Path, *, inputs_directory: Path
-) -> Path:
-    """Publish the exact supported runtime matrix, one source ZIP and outer checksums."""
-    if output_directory.exists():
-        fail(f"distribution output must be a new directory: {output_directory}")
-    try:
-        return _assemble_distribution(
-            input_directory, output_directory, inputs_directory=inputs_directory
-        )
-    except (OSError, ValueError, KeyError, TypeError, zipfile.BadZipFile) as error:
-        fail(f"cannot assemble distribution: {error}")
+def _write_distribution(
+    output: Path,
+    release: ReleaseContext,
+    archives: dict[str, HostArchive],
+    identities: dict[tuple[str, str], str],
+    sources: SourcePayload,
+) -> None:
+    from fplinux_cli.cli.inspect import inspect_distribution  # noqa: PLC0415
+    from fplinux_cli.packaging.archive import _write_archive, finalize_checksums  # noqa: PLC0415
 
-
-def _assemble_distribution(
-    input_directory: Path, output_directory: Path, *, inputs_directory: Path
-) -> Path:
-    from fplinux_cli.dependencies.distribution import (  # noqa: PLC0415 -- transport validation.
-        read_dependency_distribution,
-    )
-    from fplinux_cli.packaging.archive import (  # noqa: PLC0415 -- Linux assembly backend.
-        _write_archive,
-        distribution_record,
-        finalize_checksums,
-    )
-
-    dependency = read_dependency_distribution(inputs_directory)
-    context = dependency.release.fields()
-    release_id = context["release_id"]
-    expected = set(distribution_matrix())
-    if not expected:
-        fail("distribution has no supported target/host selections")
-    companions: dict[tuple[str, str], tuple[Path, dict[str, str]]] = {}
-    runtime_paths = set(input_directory.glob("*.zip"))
-    for path in sorted(runtime_paths):
-        if not path.name.endswith("-sources.zip"):
-            continue
-        record, source_context = _source_record(path)
-        if source_context != context:
-            fail(f"source companion belongs to another release: {path.name}")
-        selection = record["target"], record["host"]
-        if selection in companions:
-            fail(f"duplicate corresponding sources for {selection[0]}/{selection[1]}")
-        companions[selection] = path, record
-    if set(companions) != expected:
-        missing = sorted(expected - companions.keys())
-        extra = sorted(companions.keys() - expected)
-        fail(
-            "distribution target/host matrix is incomplete or unexpected: "
-            f"missing={missing}, extra={extra}"
-        )
-    names = set()
-    for (target, host), (source, record) in companions.items():
-        runtime = f"FPLinux-{target}-{host}-x64-{release_id}.zip"
-        if record["archive"] != runtime or source.name != f"{Path(runtime).stem}-sources.zip":
-            fail(f"distribution input has the wrong build name: {source.name}")
-        names.update({source.name, runtime})
-    if {path.name for path in runtime_paths} != names:
-        fail("distribution inputs do not contain exactly one runtime and companion per selection")
-    output_directory.parent.mkdir(parents=True, exist_ok=True)
-    source_stem = f"FPLinux-{release_id}-sources"
-    with tempfile.TemporaryDirectory(
-        dir=output_directory.parent, prefix=".fplinux-distribution-"
-    ) as temporary:
-        staging = Path(temporary) / "assets"
+    output.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=output.parent, prefix=".fplinux-package-") as temporary:
+        staging = Path(temporary) / "release"
         staging.mkdir()
-        sources: dict[str, bytes] = {}
-        source_executables: set[str] = set()
-        records = []
-        for (target, host), (companion, record) in sorted(companions.items()):
-            files, executables, manifest = _final_runtime(
-                input_directory / record["archive"],
-                record,
-                source_stem=source_stem,
-                context=context,
-            )
-            final_archive = _write_archive(
+        source_stem = f"FPLinux-{release.release_id}-sources"
+        runtimes = {}
+        for host, payload in archives.items():
+            finalize_checksums(payload.files)
+            archive = _write_archive(
                 staging,
-                Path(record["archive"]).stem,
-                files,
-                executables,
+                Path(release_archive_name(host, release.release_id)).stem,
+                payload.files,
+                payload.executables,
                 compression=zipfile.ZIP_DEFLATED,
             )
-            _asset_size(final_archive)
-            records.append(distribution_record(final_archive, manifest, host))
-            source_files, executable_sources = _read_archive(companion)
-            _merge_sources(
-                sources,
-                source_executables,
-                source_files,
-                executable_sources,
-                target=target,
-                host=host,
-            )
-        sources["DISTRIBUTION.json"] = canonical_json_bytes({**context, "runtimes": records})
-        finalize_checksums(sources)
+            runtimes[host] = {"archive": archive.name, "sha256": common.sha256_file(archive)}
+        records = [
+            {"target": target, "host": host, "identity": identity, **runtimes[host]}
+            for (target, host), identity in sorted(identities.items())
+        ]
+        context = release.fields()
+        sources.files["DISTRIBUTION.json"] = canonical_json_bytes({**context, "runtimes": records})
+        finalize_checksums(sources.files)
         source_archive = _write_archive(
-            staging, source_stem, sources, source_executables, compression=zipfile.ZIP_DEFLATED
+            staging,
+            source_stem,
+            sources.files,
+            sources.executables,
+            compression=zipfile.ZIP_DEFLATED,
         )
-        _asset_size(source_archive)
-        for name in dependency.files:
-            shutil.copyfile(inputs_directory / name, staging / name)
-            _asset_size(staging / name)
-        association = {
-            **context,
-            "runtimes": records,
-            "sources": {
-                "archive": source_archive.name,
-                "sha256": common.sha256_file(source_archive),
+        _write_metadata(
+            staging,
+            {
+                **context,
+                "runtimes": records,
+                "sources": {
+                    "archive": source_archive.name,
+                    "sha256": common.sha256_file(source_archive),
+                },
+                "dependencies": None,
             },
-            "dependencies": "DEPENDENCIES.json",
-        }
-        common.replace_file_atomically(
-            staging / "RELEASE.json", canonical_json_bytes(association), 0o644
         )
-        checksums = "".join(
-            f"{common.sha256_file(path)}  {path.name}\n" for path in sorted(staging.iterdir())
-        ).encode()
-        common.replace_file_atomically(staging / "SHA256SUMS", checksums, 0o644)
-        staging.replace(output_directory)
-    return output_directory / source_archive.name
+        inspect_distribution(staging)
+        _publish_directory(staging, output)
+
+
+def _package_selections(target: str | None, host: str | None) -> tuple[tuple[str, str], ...]:
+    if target is None:
+        selections = distribution_matrix()
+    else:
+        selections = tuple((target, name) for name in runtime_hosts(targets.load_target(target)))
+    if host is not None:
+        selections = tuple(selection for selection in selections if selection[1] == host)
+    if not selections:
+        fail(
+            f"no supported phone and host combination selected: {target or 'all'}/{host or 'both'}"
+        )
+    return selections
+
+
+def package_release(
+    *,
+    target: str | None,
+    host: str | None,
+    jobs: int,
+    output_directory: Path | None = None,
+) -> None:
+    """Build exact release inputs and deliver one ZIP format for any selection."""
+    from itertools import groupby  # noqa: PLC0415 -- grouping is only needed on the build host.
+
+    from fplinux_cli.build.workflow import build  # noqa: PLC0415 -- Linux build backend.
+    from fplinux_cli.packaging.archive import (  # noqa: PLC0415
+        finalize_runtime,
+        project_bundle,
+    )
+    from fplinux_cli.packaging.autonomous import HostPayloads  # noqa: PLC0415
+    from fplinux_cli.packaging.sources import (  # noqa: PLC0415
+        collect_source_files,
+        project_source_files,
+    )
+
+    selections = _package_selections(target, host)
+    cache = data_root(common.ROOT)
+    snapshot = capture_public_sources(selected_data_root=cache)
+    release = snapshot.release
+    archives = {
+        name: HostArchive(name, release.release_id) for name in sorted({h for _, h in selections})
+    }
+    sources = project_source_files(snapshot)
+    identities = {}
+    native = HostPayloads(cache)
+    for name, choices in groupby(sorted(selections), key=lambda selection: selection[0]):
+        configuration = targets.load_target(name)
+        bundle, manifest = build(name, jobs, include_device_data=False, release_context=release)
+        card_config = None
+        card_files = None
+        card_build = None
+        if supports_release_card(name):
+            card_config = targets.load_target(name, MICROSD_BOOT_PROFILE)
+            card_build = build(
+                name,
+                jobs,
+                profile=MICROSD_BOOT_PROFILE,
+                include_device_data=False,
+                release_context=release,
+            )
+            card_files = read_card_files(card_build[0].path, card_build[1], release)
+        for _, selected_host in choices:
+            files, modes, tool_sources = project_bundle(
+                name,
+                configuration,
+                bundle.path,
+                manifest,
+                host=selected_host,
+                host_payloads=native,
+                card_files=card_files,
+            )
+            source = collect_source_files(
+                configuration, host=selected_host, cache=cache, card_config=card_config
+            )
+            files.update(source.notices)
+            require_public_runtime_files(files.keys(), name)
+            finalize_runtime(files, manifest, modes)
+            microsd = None
+            if card_config is not None and card_build is not None:
+                card_bundle, card_manifest = card_build
+                sd_files, sd_modes, sd_sources = project_bundle(
+                    name,
+                    card_config,
+                    card_bundle.path,
+                    card_manifest,
+                    host=selected_host,
+                    host_payloads=native,
+                )
+                sd_files.update(source.notices)
+                tool_sources.update(sd_sources)
+                require_public_runtime_files(sd_files.keys(), name)
+                finalize_runtime(sd_files, card_manifest, sd_modes)
+                microsd = sd_files, sd_modes
+            archives[selected_host].add(name, files, modes, microsd=microsd)
+            source.files.update(tool_sources)
+            _merge_sources(
+                sources.files,
+                sources.executables,
+                source.files,
+                source.executables,
+                target=name,
+                host=selected_host,
+            )
+            identities[(name, selected_host)] = manifest["device_identity"]
+    for archive in archives.values():
+        archive.finish(f"FPLinux-{release.release_id}-sources")
+    if capture_public_sources(selected_data_root=cache).release != release:
+        fail("release sources changed while packaging; rerun package")
+    output = output_directory or cache / "out/releases" / release.release_id / (
+        target or "all"
+    ) / (host or "both")
+    _write_distribution(output, release, archives, identities, sources)
+    print(f"FPLinux packages: {common.display_text(output)}")
+
+
+def attach_inputs(directory: Path, inputs: Path, output: Path) -> None:
+    """Add the release's dependency transport without changing its archive bytes."""
+    from fplinux_cli.cli.inspect import inspect_distribution  # noqa: PLC0415
+    from fplinux_cli.dependencies.distribution import read_dependency_distribution  # noqa: PLC0415
+
+    metadata = inspect_distribution(directory, complete=True)
+    if metadata["dependencies"] is not None:
+        fail("package already includes a dependency transport")
+    dependency = read_dependency_distribution(inputs)
+    if release_context_from_fields(metadata) != dependency.release:
+        fail("dependency transport does not match the packaged release")
+    output.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=output.parent, prefix=".fplinux-release-") as temporary:
+        staging = Path(temporary) / "release"
+        staging.mkdir()
+        for path in directory.iterdir():
+            if path.name not in {"RELEASE.json", "SHA256SUMS"}:
+                shutil.copyfile(path, staging / path.name)
+        for name in dependency.files:
+            shutil.copyfile(inputs / name, staging / name)
+        _write_metadata(staging, {**metadata, "dependencies": "DEPENDENCIES.json"})
+        inspect_distribution(staging, complete=True, require_inputs=True)
+        _publish_directory(staging, output)

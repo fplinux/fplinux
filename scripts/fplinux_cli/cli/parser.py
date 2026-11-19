@@ -180,7 +180,6 @@ def _add_ci_commands(commands: argparse._SubParsersAction[argparse.ArgumentParse
     """Expose the release workflow's locally reproducible stages."""
     ci_parser = commands.add_parser("ci", help="prepare and verify complete releases")
     stages = ci_parser.add_subparsers(dest="ci_command", required=True)
-    stages.add_parser("matrix", help="print the supported runtime archive selections")
     stages.add_parser("bootstrap", help="check native build-runner prerequisites")
     stages.add_parser("site-install", help="install documentation tooling from saved originals")
     prepare = stages.add_parser(
@@ -193,10 +192,10 @@ def _add_ci_commands(commands: argparse._SubParsersAction[argparse.ArgumentParse
     preflight = stages.add_parser("preflight", help="install exact inputs in a fresh checkout")
     preflight.add_argument("--commit", required=True, metavar="SHA")
     preflight.add_argument("--directory", type=Path, required=True, metavar="PATH")
-    assemble = stages.add_parser("assemble", help="assemble the complete runtime and source set")
-    assemble.add_argument("--input-dir", type=Path, required=True, metavar="PATH")
-    assemble.add_argument("--output-dir", type=Path, required=True, metavar="PATH")
-    assemble.add_argument("--inputs-dir", type=Path, required=True, metavar="PATH")
+    attach = stages.add_parser("attach-inputs", help="attach exact inputs to a complete release")
+    attach.add_argument("--directory", type=Path, required=True, metavar="PATH")
+    attach.add_argument("--inputs-dir", type=Path, required=True, metavar="PATH")
+    attach.add_argument("--output-directory", type=Path, required=True, metavar="PATH")
     smoke = stages.add_parser("smoke", help="start and reopen archives on their native host")
     smoke.add_argument("--directory", type=Path, required=True, metavar="PATH")
     smoke.add_argument("--host", choices=("linux", "windows"), required=True)
@@ -489,19 +488,18 @@ def create_parser(
     checksum_parser.add_argument(
         "aport", metavar="APORT", help="package name, for example fplinux-ui"
     )
-    package_parser = commands.add_parser(
-        "package", help="package an existing build for standalone use"
+    package_parser = commands.add_parser("package", help="build and package a standalone release")
+    package_parser.add_argument(
+        "--target", choices=targets, help="build and include only this phone"
     )
-    package_parser.add_argument("target", choices=targets)
-    _add_boot_profile_options(package_parser, "package")
+    package_parser.set_defaults(jobs=_default_build_jobs())
     package_parser.add_argument(
         "--host",
         choices=("linux", "windows"),
-        default="linux",
-        help="select the x86-64 host (default: linux)",
+        help="build an archive for this x86-64 host only (default: both)",
     )
     package_parser.add_argument(
-        "--output-directory", type=Path, metavar="PATH", help="write both ZIPs to this directory"
+        "--output-directory", type=Path, metavar="PATH", help="write the release to this directory"
     )
     prune_parser = commands.add_parser(
         "prune", help="list disposable cached files, or remove them with --apply"
@@ -553,6 +551,8 @@ def create_parser(
     console_actions.add_argument("--keyboard", metavar="EVDEV")
     console_actions.add_argument("--exec", dest="exec_command", metavar="COMMAND")
     console_actions.add_argument("--upload", nargs=2, metavar=("LOCAL", "REMOTE"))
+    console_actions.add_argument("--pull", nargs=2, metavar=("REMOTE", "LOCAL"))
+
     card_parser = commands.add_parser("card", help="install a microSD system card")
     card_commands = card_parser.add_subparsers(dest="card_command", required=True)
     card_install = card_commands.add_parser(
@@ -568,8 +568,6 @@ def create_parser(
     card_install.add_argument(
         "--erase-card", metavar="CID", help="explicitly allow erasing this SD card"
     )
-
-    console_actions.add_argument("--pull", nargs=2, metavar=("REMOTE", "LOCAL"))
 
     nand_parser = commands.add_parser("nand", help="read the target's internal NAND")
     nand_commands = nand_parser.add_subparsers(dest="nand_command", required=True)

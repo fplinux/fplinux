@@ -166,7 +166,7 @@ def _release_notes(endpoint: str, releases: list[dict[str, Any]], commit: str) -
 def publish_distribution(directory: Path, *, commit: str) -> None:
     """Publish after the complete local and remote asset inventories match."""
     _require_publisher(commit)
-    inspect_distribution(directory)
+    inspect_distribution(directory, complete=True, require_inputs=True)
     context = release_context_from_fields(json.loads((directory / "RELEASE.json").read_bytes()))
     if context.source_commit != commit or context.release_id != commit[:12]:
         fail("publication source association differs from the exact event commit")

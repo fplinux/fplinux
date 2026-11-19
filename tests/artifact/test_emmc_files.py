@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import contextlib
 import hashlib
 import json
 import shutil
@@ -15,12 +14,14 @@ from pathlib import Path
 
 import pytest
 from fplinux_cli.build.host_tools.phone_data import prepare_python_modules
-from fplinux_cli.build.runtime import runtime_source_files
 from fplinux_cli.device_data.emmc import EmmcError, FileSelection, extract_files
-from fplinux_cli.manifests.targets import load_target
+from fplinux_cli.runtime.release_catalog import load_catalog, materialize_bundle
 
 from tests import ROOT
-from tests.artifact.test_release_package import ReleaseArchiveInputs, archive_contents
+from tests.host_process.packaging.autonomous_package_fixtures import (
+    ArchivePhone,
+    build_archive_inputs,
+)
 from tests.process import run_process
 from tests.small.device_data.emmc_fixtures import write_disk
 
@@ -31,6 +32,7 @@ class SavedPhone:
 
     image: Path
     modules: Path
+    module_files: dict[str, Path]
     system: Path
     userdata: Path
 
@@ -66,8 +68,8 @@ def saved_phone_template(tmp_path_factory: pytest.TempPathFactory) -> SavedPhone
     image = tmp_path / "phone.bin"
     write_disk(image, partitions)
     delivery = tmp_path / "reader"
-    prepare_python_modules(delivery, root=ROOT, cache=Path("/cache"))
-    return SavedPhone(image, delivery / "scripts", partitions[0][1], partitions[1][1])
+    files = prepare_python_modules(delivery, root=ROOT, cache=Path("/cache"))
+    return SavedPhone(image, delivery / "scripts", files, partitions[0][1], partitions[1][1])
 
 
 @pytest.fixture
@@ -78,6 +80,7 @@ def saved_phone(tmp_path: Path, saved_phone_template: SavedPhone) -> SavedPhone:
     return SavedPhone(
         image,
         saved_phone_template.modules,
+        saved_phone_template.module_files,
         saved_phone_template.system,
         saved_phone_template.userdata,
     )
@@ -167,37 +170,28 @@ def test_isolated_ext4_reader_requires_every_selected_original(saved_phone: Save
 
 @pytest.mark.parametrize("host", ["linux", "windows"])
 def test_runtime_archive_extracts_saved_originals_and_imports_target_resources(
-    saved_phone: SavedPhone, tmp_path: Path, host: str
+    saved_phone: SavedPhone, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, host: str
 ) -> None:
     """Each host ZIP carries the same independently usable pure preparation closure."""
-    config = load_target("xiaomi-qin-1s-plus")
-    sources = runtime_source_files("xiaomi-qin-1s-plus", config, root=ROOT)
-    delivery = saved_phone.modules.parent
-    sources.update(
-        {
-            path.relative_to(delivery).as_posix(): path
-            for path in delivery.rglob("*")
-            if path.is_file()
-        }
+    inputs = build_archive_inputs(
+        tmp_path / "packaging",
+        monkeypatch,
+        ArchivePhone("xiaomi-qin-1s-plus"),
+        emmc_files=saved_phone.module_files,
     )
-    inputs = ReleaseArchiveInputs(tmp_path / "packaging")
-    inputs.publish_bundle(
-        "d" * 64,
-        extra_files={relative: source.read_bytes() for relative, source in sources.items()},
-    )
-    with contextlib.ExitStack() as stack:
-        for patch in inputs.package_patches():
-            stack.enter_context(patch)
-        inputs.package(host=host)
-    archive_path = inputs.cache / f"out/releases/FPLinux-nokia-ta1618-{host}-x64-1234567890ab.zip"
-    files, _modes = archive_contents(archive_path)
-    runtime = json.loads(files["runtime-manifest.json"])
-    for relative in sources:
-        if relative in files:
-            assert runtime["sha256"][relative] == hashlib.sha256(files[relative]).hexdigest()
+    archive_path = inputs.package(host)
     extracted = tmp_path / "recipient"
     with zipfile.ZipFile(archive_path) as archive:
         archive.extractall(extracted)
+    root = extracted / archive_path.stem
+    bundle = materialize_bundle(
+        root, tmp_path / "recipient-data", load_catalog(root), inputs.target
+    )
+    runtime = json.loads((bundle / "runtime-manifest.json").read_bytes())
+    for relative, source in saved_phone.module_files.items():
+        expected = source.read_bytes()
+        assert (bundle / relative).read_bytes() == expected
+        assert runtime["sha256"][relative] == hashlib.sha256(expected).hexdigest()
     result = run_process(
         [
             sys.executable,
@@ -205,7 +199,7 @@ def test_runtime_archive_extracts_saved_originals_and_imports_target_resources(
             "-I",
             "-S",
             str(ROOT / "tests/artifact/fixtures/emmc-files/archived_reader.py"),
-            str(extracted / archive_path.stem),
+            str(bundle),
             str(saved_phone.image),
         ],
         name="archived eMMC preparation",

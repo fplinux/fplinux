@@ -10,14 +10,17 @@ from typing import TYPE_CHECKING
 import pytest
 from fplinux_cli.cli.inspect import inspect_distribution
 from fplinux_cli.packaging import distribution
+from fplinux_cli.packaging.universal import HostArchive
 
 from tests.distribution_support import (
+    CARD_TARGETS,
     RELEASE_ID,
     SELECTIONS,
+    bundle_fixture,
     json_bytes,
     read_zip,
     release_fields,
-    write_pair,
+    write_release,
     write_transport,
 )
 
@@ -28,9 +31,7 @@ if TYPE_CHECKING:
 @pytest.fixture
 def inputs(tmp_path: Path) -> tuple[Path, Path]:
     packages = tmp_path / "packages"
-    packages.mkdir()
-    for target, host in SELECTIONS:
-        write_pair(packages, target, host)
+    write_release(packages)
     transport = tmp_path / "transport"
     write_transport(transport)
     return packages, transport
@@ -42,11 +43,13 @@ def test_release_contains_the_complete_matrix_sources_and_dependency_transport(
     packages, transport = inputs
     output = tmp_path / "final"
 
-    source = distribution.assemble_distribution(packages, output, inputs_directory=transport)
+    distribution.attach_inputs(packages, transport, output)
+    source = output / f"FPLinux-{RELEASE_ID}-sources.zip"
 
     assert source.name == f"FPLinux-{RELEASE_ID}-sources.zip"
     expected = {
-        *(f"FPLinux-{target}-{host}-x64-{RELEASE_ID}.zip" for target, host in SELECTIONS),
+        f"FPLinux-linux-x64-{RELEASE_ID}.zip",
+        f"FPLinux-windows-x64-{RELEASE_ID}.zip",
         source.name,
         "SHA256SUMS",
         "RELEASE.json",
@@ -78,11 +81,32 @@ def test_release_contains_the_complete_matrix_sources_and_dependency_transport(
             not {"device-data.cpio", "CANDIDATE-NOTICE.txt", "DEVELOPMENT-NOTICE.txt"}
             & files.keys()
         )
-        manifest = json.loads(files["build-manifest.json"])
-        assert (
-            manifest["files"]["README.txt"]["sha256"]
-            == hashlib.sha256(files["README.txt"]).hexdigest()
-        )
+        catalog = json.loads(files["targets.json"])
+        assert set(catalog["targets"]) == {t for t, h in SELECTIONS if h == record["host"]}
+        target_files = catalog["targets"][record["target"]]["files"]
+        assert ("card/layout.json" in target_files) == (record["target"] in CARD_TARGETS)
+        if record["target"] in CARD_TARGETS:
+            assert target_files["image/ramboot.bin"][1] in target_files["card/fit.itb"]
+            assert (
+                target_files["card/root.ext4.xz"]
+                == (catalog["targets"]["inoi-240-modern-4g"]["files"]["card/root.ext4.xz"])
+            )
+        assert files["licenses/host-tools/COPYING"] == b"included host tool license\n"
+        assert target_files["assets.lock.toml"] == [f"assets/{record['target']}.lock.toml"]
+        ramboot = b"".join(files[part] for part in target_files["image/ramboot.bin"])
+        original, _ = bundle_fixture(record["target"], record["host"], card=False)
+        assert ramboot == original["image/ramboot.bin"]
+        assert runtime.read_bytes() == (packages / record["archive"]).read_bytes()
+        if record["target"] in CARD_TARGETS:
+            sd = catalog["targets"][record["target"]]["microsd"]["files"]
+            assert (
+                b"".join(files[part] for part in sd["image/ramboot.bin"])
+                == b"USB stage0 with U-Boot"
+            )
+            assert not any(name.startswith("card/") for name in sd)
+        if record["target"] == "nokia-ta1618":
+            other = catalog["targets"]["inoi-240-modern-4g"]["files"]["image/ramboot.bin"]
+            assert target_files["image/ramboot.bin"][1:] == other[1:]
         selection = f"selections/{record['target']}/{record['host']}"
         assert (
             sources[f"{selection}/sources/host-tools.zip"]
@@ -97,39 +121,36 @@ def test_release_contains_the_complete_matrix_sources_and_dependency_transport(
     inspect_distribution(output)
 
 
-@pytest.mark.parametrize(
-    ("damage", "diagnostic"),
-    [
-        ("missing", "matrix is incomplete"),
-        ("conflicting_source", "conflicting corresponding source"),
-        ("private_runtime", "prepared phone data"),
-        ("mismatched_pair", "sources do not match runtime"),
-        ("transport", "part is missing or mismatched"),
-    ],
-)
-def test_release_rejects_incomplete_conflicting_private_or_unpaired_bytes(
-    inputs: tuple[Path, Path], tmp_path: Path, damage: str, diagnostic: str
+def test_single_model_package_has_the_same_format_and_is_ineligible_to_publish(
+    tmp_path: Path,
 ) -> None:
-    packages, transport = inputs
-    if damage == "missing":
-        (packages / f"FPLinux-nokia-ta1618-windows-x64-{RELEASE_ID}-sources.zip").unlink()
-    elif damage == "transport":
-        next(transport.glob("*.part-00000")).write_bytes(b"changed original")
-    else:
-        write_pair(
-            packages,
-            "nokia-ta1618",
-            "linux",
-            conflicting_source=damage == "conflicting_source",
-            private_runtime=damage == "private_runtime",
-            mismatched_pair=damage == "mismatched_pair",
-        )
-    with pytest.raises(SystemExit, match=diagnostic):
-        distribution.assemble_distribution(
-            packages, tmp_path / "final", inputs_directory=transport
-        )
+    packages = tmp_path / "packages"
+    transport = tmp_path / "transport"
+    output = tmp_path / "final"
+    write_release(packages, selections=(("konrow-senior-280-plus", "linux"),))
+    write_transport(transport)
+
+    metadata = inspect_distribution(packages)
+    assert metadata["dependencies"] is None
+    assert [(record["target"], record["host"]) for record in metadata["runtimes"]] == [
+        ("konrow-senior-280-plus", "linux"),
+    ]
+    with pytest.raises(SystemExit, match="complete supported target/host matrix"):
+        distribution.attach_inputs(packages, transport, output)
+    assert not output.exists()
+
+
+def test_package_rejects_another_card_system(tmp_path: Path) -> None:
+    linux = HostArchive("linux", RELEASE_ID)
+    for target in ("nokia-ta1618", "inoi-240-modern-4g"):
+        files, modes = bundle_fixture(target, "linux", card=True)
+        if target == "inoi-240-modern-4g":
+            files["card/root.ext4.xz"] = b"another system"
+            with pytest.raises(SystemExit, match="different microSD base files"):
+                linux.add(target, files, modes)
+        else:
+            linux.add(target, files, modes)
     assert not (tmp_path / "final").exists()
-    assert not list(tmp_path.glob(".fplinux-distribution-*"))
 
 
 def test_source_distribution_parser_rejects_duplicate_runtime_selection() -> None:
@@ -146,32 +167,9 @@ def test_source_distribution_parser_rejects_duplicate_runtime_selection() -> Non
         )
 
 
-def test_automatic_release_rejects_a_locally_packaged_opted_out_target(
-    inputs: tuple[Path, Path], tmp_path: Path
-) -> None:
-    packages, transport = inputs
-    write_pair(packages, "konrow-senior-280-plus", "linux")
-
-    with pytest.raises(SystemExit, match=r"extra=\[\('konrow-senior-280-plus', 'linux'\)\]"):
-        distribution.assemble_distribution(
-            packages, tmp_path / "final", inputs_directory=transport
-        )
-
-    assert not (tmp_path / "final").exists()
-
-
 @pytest.mark.parametrize(
-    "member", [".data/runtime/session.json", ".private/retained.txt", ".data", ".private"]
+    "member", [".data/runtime/session.json", ".private/retained.txt", "device-data.cpio"]
 )
-def test_distribution_rejects_installation_data_and_private_work(
-    inputs: tuple[Path, Path], tmp_path: Path, member: str
-) -> None:
-    packages, transport = inputs
-    write_pair(packages, "nokia-ta1618", "linux", private_member=member)
-
+def test_distribution_rejects_installation_data_and_private_work(member: str) -> None:
     with pytest.raises(SystemExit, match="prepared phone data"):
-        distribution.assemble_distribution(
-            packages, tmp_path / "final", inputs_directory=transport
-        )
-
-    assert not (tmp_path / "final").exists()
+        distribution.require_public_runtime_files({"image/ramboot.bin", member}, "test ZIP")

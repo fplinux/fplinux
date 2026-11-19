@@ -45,13 +45,16 @@ def main() -> None:
     from fplinux_cli.device_data.inputs import (  # noqa: PLC0415
         capture_phone_data,
     )
+    from fplinux_cli.runtime.card_access import prepare_card_access  # noqa: PLC0415
     from fplinux_cli.runtime.cli import main  # noqa: PLC0415
+    from fplinux_cli.runtime.events import record_events  # noqa: PLC0415
     from fplinux_cli.runtime.nand_backup import backup_nand  # noqa: PLC0415
 
     for operation in (
         create_device_data_initramfs,
         capture_phone_data,
         main,
+        prepare_card_access,
         backup_nand,
     ):
         assert callable(operation)
@@ -67,6 +70,10 @@ def main() -> None:
     if manifest["target"] == "bq-2830l-tank-connect-max":
         for name in ("cm4", "bluetooth_firmware", "fitted", "fm_radio"):
             require_unavailable(f"fplinux_cli.device_data.{name}")
+    with record_events(
+        Path(sys.argv[2]), target=manifest["target"], profile=None, build_type="release"
+    ) as records:
+        records.emit("waiting-for-device")
     for name, module in sys.modules.copy().items():
         if name.startswith("fplinux_cli"):
             assert module.__file__ is not None

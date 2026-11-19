@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-2.0-only
-"""Package a selected build for standalone use."""
+"""Project admitted builds and write deterministic ZIP archives."""
 
 from __future__ import annotations
 
@@ -7,13 +7,11 @@ import json
 import tempfile
 import zipfile
 from pathlib import Path, PurePosixPath
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from fplinux_cli import common
 from fplinux_cli.alpine.lock import bundle_runtime_packages, load_alpine_lock
 from fplinux_cli.alpine.selection import bundle_packages, selected_packages
-from fplinux_cli.artifacts.release import current_release_context
-from fplinux_cli.build import reuse as cli_bundles
 from fplinux_cli.common import (
     ZIP_TIMESTAMP,
     canonical_json_bytes,
@@ -21,17 +19,12 @@ from fplinux_cli.common import (
     sha256_bytes,
     sha256_file,
 )
-from fplinux_cli.data_paths import data_root
-from fplinux_cli.environment import definition
-from fplinux_cli.environment import state as environment_states
-from fplinux_cli.manifests import platforms, releases, targets
-from fplinux_cli.packaging.autonomous import autonomous_payload
-from fplinux_cli.packaging.documentation import offline_documentation
-from fplinux_cli.packaging.hosts import runtime_hosts
-from fplinux_cli.packaging.readme import append_source_companion, ordinary_readme
-from fplinux_cli.runtime import bundle_session as runtime_bundle_session
+from fplinux_cli.manifests import platforms, releases
+from fplinux_cli.packaging.boot_components import BOOT_COMPONENTS, boot_components
 from fplinux_cli.runtime.windows_tools import WINDOWS_TOOLS
-from fplinux_cli.workspace import build_inputs as workspaces
+
+if TYPE_CHECKING:
+    from fplinux_cli.packaging.autonomous import HostPayloads
 
 SHARED_PACKAGE_FILES = {
     "LICENSE": "LICENSE",
@@ -168,11 +161,32 @@ def add_target_files(
         files[archive_name] = source.read_bytes()
 
 
+def read_bundle_members(
+    bundle: Path, records: dict[str, Any], names: list[str]
+) -> dict[str, bytes]:
+    """Read the exact files admitted by a successful build manifest."""
+    files = {}
+    for relative in names:
+        source = bundle / relative
+        if source.is_symlink() or not source.is_file():
+            fail(f"release input is missing or invalid: {source}")
+        data = source.read_bytes()
+        record = records.get(relative)
+        if (
+            not isinstance(record, dict)
+            or record.get("sha256") != sha256_bytes(data)
+            or record.get("size") != len(data)
+            or record.get("mode") != (source.stat().st_mode & 0o777)
+        ):
+            fail(f"release input differs from its successful build manifest: {source}")
+        files[relative] = data
+    return files
+
+
 def _project_runtime(
     files: dict[str, bytes],
     *,
     host: str,
-    ready_runtime: bool,
 ) -> None:
     """Admit only the runtime delivered for this host, preserving its kernel identity."""
     runtime = json.loads(files["runtime-manifest.json"])
@@ -182,7 +196,7 @@ def _project_runtime(
             for role, relative in runtime["host_tools"].items()
             if role != "keyboard"
         }
-    elif ready_runtime:
+    else:
         runtime["host_tools"] = {
             role: path for role, path in runtime["host_tools"].items() if role != "keyboard"
         }
@@ -266,213 +280,65 @@ def _write_archive(
     return archive
 
 
-def package_target(
+def project_bundle(  # noqa: PLR0913 -- the host and admitted build inputs stay explicit.
     target: str,
+    config: dict[str, Any],
+    bundle: Path,
+    manifest: dict[str, Any],
     *,
-    profile: str | None = None,
-    boot: str | None = None,
-    host: str = "linux",
-    output_directory: Path | None = None,
-) -> None:
-    cache = data_root(common.ROOT)
-    if host not in {"linux", "windows"}:
-        fail("package host must be linux or windows")
-    build_type = "release"
-    selected_profile = runtime_bundle_session.selected_context_profile(
-        target, profile=profile, boot=boot
-    )
-    config = targets.load_target(target, selected_profile, build_type=build_type)
-    ready_runtime = config["linux"]["root"]["kind"] == "initramfs"
-    if ready_runtime and host not in runtime_hosts(config):
-        fail(f"runtime archives do not support host {host} for this target")
-    if not ready_runtime and host != "linux":
-        fail("external-root exports support Linux x86-64 only")
-    release_context = current_release_context(selected_data_root=cache)
+    host: str,
+    host_payloads: HostPayloads,
+    card_files: dict[str, bytes] | None = None,
+) -> tuple[dict[str, bytes], set[str], dict[str, bytes]]:
+    """Project one admitted build into the shared host archive."""
     release = load_release_manifest(target, config)
-    documentation = {} if ready_runtime else offline_documentation(selected_data_root=cache)
-    bundle, manifest = runtime_bundle_session.resolve_target_bundle(
-        target, selected_profile, build_type=build_type
+    records = manifest["files"]
+    runtime = json.loads(
+        read_bundle_members(bundle, records, ["runtime-manifest.json"])["runtime-manifest.json"]
     )
-    if any(manifest.get(key) != value for key, value in release_context.fields().items()):
-        fail("build release context is stale; rebuild this target before packaging")
-    without_device_data = ready_runtime and config["platform"] == "sc9820e"
-    if without_device_data:
-        snapshot = workspaces.target_workspace_snapshot(
-            target,
-            selected_profile,
-            build_type=build_type,
-            include_device_data=False,
-            selected_data_root=cache,
-        )
-    else:
-        snapshot = workspaces.target_workspace_snapshot(
-            target, selected_profile, build_type=build_type, selected_data_root=cache
-        )
-    environment_recipe = definition.environment_recipe_digest()
-    environment_state = environment_states.load_environment_state(cache, environment_recipe)
-    identity = cli_bundles.build_identity(snapshot, environment_state, cache)
-    if not cli_bundles.manifest_matches_identity(manifest, identity):
-        clean_snapshot = workspaces.target_workspace_snapshot(
-            target,
-            selected_profile,
-            build_type=build_type,
-            include_device_data=False,
-            selected_data_root=cache,
-        )
-        identity = cli_bundles.build_identity(clean_snapshot, environment_state, cache)
-    files_table = manifest.get("files")
-    runtime_path = bundle.path / "runtime-manifest.json"
-    if runtime_path.is_symlink() or not runtime_path.is_file():
-        fail(f"release input is missing or invalid: {runtime_path}")
-    try:
-        runtime = json.loads(runtime_path.read_bytes())
-    except (OSError, ValueError) as error:
-        fail(f"release runtime manifest cannot be read: {error}")
-    if not isinstance(runtime, dict) or not isinstance(runtime.get("sha256"), dict):
-        fail("release runtime manifest has no executable closure")
-    runtime_files = list(runtime["sha256"])
-    try:
-        required_boot_artifacts = cli_bundles.required_boot_artifacts(manifest)
-    except ValueError as error:
-        fail(str(error))
-    reserved = {
-        "build-manifest.json",
-        "SHA256SUMS",
-        *SHARED_PACKAGE_FILES,
-    }
-    collision = reserved & set(required_boot_artifacts)
-    if collision:
-        fail(f"profile boot artifact has a reserved archive path: {min(collision)}")
-    bundle_files = list(
-        dict.fromkeys((*release["bundle_files"], *required_boot_artifacts, *runtime_files))
-    )
-    if (
-        not cli_bundles.manifest_matches_identity(manifest, identity)
-        or not isinstance(files_table, dict)
-        or not set(bundle_files).issubset(files_table)
-    ):
-        command = runtime_bundle_session.profile_command(
-            "build", target, selected_profile, build_type=build_type
-        )
-        if without_device_data:
-            command += " --without-device-data"
-        fail(f"build output is stale; rebuild it: {command}")
-    files: dict[str, bytes] = {}
-    for relative in bundle_files:
-        source = bundle.path / relative
-        if source.is_symlink() or not source.is_file():
-            fail(f"release input is missing or invalid: {source}")
-        data = source.read_bytes()
-        record = files_table[relative]
-        if (
-            not isinstance(record, dict)
-            or record.get("sha256") != sha256_bytes(data)
-            or record.get("size") != len(data)
-            or record.get("mode") != (source.stat().st_mode & 0o777)
-        ):
-            fail(f"release input differs from its successful build manifest: {source}")
-        files[relative] = data
-
-    executables = {relative for relative in files if files_table[relative]["mode"] & 0o111}
-    host_omissions = {
-        relative
-        for relative in files
-        if (
-            host == "linux"
-            and (
-                relative in {"Run.cmd", "Run-debug.cmd"}
-                or relative.startswith(("scripts/fplinux_cli/runtime/windows/", "common/windows/"))
-            )
-        )
-        or (host == "windows" and relative in {"Run.sh", "60-fplinux.rules"})
-        or (not ready_runtime and relative == "Run.sh")
-    }
-    for relative in host_omissions:
-        files.pop(relative)
-    executables.difference_update(host_omissions)
-    add_target_files(files, target, release["documents"])
-    if not ready_runtime:
-        files["README.txt"] = ordinary_readme(target, config)
-        if config["platform"] == "sc9820e":
-            from fplinux_cli.packaging.sources import (  # noqa: PLC0415
-                collect_loader_license_notices,
-            )
-
-            files.update(collect_loader_license_notices(config, cache=cache))
-    source_files: dict[str, bytes] = {}
-    source_executables: set[str] = set()
-    if ready_runtime:
-        prepared_files = {"device-data.cpio"}
-        for relative in prepared_files:
-            files.pop(relative, None)
-        omitted = {
-            relative
-            for relative in files
-            if relative == "host/fplinux-usb-keyboard"
-            or (host == "windows" and relative.startswith("host/"))
+    names = set(release["bundle_files"]) | runtime["sha256"].keys()
+    names.difference_update({"Run.sh", "Run.cmd", "Run-debug.cmd", "device-data.cpio"})
+    if host == "linux":
+        names = {
+            name
+            for name in names
+            if not name.startswith(("scripts/fplinux_cli/runtime/windows/", "common/windows/"))
+            and name != "host/fplinux-usb-keyboard"
         }
-        for relative in omitted:
-            files.pop(relative)
-        executables.difference_update(omitted)
-        additions = autonomous_payload(config, host=host, runtime=runtime, cache=cache)
-        collisions = (set(additions.files) & set(files)) - {"README.txt"}
-        if collisions:
-            fail(f"duplicate runtime archive path: {min(collisions)}")
-        files.update(additions.files)
-        executables.update(additions.executables)
-        from fplinux_cli.packaging.sources import collect_source_files  # noqa: PLC0415
+    else:
+        names = {
+            name for name in names if not name.startswith("host/") and name != "60-fplinux.rules"
+        }
+    files = read_bundle_members(bundle, records, sorted(names))
+    executables = {name for name in files if records[name]["mode"] & 0o111}
+    add_target_files(files, target, release["documents"])
 
-        sources = collect_source_files(config, host=host, cache=cache)
-        source_files.update(sources.files)
-        source_executables.update(sources.executables)
-        files.update(sources.notices)
-        for relative in tuple(files):
-            if relative.startswith("sources/"):
-                source_files[relative] = files.pop(relative)
-    _project_runtime(files, host=host, ready_runtime=ready_runtime)
-    collisions = set(files) & set(documentation)
-    if collisions:
-        fail(f"duplicate documentation archive path: {min(collisions)}")
-    files.update(documentation)
-    for archive_name, relative in SHARED_PACKAGE_FILES.items():
-        source = common.ROOT / relative
+    if manifest["profile"] is None:
+        files[BOOT_COMPONENTS] = boot_components(
+            bundle,
+            manifest,
+            platform=config["platform"],
+            image_path=release["image"],
+            image=files[release["image"]],
+        )
+    additions = host_payloads.project(config, host=host, runtime=runtime)
+    if collisions := additions.files.keys() & files.keys():
+        fail(f"duplicate runtime archive path: {min(collisions)}")
+    files.update(additions.files)
+    executables.update(additions.executables)
+    source_files = {}
+    for name in tuple(files):
+        if name.startswith("sources/"):
+            source_files[name] = files.pop(name)
+    _project_runtime(files, host=host)
+
+    for name, path in SHARED_PACKAGE_FILES.items():
+        source = common.ROOT / path
         if source.is_symlink() or not source.is_file():
             fail(f"shared package file is missing or invalid: {source}")
-        files[archive_name] = source.read_bytes()
-    context_component = "" if selected_profile is None else f"-{selected_profile}"
-    base_stem = f"FPLinux-{target}{context_component}-{host}-x64"
-    source_stem = None
-    if ready_runtime:
-        source_stem = f"{base_stem}-{release_context.release_id}-sources"
-        files["README.txt"] = append_source_companion(files["README.txt"], source_stem)
-    finalize_runtime(files, manifest, executables)
-    stem = f"{base_stem}-{release_context.release_id}"
-    destination = output_directory if output_directory is not None else cache / "out/releases"
-    archive = _write_archive(
-        destination,
-        stem,
-        files,
-        executables,
-        compression=zipfile.ZIP_DEFLATED if ready_runtime else zipfile.ZIP_STORED,
-    )
-    if source_stem is not None:
-        source_files["DISTRIBUTION.json"] = canonical_json_bytes(
-            {
-                **release_context.fields(),
-                "runtimes": [distribution_record(archive, manifest, host)],
-            }
-        )
-        finalize_checksums(source_files)
-        source_archive = _write_archive(
-            destination,
-            source_stem,
-            source_files,
-            source_executables,
-            compression=zipfile.ZIP_DEFLATED,
-        )
-        print(f"Matching sources: {common.display_text(source_archive)}")
-
-    image_digest = sha256_bytes(files[release["image"]])
-    print(f"FPLinux package: {common.display_text(archive)}")
-    print(f"Archive SHA256: {sha256_file(archive)}")
-    print(f"ramboot.bin SHA256: {image_digest}")
+        files[name] = source.read_bytes()
+    if card_files is not None:
+        if collisions := card_files.keys() & files.keys():
+            fail(f"duplicate system card archive path: {min(collisions)}")
+        files.update(card_files)
+    return files, executables, source_files

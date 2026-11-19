@@ -6,36 +6,43 @@ from __future__ import annotations
 import hashlib
 import shutil
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import pytest
 from fplinux_cli import common
 from fplinux_cli.alpine import lock as alpine_lock
-from fplinux_cli.alpine import selection, signing
-from fplinux_cli.artifacts.bundles import publish_current_bundle
-from fplinux_cli.artifacts.release import ReleaseContext
+from fplinux_cli.alpine import selection
+from fplinux_cli.artifacts.bundles import CurrentBundle
+from fplinux_cli.artifacts.release import (
+    PublicSourceSnapshot,
+    ReleaseContext,
+    public_source_digest,
+)
+from fplinux_cli.build import workflow
 from fplinux_cli.build.host_tools import linux_host, windows_driver
 from fplinux_cli.build.host_tools import windows as windows_build
 from fplinux_cli.build.identity import runtime_identity
 from fplinux_cli.build.runtime import device_data_descriptor, runtime_source_files
 from fplinux_cli.common import canonical_json_bytes
-from fplinux_cli.environment import definition
-from fplinux_cli.environment import state as environment_states
-from fplinux_cli.environment.state import EnvironmentState
 from fplinux_cli.manifests import platforms, releases, targets
 from fplinux_cli.packaging import archive as package
+from fplinux_cli.packaging import distribution
 from fplinux_cli.packaging import sources as package_sources
-from fplinux_cli.workspace import build_inputs
-from fplinux_cli.workspace.capture import WorkspaceSnapshot
+from fplinux_cli.workspace.capture import WorkspaceFile
 
 from tests.bundle_support import file_record
+from tests.fixtures.artifact_footprint import newc
 from tests.fixtures.runtime_manifest import runtime_manifest
 from tests.host_process.runtime.sc9820e.fixtures import prepare_runtime
-from tests.small.packaging.package_docs_fixtures import write_offline_export
 from tests.small.runtime.adapter_fixtures import adapter_data
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
     from pathlib import Path
+
+KERNEL = b"built kernel bytes\n"
+SQUASHFS = b"hsqs synthetic system"
+RAM_ROOT = newc([("root.squashfs", SQUASHFS, 0o100644, 1, 1)])
 
 
 @dataclass(frozen=True)
@@ -53,10 +60,25 @@ class ArchiveInputs:
     root: Path
     target: str
     bundle: Path
-    manifest: bytes
-    native_files: dict[str, Path]
+    manifest: dict[str, Any]
+    snapshot: PublicSourceSnapshot
+    build_calls: list[tuple[str, int, bool, ReleaseContext]]
     linux_files: dict[str, Path]
     windows_scripts: dict[str, bytes]
+
+    @property
+    def output(self) -> Path:
+        """Return the destination owned by the package case."""
+        return self.root / "release"
+
+    def package(self, host: str) -> Path:
+        """Invoke the production package path against controlled build inputs."""
+        start = len(self.build_calls)
+        distribution.package_release(
+            target=self.target, host=host, jobs=1, output_directory=self.output
+        )
+        assert self.build_calls[start:] == [(self.target, 1, False, self.snapshot.release)]
+        return self.output / f"FPLinux-{host}-x64-1234567890ab.zip"
 
 
 def write_archive_file(root: Path, relative: str, contents: bytes, *, mode: int = 0o644) -> Path:
@@ -73,9 +95,20 @@ def archive_inputs(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest
 ) -> ArchiveInputs:
     """Replace compilation and host identity, retaining real collection and ZIP writing."""
-    source = common.ROOT
     selected = getattr(request, "param", "nokia-ta1618")
     phone = ArchivePhone(selected) if isinstance(selected, str) else selected
+    return build_archive_inputs(tmp_path, monkeypatch, phone)
+
+
+def build_archive_inputs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    phone: ArchivePhone,
+    *,
+    emmc_files: Mapping[str, Path] | None = None,
+) -> ArchiveInputs:
+    """Prepare a controlled build with an optional real eMMC reader closure."""
+    source = common.ROOT
     target = phone.target
     config = targets.load_target(target)
     if not phone.required_phone_data:
@@ -97,6 +130,8 @@ def archive_inputs(
     source_files = [
         "LICENSE",
         "LICENSES/Unlicense.txt",
+        "THIRD_PARTY_NOTICES.md",
+        "fplinux",
         "third-party-licenses/musl/COPYRIGHT",
         "common/60-fplinux.rules",
         "common/runtime.py",
@@ -119,6 +154,16 @@ def archive_inputs(
             source_files.append(f"targets/{target}/{parser}")
     for relative in source_files:
         write_archive_file(tmp_path, relative, (source / relative).read_bytes())
+    release_document = f"targets/{target}/release/EXTRA.txt"
+    write_archive_file(tmp_path, release_document, b"phone instructions\n")
+    release["documents"] = ["release/EXTRA.txt"]
+    target_manifest = f"targets/{target}/target.toml"
+    write_archive_file(tmp_path, target_manifest, f'platform = "{config["platform"]}"\n'.encode())
+    write_archive_file(
+        tmp_path,
+        "profiles/default/profile.toml",
+        (source / "profiles/default/profile.toml").read_bytes(),
+    )
     for name in ("alpine.lock.toml", "sources.lock.toml"):
         write_archive_file(tmp_path, name, (source / "tests/fixtures/alpine" / name).read_bytes())
     shutil.copytree(source / "scripts/fplinux_cli", tmp_path / "scripts/fplinux_cli")
@@ -129,18 +174,15 @@ def archive_inputs(
         contents = resource.read_bytes()
         windows_scripts[relative] = contents
         write_archive_file(tmp_path, relative, contents)
-    public_key = signing.signing_public_key(tmp_path / ".data")
-    write_archive_file(
-        tmp_path, public_key.relative_to(tmp_path).as_posix(), b"test public signing key\n"
-    )
-    signing_digest = hashlib.sha256(public_key.read_bytes()).hexdigest()
     generation = "c" * 64
     bundle = tmp_path / ".data/out" / target / "builds/release/bundles" / generation
     monkeypatch.setattr(package, "load_alpine_lock", lambda _root: lock)
     normalized = package.load_release_manifest(target, config)
     runtime_sources = runtime_source_files(target, config, root=source)
-    if config.get("emmc") is not None and device_data_descriptor(target, config) is not None:
-        # This fixture tests archive admission; actual filesystem imports belong to artifact tests.
+    if emmc_files is not None:
+        runtime_sources.update(emmc_files)
+    elif config.get("emmc") is not None and device_data_descriptor(target, config) is not None:
+        # Admission tests do not run the filesystem reader.
         for name in ("ext4", "cachetools", "crcmod"):
             for relative, contents in (
                 (f"scripts/{name}/__init__.py", b"NAME = 'test-only dependency'\n"),
@@ -179,7 +221,7 @@ def archive_inputs(
             source_path.read_bytes(),
             mode=0o755 if relative in {"fplinux.py", "Run.sh"} else 0o644,
         )
-    write_archive_file(bundle, "image/ramboot.bin", b"DHTB synthetic built RAM payload\n")
+    image = b"DHTB synthetic built RAM payload\n"
     runtime = runtime_manifest()
     if config["platform"] == "sc9820e":
         sc9820e_root = tmp_path / "sc9820e-runtime"
@@ -191,15 +233,24 @@ def archive_inputs(
                 for key in ("adapter", "assets", "addresses", "personalization")
             }
         )
-        image = bytearray((sc9820e_root / "ramboot.bin").read_bytes())
+        template = bytearray((sc9820e_root / "ramboot.bin").read_bytes())
         slot = runtime["personalization"]["offset"]
-        image[slot : slot + 512] = bytes(512)
+        template[slot : slot + 512] = bytes(512)
         runtime["personalization"]["template_sha256"] = hashlib.sha256(bytes(512)).hexdigest()
-        write_archive_file(bundle, "image/ramboot.bin", bytes(image))
+        image = bytes(template)
         for role, relative in config["runtime"]["assets"].items():
             write_archive_file(bundle, relative, (assets / f"{role}.bin").read_bytes())
     else:
         runtime["adapter"] = adapter_data()
+    for relative, contents in {
+        "image/ramboot.bin": image + KERNEL + RAM_ROOT,
+        "debug/zImage": KERNEL,
+        "debug/initramfs.cpio": RAM_ROOT,
+        "THIRD_PARTY_NOTICES.md": (source / "THIRD_PARTY_NOTICES.md").read_bytes(),
+    }.items():
+        write_archive_file(bundle, relative, contents)
+        if relative not in bundle_files:
+            bundle_files.append(relative)
     runtime["identity"] = runtime_identity(
         config["identity"], config["platform"], platform["identity"]
     )
@@ -229,32 +280,39 @@ def archive_inputs(
             *runtime["host_tools"].values(),
         )
     }
-    context = ReleaseContext("1234567890ab", "1234567890ab" + "0" * 28, "a" * 64)
+    project = (
+        WorkspaceFile("LICENSE", b"project license\n", 0o644),
+        WorkspaceFile("THIRD_PARTY_NOTICES.md", b"project notices\n", 0o644),
+        WorkspaceFile("fplinux", b"#!/bin/sh\nexit 0\n", 0o755),
+        WorkspaceFile(target_manifest, (tmp_path / target_manifest).read_bytes(), 0o644),
+    )
+    context = ReleaseContext(
+        "1234567890ab", "1234567890ab" + "0" * 28, public_source_digest(project)
+    )
+    snapshot = PublicSourceSnapshot(project, context)
+    build_calls: list[tuple[str, int, bool, ReleaseContext]] = []
     runtime.update(context.fields())
     write_archive_file(bundle, "runtime-manifest.json", canonical_json_bytes(runtime))
-    snapshot = WorkspaceSnapshot((), "a" * 64, release_context=context)
-    manifest = canonical_json_bytes(
-        {
-            **context.fields(),
-            "rootfs_receipt": {"recipe": "d" * 64, "sha256": "e" * 64},
-            "kernel_artifacts": {},
-            "boot_artifacts": {"required": []},
-            "environment_recipe": "b" * 64,
-            "environment_content": "c" * 64,
-            "apk_signing_key": signing_digest,
-            "device_identity": "f" * 64,
-            "files": {relative: file_record(bundle / relative) for relative in bundle_files},
-            "generation": generation,
-            "kbuild_receipt": {"recipe": "0" * 64, "sha256": "1" * 64},
-            "linux_recipe": "2" * 64,
-            "profile": None,
-            "build_type": "release",
-            "target": target,
-            "workspace_digest": snapshot.recipe,
-        }
-    )
-    write_archive_file(bundle, "build-manifest.json", manifest)
-    publish_current_bundle(tmp_path / ".data/out", target, bundle)
+    manifest: dict[str, Any] = {
+        **context.fields(),
+        "rootfs_receipt": {"recipe": "d" * 64, "sha256": "e" * 64},
+        "kernel_artifacts": {"image": "debug/zImage", "initramfs": "debug/initramfs.cpio"},
+        "boot_artifacts": {"required": []},
+        "environment_recipe": "b" * 64,
+        "environment_content": "c" * 64,
+        "apk_signing_key": "3" * 64,
+        "device_identity": "f" * 64,
+        "files": {relative: file_record(bundle / relative) for relative in bundle_files},
+        "generation": generation,
+        "kbuild_receipt": {"recipe": "0" * 64, "sha256": "1" * 64},
+        "linux_recipe": "2" * 64,
+        "profile": None,
+        "build_type": "release",
+        "target": target,
+        "workspace_digest": "a" * 64,
+    }
+    manifest_bytes = canonical_json_bytes(manifest)
+    write_archive_file(bundle, "build-manifest.json", manifest_bytes)
     native_files = {
         relative: write_archive_file(tmp_path / "prepared-native", relative, relative.encode())
         for relative in (
@@ -268,6 +326,11 @@ def archive_inputs(
             "runtime/python314.zip",
         )
     }
+    native_files["sources/windows-tools-source.zip"] = write_archive_file(
+        tmp_path / "prepared-native",
+        "sources/windows-tools-source.zip",
+        b"prepared compiler source projection",
+    )
     driver_files = {
         "tools/driver/wdi-simple.exe": write_archive_file(
             tmp_path / "prepared-driver", "tools/driver/wdi-simple.exe", b"prepared driver helper"
@@ -277,6 +340,12 @@ def archive_inputs(
             "licenses/windows-driver/License.rtf",
             b"synthetic driver redistribution license\n",
         ),
+        **{
+            f"sources/windows-driver/{name}": write_archive_file(
+                tmp_path / "prepared-driver", f"sources/windows-driver/{name}", b"fixture source\n"
+            )
+            for name in ("README.txt", "build.py", "downloads.json")
+        },
     }
     linux_files = {
         relative: write_archive_file(
@@ -295,11 +364,6 @@ def archive_inputs(
             files["tools/ums9117-nand-ecc.exe"] = write_archive_file(
                 tmp_path / "prepared-native", "tools/ums9117-nand-ecc.exe", b"prepared BCH decoder"
             )
-            files["sources/windows-tools-source.zip"] = write_archive_file(
-                tmp_path / "prepared-native",
-                "sources/windows-tools-source.zip",
-                b"prepared compiler source projection",
-            )
             files["licenses/windows-host/ums9117-nand-ecc-COPYING.txt"] = write_archive_file(
                 tmp_path / "prepared-native",
                 "licenses/windows-host/ums9117-nand-ecc-COPYING.txt",
@@ -315,43 +379,70 @@ def archive_inputs(
         """Stand in for the exact pinned-environment runtime export boundary."""
         return dict(linux_files)
 
-    def prepared_release_context(*, selected_data_root: Path) -> ReleaseContext:
+    def captured_sources(*, selected_data_root: Path) -> PublicSourceSnapshot:
         """Replace source identity capture while requiring the selected archive store."""
         assert selected_data_root == tmp_path / ".data"
-        return context
+        return snapshot
+
+    def built_bundle(
+        name: str, jobs: int, *, include_device_data: bool, release_context: ReleaseContext
+    ) -> tuple[CurrentBundle, dict[str, Any]]:
+        build_calls.append((name, jobs, include_device_data, release_context))
+        admitted = CurrentBundle(
+            bundle, generation, hashlib.sha256(manifest_bytes).hexdigest(), manifest_bytes
+        )
+        return admitted, manifest
+
+    def corresponding_sources(
+        selected: dict[str, Any], *, host: str, **_options: object
+    ) -> package_sources.SourcePayload:
+        member = "upstream/test-package.tar.gz"
+        contents = b"test upstream archive\n"
+        downloads = [
+            {
+                "archive": member,
+                "algorithm": "sha256",
+                "checksum": hashlib.sha256(contents).hexdigest(),
+            }
+        ]
+        files = {
+            member: contents,
+            "upstream/downloads.json": canonical_json_bytes(downloads),
+            "upstream/alpine-source-channels.json": b"[]\n",
+        }
+        if host == "linux":
+            files["BUILD-LINUX.txt"] = b"fixture rebuild instructions\n"
+        else:
+            files["upstream/windows-runtime-source-channels.json"] = b"[]\n"
+        notices = (
+            {
+                "licenses/loaders/fdl2/README": b"original license explanation\n",
+                "licenses/loaders/fdl2/gpl-2.0.txt": b"original GPL terms\n",
+                "licenses/loaders/sml/license.md": b"original monitor license\n",
+            }
+            if selected["platform"] == "sc9820e"
+            else {}
+        )
+        return package_sources.SourcePayload(files, set(), notices)
 
     monkeypatch.setattr(common, "ROOT", tmp_path)
     monkeypatch.setenv("FPLINUX_DATA_DIR", str(tmp_path / ".data"))
-    monkeypatch.setattr(package, "current_release_context", prepared_release_context)
+    monkeypatch.setattr(distribution, "capture_public_sources", captured_sources)
+    monkeypatch.setattr(workflow, "build", built_bundle)
     monkeypatch.setattr(targets, "load_target", lambda *_args, **_kwargs: config)
     monkeypatch.setattr(releases, "load_release", lambda *_args, **_kwargs: release)
     monkeypatch.setattr(platforms, "load_platform", lambda *_args: platform)
-    monkeypatch.setattr(
-        build_inputs, "target_workspace_snapshot", lambda *_args, **_kwargs: snapshot
-    )
-    monkeypatch.setattr(definition, "environment_recipe_digest", lambda: "b" * 64)
-    monkeypatch.setattr(
-        environment_states,
-        "load_environment_state",
-        lambda *_args: EnvironmentState("b" * 64, "d" * 64, "c" * 64),
-    )
     monkeypatch.setattr(windows_build, "prepare_windows_host", prepared_native)
     monkeypatch.setattr(windows_driver, "prepare_windows_driver", prepared_driver)
     monkeypatch.setattr(linux_host, "prepare_linux_host", prepared_linux)
-    monkeypatch.setattr(
-        package_sources,
-        "collect_source_files",
-        lambda *_args, **_kwargs: package_sources.SourcePayload(
-            {"project/source.c": b"controlled corresponding source\n"}, set(), {}
-        ),
-    )
-    write_offline_export(tmp_path)
+    monkeypatch.setattr(package_sources, "collect_source_files", corresponding_sources)
     return ArchiveInputs(
         root=tmp_path,
         target=target,
         bundle=bundle,
         manifest=manifest,
-        native_files={**native_files, **driver_files},
+        snapshot=snapshot,
+        build_calls=build_calls,
         linux_files=linux_files,
         windows_scripts=windows_scripts,
     )

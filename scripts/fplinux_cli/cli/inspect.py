@@ -10,7 +10,7 @@ import stat
 import tarfile
 import zipfile
 from pathlib import Path, PurePosixPath
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from fplinux_cli.artifacts.footprint import FootprintError, compare_footprints, inspect_footprint
 from fplinux_cli.artifacts.release import current_release_context, release_context_from_fields
@@ -322,23 +322,19 @@ def _source_records(
     ):
         fail("corresponding project sources differ from their release identity")
     for record in records:
-        _verify_source_material(
-            archive, prefix, members, checksums, record, combined=len(records) > 1
-        )
+        _verify_source_material(archive, prefix, members, checksums, record)
     return records
 
 
-def _verify_source_material(  # noqa: PLR0913 -- archive identity and selection inputs stay explicit.
+def _verify_source_material(
     archive: zipfile.ZipFile,
     prefix: str,
     members: set[str],
     checksums: dict[str, str],
     record: dict[str, str],
-    *,
-    combined: bool,
 ) -> None:
     """Admit emitted rebuild instructions and every selected original they reference."""
-    selection = f"selections/{record['target']}/{record['host']}/" if combined else ""
+    selection = f"selections/{record['target']}/{record['host']}/"
     required = {
         f"project/targets/{record['target']}/target.toml",
         selection + "upstream/downloads.json",
@@ -380,29 +376,86 @@ def _verify_source_material(  # noqa: PLR0913 -- archive identity and selection 
             fail(f"corresponding source original differs from its declaration: {name}")
 
 
-def _verify_runtime_manifest(
-    manifest: dict[str, object],
-    prefix: str,
-    checksums: dict[str, str],
-    files: dict[str, zipfile.ZipInfo],
-) -> None:
-    """Compare final manifest records to verified bytes and actual ZIP modes."""
-    records = manifest.get("files")
-    expected = set(checksums) - {"build-manifest.json"}
-    if not isinstance(records, dict) or set(records) != expected:
-        fail("distribution runtime build manifest has an incomplete file inventory")
-    for name in expected:
-        item = files[prefix + name]
-        mode = item.external_attr >> 16
-        if mode not in {stat.S_IFREG | 0o644, stat.S_IFREG | 0o755} or records[name] != {
-            "mode": stat.S_IMODE(mode),
-            "size": item.file_size,
-            "sha256": checksums[name],
-        }:
-            fail(f"distribution runtime build manifest differs from final file: {name}")
-    content = {key: value for key, value in manifest.items() if key != "generation"}
-    if manifest.get("generation") != sha256_bytes(canonical_json_bytes(content)):
-        fail("distribution runtime build manifest generation differs")
+def _archive_payload(archive: zipfile.ZipFile, prefix: str, parts: tuple[str, ...]) -> bytes:
+    return b"".join(archive.read(prefix + part) for part in parts)
+
+
+def _universal_manifests(
+    archive: zipfile.ZipFile, prefix: str, checksums: dict[str, str]
+) -> tuple[str, dict[str, dict[str, Any]]]:
+    """Verify each reconstructed RAM and microSD runtime against its build manifest."""
+    from fplinux_cli.packaging.card_kit import CARD_MEMBERS  # noqa: PLC0415
+    from fplinux_cli.packaging.distribution import require_public_runtime_files  # noqa: PLC0415
+    from fplinux_cli.runtime.bundle import MICROSD_BOOT_PROFILE  # noqa: PLC0415
+    from fplinux_cli.runtime.release_catalog import parse_catalog  # noqa: PLC0415
+
+    catalog = parse_catalog(archive.read(prefix + "targets.json"))
+    require_public_runtime_files(checksums, archive.filename or "release")
+    manifests = {}
+    used_objects = set()
+    for target, board in catalog.targets.items():
+        card_members = set(CARD_MEMBERS) & board.files.keys()
+        if card_members != (set(CARD_MEMBERS) if board.microsd is not None else set()):
+            fail(f"release board has incomplete card installation files: {target}")
+        for recipe, profile in ((board, None), (board.microsd, MICROSD_BOOT_PROFILE)):
+            if recipe is None:
+                continue
+            require_public_runtime_files(recipe.files, target)
+            manifest = json.loads(
+                _archive_payload(archive, prefix, recipe.files["build-manifest.json"])
+            )
+            if not isinstance(manifest, dict) or (
+                manifest.get("target") != target
+                or manifest.get("release_id") != catalog.release_id
+                or manifest.get("build_type") != "release"
+                or manifest.get("profile") != profile
+            ):
+                fail(f"release board manifest has a different identity: {target}")
+            records = manifest.get("files")
+            if not isinstance(records, dict) or set(records) != set(recipe.files) - {
+                "build-manifest.json",
+                "SHA256SUMS",
+            }:
+                fail(f"release board manifest has an incomplete file inventory: {target}")
+            content = {key: value for key, value in manifest.items() if key != "generation"}
+            if manifest.get("generation") != sha256_bytes(canonical_json_bytes(content)):
+                fail(f"release board manifest generation differs: {target}")
+            for name, parts in recipe.files.items():
+                for part in parts:
+                    if part.startswith("objects/"):
+                        if checksums[part] != part.removeprefix("objects/"):
+                            fail(f"release object differs from its name: {part}")
+                        used_objects.add(part)
+                if name not in records:
+                    continue
+                size = sum(archive.getinfo(prefix + part).file_size for part in parts)
+                digest = (
+                    checksums[parts[0]]
+                    if len(parts) == 1
+                    else sha256_bytes(_archive_payload(archive, prefix, parts))
+                )
+                mode = 0o755 if name in recipe.executables else 0o644
+                if records[name] != {"mode": mode, "size": size, "sha256": digest}:
+                    fail(f"release board file differs from its build manifest: {target}/{name}")
+                if (
+                    len(parts) == 1
+                    and not parts[0].startswith("objects/")
+                    and archive.getinfo(prefix + parts[0]).external_attr >> 16
+                    != (stat.S_IFREG | mode)
+                ):
+                    fail(f"release shared file has the wrong executable mode: {parts[0]}")
+            if profile is None:
+                manifests[target] = manifest
+            else:
+                if release_context_from_fields(manifest) != release_context_from_fields(
+                    manifests[target]
+                ):
+                    fail(f"microSD boot and RAM use different releases: {target}")
+                if set(CARD_MEMBERS) & recipe.files.keys():
+                    fail(f"installed card runtime includes installation files: {target}")
+    if used_objects != {name for name in checksums if name.startswith("objects/")}:
+        fail("release contains unreferenced objects")
+    return catalog.release_id, manifests
 
 
 def inspect_archive(path: Path) -> None:
@@ -415,15 +468,18 @@ def inspect_archive(path: Path) -> None:
                 records = _source_records(archive, prefix, checksums)
                 print("kind: corresponding-sources")
                 _print_release(json.loads(archive.read(prefix + "DISTRIBUTION.json")))
-                for record in records:
-                    print(f"runtime: {record['archive']} {record['sha256']}")
+                for name, digest in dict.fromkeys(
+                    (row["archive"], row["sha256"]) for row in records
+                ):
+                    print(f"runtime: {name} {digest}")
+            elif prefix + "targets.json" in files:
+                release_id, manifests = _universal_manifests(archive, prefix, checksums)
+                print("kind: universal runtime")
+                print(f"release: {release_id}")
+                for target in sorted(manifests):
+                    print(f"target: {target}")
             else:
-                manifest = json.loads(archive.read(prefix + "build-manifest.json"))
-                if not isinstance(manifest, dict):
-                    fail("archive build manifest must be an object")
-                _verify_runtime_manifest(manifest, prefix, checksums, files)
-                print("kind: runtime")
-                _print_identity(manifest)
+                fail("archive has no FPLinux release catalog or corresponding source inventory")
             print("SIZE SHA256 PATH")
             for name, digest in sorted(checksums.items()):
                 print(f"{files[prefix + name].file_size} {digest} {name}")
@@ -432,16 +488,19 @@ def inspect_archive(path: Path) -> None:
         fail(f"cannot inspect archive {display_text(path)}: {error}")
 
 
-def inspect_distribution(directory: Path) -> None:
+def inspect_distribution(
+    directory: Path, *, complete: bool = False, require_inputs: bool = False
+) -> dict[str, Any]:
     """Check all release assets and their shared corresponding-source pairing."""
     from fplinux_cli.dependencies.distribution import (  # noqa: PLC0415 -- native metadata reader.
         read_dependency_distribution,
     )
+    from fplinux_cli.packaging.card_kit import CARD_MEMBERS, supports_release_card  # noqa: PLC0415
     from fplinux_cli.packaging.distribution import (  # noqa: PLC0415 -- distribution backend.
         distribution_matrix,
-        require_public_runtime_files,
         source_distribution,
     )
+    from fplinux_cli.packaging.universal import release_archive_name  # noqa: PLC0415
 
     try:
         metadata = json.loads((directory / "RELEASE.json").read_bytes())
@@ -454,13 +513,16 @@ def inspect_distribution(directory: Path) -> None:
             "dependencies",
         }:
             fail("distribution has invalid release association metadata")
-        context = release_context_from_fields(metadata).fields()
-        dependency = read_dependency_distribution(directory)
-        if (
-            dependency.release.fields() != context
-            or metadata["dependencies"] != "DEPENDENCIES.json"
-        ):
-            fail("distribution dependency inputs belong to another release")
+        release = release_context_from_fields(metadata)
+        context = release.fields()
+        dependency_files: tuple[str, ...] = ()
+        if metadata["dependencies"] == "DEPENDENCIES.json":
+            dependency = read_dependency_distribution(directory)
+            if dependency.release.fields() != context:
+                fail("distribution dependency inputs belong to another release")
+            dependency_files = tuple(dependency.files)
+        elif require_inputs or metadata["dependencies"] is not None:
+            fail("distribution has no valid dependency transport")
         source_name = f"FPLinux-{context['release_id']}-sources.zip"
         if metadata["sources"] != {
             "archive": source_name,
@@ -476,57 +538,66 @@ def inspect_distribution(directory: Path) -> None:
             ).fields()
         if source_context != context or metadata["runtimes"] != records:
             fail("distribution source/runtime association differs")
-        expected_matrix = set(distribution_matrix())
-        if {(record["target"], record["host"]) for record in records} != expected_matrix:
+        actual = {(record["target"], record["host"]) for record in records}
+        if complete and actual != set(distribution_matrix()):
             fail("distribution does not contain the complete supported target/host matrix")
         expected_names = {
             source.name,
             "SHA256SUMS",
             "RELEASE.json",
-            *dependency.files,
+            *dependency_files,
             *(record["archive"] for record in records),
         }
         if {path.name for path in directory.iterdir()} != expected_names:
             fail("distribution files do not match its runtime/source inventory")
+        if any(path.is_symlink() or not path.is_file() for path in directory.iterdir()):
+            fail("distribution requires regular files")
         outer = "".join(
             f"{sha256_file(directory / name)}  {name}\n"
             for name in sorted(expected_names - {"SHA256SUMS"})
         )
         if (directory / "SHA256SUMS").read_text(encoding="ascii") != outer:
             fail("distribution SHA256SUMS does not match its final assets")
-        for record in records:
-            expected = (
-                f"FPLinux-{record['target']}-{record['host']}-x64-{context['release_id']}.zip"
-            )
-            runtime = directory / record["archive"]
-            if record["archive"] != expected or sha256_file(runtime) != record["sha256"]:
-                fail(f"distribution runtime name or pairing hash differs: {record['archive']}")
+        for host in sorted({record["host"] for record in records}):
+            expected = release_archive_name(host, release.release_id)
+            selected = {record["target"]: record for record in records if record["host"] == host}
+            runtime = directory / expected
+            if any(record["archive"] != expected for record in selected.values()):
+                fail(f"distribution runtime name or pairing hash differs: {expected}")
+            digest = sha256_file(runtime)
+            if any(record["sha256"] != digest for record in selected.values()):
+                fail(f"distribution runtime name or pairing hash differs: {expected}")
             with zipfile.ZipFile(runtime) as archive:
-                prefix, checksums, files = _verify_archive(archive)
-                manifest = json.loads(archive.read(prefix + "build-manifest.json"))
-                if not isinstance(manifest, dict):
-                    fail("distribution runtime build manifest must be an object")
-                _verify_runtime_manifest(manifest, prefix, checksums, files)
-                if (
-                    manifest.get("device_identity") != record["identity"]
-                    or manifest.get("target") != record["target"]
-                    or manifest.get("profile") is not None
-                    or manifest.get("build_type") != "release"
-                    or release_context_from_fields(manifest).fields() != context
-                ):
-                    fail(f"distribution runtime identity differs: {runtime.name}")
+                prefix, checksums, _files = _verify_archive(archive)
+                release_id, manifests = _universal_manifests(archive, prefix, checksums)
+                if release_id != context["release_id"] or set(manifests) != set(selected):
+                    fail(f"distribution runtime selection differs: {runtime.name}")
+                for target, manifest in manifests.items():
+                    if (
+                        manifest.get("device_identity") != selected[target]["identity"]
+                        or release_context_from_fields(manifest).fields() != context
+                    ):
+                        fail(f"distribution runtime identity differs: {runtime.name}/{target}")
+                    card_files = set(CARD_MEMBERS) & manifest["files"].keys()
+                    expected_card = set(CARD_MEMBERS) if supports_release_card(target) else set()
+                    if card_files != expected_card:
+                        fail(
+                            f"distribution card installation files differ: {runtime.name}/{target}"
+                        )
                 readme = archive.read(prefix + "README.txt").decode("utf-8")
                 if f"\n  {source.name}\n" not in readme:
                     fail(f"distribution runtime names another source companion: {runtime.name}")
-                members = {name.removeprefix(prefix) for name in files}
-                require_public_runtime_files(members, runtime.name)
             print(f"runtime: {runtime.name}; pairing: OK")
         for name in expected_names - {"SHA256SUMS"}:
             if (directory / name).stat().st_size >= 2 * 1024**3:
                 fail(f"distribution asset must be smaller than 2 GiB: {name}")
     except (OSError, zipfile.BadZipFile, KeyError, ValueError, AttributeError) as error:
         fail(f"cannot inspect distribution {display_text(directory)}: {error}")
-    print(f"distribution: {len(records)} runtimes; corresponding sources and checksums: OK")
+    print(
+        f"distribution: {len({record['archive'] for record in records})} host archives, "
+        f"{len(records)} selections; corresponding sources and checksums: OK"
+    )
+    return metadata
 
 
 def inspect_apk(path: Path) -> None:

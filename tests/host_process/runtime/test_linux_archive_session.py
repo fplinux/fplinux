@@ -26,6 +26,7 @@ from fplinux_cli.runtime.ssh import session as ssh_session
 from fplinux_cli.runtime.ssh import transport as ssh_transport
 
 from tests import ROOT
+from tests.boot_identity import IDENTITY_9
 from tests.fixtures.executables import install_python_script
 from tests.process import process_state, python_environment
 from tests.ssh_transport_support import create_ready_session
@@ -80,11 +81,11 @@ def test_archive_ready_reconnect_preserves_current_and_parallel_prepared_session
             "-c",
             f"print({identity!r})"
             if command == "fplinux-session-id"
-            else "print('6.18.42-fplinux-9999999999999999')",
+            else "print('6.18.42-fplinux-9999999999999999'); print('9' * 64)",
         ],
     )
 
-    ready = ssh_transport.reacquire_bound_session(session, expected_device_identity="9" * 64)
+    ready = ssh_transport.reacquire_bound_session(session, expected_device_identity=IDENTITY_9)
     ssh_session.finish_session(session)
     loaded = ssh_session.load_saved_session("phone", runtime_root=root)
 

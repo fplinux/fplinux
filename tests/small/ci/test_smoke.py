@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import subprocess
 from pathlib import Path
@@ -20,27 +21,74 @@ from tests.distribution_support import (
     write_zip,
 )
 
+_PREPARATION_TARGET = "nokia-ta1618"
 
-def _write_distribution(
-    directory: Path, files: dict[str, bytes], *, device_data: dict[str, str] | None
-) -> Path:
+
+def _bundle_recipe(
+    files: dict[str, bytes], target: str, *, prepare_device_data: bool
+) -> dict[str, object]:
+    runtime = json_bytes(
+        {
+            "release_id": RELEASE_ID,
+            "target": target,
+            "device_data": {} if prepare_device_data else None,
+        }
+    )
+    digest = hashlib.sha256(runtime).hexdigest()
+    manifest = json_bytes(
+        {
+            "release_id": RELEASE_ID,
+            "target": target,
+            "files": {
+                "runtime-manifest.json": {"mode": 0o644, "size": len(runtime), "sha256": digest}
+            },
+        }
+    )
+    sums = (
+        f"{hashlib.sha256(manifest).hexdigest()}  build-manifest.json\n"
+        f"{digest}  runtime-manifest.json\n"
+    ).encode()
+    references = {}
+    for name, contents in (
+        ("build-manifest.json", manifest),
+        ("runtime-manifest.json", runtime),
+        ("SHA256SUMS", sums),
+    ):
+        member = f"objects/{hashlib.sha256(contents).hexdigest()}"
+        files[member] = contents
+        references[name] = [member]
+    return {"name": f"Test {target}", "files": references, "executables": []}
+
+
+def _write_distribution(directory: Path, files: dict[str, bytes]) -> Path:
     directory.mkdir()
-    records = []
-    for target, host in SELECTIONS:
-        runtime = directory / f"FPLinux-{target}-{host}-x64-{RELEASE_ID}.zip"
-        write_zip(
-            runtime,
-            {**files, "runtime-manifest.json": json_bytes({"device_data": device_data})},
-            {"Run.sh"},
-        )
-        records.append(
+    records: list[dict[str, str]] = []
+    for host in ("linux", "windows"):
+        runtime = directory / f"FPLinux-{host}-x64-{RELEASE_ID}.zip"
+        archive_files = dict(files)
+        target_ids = [target for target, selected_host in SELECTIONS if selected_host == host]
+        targets = {
+            target: _bundle_recipe(
+                archive_files, target, prepare_device_data=target == _PREPARATION_TARGET
+            )
+            for target in target_ids
+        }
+        archive_files["targets.json"] = json_bytes({"release_id": RELEASE_ID, "targets": targets})
+        archive_files["menu.txt"] = "".join(
+            f"  {number}. Test {target} ({target})\n"
+            for number, target in enumerate(target_ids, start=1)
+        ).encode()
+        write_zip(runtime, archive_files, {"Run.sh"} & archive_files.keys())
+        digest = hashlib.sha256(runtime.read_bytes()).hexdigest()
+        records.extend(
             {
                 "archive": runtime.name,
                 "target": target,
                 "host": host,
                 "identity": "f" * 64,
-                "sha256": hashlib.sha256(runtime.read_bytes()).hexdigest(),
+                "sha256": digest,
             }
+            for target in target_ids
         )
     sources = directory / f"FPLinux-{RELEASE_ID}-sources.zip"
     write_zip(
@@ -54,7 +102,7 @@ def _write_distribution(
 @pytest.fixture
 def distribution(tmp_path: Path) -> Path:
     return _write_distribution(
-        tmp_path / "distribution", {"README.txt": b"native smoke archive\n"}, device_data={}
+        tmp_path / "distribution", {"README.txt": b"native smoke archive\n"}
     )
 
 
@@ -65,16 +113,22 @@ def test_native_smoke_extracts_under_prepared_permissions_and_cleans_up(
     original_files = set(distribution.iterdir())
     launched_roots: list[Path] = []
 
-    def launch(root: Path, host: str, scope: Path, *, attempt: int) -> None:
+    def launch(root: Path, host: str, scope: Path, target: str, *, attempt: int) -> None:
         assert host == "windows"
         assert attempt in (1, 2)
         assert (root / "README.txt").read_bytes() == b"native smoke archive\n"
-        assert scope == archive_runtime_root(root / ".data", root)
-        for relative in (".", "logs", "session", "reader/session", "temp"):
+        assert scope == archive_runtime_root(root / ".data", root) / "targets" / target
+        for relative in (".", "logs", "session", "temp"):
             assert (scope / relative).is_dir()
+        assert (scope / "reader/session").is_dir() == (target == _PREPARATION_TARGET)
         launched_roots.append(root)
 
     def run_storage(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[bytes]:
+        if command == ["cmd.exe", "/d", "/c", "Run.cmd"]:
+            root = kwargs["cwd"]
+            assert isinstance(root, Path)
+            assert kwargs["input"] == b"0\n"
+            return subprocess.CompletedProcess(command, 0, stdout=(root / "menu.txt").read_bytes())
         assert kwargs["cwd"] == launched_roots[-1]
         return subprocess.CompletedProcess(command, storage_status)
 
@@ -88,51 +142,54 @@ def test_native_smoke_extracts_under_prepared_permissions_and_cleans_up(
     else:
         smoke.smoke_distribution(distribution, host="windows")
 
-    windows_archives = sum(host == "windows" for _target, host in SELECTIONS)
-    expected_launches = 1 if storage_status else 2 * windows_archives
+    windows_targets = sum(host == "windows" for _target, host in SELECTIONS)
+    expected_launches = 1 if storage_status else 2 * windows_targets
     assert len(launched_roots) == expected_launches
+    assert len(set(launched_roots)) == 1
     assert all(root.parent.parent == distribution for root in launched_roots)
     assert all(not root.exists() for root in launched_roots)
     assert set(distribution.iterdir()) == original_files
 
 
 @pytest.mark.skipif(os.name != "posix", reason="the launcher peer uses POSIX shell")
-@pytest.mark.parametrize(
-    ("device_data", "storage_paths"),
-    [
-        (
-            {},
-            (".", "logs", "session", "temp", "reader/session"),
-        ),
-        (None, (".", "logs", "session", "temp")),
-    ],
-    ids=["preparation", "direct-boot"],
-)
-def test_native_smoke_runs_relative_distribution_launchers_twice_and_cleans_up(
+def test_native_smoke_runs_each_board_twice_from_one_archive_with_separate_state(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    device_data: dict[str, str] | None,
-    storage_paths: tuple[str, ...],
 ) -> None:
     launcher = Path(__file__).parent / "fixtures/native-smoke/launcher.sh"
-    directory = _write_distribution(
-        tmp_path / "distribution", {"Run.sh": launcher.read_bytes()}, device_data=device_data
-    )
+    directory = _write_distribution(tmp_path / "distribution", {"Run.sh": launcher.read_bytes()})
     original_files = set(directory.iterdir())
-    storage_roots: list[Path] = []
+    storage_visits: dict[Path, int] = {}
 
     def run_storage(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[bytes]:
         root = kwargs["cwd"]
         assert isinstance(root, Path)
-        scope = archive_runtime_root(root / ".data", root)
+        if command == ["sh", "Run.sh"]:
+            menu_input = kwargs["input"]
+            assert isinstance(menu_input, bytes)
+            return run_process(
+                command,
+                cwd=root,
+                input=menu_input,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                check=False,
+                timeout=5,
+            )
+        scope = Path(command[command.index(str(root)) + 1])
+        assert scope.parent == archive_runtime_root(root / ".data", root) / "targets"
+        target = scope.name
+        storage_paths: tuple[str, ...] = (".", "logs", "session", "temp")
+        if target == _PREPARATION_TARGET:
+            storage_paths = (*storage_paths, "reader/session")
         for relative in storage_paths:
             assert (scope / relative).is_dir()
         assert (scope / "reader").exists() == ("reader/session" in storage_paths)
         assert tuple(command[command.index(str(root)) + 1 :]) == tuple(
             str(scope / relative) for relative in storage_paths
         )
-        storage_roots.append(root)
-        attempt = storage_roots.count(root)
+        attempt = storage_visits.get(scope, 0) + 1
+        storage_visits[scope] = attempt
         assert (
             sorted(path.parent.name for path in (scope / "logs").glob("*/runtime.log"))
             == [
@@ -141,23 +198,25 @@ def test_native_smoke_runs_relative_distribution_launchers_twice_and_cleans_up(
             ][:attempt]
         )
         for index in range(1, attempt + 1):
-            assert (scope / f"smoke-events-{index}.jsonl").read_bytes() == (
-                b'{"event":"waiting-for-device"}\n'
-            )
+            event = json.loads((scope / f"smoke-events-{index}.jsonl").read_bytes())
+            assert event == {"event": "waiting-for-device", "target": target}
             log_directory = scope / f"logs/smoke-events-{index}"
             assert (log_directory / "runtime.log").read_bytes() == b"launcher initialized\n"
             assert (log_directory / "stopped").read_bytes() == b"stopped\n"
         return subprocess.CompletedProcess(command, 0)
 
+    run_process = subprocess.run
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(smoke, "_require_ordinary_account", lambda _host: None)
     monkeypatch.setattr(subprocess, "run", run_storage)
 
     smoke.smoke_distribution(Path("distribution"), host="linux")
 
-    linux_archives = sum(host == "linux" for _target, host in SELECTIONS)
-    assert len(storage_roots) == 2 * linux_archives
-    assert all(not root.exists() for root in storage_roots)
+    assert {scope.name: attempts for scope, attempts in storage_visits.items()} == {
+        target: 2 for target, host in SELECTIONS if host == "linux"
+    }
+    assert len({scope.parent for scope in storage_visits}) == 1
+    assert all(not scope.exists() for scope in storage_visits)
     assert set(directory.iterdir()) == original_files
 
 
@@ -166,9 +225,7 @@ def test_native_smoke_preserves_launcher_stderr_after_workspace_cleanup(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     launcher = Path(__file__).parent / "fixtures/native-smoke/failing-launcher.sh"
-    directory = _write_distribution(
-        tmp_path / "distribution", {"Run.sh": launcher.read_bytes()}, device_data=None
-    )
+    directory = _write_distribution(tmp_path / "distribution", {"Run.sh": launcher.read_bytes()})
     original_files = set(directory.iterdir())
     monkeypatch.setattr(smoke, "_require_ordinary_account", lambda _host: None)
 

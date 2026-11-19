@@ -22,9 +22,7 @@ jobs:
     permissions:
       contents: read
     outputs:
-      targets: ${{ steps.matrix.outputs.targets }}
       snapshot: ${{ steps.inputs.outputs.snapshot }}
-      release_id: ${{ steps.inputs.outputs.release_id }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -33,8 +31,6 @@ jobs:
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
         with:
           python-version: "3.14"
-      - id: matrix
-        run: echo "targets=$(./fplinux ci matrix)" >> "$GITHUB_OUTPUT"
       - run: sh .github/scripts/prepare-linux.sh
       - id: inputs
         run: ./fplinux ci prepare-inputs --output-dir "$RUNNER_TEMP/fplinux-inputs"
@@ -74,12 +70,6 @@ jobs:
     runs-on: ubuntu-24.04
     permissions:
       contents: read
-    strategy:
-      fail-fast: false
-      matrix: ${{ fromJSON(needs.prepare-inputs.outputs.targets) }}
-    env:
-      FPLINUX_TARGET: ${{ matrix.target }}
-      FPLINUX_PACKAGE_HOSTS: ${{ join(matrix.hosts, ' ') }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -94,47 +84,10 @@ jobs:
           name: dependency-inputs
           path: ${{ runner.temp }}/fplinux-inputs
       - run: ./fplinux ci restore-inputs --directory "$RUNNER_TEMP/fplinux-inputs" --snapshot "${{ needs.prepare-inputs.outputs.snapshot }}"
-      - run: ./fplinux setup "$FPLINUX_TARGET" --offline
+      - run: ./fplinux setup --offline
       - run: ./fplinux doctor
-      - run: ./fplinux build "$FPLINUX_TARGET" --without-device-data
-      - run: |
-          for host in $FPLINUX_PACKAGE_HOSTS; do
-            ./fplinux package "$FPLINUX_TARGET" --host "$host" --output-directory "$FPLINUX_DATA_DIR/ci/packages"
-          done
-          for archive in "$FPLINUX_DATA_DIR"/ci/packages/*.zip; do
-            ./fplinux inspect archive "$archive"
-          done
-      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
-        with:
-          name: packages-${{ matrix.target }}
-          path: ${{ env.FPLINUX_DATA_DIR }}/ci/packages/*.zip
-          if-no-files-found: error
-          compression-level: 0
-          retention-days: 2
-
-  assemble:
-    needs: [prepare-inputs, build]
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          ref: ${{ github.sha }}
-          persist-credentials: false
-      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
-        with:
-          python-version: "3.14"
-      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131
-        with:
-          pattern: packages-*
-          merge-multiple: true
-          path: ${{ env.FPLINUX_DATA_DIR }}/ci/intermediate
-      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131
-        with:
-          name: dependency-inputs
-          path: ${{ runner.temp }}/fplinux-inputs
-      - run: ./fplinux ci assemble --input-dir "$FPLINUX_DATA_DIR/ci/intermediate" --inputs-dir "$RUNNER_TEMP/fplinux-inputs" --output-dir "$FPLINUX_DATA_DIR/ci/distribution"
+      - run: ./fplinux package --output-directory "$FPLINUX_DATA_DIR/ci/package"
+      - run: ./fplinux ci attach-inputs --directory "$FPLINUX_DATA_DIR/ci/package" --inputs-dir "$RUNNER_TEMP/fplinux-inputs" --output-directory "$FPLINUX_DATA_DIR/ci/distribution"
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
         with:
           name: distribution
@@ -144,7 +97,7 @@ jobs:
           retention-days: 2
 
   smoke-linux:
-    needs: assemble
+    needs: build
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -165,7 +118,7 @@ jobs:
       - run: ./fplinux ci smoke --directory "$FPLINUX_DATA_DIR/ci/distribution" --host linux
 
   smoke-windows:
-    needs: assemble
+    needs: build
     runs-on: windows-2025
     permissions:
       contents: read

@@ -19,6 +19,7 @@ from fplinux_cli.environment.downloads import download_locked_file
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from fplinux_cli.artifacts.release import PublicSourceSnapshot
     from fplinux_cli.dependencies.inputs import DependencyInput
     from fplinux_cli.manifests.loaders import LoaderSource
 
@@ -32,9 +33,10 @@ class SourcePayload:
     notices: dict[str, bytes]
 
 
-def project_source_files(*, selected_data_root: Path | None = None) -> SourcePayload:
+def project_source_files(snapshot: PublicSourceSnapshot | None = None) -> SourcePayload:
     """Read active tracked and nonignored project source bytes, retaining executable modes."""
-    snapshot = capture_public_sources(selected_data_root=selected_data_root)
+    if snapshot is None:
+        snapshot = capture_public_sources()
     files = {}
     executables = set()
     for source in snapshot.files:
@@ -114,30 +116,6 @@ def _loader_license_notices(
                 name = item.name.removeprefix(prefix)
                 notices[f"licenses/loaders/{source.role}/{name}"] = stream.read()
     return notices
-
-
-def collect_loader_license_notices(
-    config: dict[str, Any], *, cache: Path | None = None
-) -> dict[str, bytes]:
-    """Read ordinary binary notices from the admitted cached loader archives."""
-    from fplinux_cli.manifests.loaders import loader_sources  # noqa: PLC0415
-
-    sources = loader_sources(
-        config["loader"]["build"], common.load_toml(common.ROOT / "sources.lock.toml")
-    )
-    cache = data_root(common.ROOT) if cache is None else cache
-    archives = {}
-    for source in sources:
-        if source.role == "fdl1":
-            continue
-        path = download_locked_file(
-            source.url,
-            source.sha256,
-            cache / "downloads" / source.cache_name,
-            offline=True,
-        )
-        archives[f"upstream/{source.cache_name}"] = path.read_bytes()
-    return _loader_license_notices(sources, archives)
 
 
 def _linux_runtime_sources(
@@ -240,27 +218,38 @@ def _alpine_source_channels(
 
 
 def collect_source_files(
-    config: dict[str, Any], *, host: str, cache: Path | None = None
+    config: dict[str, Any],
+    *,
+    host: str,
+    cache: Path | None = None,
+    card_config: dict[str, Any] | None = None,
 ) -> SourcePayload:
     """Collect matching source material while the caller owns the project cache lock."""
     from fplinux_cli.alpine.selection import (  # noqa: PLC0415
         bundle_packages,
         selected_packages,
     )
-    from fplinux_cli.dependencies.inputs import build_source_inputs  # noqa: PLC0415
+    from fplinux_cli.dependencies.inputs import (  # noqa: PLC0415
+        build_source_inputs,
+        deduplicate_inputs,
+    )
     from fplinux_cli.manifests.platforms import load_platform  # noqa: PLC0415
 
     cache = data_root(common.ROOT) if cache is None else cache
-    payload = project_source_files(selected_data_root=cache)
+    payload = SourcePayload({}, set(), {})
     platform = load_platform(config["platform"])
-    rootfs = selected_packages(platform, config, common.ROOT)
-    packages = (*rootfs, *bundle_packages(platform, config, rootfs, root=common.ROOT))
-    inputs = [
-        item
-        for item in build_source_inputs(common.ROOT, platform, config)
-        if item.purpose == "source-original"
-    ]
-    records = _collect_archives(inputs, payload.files, cache=cache)
+    packages: set[str] = set()
+    inputs: list[DependencyInput] = []
+    for selected in (config,) if card_config is None else (config, card_config):
+        rootfs = selected_packages(platform, selected, common.ROOT)
+        packages.update(rootfs)
+        packages.update(bundle_packages(platform, selected, rootfs, root=common.ROOT))
+        inputs.extend(
+            item
+            for item in build_source_inputs(common.ROOT, platform, selected)
+            if item.purpose == "source-original"
+        )
+    records = _collect_archives(deduplicate_inputs(inputs), payload.files, cache=cache)
     if platform["bootstrap"]["backend"] == "sc9820e":
         from fplinux_cli.manifests.loaders import loader_sources  # noqa: PLC0415
 
@@ -274,7 +263,7 @@ def collect_source_files(
         records.extend(_linux_runtime_sources(payload.files, payload.notices, cache=cache))
     else:
         _windows_source_channels(payload.files)
-    _alpine_source_channels(packages, payload.files, cache=cache)
+    _alpine_source_channels(tuple(sorted(packages)), payload.files, cache=cache)
     payload.files["upstream/downloads.json"] = canonical_json_bytes(records)
     if host == "linux":
         payload.files["BUILD-LINUX.txt"] = _linux_build_instructions()

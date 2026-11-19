@@ -11,9 +11,9 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 from fplinux_cli.ci import release
-from fplinux_cli.packaging.distribution import assemble_distribution
+from fplinux_cli.packaging.distribution import attach_inputs
 
-from tests.distribution_support import COMMIT, SELECTIONS, write_pair, write_transport
+from tests.distribution_support import COMMIT, write_release, write_transport
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -22,13 +22,11 @@ if TYPE_CHECKING:
 @pytest.fixture
 def assets(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     packages = tmp_path / "packages"
-    packages.mkdir()
-    for target, host in SELECTIONS:
-        write_pair(packages, target, host)
+    write_release(packages)
     transport = tmp_path / "transport"
     write_transport(transport)
     output = tmp_path / "release"
-    assemble_distribution(packages, output, inputs_directory=transport)
+    attach_inputs(packages, transport, output)
     for name, value in {
         "GITHUB_REPOSITORY": "fplinux/fplinux",
         "GITHUB_EVENT_NAME": "push",

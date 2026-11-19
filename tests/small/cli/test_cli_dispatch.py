@@ -340,13 +340,14 @@ class CliCacheLockTests:
             dispatch_root,
             [
                 "package",
+                "--target",
                 "target",
                 "--host",
                 "windows",
                 "--output-directory",
                 "archives",
             ],
-            "fplinux_cli.packaging.archive.package_target",
+            "fplinux_cli.packaging.distribution.package_release",
         )
         assert events[0] == ("lock", dispatch_root / ".data", True, "package", "target", None)
         assert package.call_args.kwargs["host"] == "windows"
@@ -355,7 +356,20 @@ class CliCacheLockTests:
     @pytest.mark.parametrize(
         ("arguments", "callback_name", "locked"),
         [
-            (["ci", "matrix"], "fplinux_cli.ci.commands.run_ci", False),
+            (
+                [
+                    "ci",
+                    "attach-inputs",
+                    "--directory",
+                    "package",
+                    "--inputs-dir",
+                    "inputs",
+                    "--output-directory",
+                    "release",
+                ],
+                "fplinux_cli.ci.commands.run_ci",
+                False,
+            ),
             (
                 ["ci", "restore-inputs", "--directory", "inputs", "--snapshot", "a" * 64],
                 "fplinux_cli.ci.commands.run_ci",
@@ -918,10 +932,6 @@ class CliCacheLockTests:
         ("arguments", "callback_name"),
         [
             (
-                ["package", "target", "--profile", "microsd-uboot"],
-                "fplinux_cli.packaging.archive.package_target",
-            ),
-            (
                 ["run", "target", "--profile", "microsd-uboot"],
                 "fplinux_cli.runtime.runner.run_target",
             ),
@@ -931,7 +941,6 @@ class CliCacheLockTests:
             ),
         ],
         ids=[
-            "package-target---profile-microsd-uboot",
             "run-target---profile-microsd-uboot",
             "console-target---profile-microsd-uboot---exec-id",
         ],
@@ -947,7 +956,7 @@ class CliCacheLockTests:
                 (
                     "lock",
                     dispatch_root / ".data",
-                    arguments[0] == "package",
+                    False,
                     arguments[0],
                     "target",
                     "microsd-uboot",
@@ -961,34 +970,33 @@ class CliCacheLockTests:
     @pytest.mark.parametrize(
         ("options", "host"),
         [
-            ([], "linux"),
+            ([], None),
             (["--host", "windows"], "windows"),
         ],
-        ids=["linux", "windows"],
+        ids=["both", "windows"],
     )
     def test_package_host_options_reach_the_backend_under_the_required_lock(
         self,
         dispatch_root: Path,
         *,
         options: list[str],
-        host: str,
+        host: str | None,
     ) -> None:
         """Both native archive hosts prepare their runtime under an exclusive cache lock."""
         events, package = run_dispatch(
             dispatch_root,
-            ["package", "target", *options],
-            "fplinux_cli.packaging.archive.package_target",
+            ["package", *options],
+            "fplinux_cli.packaging.distribution.package_release",
         )
 
         assert events == [
-            ("lock", dispatch_root / ".data", True, "package", "target", None),
+            ("lock", dispatch_root / ".data", True, "package", None, None),
             "command",
             "unlock",
         ]
         package.assert_called_once_with(
-            "target",
-            profile=None,
-            boot=None,
+            target=None,
+            jobs=mock.ANY,
             host=host,
             output_directory=None,
         )
@@ -1004,17 +1012,6 @@ class CliCacheLockTests:
                 ),
             ),
             (
-                ["package", "nokia-ta1618", "--boot", "microsd"],
-                "fplinux_cli.packaging.archive.package_target",
-                mock.call(
-                    "nokia-ta1618",
-                    profile=None,
-                    boot="microsd",
-                    host="linux",
-                    output_directory=None,
-                ),
-            ),
-            (
                 ["run", "target", "--boot", "microsd"],
                 "fplinux_cli.runtime.runner.run_target",
                 mock.call(
@@ -1024,7 +1021,6 @@ class CliCacheLockTests:
         ],
         ids=[
             "run-nokia-ta1618---boot-microsd",
-            "package-nokia-ta1618---boot-microsd",
             "run-target---boot-microsd",
         ],
     )
@@ -1040,7 +1036,7 @@ class CliCacheLockTests:
                 (
                     "lock",
                     dispatch_root / ".data",
-                    command == "package",
+                    False,
                     command,
                     target,
                     "microsd-uboot",
@@ -1051,16 +1047,15 @@ class CliCacheLockTests:
         )
         assert (callback.call_args) == (expected_call)
 
-    @pytest.mark.parametrize("command", ["run", "package"], ids=["run", "package"])
     def test_boot_selector_and_profile_are_rejected_together_before_locking(
-        self, dispatch_root: Path, command: str
+        self, dispatch_root: Path
     ) -> None:
-        """One run or package invocation selects either a boot mode or a profile, not both."""
+        """One run selects a boot mode or a profile before taking the cache lock."""
         with (
             mock.patch.object(
                 sys,
                 "argv",
-                ["fplinux", command, "target", "--boot", "microsd", "--profile", "microsd-uboot"],
+                ["fplinux", "run", "target", "--boot", "microsd", "--profile", "microsd-uboot"],
             ),
             mock.patch.object(lifecycle, "ROOT", dispatch_root),
             mock.patch("fplinux_cli.manifests.paths.discover_targets", return_value=("target",)),
@@ -1145,10 +1140,6 @@ class CliCacheLockTests:
                 "argument --profile: invalid profile name: '../../x'",
             ),
             (
-                ("package", "target", "--profile", "../../x"),
-                "argument --profile: invalid profile name: '../../x'",
-            ),
-            (
                 ("run", "target", "--profile", "../../x"),
                 "argument --profile: invalid profile name: '../../x'",
             ),
@@ -1164,7 +1155,6 @@ class CliCacheLockTests:
         ids=[
             "check---profile-../../x",
             "build-target---profile-../../x",
-            "package-target---profile-../../x",
             "run-target---profile-../../x",
             "console-target---profile-../../x",
             "check-source---profile-lab",

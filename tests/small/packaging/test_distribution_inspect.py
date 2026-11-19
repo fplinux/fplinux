@@ -12,9 +12,8 @@ from fplinux_cli.packaging import distribution
 
 from tests.distribution_support import (
     RELEASE_ID,
-    SELECTIONS,
     read_zip,
-    write_pair,
+    write_release,
     write_transport,
     write_zip,
 )
@@ -26,13 +25,11 @@ if TYPE_CHECKING:
 @pytest.fixture
 def assets(tmp_path: Path) -> Path:
     packages = tmp_path / "packages"
-    packages.mkdir()
-    for target, host in SELECTIONS:
-        write_pair(packages, target, host)
+    write_release(packages)
     transport = tmp_path / "transport"
     write_transport(transport)
     output = tmp_path / "final"
-    distribution.assemble_distribution(packages, output, inputs_directory=transport)
+    distribution.attach_inputs(packages, transport, output)
     return output
 
 
@@ -42,13 +39,15 @@ def test_source_and_final_release_inspection_verify_pairing(
     inspect_archive(assets / f"FPLinux-{RELEASE_ID}-sources.zip")
     assert "kind: corresponding-sources" in capsys.readouterr().out
     inspect_distribution(assets)
-    assert "18 runtimes; corresponding sources and checksums: OK" in capsys.readouterr().out
+    assert "2 host archives, 18 selections; corresponding sources and checksums: OK" in (
+        capsys.readouterr().out
+    )
 
 
 def test_release_rejects_changed_runtime_even_after_outer_checksums_are_replaced(
     assets: Path,
 ) -> None:
-    runtime = assets / f"FPLinux-nokia-ta1618-linux-x64-{RELEASE_ID}.zip"
+    runtime = assets / f"FPLinux-linux-x64-{RELEASE_ID}.zip"
     write_zip(runtime, {"README.txt": b"another runtime\n"}, set())
     (assets / "SHA256SUMS").write_text(
         "".join(
@@ -59,6 +58,18 @@ def test_release_rejects_changed_runtime_even_after_outer_checksums_are_replaced
     )
     with pytest.raises(SystemExit, match="pairing hash differs"):
         inspect_distribution(assets)
+
+
+def test_universal_archive_rejects_a_nonexecutable_native_runtime(assets: Path) -> None:
+    runtime = assets / f"FPLinux-linux-x64-{RELEASE_ID}.zip"
+    files, modes = read_zip(runtime)
+    files.pop("SHA256SUMS")
+    executables = {name for name, mode in modes.items() if mode & 0o111}
+    executables.remove("runtime/bin/python3.14")
+    write_zip(runtime, files, executables)
+
+    with pytest.raises(SystemExit, match=r"wrong executable mode: runtime/bin/python3\.14"):
+        inspect_archive(runtime)
 
 
 def test_source_inspection_requires_the_selected_rebuild_material(assets: Path) -> None:

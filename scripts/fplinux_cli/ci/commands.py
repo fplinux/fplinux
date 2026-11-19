@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import json
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -12,24 +11,7 @@ if TYPE_CHECKING:
 
 def run_ci(args: argparse.Namespace) -> None:
     """Keep runner orchestration in the same executable interface as local builds."""
-    if args.ci_command == "matrix":
-        from fplinux_cli.packaging.distribution import (  # noqa: PLC0415 -- selected backend.
-            distribution_matrix,
-        )
-
-        hosts: dict[str, list[str]] = {}
-        for target, host in distribution_matrix():
-            hosts.setdefault(target, []).append(host)
-        print(
-            json.dumps(
-                {
-                    "include": [
-                        {"target": target, "hosts": values} for target, values in hosts.items()
-                    ]
-                }
-            )
-        )
-    elif args.ci_command == "bootstrap":
+    if args.ci_command == "bootstrap":
         from .bootstrap import bootstrap_host  # noqa: PLC0415 -- Linux-only backend.
 
         bootstrap_host()
@@ -46,21 +28,13 @@ def run_ci(args: argparse.Namespace) -> None:
 
         prepare_push(args.commit, args.directory)
     elif args.ci_command == "site-install":
-        from fplinux_cli.dependencies.site_install import (  # noqa: PLC0415 -- native site runtime.
-            install_site,
-        )
+        from fplinux_cli.dependencies.site_install import install_site  # noqa: PLC0415
 
         install_site()
-    elif args.ci_command == "assemble":
-        from fplinux_cli.cli.inspect import (  # noqa: PLC0415 -- selected backend.
-            inspect_distribution,
-        )
-        from fplinux_cli.packaging.distribution import (  # noqa: PLC0415 -- selected backend.
-            assemble_distribution,
-        )
+    elif args.ci_command == "attach-inputs":
+        from fplinux_cli.packaging.distribution import attach_inputs  # noqa: PLC0415
 
-        assemble_distribution(args.input_dir, args.output_dir, inputs_directory=args.inputs_dir)
-        inspect_distribution(args.output_dir)
+        attach_inputs(args.directory, args.inputs_dir, args.output_directory)
     elif args.ci_command == "smoke":
         from .smoke import smoke_distribution  # noqa: PLC0415 -- native runtime backend.
 

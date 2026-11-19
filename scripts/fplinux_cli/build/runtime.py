@@ -31,6 +31,7 @@ _RUNTIME_MODULES = (
     "manifests/values.py",
     "runtime/__init__.py",
     "runtime/cli.py",
+    "runtime/release_catalog.py",
     "runtime/card.py",
     "runtime/card_access.py",
     "runtime/card_media.py",
