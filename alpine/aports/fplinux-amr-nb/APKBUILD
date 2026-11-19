@@ -1,0 +1,50 @@
+# Maintainer: FPLinux contributors <fplinux@example.invalid>
+pkgname=fplinux-amr-nb
+pkgver=@version:aport_ffmpeg_9_0_2_tar_xz@
+pkgrel=0
+pkgdesc="AMR-NB speech decoding libraries for FPLinux"
+url="https://ffmpeg.org"
+arch="armv7"
+license="LGPL-2.1-or-later"
+depends_dev="$pkgname=$pkgver-r$pkgrel"
+makedepends_build="clang22 lld22 llvm22 make"
+makedepends_host="musl-dev"
+subpackages="$pkgname-dev"
+options="!check"
+source="
+	@source:aport_ffmpeg_9_0_2_tar_xz@
+	configure-amr-nb.sh
+"
+builddir="$srcdir/ffmpeg-$pkgver"
+
+build() {
+	: "${CC:?missing target CC}" \
+		"${CHOST:?missing target CHOST}" "${CBUILDROOT:?missing target sysroot}"
+	sh "$srcdir/configure-amr-nb.sh" \
+		--target-os=linux --arch=arm --cpu=cortex-a7 --enable-cross-compile \
+		--cc="$CC" \
+		--ar=/usr/lib/llvm22/bin/llvm-ar \
+		--nm=/usr/lib/llvm22/bin/llvm-nm \
+		--ranlib=/usr/lib/llvm22/bin/llvm-ranlib \
+		--strip=/usr/lib/llvm22/bin/llvm-strip \
+		--sysroot="$CBUILDROOT" \
+		--extra-cflags="--target=$CHOST --gcc-toolchain=$CBUILDROOT/usr $CPPFLAGS $CFLAGS -march=armv7-a -mfpu=neon-vfpv4 -mfloat-abi=hard -marm" \
+		--extra-ldflags="--target=$CHOST --gcc-toolchain=$CBUILDROOT/usr $LDFLAGS" \
+		--enable-neon
+	# Keep the displayed configuration independent of the temporary build path.
+	_config_sysroot=$(printf '%s\n' "$CBUILDROOT" | sed 's/[][\\.^$*|]/\\&/g')
+	sed -i "/^#define FFMPEG_CONFIGURATION /s|$_config_sysroot|/sysroot|g" config.h
+	make -j"${JOBS:-1}"
+}
+
+package() {
+	make DESTDIR="$pkgdir" install-libs install-headers
+	install -Dm644 "$builddir/LICENSE.md" \
+		"$pkgdir/usr/share/licenses/$pkgname/LICENSE.md"
+	install -Dm644 "$builddir/COPYING.LGPLv2.1" \
+		"$pkgdir/usr/share/licenses/$pkgname/COPYING.LGPLv2.1"
+}
+
+sha512sums="
+7fa865e2a086003a4337bb37153282ca678a521f8121f9e6ddb2a661a2472e5c5710faa73e33ae83bd15d89a3a3073abce51c93cb9384ed9b261423078ab9f44  configure-amr-nb.sh
+"

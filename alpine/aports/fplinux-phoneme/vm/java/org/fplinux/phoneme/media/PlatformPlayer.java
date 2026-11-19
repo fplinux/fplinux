@@ -21,6 +21,7 @@ public final class PlatformPlayer implements Player {
     private static final int MIDI = 3;
     private static final int SEQUENCE = 4;
     private static final int TONE = 5;
+    private static final int AMR_NB = 6;
     private static final int PREFETCH = 1;
     private static final int START = 2;
     private static final int PAUSE = 3;
@@ -93,6 +94,9 @@ public final class PlatformPlayer implements Player {
         }
         if ("audio/mpeg".equals(type)) {
             return MP3;
+        }
+        if ("audio/amr".equals(type)) {
+            return AMR_NB;
         }
         if ("audio/x-tone-seq".equals(type)) {
             return SEQUENCE;
@@ -263,6 +267,8 @@ public final class PlatformPlayer implements Player {
                 type = "audio/midi";
             } else if (actual == MP3) {
                 type = "audio/mpeg";
+            } else if (actual == AMR_NB) {
+                type = "audio/amr";
             }
         }
     }

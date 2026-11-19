@@ -180,6 +180,8 @@ SHARED_APORT_SOURCES = {
     "fplinux-media": (
         *UTF8_SOURCES,
         "lib/fplinux-media/fplinux-media.c",
+        "lib/fplinux-media/fplinux-media-amr-nb.c",
+        "lib/fplinux-media/fplinux-media-amr-nb.h",
         "include/fplinux/fplinux-media.h",
     ),
     "fplinux-midi": (
@@ -411,7 +413,7 @@ LOCAL_BUILD_DEPENDENCIES = {
     "fplinux-launcher": ("fplinux-ui",),
     "fplinux-mesa": ("fplinux-expat-dev", "fplinux-libdrm", "fplinux-mesa-gbm"),
     "fplinux-mesa-gbm": ("fplinux-libdrm",),
-    "fplinux-media": ("fplinux-mpg123",),
+    "fplinux-media": ("fplinux-amr-nb-dev", "fplinux-mpg123"),
     "fplinux-midi": ("fplinux-soundfont",),
     "fplinux-mre": ("fplinux-ui", "fplinux-font-terminus", "fplinux-runtime-media"),
     "fplinux-music": ("fplinux-ui", "fplinux-media"),
@@ -455,6 +457,7 @@ LOCAL_BUILD_DEPENDENCIES = {
 }
 SUBPACKAGE_APORTS = {
     "fplinux-alsa-lib-card-profiles": "fplinux-alsa-lib",
+    "fplinux-amr-nb-dev": "fplinux-amr-nb",
     "fplinux-audiod-openrc": "fplinux-audiod",
     "fplinux-bash-loadables": "fplinux-bash",
     "fplinux-bluez-libs": "fplinux-bluez",

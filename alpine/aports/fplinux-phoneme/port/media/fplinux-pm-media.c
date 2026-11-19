@@ -21,6 +21,8 @@
 #define MEDIA_EVENT_RESERVE (2U * FPLINUX_RUNTIME_MEDIA_HANDLES)
 #define MEDIA_SOURCE_BYTES (2U * 1024U * 1024U)
 
+_Static_assert(MEDIA_EVENT_RESERVE < MEDIA_EVENTS, "media completion reserve");
+
 enum java_media_event {
 	JAVA_MEDIA_END = 1,
 	JAVA_MEDIA_ERROR,

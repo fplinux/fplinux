@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import base64
+import shlex
 import struct
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -31,7 +32,28 @@ def native_mpg123(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
 
 
 @pytest.fixture(scope="module")
-def media_decode(tmp_path_factory: pytest.TempPathFactory, native_mpg123: Path) -> Iterator[Path]:
+def media_decoder_args(native_mpg123: Path) -> list[str]:
+    ffmpeg = run_process(
+        ["pkg-config", "--cflags", "--libs", "libavcodec-fplinux-amr", "libavutil-fplinux-amr"],
+        name="locate the pinned native AMR-NB libraries",
+        timeout=10,
+        check=True,
+    )
+    return [
+        f"-I{native_mpg123 / 'src/include'}",
+        str(ROOT / "lib/fplinux-media/fplinux-media.c"),
+        str(ROOT / "lib/fplinux-media/fplinux-media-amr-nb.c"),
+        str(ROOT / "lib/fplinux/fplinux-utf8.c"),
+        str(native_mpg123 / "src/libmpg123/.libs/libmpg123.a"),
+        *shlex.split(ffmpeg.stdout),
+        "-lm",
+    ]
+
+
+@pytest.fixture(scope="module")
+def media_decode(
+    tmp_path_factory: pytest.TempPathFactory, media_decoder_args: list[str]
+) -> Iterator[Path]:
     with c_build_directory(tmp_path_factory, "media-decode") as directory:
         executable = directory / "media-decode"
         compile_c(
@@ -42,14 +64,10 @@ def media_decode(tmp_path_factory: pytest.TempPathFactory, native_mpg123: Path) 
                 "-Wextra",
                 "-Werror",
                 f"-I{ROOT / 'include/fplinux'}",
-                f"-I{native_mpg123 / 'src/include'}",
                 str(Path(__file__).with_name("media-decode.c")),
-                str(ROOT / "lib/fplinux-media/fplinux-media.c"),
-                str(ROOT / "lib/fplinux/fplinux-utf8.c"),
-                str(native_mpg123 / "src/libmpg123/.libs/libmpg123.a"),
-                "-lm",
+                *media_decoder_args,
             ],
-            name="link the production shared decoder and native MP3 library",
+            name="link the production shared media decoder and native libraries",
         )
         yield executable
 
@@ -60,14 +78,50 @@ def tone_mp3() -> bytes:
     return base64.b64decode(fixture.read_bytes())
 
 
+@pytest.fixture(scope="module")
+def tone_amr_nb() -> bytes:
+    fixture = Path(__file__).with_name("fixtures") / "media-decode/tone-amr-nb.base64.fixture"
+    return base64.b64decode(fixture.read_bytes())
+
+
+def test_amr_nb_matches_reference_pcm_at_eof_and_after_seek(
+    media_decode: Path, tmp_path: Path, tone_amr_nb: bytes
+) -> None:
+    encoded = tmp_path / "tone.amr"
+    encoded.write_bytes(tone_amr_nb)
+    reference = tmp_path / "tone.s16le"
+    fixture = Path(__file__).with_name("fixtures") / "media-decode/tone-s16le.base64.fixture"
+    reference.write_bytes(base64.b64decode(fixture.read_bytes()))
+    result = run_process(
+        [str(media_decode), "amr-nb", str(encoded), str(reference)],
+        name="compare AMR-NB decode and seek with independent PCM",
+        timeout=10,
+        check=True,
+    )
+    assert result.stdout == "AMR-NB decode: ok\n"
+
+
 def test_media_pcm_gain_seek_metadata_and_real_mp3_eof(
     media_decode: Path, tmp_path: Path, tone_mp3: bytes
 ) -> None:
     fixture = tmp_path / "tone-vbr.mp3"
     fixture.write_bytes(tone_mp3)
+    wrapped = tmp_path / "tone-in-wave.mp3"
+    format_body = struct.pack("<HHIIHHHHIHHH", 0x55, 1, 44100, 16000, 1, 0, 12, 1, 0, 1, 1, 0)
+    chunks = (
+        b"fmt "
+        + struct.pack("<I", len(format_body))
+        + format_body
+        + b"data"
+        + struct.pack("<I", len(tone_mp3))
+        + tone_mp3
+        + bytes(len(tone_mp3) % 2)
+        + b"JUNK\x04\x00\x00\x00end!"
+    )
+    wrapped.write_bytes(b"RIFF" + struct.pack("<I", 4 + len(chunks)) + b"WAVE" + chunks)
     result = run_process(
-        [str(media_decode), str(fixture)],
-        name="decode WAV and VBR MP3 through the shared media API",
+        [str(media_decode), str(fixture), str(wrapped)],
+        name="decode PCM and VBR MP3, including a WAVE-wrapped stream",
         timeout=10,
         check=True,
     )
@@ -75,7 +129,7 @@ def test_media_pcm_gain_seek_metadata_and_real_mp3_eof(
 
 
 def test_music_worker_folder_queue_seek_and_file_lifetime(
-    tmp_path: Path, native_mpg123: Path, tone_mp3: bytes
+    tmp_path: Path, media_decoder_args: list[str], tone_mp3: bytes
 ) -> None:
     aport = ROOT / "alpine/aports/fplinux-music"
     executable = tmp_path / "music-player"
@@ -90,14 +144,10 @@ def test_music_worker_folder_queue_seek_and_file_lifetime(
             "-Wl,--wrap=pread",
             f"-I{aport}",
             f"-I{ROOT / 'include/fplinux'}",
-            f"-I{native_mpg123 / 'src/include'}",
             str(Path(__file__).with_name("music-player.c")),
             str(aport / "music-player.c"),
-            str(ROOT / "lib/fplinux-media/fplinux-media.c"),
             str(ROOT / "lib/fplinux/fplinux-files-browse.c"),
-            str(ROOT / "lib/fplinux/fplinux-utf8.c"),
-            str(native_mpg123 / "src/libmpg123/.libs/libmpg123.a"),
-            "-lm",
+            *media_decoder_args,
         ],
         name="link the Music worker with actual file browsing and decoders",
     )

@@ -6,7 +6,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define FPLINUX_RUNTIME_MEDIA_HANDLES 16U
+/* A soundtrack and sixteen prepared effects fit in the same runtime. */
+#define FPLINUX_RUNTIME_MEDIA_HANDLES 17U
 #define FPLINUX_RUNTIME_MEDIA_BYTES (16U * 1024U * 1024U)
 
 struct fplinux_ui;
@@ -19,6 +20,7 @@ enum fplinux_runtime_media_format {
 	FPLINUX_RUNTIME_MEDIA_MIDI,
 	FPLINUX_RUNTIME_MEDIA_TONE_SEQUENCE,
 	FPLINUX_RUNTIME_MEDIA_TONE,
+	FPLINUX_RUNTIME_MEDIA_AMR_NB,
 };
 
 enum fplinux_runtime_media_command {

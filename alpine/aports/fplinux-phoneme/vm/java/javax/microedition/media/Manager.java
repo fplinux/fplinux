@@ -15,7 +15,7 @@ public final class Manager {
     public static String[] getSupportedContentTypes(String protocol) {
         if (protocol == null) {
             return new String[] { "audio/x-wav", "audio/wav", "audio/midi",
-                "audio/x-midi", "audio/mpeg", "audio/x-tone-seq" };
+                "audio/x-midi", "audio/mpeg", "audio/amr", "audio/x-tone-seq" };
         }
         if ("device".equals(protocol)) {
             return new String[] { "audio/x-tone-seq" };

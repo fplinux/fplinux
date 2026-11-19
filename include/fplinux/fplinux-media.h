@@ -15,6 +15,7 @@
 enum fplinux_media_codec {
 	FPLINUX_MEDIA_WAV,
 	FPLINUX_MEDIA_MP3,
+	FPLINUX_MEDIA_AMR_NB,
 };
 
 struct fplinux_media_info {
@@ -41,6 +42,7 @@ struct fplinux_media;
  * open_bytes copies its input, bounded by RESOURCE_BYTES. Both sniff content.
  * WAV accepts PCM unsigned 8-bit or little-endian signed 16-bit, mono/stereo,
  * 8000..48000 Hz. MP3 returns signed 16-bit native-endian PCM at its rate.
+ * AMR-NB accepts mono 8000 Hz files with good-quality speech frames (0..7).
  * Failures return NULL/-1 with errno; unsupported content uses ENOTSUP.
  */
 struct fplinux_media *fplinux_media_open_fd(int fd);

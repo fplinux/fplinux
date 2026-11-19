@@ -103,6 +103,20 @@ static void decoder_close(struct media_slot *slot)
 	slot->bytes = NULL;
 }
 
+static enum fplinux_runtime_media_format
+pcm_format(enum fplinux_media_codec codec)
+{
+	switch (codec) {
+	case FPLINUX_MEDIA_WAV:
+		return FPLINUX_RUNTIME_MEDIA_WAV;
+	case FPLINUX_MEDIA_MP3:
+		return FPLINUX_RUNTIME_MEDIA_MP3;
+	case FPLINUX_MEDIA_AMR_NB:
+		return FPLINUX_RUNTIME_MEDIA_AMR_NB;
+	}
+	return FPLINUX_RUNTIME_MEDIA_AUTO;
+}
+
 static void decoder_info(struct media_slot *slot,
 			 struct fplinux_runtime_media_info *info)
 {
@@ -120,9 +134,7 @@ static void decoder_info(struct media_slot *slot,
 		const struct fplinux_media_info *decoded =
 			fplinux_media_info(slot->decoder);
 
-		info->format = decoded->codec == FPLINUX_MEDIA_WAV ?
-				       FPLINUX_RUNTIME_MEDIA_WAV :
-				       FPLINUX_RUNTIME_MEDIA_MP3;
+		info->format = pcm_format(decoded->codec);
 		info->rate = decoded->rate;
 		info->channels = decoded->channels;
 		info->duration_us = decoded->duration_ms * 1000;
@@ -161,10 +173,7 @@ static int decoder_prepare(struct media_slot *slot)
 		const struct fplinux_media_info *info =
 			fplinux_media_info(slot->decoder);
 
-		if ((format == FPLINUX_RUNTIME_MEDIA_WAV &&
-		     info->codec != FPLINUX_MEDIA_WAV) ||
-		    (format == FPLINUX_RUNTIME_MEDIA_MP3 &&
-		     info->codec != FPLINUX_MEDIA_MP3)) {
+		if (format != pcm_format(info->codec)) {
 			errno = ENOTSUP;
 			return -1;
 		}
@@ -686,7 +695,7 @@ uint32_t fplinux_runtime_media_create(struct fplinux_runtime_media *media,
 	void *copied = NULL;
 	uint32_t handle = 0;
 
-	if (!media || format > FPLINUX_RUNTIME_MEDIA_TONE ||
+	if (!media || (unsigned int)format > FPLINUX_RUNTIME_MEDIA_AMR_NB ||
 	    (format == FPLINUX_RUNTIME_MEDIA_TONE ?
 		     (note > 127 || !duration_ms) :
 		     (!bytes || !count))) {

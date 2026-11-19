@@ -149,6 +149,9 @@ input = "environment:libtsm"
 [tools.mpg123]
 input = "environment:mpg123"
 
+[tools.ffmpeg-amr-nb]
+input = "environment:ffmpeg-amr-nb"
+
 [tools.tinysoundfont]
 input = "environment:tinysoundfont"
 
@@ -194,6 +197,12 @@ arch = "x86_64"
 [[input]]
 key = "environment:mpg123"
 source = "aport_mpg123_1_33_7_tar_bz2"
+purpose = "environment-source"
+arch = "x86_64"
+
+[[input]]
+key = "environment:ffmpeg-amr-nb"
+source = "aport_ffmpeg_9_0_2_tar_xz"
 purpose = "environment-source"
 arch = "x86_64"
 

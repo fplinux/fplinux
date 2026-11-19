@@ -90,6 +90,75 @@ static bool has_signal(const int16_t *samples, size_t count)
 	return false;
 }
 
+static void test_amr_nb_format(struct fplinux_runtime_media *broker)
+{
+	const unsigned char amr[] = {
+		'#',  '!',  'A',  'M',	'R',  '\n', 0x3c, 0xf8, 0x03, 0xb7,
+		0x48, 0x65, 0x9b, 0xc7, 0xcc, 0x88, 0x6c, 0xfa, 0xe4, 0x33,
+		0x55, 0x74, 0xc0, 0x00, 0x00, 0xe0, 0x18, 0x30, 0x93, 0xa8,
+		0x00, 0x00, 0x0d, 0x41, 0x10, 0x3e, 0xe2, 0x50,
+	};
+	const enum fplinux_runtime_media_format formats[] = {
+		FPLINUX_RUNTIME_MEDIA_AUTO,
+		FPLINUX_RUNTIME_MEDIA_AMR_NB,
+		FPLINUX_RUNTIME_MEDIA_WAV,
+	};
+
+	for (size_t i = 0; i < sizeof(formats) / sizeof(formats[0]); i++) {
+		uint32_t handle = fplinux_runtime_media_create(
+			broker, formats[i], amr, sizeof(amr), 0, 0);
+		assert(handle);
+		struct fplinux_runtime_media_event prepared =
+			wait_event(handle, FPLINUX_RUNTIME_MEDIA_RESULT,
+				   FPLINUX_RUNTIME_MEDIA_PREPARE);
+
+		if (formats[i] == FPLINUX_RUNTIME_MEDIA_WAV) {
+			assert(prepared.error == ENOTSUP);
+		} else {
+			assert(!prepared.error && prepared.info.rate == 8000 &&
+			       prepared.info.channels == 1 &&
+			       prepared.info.format ==
+				       FPLINUX_RUNTIME_MEDIA_AMR_NB);
+			command(broker, handle, FPLINUX_RUNTIME_MEDIA_START, 0);
+			struct fplinux_runtime_media_event ended =
+				wait_event(handle, FPLINUX_RUNTIME_MEDIA_END,
+					   FPLINUX_RUNTIME_MEDIA_PREPARE);
+			assert(ended.info.position_us == 20000 &&
+			       ended.info.duration_us == 20000);
+		}
+		fplinux_runtime_media_destroy(broker, handle);
+	}
+
+	uint32_t wrong = fplinux_runtime_media_create(
+		broker, FPLINUX_RUNTIME_MEDIA_AMR_NB, wav, sizeof(wav), 0, 0);
+	assert(wrong);
+	assert(wait_event(wrong, FPLINUX_RUNTIME_MEDIA_RESULT,
+			  FPLINUX_RUNTIME_MEDIA_PREPARE)
+		       .error == ENOTSUP);
+	fplinux_runtime_media_destroy(broker, wrong);
+
+	uint32_t soundtrack = fplinux_runtime_media_create(
+		broker, FPLINUX_RUNTIME_MEDIA_MIDI, midi, sizeof(midi), 0, 0);
+	uint32_t effects[16];
+
+	assert(soundtrack);
+	assert(!wait_event(soundtrack, FPLINUX_RUNTIME_MEDIA_RESULT,
+			   FPLINUX_RUNTIME_MEDIA_PREPARE)
+			.error);
+	for (size_t i = 0; i < sizeof(effects) / sizeof(effects[0]); i++) {
+		effects[i] = fplinux_runtime_media_create(
+			broker, FPLINUX_RUNTIME_MEDIA_AMR_NB, amr, sizeof(amr),
+			0, 0);
+		assert(effects[i]);
+		assert(!wait_event(effects[i], FPLINUX_RUNTIME_MEDIA_RESULT,
+				   FPLINUX_RUNTIME_MEDIA_PREPARE)
+				.error);
+	}
+	for (size_t i = 0; i < sizeof(effects) / sizeof(effects[0]); i++)
+		fplinux_runtime_media_destroy(broker, effects[i]);
+	fplinux_runtime_media_destroy(broker, soundtrack);
+}
+
 int main(int argc, char **argv)
 {
 	assert(argc == 2);
@@ -422,6 +491,7 @@ int main(int argc, char **argv)
 		runtime_media_test_tick();
 	for (size_t i = 0; i < event_count; i++)
 		assert(events[i].handle != stale);
+	test_amr_nb_format(broker);
 	fplinux_runtime_media_close(broker);
 	runtime_media_test_ui_close();
 	puts("runtime media: ok");

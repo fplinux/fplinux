@@ -8,7 +8,10 @@ from pathlib import Path
 from tests import ROOT
 from tests.c_harness import compile_c
 from tests.host_tool.media.test_media_decode import (
-    native_mpg123 as native_mpg123,  # noqa: PLC0414 -- pytest fixture export.
+    media_decoder_args as media_decoder_args,  # noqa: PLC0414 -- pytest fixture export.
+)
+from tests.host_tool.media.test_media_decode import (
+    native_mpg123 as native_mpg123,  # noqa: PLC0414 -- pytest fixture dependency.
 )
 from tests.host_tool.media.test_media_decode import (
     tone_mp3 as tone_mp3,  # noqa: PLC0414 -- pytest fixture export.
@@ -21,7 +24,7 @@ from tests.process import run_process
 
 def test_mre_parent_midi_loops_pause_gain_mp3_heard_eof_and_guest_cleanup(
     tmp_path: Path,
-    native_mpg123: Path,
+    media_decoder_args: list[str],
     native_midi: Path,
     lvgl_library: tuple[Path, Path],
     tone_mp3: bytes,
@@ -47,7 +50,6 @@ def test_mre_parent_midi_loops_pause_gain_mp3_heard_eof_and_guest_cleanup(
             "-DLV_KCONFIG_IGNORE",
             "-DLV_LVGL_H_INCLUDE_SYSTEM",
             f'-DLV_CONF_PATH="{ROOT / "alpine/aports/fplinux-lvgl/lv_conf.h"}"',
-            f"-I{native_mpg123 / 'src/include'}",
             "-isystem",
             str(native_midi / "include"),
             f'-DFPLINUX_MIDI_SOUNDFONT="{native_midi / "bank/TimGM6mb.sf2"}"',
@@ -55,14 +57,11 @@ def test_mre_parent_midi_loops_pause_gain_mp3_heard_eof_and_guest_cleanup(
             str(aport / "audio-broker.c"),
             str(boundary / "ui-boundary.c"),
             str(ROOT / "lib/fplinux-runtime-media/fplinux-runtime-media.c"),
-            str(ROOT / "lib/fplinux-media/fplinux-media.c"),
-            str(ROOT / "lib/fplinux/fplinux-utf8.c"),
             str(ROOT / "lib/fplinux-midi/fplinux-midi.c"),
             str(ROOT / "lib/fplinux-midi/fplinux-midi-smf.c"),
             str(ROOT / "lib/fplinux-midi/fplinux-midi-tone.c"),
             str(ROOT / "lib/fplinux-midi/fplinux-midi-synth.c"),
-            str(native_mpg123 / "src/libmpg123/.libs/libmpg123.a"),
-            "-lm",
+            *media_decoder_args,
         ],
         name="link the MRE parent adapter with the actual worker and decoders",
     )

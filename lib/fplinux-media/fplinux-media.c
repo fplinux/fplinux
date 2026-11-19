@@ -2,6 +2,7 @@
 #define _GNU_SOURCE
 #define _FILE_OFFSET_BITS 64
 #include "fplinux-media.h"
+#include "fplinux-media-amr-nb.h"
 #include "fplinux-utf8.h"
 
 #include <errno.h>
@@ -20,6 +21,7 @@ struct fplinux_media {
 	int fd;
 	unsigned char *bytes;
 	uint64_t size;
+	uint64_t source_offset;
 	uint64_t input_position;
 	uint64_t data_offset;
 	uint64_t total_frames;
@@ -27,6 +29,7 @@ struct fplinux_media {
 	unsigned int bits;
 	unsigned int gain;
 	mpg123_handle *mp3;
+	struct fplinux_media_amr_nb *amr_nb;
 	size_t io_remaining;
 	int io_error;
 };
@@ -63,6 +66,7 @@ static ssize_t read_at(struct fplinux_media *media, void *out, size_t count,
 	}
 	if (count > media->size - offset)
 		count = (size_t)(media->size - offset);
+	offset += media->source_offset;
 	if (media->bytes) {
 		memcpy(out, media->bytes + offset, count);
 		return (ssize_t)count;
@@ -74,9 +78,9 @@ static ssize_t read_at(struct fplinux_media *media, void *out, size_t count,
 	return result;
 }
 
-static int read_exact(struct fplinux_media *media, void *out, size_t count,
-		      uint64_t offset)
+static int read_exact(void *context, void *out, size_t count, uint64_t offset)
 {
+	struct fplinux_media *media = context;
 	size_t done = 0;
 	while (done < count) {
 		ssize_t size = read_at(media, (unsigned char *)out + done,
@@ -248,6 +252,8 @@ static bool has_frame_count(struct fplinux_media *media, uint64_t offset)
 	return false;
 }
 
+static int open_mp3(struct fplinux_media *media);
+
 static int open_wav(struct fplinux_media *media)
 {
 	unsigned char header[16];
@@ -258,7 +264,8 @@ static int open_wav(struct fplinux_media *media)
 		errno = EINVAL;
 		return -1;
 	}
-	bool format = false;
+	enum { WAVE_PCM = 1, WAVE_MP3 = 0x55 };
+	unsigned int format = 0;
 	uint64_t data_bytes = 0;
 	for (uint64_t at = 12, chunks = 0;
 	     at <= limit && limit - at >= 8U && chunks < MEDIA_CHUNKS_MAX;
@@ -280,23 +287,29 @@ static int open_wav(struct fplinux_media *media)
 			media->info.channels = read_le16(header + 2);
 			media->info.rate = read_le32(header + 4);
 			media->bits = read_le16(header + 14);
-			if (read_le16(header) != 1U ||
+			format = read_le16(header);
+			if ((format != WAVE_PCM && format != WAVE_MP3) ||
 			    (media->info.channels != 1U &&
 			     media->info.channels != 2U) ||
 			    media->info.rate < 8000U ||
-			    media->info.rate > 48000U ||
-			    (media->bits != 8U && media->bits != 16U)) {
+			    media->info.rate > 48000U) {
 				errno = ENOTSUP;
 				return -1;
 			}
-			unsigned int align =
-				media->info.channels * media->bits / 8U;
-			if (read_le16(header + 12) != align ||
-			    read_le32(header + 8) != media->info.rate * align) {
-				errno = EINVAL;
-				return -1;
+			if (format == WAVE_PCM) {
+				if (media->bits != 8U && media->bits != 16U) {
+					errno = ENOTSUP;
+					return -1;
+				}
+				unsigned int align =
+					media->info.channels * media->bits / 8U;
+				if (read_le16(header + 12) != align ||
+				    read_le32(header + 8) !=
+					    media->info.rate * align) {
+					errno = EINVAL;
+					return -1;
+				}
 			}
-			format = true;
 		} else if (!memcmp(header, "data", 4)) {
 			if (media->data_offset) {
 				errno = ENOTSUP;
@@ -309,8 +322,18 @@ static int open_wav(struct fplinux_media *media)
 		if (bytes & 1U)
 			at++;
 	}
-	if (!format || !media->data_offset ||
-	    data_bytes % (media->info.channels * media->bits / 8U)) {
+	if (!format || !media->data_offset) {
+		errno = EINVAL;
+		return -1;
+	}
+	if (format == WAVE_MP3) {
+		/* The MP3 decoder's reads and seeks are relative to the data chunk. */
+		media->source_offset = media->data_offset;
+		media->size = data_bytes;
+		media->data_offset = 0;
+		return open_mp3(media);
+	}
+	if (data_bytes % (media->info.channels * media->bits / 8U)) {
 		errno = EINVAL;
 		return -1;
 	}
@@ -438,19 +461,36 @@ unsupported:
 	return -1;
 }
 
+static int open_amr_nb(struct fplinux_media *media)
+{
+	media->amr_nb =
+		fplinux_media_amr_nb_open(read_exact, media, media->size);
+	if (!media->amr_nb)
+		return -1;
+	media->info.codec = FPLINUX_MEDIA_AMR_NB;
+	media->info.rate = FPLINUX_MEDIA_AMR_NB_RATE;
+	media->info.channels = 1;
+	return 0;
+}
+
 static struct fplinux_media *open_input(struct fplinux_media *media)
 {
 	unsigned char prefix[12];
+	int result;
+
 	media->gain = 100;
 	if (media->size < sizeof(prefix) ||
 	    read_exact(media, prefix, sizeof(prefix), 0) < 0) {
 		errno = ENOTSUP;
 		goto fail;
 	}
-	int result = !memcmp(prefix, "RIFF", 4) &&
-				     !memcmp(prefix + 8, "WAVE", 4) ?
-			     open_wav(media) :
-			     open_mp3(media);
+	if (!memcmp(prefix, FPLINUX_MEDIA_AMR_NB_MAGIC,
+		    sizeof(FPLINUX_MEDIA_AMR_NB_MAGIC) - 1U))
+		result = open_amr_nb(media);
+	else if (!memcmp(prefix, "RIFF", 4) && !memcmp(prefix + 8, "WAVE", 4))
+		result = open_wav(media);
+	else
+		result = open_mp3(media);
 	if (result < 0)
 		goto fail;
 	return media;
@@ -509,6 +549,7 @@ void fplinux_media_close(struct fplinux_media *media)
 		return;
 	if (media->mp3)
 		mpg123_delete(media->mp3);
+	fplinux_media_amr_nb_close(media->amr_nb);
 	if (media->fd >= 0)
 		close(media->fd);
 	free(media->bytes);
@@ -526,6 +567,20 @@ static ssize_t read_pcm(struct fplinux_media *media, int16_t *samples,
 {
 	if (media->info.eof)
 		return 0;
+	if (media->amr_nb) {
+		ssize_t frames = fplinux_media_amr_nb_read(
+			media->amr_nb, samples, capacity, &media->total_frames);
+
+		if (frames < 0)
+			return -1;
+		media->info.position_frames += (uint64_t)frames;
+		if (media->total_frames && !media->info.duration_known)
+			set_duration(media);
+		media->info.eof = media->info.duration_known &&
+				  media->info.position_frames ==
+					  media->total_frames;
+		return frames;
+	}
 	size_t frames;
 	if (media->info.codec == FPLINUX_MEDIA_WAV) {
 		uint64_t remaining =
@@ -634,7 +689,15 @@ int fplinux_media_seek(struct fplinux_media *media, uint64_t position_ms)
 		media->info.eof = target == media->total_frames;
 		return 0;
 	}
-	if (target < media->info.position_frames || media->info.eof) {
+	if (media->amr_nb) {
+		if (target < media->info.position_frames ||
+		    fplinux_media_amr_nb_failed(media->amr_nb)) {
+			if (fplinux_media_amr_nb_rewind(media->amr_nb) < 0)
+				return -1;
+			media->info.position_frames = 0;
+			media->info.eof = false;
+		}
+	} else if (target < media->info.position_frames || media->info.eof) {
 		media->io_remaining = MEDIA_IO_BYTES;
 		media->io_error = 0;
 		int64_t result = mpg123_seek64(media->mp3, 0, SEEK_SET);

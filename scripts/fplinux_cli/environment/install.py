@@ -397,6 +397,16 @@ def _install_mpg123_headers(tool: ToolInput, temporary: Path) -> None:
     _install_file(tool.archive, Path("/opt/quality/src/mpg123.tar.bz2"))
 
 
+def _install_ffmpeg_amr_nb(tool: ToolInput, resources: Path, temporary: Path) -> None:
+    """Prepare the pinned native AMR decoder for host tests and analysis."""
+    source = temporary / "ffmpeg"
+    _extract_archive(tool.archive, source, strip_components=1)
+    configure = resources / "alpine/aports/fplinux-amr-nb/configure-amr-nb.sh"
+    subprocess.run(["sh", configure, "--disable-x86asm"], cwd=source, check=True)
+    subprocess.run(["make"], cwd=source, check=True)
+    subprocess.run(["make", "install-libs", "install-headers"], cwd=source, check=True)
+
+
 def _install_tinysoundfont_headers(
     tool: ToolInput,
     resources: Path,
@@ -506,6 +516,7 @@ def main() -> None:
         _install_gui_headers(tools, temporary_root)
         _install_libtsm(tools["libtsm"], args.resources, temporary_root)
         _install_mpg123_headers(tools["mpg123"], temporary_root)
+        _install_ffmpeg_amr_nb(tools["ffmpeg-amr-nb"], args.resources, temporary_root)
         _install_tinysoundfont_headers(tools["tinysoundfont"], args.resources, temporary_root)
         for tool, filename in (("soundfont", "soundfont.tar.gz"),):
             _install_file(tools[tool].archive, Path("/opt/quality/src") / filename)
