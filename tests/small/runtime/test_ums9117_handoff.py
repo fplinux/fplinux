@@ -14,6 +14,7 @@ from unittest import mock
 import pytest
 from fplinux_cli.runtime.ssh import transport as ssh_transport
 
+from tests.boot_identity import IDENTITY_9
 from tests.small.runtime.adapter_fixtures import (
     ADAPTER,
     BRIDGE_SESSION_ID,
@@ -45,9 +46,9 @@ class HandoffTransportTests:
             **_options: object,
         ) -> subprocess.CompletedProcess[str]:
             commands.append(command)
-            if command == "uname -r":
+            if command.startswith("uname -r && "):
                 suffix = "9" * 16 if matches else "8" * 16
-                stdout = f"6.18.42-fplinux-{suffix}\n"
+                stdout = f"6.18.42-fplinux-{suffix}\n{'9' * 64}\n"
             else:
                 stdout = "system=1234 rtc=kept\n"
             return subprocess.CompletedProcess([], 0, stdout, "")
@@ -85,10 +86,11 @@ class HandoffTransportTests:
             ADAPTER.complete_linux_handoff(
                 session,
                 {"vendor_id": 0x0525, "product_id": 0xA4A6, "wait_seconds": 30},
-                expected_device_identity="9" * 64,
+                expected_device_identity=IDENTITY_9,
                 events=events.append,
             )
-        assert commands == ["uname -r"]
+        assert len(commands) == 1
+        assert commands[0].startswith("uname -r && ")
         assert (events) == (["linux-usb", "ssh-ready"] if matches else ["linux-usb"])
         assert ("session is ready" in rendered.getvalue()) == (matches)
 
@@ -111,7 +113,7 @@ class HandoffTransportTests:
             on_linux_usb: Callable[[], None],
             failure: str | None = failure,
         ) -> object:
-            assert expected_device_identity == "9" * 64
+            assert expected_device_identity == IDENTITY_9
             on_linux_usb()
             if failure == "authentication":
                 raise SystemExit(failure)
@@ -128,7 +130,7 @@ class HandoffTransportTests:
             ADAPTER.complete_linux_handoff(
                 {"session_id": "a" * 64},
                 {"vendor_id": 0x0525, "product_id": 0xA4A6, "wait_seconds": 30},
-                expected_device_identity="9" * 64,
+                expected_device_identity=IDENTITY_9,
                 events=events.append,
             )
         assert (events) == (["linux-usb", "ssh-ready"] if failure is None else ["linux-usb"])
@@ -147,7 +149,7 @@ class HandoffTransportTests:
             result = ADAPTER.complete_linux_handoff(
                 session,
                 {"vendor_id": 0x0525, "product_id": 0xA4A6, "wait_seconds": 30},
-                expected_device_identity="9" * 64,
+                expected_device_identity=IDENTITY_9,
             )
 
         assert (result) is (ready)
@@ -241,4 +243,6 @@ class BridgeAcknowledgementTests:
     def test_boot_requires_a_prepared_session(self) -> None:
         """RAM loading requires the per-run bridge binding token."""
         with pytest.raises(SystemExit, match="requires a prepared session"):
-            ADAPTER.run(Path("bundle"), bridge_runtime(), None, expected_device_identity="9" * 64)
+            ADAPTER.run(
+                Path("bundle"), bridge_runtime(), None, expected_device_identity=IDENTITY_9
+            )

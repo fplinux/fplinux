@@ -9,6 +9,7 @@ compatible = "sprd,ums9117"
 packages = [
   "fplinux-alsa-lib",
   "fplinux-apk-tools",
+  "fplinux-audio",
   "fplinux-bluetooth",
   "fplinux-bluez",
   "fplinux-bluez-glib",
@@ -40,6 +41,7 @@ packages = [
 [uboot]
 source = "platforms/ums9117/uboot/u-boot.lock.toml"
 archive_prefix = "u-boot-2026.07"
+defconfig = "platforms/ums9117/uboot/fplinux_ums9117_defconfig"
 patches = ["platforms/ums9117/uboot/integration.patch"]
 required_config = [
   "CONFIG_TARGET_FPLINUX_UMS9117=y",
@@ -91,8 +93,8 @@ source = "platforms/ums9117/uboot/ums9117.h"
 destination = "include/configs/ums9117.h"
 
 [[uboot.copies]]
-source = "platforms/ums9117/uboot/ums9117-u-boot.dtsi"
-destination = "arch/arm/dts/ums9117-u-boot.dtsi"
+source = "platforms/ums9117/uboot/ums9117-u-boot.dts"
+destination = "arch/arm/dts/ums9117-u-boot.dts"
 
 [[uboot.copies]]
 source = "platforms/ums9117/common/ums9117-boot-contract.h"
@@ -159,6 +161,7 @@ patches = [
   "platforms/ums9117/linux/patches/0020-ums9117-eic-cold.patch",
   "platforms/ums9117/linux/patches/0022-bnep-local-ethernet-address.patch",
   "platforms/ums9117/linux/patches/0023-mmc-card-detection-config.patch",
+  "platforms/ums9117/linux/patches/0024-squashfs-ram-layer-uuid.patch",
 ]
 overlay = "platforms/ums9117/linux/overlay"
 
@@ -349,6 +352,7 @@ config = "CONFIG_MMC_REMOVABLE"
 [bootstrap]
 vendor_source_lock = "fpdoom_bootstrap"
 archive_prefix = "fpdoom-{commit}/"
+stage0_source = "platforms/ums9117/bootstrap-microsd"
 source_destination = "bootstrap"
 vendor_destination = "vendor/fpdoom"
 output_destination = "out"
@@ -384,6 +388,7 @@ patches = [
   "platforms/ums9117/bootstrap/patches/0004-linux-owned-input-audio.patch",
   "platforms/ums9117/bootstrap/patches/0005-target-owned-early-init.patch",
   "platforms/ums9117/bootstrap/patches/0006-usb-control-setup.patch",
+  "platforms/ums9117/bootstrap/patches/0007-cold-sd-entry.patch",
 ]
 toolchain = "arm-none-eabi"
 lto = 0

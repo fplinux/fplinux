@@ -33,7 +33,8 @@ static void present(void *context)
 	++image->presents;
 }
 
-static void render_expected_boot(const struct fplinux_status_canvas *canvas)
+static void render_expected_boot(const struct fplinux_status_canvas *canvas,
+				 const char *detail)
 {
 	struct fplinux_status_mark mark = { 0 };
 	struct fplinux_status_resources resources = {
@@ -48,7 +49,7 @@ static void render_expected_boot(const struct fplinux_status_canvas *canvas)
 		.layout = FPLINUX_STATUS_BOOT,
 		.indicator = FPLINUX_STATUS_NONE,
 		.heading = "Starting FPLinux",
-		.detail = "Keep USB connected.",
+		.detail = detail,
 	};
 
 	for (size_t i = 0; i < FPLINUX_BOOT_MARK_COUNT; ++i) {
@@ -74,8 +75,8 @@ int main(int argc, char **argv)
 	const char *detail;
 	FILE *output;
 
-	assert(fplinux_boot_screen_init(NULL, NULL) == -1);
-	assert(fplinux_boot_screen_init(&screen, NULL) == -1);
+	assert(fplinux_boot_screen_init(NULL, NULL, true) == -1);
+	assert(fplinux_boot_screen_init(&screen, NULL, true) == -1);
 	fplinux_boot_screen_fail(&screen, 1, "x");
 	assert(!screen.initialized);
 	if (argc < 5 || argc > 6 || sscanf(argv[1], "%u", &image.width) != 1 ||
@@ -88,9 +89,13 @@ int main(int argc, char **argv)
 	canvas = (struct fplinux_status_canvas){ image.width, image.height,
 						 &image, fill, present };
 	if (!strcmp(argv[3], "expected"))
-		render_expected_boot(&canvas);
+		render_expected_boot(&canvas, "Keep USB connected.");
+	else if (!strcmp(argv[3], "expected-offline"))
+		render_expected_boot(&canvas, NULL);
 	else
-		assert(!fplinux_boot_screen_init(&screen, &canvas));
+		assert(!fplinux_boot_screen_init(&screen, &canvas,
+						 strcmp(argv[3],
+							"boot-offline") != 0));
 	detail = argc >= 6 ? argv[5] : "Keep USB connected.";
 	if (!strcmp(argv[3], "error")) {
 		if (argc == 5)

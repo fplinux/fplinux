@@ -13,6 +13,8 @@ from pathlib import Path
 from threading import Event
 from typing import TYPE_CHECKING, Any
 
+from fplinux_cli.runtime.bundle import boots_system_card
+
 from .host import (
     BootromDriverRequiredError,
     UsbProbeCancelledError,
@@ -106,7 +108,7 @@ def _setup_bootrom_driver(
 
 def boot_archive(  # noqa: PLR0913 -- native loading inputs have separate owners.
     bundle: WindowsBundle,
-    device_data: Path,
+    device_data: Path | None,
     *,
     events: Callable[[str], None] | None = None,
     log: Path,
@@ -115,11 +117,15 @@ def boot_archive(  # noqa: PLR0913 -- native loading inputs have separate owners
     loader_trace: bool = False,
     on_wait: Callable[[], None] | None = None,
 ) -> tuple[WindowsTransport, dict[str, Any]]:
-    """Boot one selected archive with its external data capsule and return authenticated SSH."""
+    """Boot the selected image with the native tools and return authenticated SSH."""
     if events is not None:
         events("host-preparation")
     root = bundle.root
-    if device_data.is_symlink() or not device_data.is_file():
+    system_card = boots_system_card(bundle.runtime)
+    if system_card:
+        if device_data is not None:
+            fail("The system microSD must use the phone data already on the card")
+    elif device_data is None or device_data.is_symlink() or not device_data.is_file():
         fail("The prepared device data capsule is missing")
     host = WindowsHost()
     usb = bundle.runtime["usb"]["bootrom"]
@@ -145,6 +151,8 @@ def boot_archive(  # noqa: PLR0913 -- native loading inputs have separate owners
     try:
         loader_directory = directory
         if split_upload:
+            if device_data is None:
+                fail("Split upload requires the prepared device data capsule")
             loader_directory = directory / "uploads"
             loader_directory.mkdir()
             host.secure_new(loader_directory, directory=True)
@@ -179,9 +187,10 @@ def boot_archive(  # noqa: PLR0913 -- native loading inputs have separate owners
                     events("driver-ready")
                 events("ram-loader-start")
 
+        boot_label = "microSD boot" if system_card else "console RAM boot"
         while True:
             print(
-                f"{bundle.runtime['identity']['target']['display_name']} console RAM boot",
+                f"{bundle.runtime['identity']['target']['display_name']} {boot_label}",
                 flush=True,
             )
             print(config["boot_instructions"], flush=True)
@@ -220,11 +229,12 @@ def boot_archive(  # noqa: PLR0913 -- native loading inputs have separate owners
             payload = directory / "payload"
             payload.mkdir()
             host.secure_new(payload, directory=True)
-            sources = adapter.loader_payload_sources(root, device_data=device_data)
-            for name, source in sources.items():
-                destination = payload / name
-                shutil.copyfile(source, destination)
-                host.secure_new(destination)
+            if not system_card:
+                sources = adapter.loader_payload_sources(root, device_data=device_data)
+                for name, source in sources.items():
+                    destination = payload / name
+                    shutil.copyfile(source, destination)
+                    host.secure_new(destination)
         if not split_upload:
             if events is not None:
                 events("bootstrap-handoff")

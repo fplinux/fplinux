@@ -9,14 +9,21 @@ import ipaddress
 import json
 import os
 import re
+import secrets
+import stat
 import subprocess
 import tempfile
 import time
 from pathlib import Path
+from textwrap import dedent
 from typing import TYPE_CHECKING, Any
 
 from fplinux_cli.common import is_sha256
-from fplinux_cli.runtime.connection import ConnectionLostError
+from fplinux_cli.runtime.connection import (
+    BOOT_IDENTITY_COMMAND,
+    ConnectionLostError,
+    observed_device_identity,
+)
 from fplinux_cli.runtime.ssh import commands, material
 
 from .host import (
@@ -32,6 +39,9 @@ from .session import write_session
 if TYPE_CHECKING:
     from collections.abc import Callable
     from typing import BinaryIO
+
+
+_UPLOAD_TIMEOUT_SECONDS = 15 * 60
 
 
 class WindowsTransport:
@@ -203,6 +213,69 @@ class WindowsTransport:
                     + (f": {detail}" if detail else "")
                 )
 
+    def upload(self, session: dict[str, Any], local_name: str, remote_name: str) -> None:
+        """Stream binary stdin, then verify and publish the staged file on the phone."""
+        remote = commands.remote_path(remote_name, "upload destination")
+        self._require_bound(session)
+        local = Path(local_name)
+        try:
+            metadata = local.lstat()
+        except OSError as error:
+            fail(f"cannot inspect upload source {local}: {error}")
+        if not stat.S_ISREG(metadata.st_mode):
+            fail(f"upload source is not a regular file: {local}")
+        size = metadata.st_size
+        directory = remote.rsplit("/", 1)[0] or "/"
+        temporary = f"{directory.rstrip('/')}/.fplinux-upload.{secrets.token_hex(12)}"
+        with local.open("rb") as source, tempfile.TemporaryFile(mode="w+b") as stderr:
+            digest = hashlib.file_digest(source, "sha256").hexdigest()
+            source.seek(0)
+            command = dedent(
+                """\
+                set -eu
+                if ! ( {space_check} ); then
+                    printf '%s\\n' \\
+                        'upload destination is missing or does not have enough free space' >&2
+                    exit 1
+                fi
+                umask 077
+                trap "rm -f '{temporary}'" EXIT
+                trap 'exit 1' HUP INT TERM
+                cat > '{temporary}'
+                if ! ( {publication} ); then
+                    printf '%s\\n' \\
+                        'device-side SHA-256 verification or atomic upload publication failed' >&2
+                    exit 1
+                fi
+                """
+            ).format(
+                space_check=commands.upload_space_check(directory, size),
+                temporary=temporary,
+                publication=commands.upload_publication(temporary, remote, digest, size),
+            )
+            argv = self._ssh_arguments(session, command)
+            argv[1:1] = ["-T"]
+            try:
+                result = subprocess.run(
+                    argv,
+                    stdin=source,
+                    stdout=subprocess.DEVNULL,
+                    stderr=stderr,
+                    timeout=_UPLOAD_TIMEOUT_SECONDS,
+                    check=False,
+                    creationflags=console_creation_flags(),
+                )
+            except subprocess.TimeoutExpired:
+                fail(f"SSH upload timed out after {_UPLOAD_TIMEOUT_SECONDS:g}s")
+            if result.returncode:
+                detail = commands.stream_stderr_detail(stderr)
+                fail(
+                    f"SSH upload failed with exit status {result.returncode}"
+                    + (f": {detail}" if detail else "")
+                )
+
+        print(f"upload verified: {local} ({size} bytes, sha256={digest}) -> {remote}", flush=True)
+
     def authenticate(
         self,
         session: dict[str, Any],
@@ -278,7 +351,9 @@ class WindowsTransport:
                 connect_timeout = max(1, min(5, int(remaining)))
                 result = subprocess.run(
                     self._ssh_arguments(
-                        session, "fplinux-session-id; uname -r", connect_timeout=connect_timeout
+                        session,
+                        f"fplinux-session-id && {BOOT_IDENTITY_COMMAND}",
+                        connect_timeout=connect_timeout,
                     ),
                     stdin=subprocess.DEVNULL,
                     capture_output=True,
@@ -293,10 +368,12 @@ class WindowsTransport:
                 time.sleep(0.5)
                 continue
             lines = result.stdout.splitlines()
-            if len(lines) != 2 or not hmac.compare_digest(lines[0], session["session_id"]):
+            if not lines or not hmac.compare_digest(lines[0], session["session_id"]):
                 fail("The authenticated phone returned another RAM session identity")
-            if not lines[1].endswith(f"-fplinux-{expected_device_identity[:16]}"):
-                fail("The authenticated phone returned another kernel build identity")
+            if observed_device_identity(lines[1:]) != expected_device_identity:
+                fail(
+                    "The authenticated phone returned another kernel build identity or boot recipe"
+                )
             try:
                 if current_interface() != index:
                     continue

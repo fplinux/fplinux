@@ -107,26 +107,6 @@ class LinuxManifestTests:
         }
 
     @staticmethod
-    def test_profile_patch_inputs_are_retained_for_projection_conflict_checks(
-        linux_sources: dict[str, Any],
-    ) -> None:
-        """Source preparation can observe microSD patches even while building the RAM profile."""
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            linux_inputs.platform(root, "demo", source_lock="base", arch="arm")
-            target = linux_inputs.target(root, "phone", platform_name="demo")
-            target.write_text(
-                target.read_text(encoding="utf-8").replace(
-                    "linux_patches = []", 'linux_patches = ["linux/card.patch"]'
-                ),
-                encoding="utf-8",
-            )
-
-            targets = discover_linux_targets(root, linux_sources, "1" * 64)
-
-        assert (targets[0].config["microsd"]["linux_patches"]) == (["linux/card.patch"])
-
-    @staticmethod
     def test_captured_overlay_and_panel_discovery_uses_only_snapshot_inputs(
         tmp_path: Path,
         linux_sources: dict[str, Any],

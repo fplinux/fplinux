@@ -207,10 +207,10 @@ class BootstrapRecipeTests:
         self, bootstrap_context: BootstrapContext
     ) -> None:
         """The RAM-owned panel also invalidates its SD consumer without foreign panel inputs."""
-        bootstrap_context.write("targets/demo/bootstrap-microsd/Makefile", b"all:\n\ttrue\n")
+        bootstrap_context.write("platforms/demo/bootstrap-microsd/Makefile", b"all:\n\ttrue\n")
         panel = bootstrap_context.write("targets/demo/bootstrap/lcd_config.h", b"selected panel\n")
         bootstrap_context.target_config["bootstrap"].update(
-            source="bootstrap-microsd", lcd_config="bootstrap/lcd_config.h"
+            source="platforms/demo/bootstrap-microsd", lcd_config="bootstrap/lcd_config.h"
         )
         baseline = bootstrap_context.digest()
 
@@ -219,12 +219,14 @@ class BootstrapRecipeTests:
         panel.write_bytes(b"changed selected panel\n")
         assert (baseline) != (bootstrap_context.digest())
 
-    @pytest.mark.parametrize("source", ["bootstrap", "bootstrap-microsd"])
+    @pytest.mark.parametrize(
+        "source", ["targets/demo/bootstrap", "platforms/demo/bootstrap-microsd"]
+    )
     def test_rendered_panel_data_changes_either_bootstrap_recipe(
         self, bootstrap_context: BootstrapContext, source: str
     ) -> None:
         """A selected LCD command change invalidates either stage without foreign inputs."""
-        bootstrap_context.write("targets/demo/bootstrap-microsd/Makefile", b"all:\n\ttrue\n")
+        bootstrap_context.write("platforms/demo/bootstrap-microsd/Makefile", b"all:\n\ttrue\n")
         bootstrap_context.write("targets/demo/bootstrap/lcd_config.h", b"selected panel wrapper\n")
         bootstrap_context.target_config["display"] = load_target("nokia-ta1618")["display"]
         commands: list[dict[str, Any]] = [{"command": 0x36, "data": [0x28], "delay_ms": 0}]
@@ -239,12 +241,14 @@ class BootstrapRecipeTests:
         commands[0]["data"][0] = 0x48
         assert baseline != bootstrap_context.digest()
 
-    @pytest.mark.parametrize("source", ["bootstrap", "bootstrap-microsd"])
+    @pytest.mark.parametrize(
+        "source", ["targets/demo/bootstrap", "platforms/demo/bootstrap-microsd"]
+    )
     def test_status_font_inputs_are_causal_for_ram_and_sd(
         self, bootstrap_context: BootstrapContext, source: str
     ) -> None:
         """A pinned font or its compile interface invalidates either bootstrap recipe."""
-        bootstrap_context.write("targets/demo/bootstrap-microsd/Makefile", b"all:\n\ttrue\n")
+        bootstrap_context.write("platforms/demo/bootstrap-microsd/Makefile", b"all:\n\ttrue\n")
         bootstrap_context.target_config["bootstrap"]["source"] = source
         baseline = bootstrap_context.digest()
         bootstrap_context.sources["linux"]["url"] = "https://example.invalid/mirror.tar.xz"
@@ -287,15 +291,20 @@ class BootstrapRecipeTests:
         ("source", "selected", "expected"),
         [
             pytest.param(
-                "bootstrap", "bootstrap/lcd_config.h", b"single selected panel\n", id="ram-panel"
+                "targets/demo/bootstrap",
+                "bootstrap/lcd_config.h",
+                b"single selected panel\n",
+                id="ram-panel",
             ),
             pytest.param(
-                "bootstrap-microsd",
+                "platforms/demo/bootstrap-microsd",
                 "bootstrap/lcd_config.h",
                 b"single selected panel\n",
                 id="microsd-panel",
             ),
-            pytest.param("bootstrap", None, b"complete porting table\n", id="headless-table"),
+            pytest.param(
+                "targets/demo/bootstrap", None, b"complete porting table\n", id="headless-table"
+            ),
         ],
     )
     def test_projection_selects_one_panel_or_the_headless_table(
@@ -322,9 +331,11 @@ class BootstrapRecipeTests:
         bootstrap_context.write("sources.lock.toml", catalog.encode("utf-8"))
         bootstrap_context.platform["bootstrap"]["patches"] = []
         bootstrap_context.write("targets/demo/bootstrap/lcd_config.h", b"single selected panel\n")
-        bootstrap_context.write("targets/demo/bootstrap-microsd/Makefile", b"all:\n\ttrue\n")
+        bootstrap_context.write("platforms/demo/bootstrap-microsd/Makefile", b"all:\n\ttrue\n")
         zimage = bootstrap_context.write("kernel/zImage", b"kernel payload\n")
         dtb = bootstrap_context.write("kernel/target.dtb", b"device tree\n")
+        root = bootstrap_context.write("rootfs/initramfs.cpio", b"RAM root\n")
+        bootstrap_context.write("work/device-data.cpio", b"device data\n")
         work = bootstrap_context.root / "work"
         bootstrap_context.target_config["bootstrap"].update(source=source, lcd_config=selected)
         with (
@@ -346,6 +357,7 @@ class BootstrapRecipeTests:
                 work=work,
                 zimage=zimage,
                 dtb=dtb,
+                rootfs_output=root.parent,
             )
         panel = work / "bootstrap/vendor/runtime/lcd_config.h"
         assert (panel.read_bytes()) == (expected)

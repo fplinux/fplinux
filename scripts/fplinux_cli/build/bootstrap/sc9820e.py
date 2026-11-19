@@ -266,7 +266,6 @@ def _patch_initrd(dtb: Path, initramfs: Path, address: int) -> bytes:
 
 
 def build_sc9820e(  # noqa: PLR0913 -- source, placement and output inputs stay explicit.
-    target: str,
     target_config: dict[str, Any],
     *,
     work: Path,
@@ -274,6 +273,7 @@ def build_sc9820e(  # noqa: PLR0913 -- source, placement and output inputs stay 
     dtb: Path,
     kernel_output: Path,
     rootfs_output: Path,
+    early_firmware: Path | None = None,
 ) -> BootstrapBuild:
     """Compile the complete source entry, verify RAM placement and pack public bytes."""
     bootstrap = target_config["bootstrap"]
@@ -283,7 +283,7 @@ def build_sc9820e(  # noqa: PLR0913 -- source, placement and output inputs stay 
     for name, contents in generated_entry_files(layout, kernel_bytes=len(kernel_bytes)).items():
         (work / name).write_bytes(contents)
     platform_source = inputs_build.root_source(PLATFORM_SOURCE)
-    target_source = inputs_build.target_source(target, bootstrap["source"])
+    target_source = inputs_build.root_source(bootstrap["source"])
     prefix = bootstrap["toolchain"] + "-"
     objects = []
     for source in (
@@ -351,6 +351,9 @@ def build_sc9820e(  # noqa: PLR0913 -- source, placement and output inputs stay 
     initramfs = None
     if bootstrap["initramfs_delivery"] == "external":
         initramfs = inputs_build.require_file(rootfs_output / INITRAMFS_NAME)
+        tree = _patch_initrd(staged_dtb, initramfs, layout["initramfs_load"])
+    elif early_firmware is not None:
+        initramfs = inputs_build.require_file(early_firmware)
         tree = _patch_initrd(staged_dtb, initramfs, layout["initramfs_load"])
     elif bootstrap["initramfs_delivery"] == "none":
         tree = staged_dtb.read_bytes()

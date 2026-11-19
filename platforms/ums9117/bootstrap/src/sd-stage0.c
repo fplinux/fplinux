@@ -4,7 +4,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "fplinux-boot-screen/boot-screen.h"
+#include "generated/fplinux-bootstrap-display.h"
 #include "generated/fplinux-bootstrap-identity.h"
 #include "generated/fplinux-boot-layout.h"
 #include "generated/fplinux-uboot-build.h"
@@ -13,6 +13,10 @@
 #include "ums9117-bootstrap/boot-common.h"
 #include "ums9117-bootstrap/sd-stage0.h"
 #include "ums9117-common/ums9117-boot-contract.h"
+
+#if FPLINUX_BOOTSTRAP_DISPLAY_WIDTH
+#include "fplinux-boot-screen/boot-screen.h"
+#endif
 
 extern const unsigned char uboot_payload_start[];
 extern const unsigned char uboot_payload_end[];
@@ -35,9 +39,12 @@ enum ums9117_sd_stage0_failure_code {
 	UMS9117_SD_STAGE0_FAILURE_USB_TX_CLEANUP,
 };
 
+static struct fplinux_uboot_handoff uboot_handoff;
+static const char uboot_sha256[] = FPLINUX_UBOOT_BINARY_SHA256;
+
+#if FPLINUX_BOOTSTRAP_DISPLAY_WIDTH
 static struct fplinux_boot_screen boot_screen;
 static struct ums9117_boot_canvas boot_canvas;
-static struct fplinux_uboot_handoff uboot_handoff;
 
 static const char *stage0_failure_detail(uint32_t code, uint32_t detail)
 {
@@ -84,28 +91,37 @@ static const char *stage0_failure_detail(uint32_t code, uint32_t detail)
 		return "MICROSD BOOT FAILED. POWER OFF AND TRY AGAIN";
 	}
 }
+#endif
 
 static void stage0_fail(uint32_t code, uint32_t detail)
 {
 	fprintf(stderr, "%s_UBOOT_STAGE0 event=error error=%lu detail=%lu\n",
 		FPLINUX_BOOTSTRAP_RECORD_PREFIX, (unsigned long)code,
 		(unsigned long)detail);
+#if FPLINUX_BOOTSTRAP_DISPLAY_WIDTH
 	fplinux_boot_screen_fail(&boot_screen, code,
 				 stage0_failure_detail(code, detail));
+#endif
 	for (;;)
 		;
 }
 
+#if !FPLINUX_COLD_SD
 static void stage0_fail_without_transport(uint32_t code)
 	__attribute__((noreturn));
 
 static void stage0_fail_without_transport(uint32_t code)
 {
+#if FPLINUX_BOOTSTRAP_DISPLAY_WIDTH
 	fplinux_boot_screen_fail(&boot_screen, code,
 				 stage0_failure_detail(code, 0U));
+#else
+	(void)code;
+#endif
 	for (;;)
 		;
 }
+#endif
 
 static int stage0_checkpoint(uint32_t code, uint32_t value)
 {
@@ -138,9 +154,11 @@ static void stage0_finalize_and_boot(uint32_t zimage_phys,
 				     uint32_t zimage_bytes, uint32_t dtb_phys,
 				     uint32_t dtb_bytes)
 {
+#if !FPLINUX_COLD_SD
 	enum ums9117_bootstrap_session_status session_status;
 	uint8_t session_id[FPLINUX_HANDOFF_SESSION_ID_BYTES];
 	uint32_t dma_status;
+#endif
 
 	if (zimage_phys != FPLINUX_BOOT_LAYOUT_ZIMAGE_PHYS || !zimage_bytes ||
 	    zimage_bytes > FPLINUX_BOOT_LAYOUT_ZIMAGE_LIMIT_BYTES ||
@@ -154,6 +172,7 @@ static void stage0_finalize_and_boot(uint32_t zimage_phys,
 					   FPLINUX_BOOT_ZIMAGE_SIZE_OFFSET) !=
 		    zimage_bytes)
 		stage0_fail(UMS9117_SD_STAGE0_FAILURE_SYSTEM_IMAGE, 0U);
+#if !FPLINUX_COLD_SD
 	session_status = ums9117_bootstrap_personalize_dtb(dtb_phys, dtb_bytes,
 							   session_id);
 	if (session_status != UMS9117_BOOTSTRAP_SESSION_OK)
@@ -174,6 +193,7 @@ static void stage0_finalize_and_boot(uint32_t zimage_phys,
 		stage0_fail_without_transport(
 			UMS9117_SD_STAGE0_FAILURE_USB_TX_CLEANUP);
 	ums9117_bootstrap_cleanup_usb_dma_and_disconnect();
+#endif
 	ums9117_bootstrap_handoff_to_linux(zimage_phys, dtb_phys);
 }
 
@@ -192,43 +212,43 @@ static size_t uboot_payload_size(void)
 	return (size_t)(uboot_payload_end - uboot_payload_start);
 }
 
-void ums9117_sd_stage0_main(const struct ums9117_sd_stage0_board *board)
+#if FPLINUX_BOOTSTRAP_DISPLAY_WIDTH
+static void stage0_display_init(void)
 {
 	struct fplinux_status_canvas canvas;
-	struct ums9117_bootstrap_timer_result timer;
-	uint32_t ram_bytes = ums9117_bootstrap_ram_bytes();
-	size_t uboot_bytes = uboot_payload_size();
-	int has_display = board->display_width != 0 ||
-			  board->display_height != 0;
-
 	boot_canvas.width = sys_data.display.w1;
 	boot_canvas.height = sys_data.display.h1;
 	boot_canvas.stride = sys_data.display.w1;
-	if (has_display) {
-		memset((void *)(uintptr_t)FPLINUX_BOOT_LAYOUT_FRAMEBUFFER_PHYS,
-		       0, FPLINUX_BOOT_LAYOUT_FRAMEBUFFER_BYTES);
-		boot_canvas.pixels = (uint16_t *)(uintptr_t)
-			FPLINUX_BOOT_LAYOUT_FRAMEBUFFER_PHYS;
-		if (!ums9117_boot_canvas_valid(&boot_canvas))
-			stage0_fail(UMS9117_SD_STAGE0_FAILURE_DISPLAY_MEMORY,
-				    0U);
-		canvas.width = boot_canvas.width;
-		canvas.height = boot_canvas.height;
-		canvas.context = &boot_canvas;
-		canvas.fill = ums9117_boot_canvas_fill_rect;
-		canvas.present = ums9117_boot_canvas_present;
-	}
-
-	if (has_display) {
-		sys_start();
-		sys_framebuffer(boot_canvas.pixels);
-		if (fplinux_boot_screen_init(&boot_screen, &canvas) != 0)
-			stage0_fail(UMS9117_SD_STAGE0_FAILURE_BOOT_SCREEN, 0U);
-	}
-	if (boot_canvas.width != board->display_width ||
-	    boot_canvas.height != board->display_height)
+	boot_canvas.pixels =
+		(uint16_t *)(uintptr_t)FPLINUX_BOOT_LAYOUT_FRAMEBUFFER_PHYS;
+	memset(boot_canvas.pixels, 0, FPLINUX_BOOT_LAYOUT_FRAMEBUFFER_BYTES);
+	if (!ums9117_boot_canvas_valid(&boot_canvas))
+		stage0_fail(UMS9117_SD_STAGE0_FAILURE_DISPLAY_MEMORY, 0U);
+	canvas.width = boot_canvas.width;
+	canvas.height = boot_canvas.height;
+	canvas.context = &boot_canvas;
+	canvas.fill = ums9117_boot_canvas_fill_rect;
+	canvas.present = ums9117_boot_canvas_present;
+	sys_start();
+	sys_framebuffer(boot_canvas.pixels);
+	if (fplinux_boot_screen_init(&boot_screen, &canvas, !FPLINUX_COLD_SD) !=
+	    0)
+		stage0_fail(UMS9117_SD_STAGE0_FAILURE_BOOT_SCREEN, 0U);
+	if (boot_canvas.width != FPLINUX_BOOTSTRAP_DISPLAY_WIDTH ||
+	    boot_canvas.height != FPLINUX_BOOTSTRAP_DISPLAY_HEIGHT)
 		stage0_fail(UMS9117_SD_STAGE0_FAILURE_DISPLAY_SIZE, 0U);
+}
+#endif
 
+void ums9117_sd_stage0_main(void)
+{
+	struct ums9117_bootstrap_timer_result timer;
+	uint32_t ram_bytes = ums9117_bootstrap_ram_bytes();
+	size_t uboot_bytes = uboot_payload_size();
+
+#if FPLINUX_BOOTSTRAP_DISPLAY_WIDTH
+	stage0_display_init();
+#endif
 	ums9117_bootstrap_enable_timer_gates(NULL);
 	if (!ums9117_bootstrap_probe_timer(&timer))
 		stage0_fail(UMS9117_SD_STAGE0_FAILURE_TIMER, 0U);
@@ -236,7 +256,8 @@ void ums9117_sd_stage0_main(const struct ums9117_sd_stage0_board *board)
 	if (ram_bytes < FPLINUX_BOOT_LAYOUT_RAM_REQUIRED_BYTES ||
 	    !uboot_bytes ||
 	    uboot_bytes > FPLINUX_BOOT_LAYOUT_UBOOT_LIMIT_BYTES ||
-	    uboot_bytes != FPLINUX_UBOOT_BINARY_BYTES)
+	    uboot_bytes != FPLINUX_UBOOT_BINARY_BYTES ||
+	    sizeof(uboot_sha256) != sizeof(uboot_handoff.uboot_sha256))
 		stage0_fail(UMS9117_SD_STAGE0_FAILURE_UBOOT_IMAGE,
 			    (uint32_t)uboot_bytes);
 	memcpy((void *)(uintptr_t)FPLINUX_BOOT_LAYOUT_UBOOT_LOAD_PHYS,
@@ -253,6 +274,9 @@ void ums9117_sd_stage0_main(const struct ums9117_sd_stage0_board *board)
 	uboot_handoff.dtb_limit = FPLINUX_BOOT_LAYOUT_DTB_LIMIT_BYTES;
 	uboot_handoff.fit_phys = FPLINUX_BOOT_LAYOUT_FIT_PHYS;
 	uboot_handoff.fit_limit = FPLINUX_BOOT_LAYOUT_FIT_LIMIT_BYTES;
+	uboot_handoff.entry = FPLINUX_COLD_SD ? FPLINUX_UBOOT_ENTRY_SD :
+						FPLINUX_UBOOT_ENTRY_USB;
+	memcpy(uboot_handoff.uboot_sha256, uboot_sha256, sizeof(uboot_sha256));
 
 	clean_invalidate_dcache();
 	invalidate_icache();

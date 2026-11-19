@@ -24,7 +24,6 @@ class KernelOutputContext:
         self.output = self.work / "kernel"
         self.linux = self.root / "linux"
         self.defconfig = self.write("defconfig", b"CONFIG_TEST=y\n")
-        self.initramfs = self.write("initramfs.cpio", b"boot archive a\n")
         self.cross = "arm-none-eabi-"
 
     def write(self, relative: str, contents: bytes, *, root: Path | None = None) -> Path:
@@ -34,30 +33,8 @@ class KernelOutputContext:
         path.write_bytes(contents)
         return path
 
-    def plan(
-        self,
-        jobs: int = 2,
-        *,
-        external: bool = False,
-        initramfs_delivery: str = "embedded",
-        rootfs_recipe: str = "d" * 64,
-        partuuid: str = "46504c58-02",
-    ) -> kbuild_state.KbuildPlan:
-        """Construct a real cache plan from the scenario's root contract and scheduling."""
-        initramfs = None if external else kbuild_state.initramfs_identity(self.initramfs)
-        initramfs_input = None
-        if initramfs is not None and initramfs_delivery == "embedded":
-            initramfs_input = kbuild_state.initramfs_input_path(self.work, initramfs)
-        root: dict[str, object] = (
-            {
-                "kind": "external",
-                "filesystem": "ext4",
-                "partuuid": partuuid,
-                "wait_seconds": 10,
-            }
-            if external
-            else {"kind": "initramfs"}
-        )
+    def plan(self, jobs: int = 2) -> kbuild_state.KbuildPlan:
+        """Construct a cache plan from the SoC configuration and compiler arguments."""
         kbuild = [
             "make",
             "-C",
@@ -71,13 +48,6 @@ class KernelOutputContext:
             linux_base="c" * 64,
             defconfig=self.defconfig,
             defconfig_path="targets/demo/kernel/defconfig",
-            root=root,
-            initramfs_delivery="none" if external else initramfs_delivery,
-            initramfs=initramfs,
-            initramfs_input=initramfs_input,
-            initramfs_receipt=(
-                None if external else {"recipe": rootfs_recipe, "sha256": "e" * 64}
-            ),
             arch="arm",
             cross_compile=self.cross,
             commands=kernel_build.kernel_build_commands(
@@ -88,7 +58,7 @@ class KernelOutputContext:
                     str(self.output / ".config"),
                     "--set-str",
                     "INITRAMFS_SOURCE",
-                    "" if initramfs_input is None else str(initramfs_input),
+                    "",
                 ],
                 ["zImage", "dtbs"],
                 jobs,
@@ -108,7 +78,6 @@ class KernelOutputContext:
     def complete(self, plan: kbuild_state.KbuildPlan, tag: bytes) -> None:
         """Publish a successful receipt after materializing all declared output files."""
         kbuild_state.prepare_output(self.work, self.output)
-        kbuild_state.materialize_initramfs_input(self.work, self.initramfs, plan)
         self.write_outputs(tag)
         kbuild_state.publish_success(self.work, self.output, plan)
 
@@ -133,79 +102,9 @@ class KernelOutputStateTests:
         )
         assert (retained.read_bytes()) == (b"keep\n")
 
-    def test_changed_boot_archive_invalidates_cache_and_updates_materialized_input(
-        self, kernel_output: KernelOutputContext
-    ) -> None:
-        """Different boot bytes change the plan identity and its materialized input."""
-        before = kernel_output.plan()
-        kernel_output.complete(before, b"a")
-        if before.initramfs_input is None:
-            pytest.fail("RAM plan has no materialized boot input")
-        assert (before.initramfs_input.read_bytes()) == (b"boot archive a\n")
-        kernel_output.initramfs.write_bytes(b"boot archive b\n")
-        changed = kernel_output.plan()
-        assert (before.recipe) != (changed.recipe)
-        assert not (kbuild_state.cache_hit(kernel_output.work, kernel_output.output, changed))
-        kbuild_state.materialize_initramfs_input(
-            kernel_output.work, kernel_output.initramfs, changed
-        )
-        if changed.initramfs_input is None:
-            pytest.fail("changed RAM plan has no materialized boot input")
-        assert (changed.initramfs_input.read_bytes()) == (b"boot archive b\n")
-
     def test_parallelism_is_not_a_recipe_input(self, kernel_output: KernelOutputContext) -> None:
         """Scheduling changes do not select a different cache slot."""
         assert (kernel_output.plan(1).recipe) == (kernel_output.plan(8).recipe)
-
-    def test_external_ram_archive_changes_identity_without_a_kbuild_copy(
-        self, kernel_output: KernelOutputContext
-    ) -> None:
-        """A separately loaded RAM root remains causal to the kernel's authenticated identity."""
-        plan = kernel_output.plan(initramfs_delivery="external")
-        kbuild_state.prepare_output(kernel_output.work, kernel_output.output)
-        kernel_output.write_outputs(b"external-ram")
-        kbuild_state.publish_success(kernel_output.work, kernel_output.output, plan)
-
-        assert plan.root == {"kind": "initramfs"}
-        assert plan.initramfs_input is None
-        assert not (kernel_output.work / "rootfs.cpio").exists()
-        assert kbuild_state.cache_hit(
-            kernel_output.work,
-            kernel_output.output,
-            kernel_output.plan(initramfs_delivery="external"),
-        )
-        kernel_output.write("unrelated.txt", b"unrelated")
-        assert kbuild_state.cache_hit(
-            kernel_output.work,
-            kernel_output.output,
-            kernel_output.plan(initramfs_delivery="external"),
-        )
-
-        changed_receipt = kernel_output.plan(initramfs_delivery="external", rootfs_recipe="f" * 64)
-        assert plan.recipe != changed_receipt.recipe
-        assert not kbuild_state.cache_hit(
-            kernel_output.work, kernel_output.output, changed_receipt
-        )
-
-        kernel_output.initramfs.write_bytes(b"boot archive b\n")
-        changed = kernel_output.plan(initramfs_delivery="external")
-        assert plan.recipe != changed.recipe
-        assert not kbuild_state.cache_hit(kernel_output.work, kernel_output.output, changed)
-        with pytest.raises(kbuild_state.KbuildStateError, match="does not consume"):
-            kbuild_state.materialize_initramfs_input(
-                kernel_output.work, kernel_output.initramfs, changed
-            )
-
-    def test_ram_delivery_changes_the_plan_for_identical_root_bytes(
-        self, kernel_output: KernelOutputContext
-    ) -> None:
-        """An embedded kernel receipt cannot authorize a separately loaded boot archive."""
-        embedded = kernel_output.plan()
-        kernel_output.complete(embedded, b"embedded")
-        external = kernel_output.plan(initramfs_delivery="external")
-
-        assert embedded.recipe != external.recipe
-        assert not kbuild_state.cache_hit(kernel_output.work, kernel_output.output, external)
 
     def test_changed_input_is_a_miss_but_retains_fixed_output(
         self, kernel_output: KernelOutputContext
@@ -220,9 +119,6 @@ class KernelOutputStateTests:
         assert (first.recipe) != (changed.recipe)
         assert not (kbuild_state.cache_hit(kernel_output.work, kernel_output.output, changed))
         kbuild_state.prepare_output(kernel_output.work, kernel_output.output)
-        kbuild_state.materialize_initramfs_input(
-            kernel_output.work, kernel_output.initramfs, changed
-        )
         assert (kernel_output.output) == (kernel_output.work / "kernel")
         assert (retained.read_bytes()) == (b"keep\n")
 
@@ -232,7 +128,6 @@ class KernelOutputStateTests:
         """A receipt published after all outputs exist authorizes reuse."""
         plan = kernel_output.plan()
         kbuild_state.prepare_output(kernel_output.work, kernel_output.output)
-        kbuild_state.materialize_initramfs_input(kernel_output.work, kernel_output.initramfs, plan)
         kernel_output.write_outputs(b"complete")
 
         assert not (kernel_output.work / kbuild_state.RECEIPT_NAME).exists()
@@ -242,49 +137,14 @@ class KernelOutputStateTests:
         identity = kbuild_state.receipt_identity(kernel_output.work, kernel_output.output, plan)
         assert (identity["recipe"]) == (plan.recipe)
 
-    def test_changed_initramfs_input_revokes_hit_and_success_publication(
+    def test_missing_binary_refuses_reuse_and_receipt_publication(
         self, kernel_output: KernelOutputContext
     ) -> None:
-        """A receipt cannot reuse or republish outputs with another initramfs copy."""
+        """The receipt can only authorize a complete set of compiler outputs."""
         plan = kernel_output.plan()
-        kernel_output.complete(plan, b"a")
-        if plan.initramfs_input is None:
-            pytest.fail("embedded plan did not expose its initramfs input")
-        plan.initramfs_input.write_bytes(b"rootfs-tampered\n")
+        kernel_output.complete(plan, b"before")
+        (kernel_output.output / "arch/zImage").unlink()
 
-        assert not (kbuild_state.cache_hit(kernel_output.work, kernel_output.output, plan))
-        with pytest.raises(kbuild_state.KbuildStateError, match="initramfs input"):
+        assert not kbuild_state.cache_hit(kernel_output.work, kernel_output.output, plan)
+        with pytest.raises(kbuild_state.KbuildStateError, match="declared output is missing"):
             kbuild_state.publish_success(kernel_output.work, kernel_output.output, plan)
-
-    def test_external_root_has_no_materialized_initramfs_dependency(
-        self, kernel_output: KernelOutputContext
-    ) -> None:
-        """An external plan stays reusable after boot archive edits and rejects materialization."""
-        plan = kernel_output.plan(external=True)
-        kbuild_state.prepare_output(kernel_output.work, kernel_output.output)
-        kernel_output.write_outputs(b"external")
-        kbuild_state.publish_success(kernel_output.work, kernel_output.output, plan)
-
-        kernel_output.initramfs.write_bytes(b"unrelated boot archive bytes\n")
-
-        assert kbuild_state.cache_hit(
-            kernel_output.work, kernel_output.output, kernel_output.plan(external=True)
-        )
-        assert not ((kernel_output.work / "rootfs.cpio").exists())
-        with pytest.raises(kbuild_state.KbuildStateError, match="does not consume"):
-            kbuild_state.materialize_initramfs_input(
-                kernel_output.work, kernel_output.initramfs, plan
-            )
-
-    def test_changing_external_root_contract_is_a_cache_miss(
-        self, kernel_output: KernelOutputContext
-    ) -> None:
-        """One PARTUUID cannot authorize reuse for a different external root."""
-        plan = kernel_output.plan(external=True)
-        kbuild_state.prepare_output(kernel_output.work, kernel_output.output)
-        kernel_output.write_outputs(b"external")
-        kbuild_state.publish_success(kernel_output.work, kernel_output.output, plan)
-        changed = kernel_output.plan(external=True, partuuid="46504c59-02")
-
-        assert (plan.recipe) != (changed.recipe)
-        assert not (kbuild_state.cache_hit(kernel_output.work, kernel_output.output, changed))

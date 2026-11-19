@@ -23,6 +23,17 @@ static bool range_valid(uint32_t start, uint32_t end)
 	       end <= UMS9117_RESIDENT_LIMIT;
 }
 
+static bool uboot_sha256_valid(const char digest[FPLINUX_UBOOT_SHA256_BYTES])
+{
+	unsigned int index;
+
+	for (index = 0; index < FPLINUX_UBOOT_SHA256_BYTES - 1U; ++index)
+		if (!((digest[index] >= '0' && digest[index] <= '9') ||
+		      (digest[index] >= 'a' && digest[index] <= 'f')))
+			return false;
+	return digest[FPLINUX_UBOOT_SHA256_BYTES - 1U] == '\0';
+}
+
 const struct fplinux_uboot_handoff *ums9117_uboot_handoff_get(void)
 {
 	const struct fplinux_uboot_handoff *handoff;
@@ -36,7 +47,9 @@ const struct fplinux_uboot_handoff *ums9117_uboot_handoff_get(void)
 		return NULL;
 	handoff = (const void *)(uintptr_t)ums9117_uboot_handoff_phys;
 	if (handoff->magic != FPLINUX_UBOOT_HANDOFF_MAGIC ||
-	    handoff->size != sizeof(*handoff))
+	    handoff->size != sizeof(*handoff) ||
+	    (handoff->entry != FPLINUX_UBOOT_ENTRY_USB &&
+	     handoff->entry != FPLINUX_UBOOT_ENTRY_SD))
 		return NULL;
 	if (!range_valid(handoff->resident_start, handoff->resident_end))
 		return NULL;
@@ -44,6 +57,8 @@ const struct fplinux_uboot_handoff *ums9117_uboot_handoff_get(void)
 	if (end < ums9117_uboot_handoff_phys ||
 	    ums9117_uboot_handoff_phys < handoff->resident_start ||
 	    end > handoff->resident_end)
+		return NULL;
+	if (!uboot_sha256_valid(handoff->uboot_sha256))
 		return NULL;
 	return handoff;
 }

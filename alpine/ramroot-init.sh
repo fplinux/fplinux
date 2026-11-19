@@ -27,6 +27,17 @@ ramroot_fail() {
 	ramroot_fail "cannot create root mount points"
 /bin/busybox mount -t squashfs -o ro,loop /root.squashfs /run/fplinux-root/lower ||
 	ramroot_fail "cannot mount compressed root"
+ramroot_lowers=/run/fplinux-root/lower
+if [ -f /board.squashfs ]; then
+	/bin/busybox mkdir /run/fplinux-root/board ||
+		ramroot_fail "cannot create board mount point"
+	# The temporary board filesystem needs its own identity for OverlayFS indexing.
+	/bin/busybox mount -t squashfs \
+		-o ro,loop,fplinux_uuid=7e621cd3-c6bf-4dea-8c07-46e968c7bdff \
+		/board.squashfs /run/fplinux-root/board ||
+		ramroot_fail "cannot mount compressed board files"
+	ramroot_lowers=/run/fplinux-root/board:$ramroot_lowers
+fi
 /bin/busybox mount -t tmpfs -o mode=0700,size=40M tmpfs /run/fplinux-root/state ||
 	ramroot_fail "cannot mount writable root state"
 /bin/busybox mkdir -m 0755 /run/fplinux-root/state/upper ||
@@ -34,7 +45,7 @@ ramroot_fail() {
 /bin/busybox mkdir -m 0700 /run/fplinux-root/state/work ||
 	ramroot_fail "cannot create root work directory"
 /bin/busybox mount -t overlay overlay \
-	-o lowerdir=/run/fplinux-root/lower,upperdir=/run/fplinux-root/state/upper,workdir=/run/fplinux-root/state/work,index=on,redirect_dir=on,xino=auto,metacopy=off \
+	-o "lowerdir=$ramroot_lowers,upperdir=/run/fplinux-root/state/upper,workdir=/run/fplinux-root/state/work,index=on,redirect_dir=on,xino=auto,metacopy=off" \
 	/newroot || ramroot_fail "cannot mount writable root"
 
 while read -r _ramroot_device ramroot_path _ramroot_type ramroot_options _ramroot_rest; do
@@ -68,6 +79,6 @@ for ramroot_mount in run dev proc sys; do
 		ramroot_fail "cannot transfer /$ramroot_mount"
 done
 
-# The loop device retains the compressed file while switch_root removes its
-# old name, the bootstrap runtime and the rest of the initial RAM filesystem.
+# Loop devices retain the compressed files after switch_root removes the
+# bootstrap runtime and the rest of the initial RAM filesystem.
 exec /bin/busybox switch_root -c /dev/console /newroot /sbin/init "$@"

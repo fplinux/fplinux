@@ -23,6 +23,7 @@ from fplinux_cli.runtime.ssh import session as ssh_session
 from fplinux_cli.runtime.ssh import transport as ssh_transport
 
 from tests import ROOT
+from tests.boot_identity import IDENTITY_9
 from tests.ssh_transport_support import create_ready_session
 
 if TYPE_CHECKING:
@@ -139,7 +140,7 @@ def main() -> None:
             root / "events.jsonl", target="phone", profile=None, build_type="release"
         ) as events,
     ):
-        admitted = bundle_runtime.ValidatedBundle(root, manifest, "8" * 64, "9" * 64, None)
+        admitted = bundle_runtime.ValidatedBundle(root, manifest, "8" * 64, IDENTITY_9, None)
         handoff = runner.run_bundle(
             admitted, events.emit, session_root=runtime_root, log=runtime_root / "runtime.log"
         )

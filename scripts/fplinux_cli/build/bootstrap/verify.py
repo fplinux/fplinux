@@ -115,6 +115,7 @@ def verify_images(  # noqa: PLR0913 -- artifacts and target limits stay explicit
     *,
     zimage: Path,
     dtb: Path,
+    initramfs: Path,
     map_file: Path,
     load_address: int,
     payload_limit: int,
@@ -124,6 +125,7 @@ def verify_images(  # noqa: PLR0913 -- artifacts and target limits stay explicit
     image = ramboot.read_bytes()
     kernel = zimage.read_bytes()
     tree = dtb.read_bytes()
+    root = initramfs.read_bytes()
     _verify_dhtb_image(
         image,
         load_address=load_address,
@@ -136,6 +138,8 @@ def verify_images(  # noqa: PLR0913 -- artifacts and target limits stay explicit
         fail("zImage has invalid ARM magic")
     if tree[:4] != b"\xd0\x0d\xfe\xed":
         fail("target DTB has invalid FDT magic")
+    if root[:6] != b"070701" or len(root) % 4:
+        fail("RAM root must be a four-byte-aligned newc archive")
     verify_forbidden_dtb_markers(tree, forbidden_markers)
 
     symbols = _bootstrap_map_symbols(map_file)
@@ -147,6 +151,8 @@ def verify_images(  # noqa: PLR0913 -- artifacts and target limits stay explicit
         "linux_dtb_end",
         "fplinux_session_start",
         "fplinux_session_end",
+        "linux_initramfs_start",
+        "linux_initramfs_end",
         "FPLINUX_BOOTSTRAP_STORAGE_DISABLED",
     }
     missing = sorted(required - symbols.keys())
@@ -186,6 +192,12 @@ def verify_images(  # noqa: PLR0913 -- artifacts and target limits stay explicit
         bounds_error="RAM-session slot lies outside the RAM image",
     )
     _verify_session_dtb(tree)
+    root_start = symbols["linux_initramfs_start"]
+    root_end = symbols["linux_initramfs_end"]
+    if not symbols["fplinux_session_end"] <= root_start < root_end <= load_address + len(image):
+        fail("embedded initramfs range lies outside the RAM payload")
+    if image[root_start - load_address : root_end - load_address] != root:
+        fail("embedded initramfs differs from the built RAM root")
     return descriptor
 
 

@@ -57,7 +57,7 @@ def kernel_identity(
     kernel_inputs: KernelInputs,
     *,
     build_type: str = "release",
-    initramfs_delivery: str = "embedded",
+    initramfs_delivery: str = "external",
 ) -> str:
     return device_state.device_kernel_identity(
         target=kernel_inputs.target,
@@ -102,7 +102,6 @@ class DeviceStateTests:
         """The separately loaded RAM root cannot reuse an identity for other boot bytes."""
         external = kernel_identity(kernel_inputs, initramfs_delivery="external")
         assert external == kernel_identity(kernel_inputs, initramfs_delivery="external")
-        assert external != kernel_identity(kernel_inputs)
 
         kernel_inputs.root["artifact"] = {"sha256": "6" * 64, "size": 1234}
         assert external != kernel_identity(kernel_inputs, initramfs_delivery="external")
@@ -167,10 +166,8 @@ class DeviceStateTests:
         kernel_inputs.implementation.write_text("second\n", encoding="utf-8")
         assert (before) != (kernel_identity(kernel_inputs))
 
-    def test_named_profile_and_its_kconfig_actions_change_identity(
-        self, kernel_inputs: KernelInputs
-    ) -> None:
-        """Different profile selections must never share a device kernel suffix."""
+    def test_named_profile_changes_boot_identity(self, kernel_inputs: KernelInputs) -> None:
+        """Different boot profiles must have different boot recipes."""
         default = kernel_identity(kernel_inputs)
         common: dict[str, Any] = {
             "target": kernel_inputs.target,
@@ -178,7 +175,7 @@ class DeviceStateTests:
             "bootstrap_recipe": kernel_inputs.bootstrap_recipe,
             "environment_recipe": "a" * 64,
             "root": kernel_inputs.root,
-            "initramfs_delivery": "embedded",
+            "initramfs_delivery": "external",
             "kbuild_implementation": kbuild_state.implementation_identity(
                 [("scripts/implementation.py", kernel_inputs.implementation)]
             ),
@@ -189,18 +186,9 @@ class DeviceStateTests:
         named = device_state.device_kernel_identity(
             **common,
             profile="usb-host-lab",
-            config_enable=("CONFIG_USB",),
-            config_disable=("CONFIG_USB_GADGET",),
-        )
-        changed_actions = device_state.device_kernel_identity(
-            **common,
-            profile="usb-host-lab",
-            config_enable=("CONFIG_USB_HID",),
-            config_disable=("CONFIG_USB_GADGET",),
         )
 
         assert (default) != (named)
-        assert (named) != (changed_actions)
 
     def test_invalid_identity_inputs_fail_closed(self, kernel_inputs: KernelInputs) -> None:
         """The helper cannot silently label a kernel from an incomplete closure."""
@@ -211,7 +199,7 @@ class DeviceStateTests:
                 bootstrap_recipe=kernel_inputs.bootstrap_recipe,
                 environment_recipe="a" * 64,
                 root={"kind": "initramfs", "artifact": {"sha256": "1" * 64}},
-                initramfs_delivery="embedded",
+                initramfs_delivery="external",
                 kbuild_implementation="9" * 64,
                 arch=kernel_inputs.arch,
                 defconfig=kernel_inputs.defconfig,
@@ -224,7 +212,7 @@ class DeviceStateTests:
                 bootstrap_recipe=kernel_inputs.bootstrap_recipe,
                 environment_recipe="a" * 64,
                 root=kernel_inputs.root,
-                initramfs_delivery="embedded",
+                initramfs_delivery="external",
                 kbuild_implementation="9" * 64,
                 arch=kernel_inputs.arch,
                 defconfig=kernel_inputs.defconfig,

@@ -203,10 +203,10 @@ def load_platform(platform: str) -> dict[str, Any]:
     if "uboot" in config:
         uboot = exact_table(
             config["uboot"],
-            {"source", "archive_prefix", "patches", "required_config", "copies"},
+            {"source", "archive_prefix", "defconfig", "patches", "required_config", "copies"},
             "platform uboot",
         )
-        for key in ("source", "archive_prefix"):
+        for key in ("source", "archive_prefix", "defconfig"):
             relative_value(uboot[key], f"platform uboot {key}")
         path_array(uboot.get("patches"), "platform uboot patches", allow_empty=True)
         kconfig_line_array(uboot.get("required_config"), "platform uboot required_config")
@@ -257,6 +257,7 @@ def _bootstrap(value: object) -> dict[str, Any]:
             "backend",
             "vendor_source_lock",
             "archive_prefix",
+            "stage0_source",
             "source_destination",
             "vendor_destination",
             "output_destination",
@@ -278,7 +279,13 @@ def _bootstrap(value: object) -> dict[str, Any]:
     )
     for key in ("vendor_source_lock", "archive_prefix", "safety_target"):
         nonempty_string(bootstrap.get(key), f"platform bootstrap {key}")
-    for key in ("source_destination", "vendor_destination", "output_destination", "pack_reloc"):
+    for key in (
+        "stage0_source",
+        "source_destination",
+        "vendor_destination",
+        "output_destination",
+        "pack_reloc",
+    ):
         relative_value(bootstrap.get(key), f"platform bootstrap {key}")
     string_array(bootstrap.get("build_targets"), "platform bootstrap build_targets")
     path_array(bootstrap.get("patches"), "platform bootstrap patches", allow_empty=True)

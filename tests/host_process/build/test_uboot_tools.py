@@ -269,17 +269,14 @@ class UbootToolsTests:
         platform = uboot_inputs.root / "platforms/ums9117"
         (platform / "linux/overlay").mkdir(parents=True)
         shutil.copyfile(ROOT / "platforms/ums9117/platform.toml", platform / "platform.toml")
+        defconfig = platform / "uboot/fplinux_ums9117_defconfig"
+        defconfig.parent.mkdir()
+        defconfig.write_text(base)
         cache = uboot_inputs.root / "cache"
         cached_archive = cache / "downloads/sources/uboot_fixture/source.tar.bz2"
         cached_archive.parent.mkdir(parents=True)
         shutil.copyfile(uboot_inputs.archive, cached_archive)
-        for target, defconfig in (
-            ("nokia-ta1618", "ta1618_defconfig"),
-            ("inoi-240-modern-4g", "inoi240_defconfig"),
-        ):
-            source = uboot_inputs.root / "targets" / target / "uboot" / defconfig
-            source.parent.mkdir(parents=True)
-            source.write_text(base)
+        for target in ("nokia-ta1618", "inoi-240-modern-4g"):
             target_config = {
                 "platform": "ums9117",
                 "identity": {
@@ -305,7 +302,7 @@ class UbootToolsTests:
                 },
                 "uboot": {
                     **uboot_inputs.config,
-                    "defconfig": f"uboot/{defconfig}",
+                    "defconfig": "platforms/ums9117/uboot/fplinux_ums9117_defconfig",
                     "patches": [],
                     "copies": [{"source": "build-log.sh", "destination": "scripts/build-log.sh"}],
                 },

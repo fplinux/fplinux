@@ -288,6 +288,29 @@ ums9117_sdio_slot_restore_rails(const struct ums9117_sdio_slot_io *io,
 	return first_error;
 }
 
+int ums9117_sdio_slot_takeover(const struct ums9117_sdio_slot_io *io,
+			       u32 quiesce_timeout_us)
+{
+	struct ums9117_sdio_state controller = { 0 };
+	u32 gate = ums9117_sdio_slot_read(io, UMS9117_SDIO_SLOT_REG_GATE_STATE);
+	int ret;
+
+	if (!(gate & UMS9117_SDIO_SLOT_GATE_MASK) ||
+	    (ums9117_sdio_slot_read(io, UMS9117_SDIO_SLOT_REG_RESET_STATE) &
+	     UMS9117_SDIO_SLOT_RESET_MASK))
+		return -EBUSY;
+	ret = ums9117_sdio_abort(&io->controller, &controller,
+				 quiesce_timeout_us);
+	if (ret)
+		return ret;
+	ums9117_sdio_slot_write(io, UMS9117_SDIO_SLOT_REG_GATE_CLEAR,
+				UMS9117_SDIO_SLOT_GATE_MASK);
+	if (ums9117_sdio_slot_read(io, UMS9117_SDIO_SLOT_REG_GATE_STATE) !=
+	    (gate & ~UMS9117_SDIO_SLOT_GATE_MASK))
+		return -EIO;
+	return 0;
+}
+
 int ums9117_sdio_slot_snapshot(const struct ums9117_sdio_slot_io *io,
 			       struct ums9117_sdio_slot_state *state)
 {

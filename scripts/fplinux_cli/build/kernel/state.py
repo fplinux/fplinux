@@ -255,3 +255,8 @@ def write_profile_root(output: Path, target_config: dict[str, Any]) -> Path:
     contents = profile_layout.root_bootargs_dtsi(target_config["linux"]["root"])
     write_changed_file(path, contents, 0o644)
     return path
+
+
+def write_default_bootargs(output: Path) -> Path:
+    """Build the family DTBs with the RAM cells ready for the selected loader."""
+    return write_profile_root(output, {"linux": {"root": {"kind": "initramfs"}}})

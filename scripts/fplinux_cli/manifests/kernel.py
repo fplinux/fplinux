@@ -15,13 +15,13 @@ if TYPE_CHECKING:
 
 def kernel_config_paths(
     target: str, target_config: dict[str, Any], platform: dict[str, Any]
-) -> tuple[Path, Path, Path]:
-    """Return the shared base, board fragment and selected build-type policy."""
-    return (
-        common.ROOT / platform["linux"]["defconfig"],
-        target_directory(target) / target_config["linux"]["config_fragment"],
-        common.ROOT / platform["linux"]["build_types"][target_config["build_type"]],
-    )
+) -> tuple[Path, ...]:
+    """Return the SoC configuration and the selected build-type policy."""
+    paths = [common.ROOT / platform["linux"]["defconfig"]]
+    if fragment := target_config["linux"].get("config_fragment"):
+        paths.append(target_directory(target) / fragment)
+    paths.append(common.ROOT / platform["linux"]["build_types"][target_config["build_type"]])
+    return tuple(paths)
 
 
 def kconfig_values(contents: str) -> dict[str, str]:
@@ -38,15 +38,16 @@ def kconfig_values(contents: str) -> dict[str, str]:
     return values
 
 
-def compose_kernel_config(*paths: Path, boot_font: str) -> bytes:
+def compose_kernel_config(*paths: Path, boot_font: str | None = None) -> bytes:
     """Apply ordered configuration inputs and the target's console font."""
     values: dict[str, str] = {}
     for path in paths:
         if path.is_symlink() or not path.is_file():
             fail(f"kernel configuration input is missing or invalid: {path}")
         values.update(kconfig_values(path.read_text()))
-    values["CONFIG_FONTS"] = "y"
-    values[f"CONFIG_FONT_{boot_font}"] = "y"
+    if boot_font is not None:
+        values["CONFIG_FONTS"] = "y"
+        values[f"CONFIG_FONT_{boot_font}"] = "y"
     return "".join(
         f"# {symbol} is not set\n" if value == "n" else f"{symbol}={value}\n"
         for symbol, value in values.items()

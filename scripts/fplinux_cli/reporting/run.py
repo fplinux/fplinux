@@ -76,7 +76,7 @@ def _expected_error_text(error: BaseException | None) -> str | None:
     return None
 
 
-def run_entrypoint(entrypoint: Callable[[], None]) -> None:
+def run_entrypoint(entrypoint: Callable[[], object]) -> None:
     """Report expected failures once and retain unexpected exception diagnostics."""
     _REPORTED_EXCEPTION.set(None)
     reporter_token = _ACTIVE_REPORTER.set(None)

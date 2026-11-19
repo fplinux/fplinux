@@ -8,8 +8,8 @@
 typedef unsigned long ulong;
 
 struct bootm_headers {
-	const char *fit_uname_cfg, *fit_uname_os, *fit_uname_fdt;
-	const void *fit_hdr_os, *fit_hdr_fdt;
+	const char *fit_uname_cfg, *fit_uname_os, *fit_uname_fdt, *fit_uname_rd;
+	const void *fit_hdr_os, *fit_hdr_fdt, *fit_hdr_rd;
 	int fit_noffset_os, fit_noffset_fdt;
 	struct {
 		ulong start, end, load, image_len;
@@ -30,6 +30,7 @@ struct bootm_info {
 #define BOOTM_STATE_FINDOTHER 4
 #define BOOTM_STATE_LOADOS 8
 #define BOOTM_STATE_OS_PREP 16
+#define BOOTM_STATE_RAMDISK 32
 #define CONFIG_SYS_FDT_PAD 0x3000U
 
 void bootm_init(struct bootm_info *bmi);

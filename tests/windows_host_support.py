@@ -18,6 +18,7 @@ from fplinux_cli.runtime.windows.host import WindowsHost
 from fplinux_cli.runtime.windows.transport import WindowsTransport
 
 from tests import ROOT
+from tests.boot_identity import IDENTITY_12
 from tests.bundle_support import file_record
 from tests.fixtures.executables import install_python_script
 from tests.fixtures.runtime_manifest import runtime_manifest
@@ -155,7 +156,7 @@ def saved_connection(transport: WindowsTransport, root: Path) -> dict[str, Any]:
         {
             "usb_serial": serial,
             "generation": "cd" * 32,
-            "device_identity": "12" * 32,
+            "device_identity": IDENTITY_12,
             "image": str(directory / "image.bin"),
         }
     )
@@ -247,7 +248,7 @@ def archive_files(directory: Path, *, platform: str = "ums9117") -> Path:
         "environment_recipe": None,
         "environment_content": None,
         "apk_signing_key": None,
-        "device_identity": "12" * 32,
+        "device_identity": IDENTITY_12,
         "files": {
             "runtime-manifest.json": file_record(runtime_path),
             "image/ramboot.bin": file_record(directory / "image/ramboot.bin"),

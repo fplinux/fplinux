@@ -12,10 +12,10 @@ import stat
 import struct
 import tarfile
 from collections import defaultdict, deque
-from dataclasses import dataclass
 from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Any
 
+from fplinux_cli.artifacts.newc import NewcEntry, newc_entries
 from fplinux_cli.common import canonical_json_bytes, sha256_bytes, sha256_file
 
 if TYPE_CHECKING:
@@ -26,54 +26,6 @@ if TYPE_CHECKING:
 
 class FootprintError(RuntimeError):
     """The selected bundle cannot provide a verified footprint."""
-
-
-@dataclass(frozen=True)
-class _Entry:
-    name: str
-    mode: int
-    uid: int
-    gid: int
-    inode: tuple[int, int, int]
-    links: int
-    device: tuple[int, int]
-    data: bytes
-
-
-def _cpio_entries(data: bytes) -> list[_Entry]:
-    entries: list[_Entry] = []
-    offset = 0
-    while offset + 110 <= len(data):
-        header = data[offset : offset + 110]
-        if header[:6] != b"070701":
-            raise FootprintError("root filesystem is not a newc archive")
-        fields = [int(header[index : index + 8], 16) for index in range(6, 110, 8)]
-        inode, mode, uid, gid, links, _mtime, size, major, minor, rmajor, rminor, namesize, _ = (
-            fields
-        )
-        name_end = offset + 110 + namesize
-        payload_start = (name_end + 3) & ~3
-        payload_end = payload_start + size
-        if not namesize or payload_end > len(data) or data[name_end - 1] != 0:
-            raise FootprintError("root filesystem archive is truncated")
-        name = data[offset + 110 : name_end - 1].decode("utf-8")
-        if name == "TRAILER!!!":
-            return entries
-        name = name.removeprefix("./")
-        entries.append(
-            _Entry(
-                name,
-                mode,
-                uid,
-                gid,
-                (major, minor, inode),
-                links,
-                (rmajor, rminor),
-                data[payload_start:payload_end],
-            )
-        )
-        offset = (payload_end + 3) & ~3
-    raise FootprintError("root filesystem archive has no trailer")
 
 
 def _installed_packages(data: bytes) -> tuple[dict[str, dict[str, Any]], dict[str, str]]:
@@ -176,13 +128,13 @@ def _explain_dependencies(
 
 
 def _rootfs_report(data: bytes, *, external: bool) -> tuple[dict[str, Any], dict[str, list[str]]]:
-    entries = _cpio_entries(data)
+    entries = newc_entries(data)
     contents = {entry.name: entry.data for entry in entries}
     packages, owners = _installed_packages(contents["lib/apk/db/installed"])
     world = contents["etc/apk/world"].decode("utf-8").splitlines()
     providers = _providers(packages, owners)
     _explain_dependencies(packages, world, providers)
-    hardlinks: dict[tuple[int, int, int], list[_Entry]] = defaultdict(list)
+    hardlinks: dict[tuple[int, int, int], list[NewcEntry]] = defaultdict(list)
     for entry in entries:
         if stat.S_ISREG(entry.mode) and entry.links > 1:
             hardlinks[entry.inode].append(entry)
@@ -249,10 +201,7 @@ def _rootfs_report(data: bytes, *, external: bool) -> tuple[dict[str, Any], dict
     }, providers
 
 
-def _ram_root_report(initramfs: bytes) -> dict[str, Any]:
-    """Describe the compressed lower image delivered in the RAM boot archive."""
-    contents = {entry.name: entry.data for entry in _cpio_entries(initramfs)}
-    lower = contents["root.squashfs"]
+def _squashfs_report(lower: bytes) -> dict[str, Any]:
     if len(lower) < 96 or lower[:4] != b"hsqs":
         raise FootprintError("RAM root lower is not a SquashFS image")
     block_bytes = struct.unpack_from("<I", lower, 12)[0]
@@ -266,8 +215,21 @@ def _ram_root_report(initramfs: bytes) -> dict[str, Any]:
         "block_bytes": block_bytes,
         "bytes": len(lower),
         "sha256": sha256_bytes(lower),
-        "description": "Compressed RAM backing; file-cache pages are additional and reclaimable",
     }
+
+
+def _ram_root_report(initramfs: bytes) -> dict[str, Any]:
+    """Describe the compressed files retained by the running RAM root."""
+    contents = {entry.name: entry.data for entry in newc_entries(initramfs)}
+    report = _squashfs_report(contents["root.squashfs"])
+    board = contents.get("board.squashfs")
+    if board is not None:
+        report["board"] = _squashfs_report(board)
+        report["total_bytes"] = report["bytes"] + report["board"]["bytes"]
+    report["description"] = (
+        "Compressed RAM backing; file-cache pages are additional and reclaimable"
+    )
+    return report
 
 
 def _elf_bytes_at(elf: bytes, address: int, size: int) -> bytes:

@@ -7,6 +7,7 @@ packages = ["fplinux-feature", "fplinux-ssh"]
 [uboot]
 source = "platforms/demo/uboot.lock.toml"
 archive_prefix = "u-boot-2026.07"
+defconfig = "platforms/demo/uboot/board_defconfig"
 patches = []
 required_config = ["CONFIG_TARGET_DEMO=y"]
 copies = []
@@ -16,6 +17,7 @@ defconfig = "platforms/demo/kernel/defconfig"
 dt_config_checks = []
 
 [bootstrap]
+stage0_source = "platforms/demo/bootstrap-microsd"
 kernel_destination = "zImage"
 toolchain = "toolchain"
 lto = 0

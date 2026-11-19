@@ -55,7 +55,7 @@ def _cache_lock_exclusive(args: argparse.Namespace) -> bool | None:
 
 
 def execute_command(
-    args: argparse.Namespace, action: Callable[[], None], *, data_directory: Path | None = None
+    args: argparse.Namespace, action: Callable[[], object], *, data_directory: Path | None = None
 ) -> None:
     """Run exactly one dispatch action while its command-wide cache lock is held."""
     exclusive = _cache_lock_exclusive(args)

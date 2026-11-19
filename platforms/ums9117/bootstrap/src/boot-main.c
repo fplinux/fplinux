@@ -23,6 +23,9 @@
 #error "generated bootstrap identity lacks FPLINUX_BOOTSTRAP_RECORD_PREFIX"
 #endif
 
+extern const unsigned char linux_initramfs_start[];
+extern const unsigned char linux_initramfs_end[];
+
 #if FPLINUX_BOOTSTRAP_DISPLAY_WIDTH
 static struct fplinux_boot_screen boot_screen;
 static struct ums9117_boot_canvas boot_canvas;
@@ -136,22 +139,52 @@ static void start_boot_screen(void)
 
 	sys_start();
 	sys_framebuffer(boot_canvas.pixels);
-	if (fplinux_boot_screen_init(&boot_screen, &canvas) != 0)
+	if (fplinux_boot_screen_init(&boot_screen, &canvas, true) != 0)
 		ums9117_boot_fail(8, "BOOT SCREEN INIT FAIL");
 }
 #endif
 
+static void load_initramfs(size_t dtb_bytes)
+{
+	enum ums9117_bootstrap_device_data_status status;
+	size_t root_bytes = linux_initramfs_end - linux_initramfs_start;
+	uint32_t arena = FPLINUX_BOOT_LAYOUT_INITRAMFS_ARENA_PHYS;
+	uint32_t limit = FPLINUX_BOOT_LAYOUT_DTB_PHYS;
+	unsigned char *device_data;
+	size_t device_data_bytes;
+	uint32_t root_end;
+	uint32_t start;
+	uint32_t end;
+
+	if (!root_bytes || (root_bytes & 3U) || root_bytes > limit - arena)
+		ums9117_boot_fail(11, "BAD INITRAMFS SIZE");
+
+	status = ums9117_boot_session_load_device_data(
+		(unsigned char *)(uintptr_t)(arena + root_bytes),
+		limit - arena - root_bytes, &device_data, &device_data_bytes);
+	if (status != UMS9117_BOOTSTRAP_DEVICE_DATA_OK)
+		ums9117_boot_fail(11,
+				  ums9117_bootstrap_device_data_error(status));
+
+	/* Linux unpacks both newc members in order into the same root. */
+	root_end = device_data ? (uint32_t)(uintptr_t)device_data : limit;
+	start = root_end - root_bytes;
+	end = root_end + device_data_bytes;
+	memcpy((void *)(uintptr_t)start, linux_initramfs_start, root_bytes);
+	ums9117_bootstrap_flush_dcache_range((void *)(uintptr_t)start,
+					     end - start);
+	if (!ums9117_boot_session_set_initrd(
+		    (unsigned char *)(uintptr_t)FPLINUX_BOOT_LAYOUT_DTB_PHYS,
+		    dtb_bytes, start, end))
+		ums9117_boot_fail(11, "INITRAMFS DTB");
+}
+
 void ums9117_boot_main(const struct ums9117_boot_board *board)
 {
 	enum ums9117_bootstrap_session_status session_status;
-	enum ums9117_bootstrap_device_data_status device_data_status;
 	uint32_t ram_bytes = ums9117_bootstrap_ram_bytes();
 	size_t zimage_bytes = ums9117_bootstrap_zimage_size();
 	size_t dtb_bytes = ums9117_bootstrap_dtb_size();
-	size_t device_data_bytes;
-	unsigned char *device_data;
-	uint32_t device_data_start;
-	uint32_t device_data_end;
 	uint8_t session_id[FPLINUX_HANDOFF_SESSION_ID_BYTES];
 	int has_display = board->display_width != 0;
 
@@ -188,28 +221,9 @@ void ums9117_boot_main(const struct ums9117_boot_board *board)
 		ums9117_boot_fail(4, "BAD DTB SIZE");
 	record_stage(4, "COPY DTB");
 	ums9117_bootstrap_copy_dtb(FPLINUX_BOOT_LAYOUT_DTB_PHYS, dtb_bytes);
-	record_stage(4, "DEVICE DATA");
-	device_data_status = ums9117_boot_session_load_device_data(
-		(unsigned char *)(uintptr_t)
-			FPLINUX_BOOT_LAYOUT_DEVICE_DATA_ARENA_PHYS,
-		FPLINUX_BOOT_LAYOUT_DEVICE_DATA_ARENA_BYTES, &device_data,
-		&device_data_bytes);
-	if (device_data_status != UMS9117_BOOTSTRAP_DEVICE_DATA_OK)
-		ums9117_boot_fail(11, ums9117_bootstrap_device_data_error(
-					      device_data_status));
-	device_data_start = (uint32_t)(uintptr_t)device_data;
-	device_data_end =
-		device_data == NULL ?
-			0 :
-			device_data_start + (uint32_t)device_data_bytes;
-	if (!ums9117_boot_session_set_initrd(
-		    (unsigned char *)(uintptr_t)FPLINUX_BOOT_LAYOUT_DTB_PHYS,
-		    dtb_bytes, device_data_start, device_data_end))
-		ums9117_boot_fail(11, "DEVICE DATA DTB");
-	if (device_data != NULL)
-		ums9117_bootstrap_flush_dcache_range(device_data,
-						     device_data_bytes);
-	record_stage(4, "DEVICE DATA READY");
+	record_stage(4, "COPY INITRAMFS");
+	load_initramfs(dtb_bytes);
+	record_stage(4, "INITRAMFS READY");
 	record_stage(4, "SESSION VERIFY");
 	session_status = ums9117_bootstrap_personalize_dtb(
 		FPLINUX_BOOT_LAYOUT_DTB_PHYS, dtb_bytes, session_id);

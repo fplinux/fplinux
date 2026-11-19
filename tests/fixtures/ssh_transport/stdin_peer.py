@@ -16,9 +16,13 @@ def main() -> int:
         print(os.environ["FPLINUX_TEST_SESSION_ID"])
     elif command == "uname -r":
         print(os.environ["FPLINUX_TEST_KERNEL"])
-    elif command == "fplinux-session-id; uname -r":
+    elif command.startswith("uname -r && "):
+        print(os.environ["FPLINUX_TEST_KERNEL"])
+        print("12" * 32)
+    elif command.startswith("fplinux-session-id && uname -r && "):
         print(os.environ["FPLINUX_TEST_SESSION_ID"])
         print(os.environ["FPLINUX_TEST_KERNEL"])
+        print("12" * 32)
     elif command == "receive-stdin":
         Path(os.environ["FPLINUX_TEST_STDIN_OUTPUT"]).write_bytes(payload)
         print("stdin received")

@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import TYPE_CHECKING, Any
 
 from fplinux_cli import common
@@ -120,7 +121,7 @@ def bootstrap_payload(target_config: dict[str, Any], platform: dict[str, Any]) -
         dtb = target_config["bootstrap"]["dtb_destination"]
         body = (
             '\t.include "ums9117-bootstrap/ram-payload.s"\n\n'
-            f'\tums9117_ram_payload "../{output}/{dtb}"\n'
+            f'\tums9117_ram_payload "../{output}/{dtb}", "../{output}/initramfs.cpio"\n'
         )
     return (f"\t@ {license_tag}: GPL-2.0-only\n" + body).encode("ascii")
 
@@ -130,7 +131,7 @@ def generated_bootstrap_files(
 ) -> dict[str, bytes]:
     """Return every transient input generated for one bootstrap build."""
     layout = effective_boot_layout(target_config)
-    return {
+    generated = {
         BOOTSTRAP_IDENTITY_HEADER: generated_bootstrap_identity(target_config),
         "generated/fplinux-bootstrap-settings.make": bootstrap_settings(target_config),
         "generated/fplinux-bootstrap-display.h": bootstrap_display_header(
@@ -142,6 +143,27 @@ def generated_bootstrap_files(
             target_config["bootstrap"], layout
         ),
     }
+    if target_config["bootstrap"]["kind"] == "uboot-stage0":
+        generated["generated/fplinux-bootstrap-options.h"] = _cold_options(target_config)
+    return generated
+
+
+def _cold_options(target_config: dict[str, Any]) -> bytes:
+    """Use the USB loader's display arguments when the card supplies no argv."""
+    from fplinux_cli.runtime.bundle import load_adapter  # noqa: PLC0415 -- SD stage0 only.
+
+    adapter = load_adapter(
+        inputs_build.root_source(f"platforms/{target_config['platform']}/host/adapter.py")
+    )
+    options = adapter.fpdoom_options(target_config["runtime"]["adapter"])
+    arguments = "".join(f"\t{json.dumps(option)},\n" for option in options)
+    return (
+        "#include <stddef.h>\n"
+        f"#define FPLINUX_BOOTSTRAP_ARGC {len(options)}\n"
+        "static char *fplinux_bootstrap_argv[] = {\n"
+        f"{arguments}"
+        "\tNULL,\n};\n"
+    ).encode("ascii")
 
 
 def bootstrap_recipe_digest(
@@ -166,7 +188,7 @@ def bootstrap_recipe_digest(
                 for field in ("stack_guard_start", "stack_guard_end")
             },
             "target_source": bootstrap_tree_entries(
-                inputs_build.target_source(target, target_bootstrap["source"])
+                inputs_build.root_source(target_bootstrap["source"])
             ),
             "platform_source": bootstrap_tree_entries(inputs_build.root_source(PLATFORM_SOURCE)),
             "implementation": {
@@ -203,9 +225,7 @@ def bootstrap_recipe_digest(
         "target": target,
         "target_bootstrap": target_bootstrap,
         "platform_bootstrap": platform_bootstrap,
-        "target_source": bootstrap_tree_entries(
-            inputs_build.target_source(target, target_bootstrap["source"])
-        ),
+        "source": bootstrap_tree_entries(inputs_build.root_source(target_bootstrap["source"])),
         "shared_copies": shared_copies,
         "lcd_config": (
             {
@@ -261,6 +281,7 @@ def uboot_build_header(uboot: UbootBuild) -> bytes:
         "#define FPLINUX_UBOOT_BUILD_H\n\n"
         f"#define FPLINUX_UBOOT_ENTRY_PHYS 0x{uboot.entry:08x}U\n"
         f"#define FPLINUX_UBOOT_BINARY_BYTES {uboot.binary.stat().st_size}U\n"
+        f'#define FPLINUX_UBOOT_BINARY_SHA256 "{sha256_file(uboot.binary)}"\n'
         "\n"
         "#endif\n"
     ).encode("ascii")

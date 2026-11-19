@@ -2,6 +2,7 @@
 #ifndef FPLINUX_BOOT_SCREEN_H
 #define FPLINUX_BOOT_SCREEN_H
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -19,7 +20,8 @@ struct fplinux_boot_screen {
 };
 
 int fplinux_boot_screen_init(struct fplinux_boot_screen *screen,
-			     const struct fplinux_status_canvas *canvas);
+			     const struct fplinux_status_canvas *canvas,
+			     bool requires_usb);
 void fplinux_boot_screen_fail(struct fplinux_boot_screen *screen,
 			      uint32_t error_code, const char *detail);
 

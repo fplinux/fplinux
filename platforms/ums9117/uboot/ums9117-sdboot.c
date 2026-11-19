@@ -10,6 +10,7 @@
 #include <linux/types.h>
 #include <log.h>
 #include <mmc.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
 #include <u-boot/sha256.h>
@@ -23,6 +24,7 @@
 #define UMS9117_SDBOOT_CONFIG FPLINUX_UBOOT_TARGET
 #define UMS9117_SDBOOT_KERNEL "kernel"
 #define UMS9117_SDBOOT_FDT "fdt"
+#define UMS9117_SDBOOT_RAMDISK "ramdisk"
 #define UMS9117_SDBOOT_VERIFY_VALUE "yes"
 
 static int range_contains(uint32_t base, uint32_t limit, uint32_t address,
@@ -70,6 +72,32 @@ static int has_sha256_hash(const void *fit, int image)
 	return value && length == SHA256_SUM_LEN;
 }
 
+static int validate_ramdisk(const struct fplinux_uboot_handoff *handoff,
+			    const void *fit, uint32_t fit_bytes, int image)
+{
+	const void *data;
+	size_t size;
+	uint8_t arch;
+	uint8_t compression;
+	uint8_t os;
+	uint8_t type;
+
+	return image >= 0 &&
+	       !strcmp(fit_get_name(fit, image, NULL),
+		       UMS9117_SDBOOT_RAMDISK) &&
+	       !fit_image_get_type(fit, image, &type) &&
+	       type == IH_TYPE_RAMDISK &&
+	       !fit_image_get_arch(fit, image, &arch) && arch == IH_ARCH_ARM &&
+	       !fit_image_get_os(fit, image, &os) && os == IH_OS_LINUX &&
+	       !fit_image_get_comp(fit, image, &compression) &&
+	       compression == IH_COMP_NONE &&
+	       !fdt_getprop(fit, image, FIT_LOAD_PROP, NULL) &&
+	       !fit_image_get_data(fit, image, &data, &size) &&
+	       range_contains(handoff->fit_phys, fit_bytes,
+			      (uint32_t)(uintptr_t)data, size) &&
+	       has_sha256_hash(fit, image);
+}
+
 static int preflight_fit_selection(const struct fplinux_uboot_handoff *handoff,
 				   uint32_t fit_bytes,
 				   const struct bootm_headers *images)
@@ -99,12 +127,16 @@ static int preflight_fit_selection(const struct fplinux_uboot_handoff *handoff,
 	if (config < 0 ||
 	    fit_conf_get_prop_node_count(fit, config, FIT_KERNEL_PROP) != 1 ||
 	    fit_conf_get_prop_node_count(fit, config, FIT_FDT_PROP) != 1 ||
-	    fdt_getprop(fit, config, FIT_RAMDISK_PROP, NULL) ||
+	    fit_conf_get_prop_node_count(fit, config, FIT_RAMDISK_PROP) != 1 ||
 	    fdt_getprop(fit, config, FIT_LOADABLE_PROP, NULL) ||
 	    fdt_getprop(fit, config, FIT_FPGA_PROP, NULL))
 		return -EINVAL;
 	kernel = fit_conf_get_prop_node_index(fit, config, FIT_KERNEL_PROP, 0);
 	fdt = fit_conf_get_prop_node_index(fit, config, FIT_FDT_PROP, 0);
+	if (!validate_ramdisk(handoff, fit, fit_bytes,
+			      fit_conf_get_prop_node_index(
+				      fit, config, FIT_RAMDISK_PROP, 0)))
+		return -EINVAL;
 	if (kernel != images->fit_noffset_os || fdt < 0 ||
 	    strcmp(fit_get_name(fit, kernel, NULL), UMS9117_SDBOOT_KERNEL) ||
 	    strcmp(fit_get_name(fit, fdt, NULL), UMS9117_SDBOOT_FDT) ||
@@ -163,7 +195,10 @@ static int validate_bootm_selection(const struct fplinux_uboot_handoff *handoff,
 	    strcmp(images->fit_uname_os, UMS9117_SDBOOT_KERNEL) ||
 	    !images->fit_uname_fdt ||
 	    strcmp(images->fit_uname_fdt, UMS9117_SDBOOT_FDT) ||
+	    !images->fit_uname_rd ||
+	    strcmp(images->fit_uname_rd, UMS9117_SDBOOT_RAMDISK) ||
 	    images->fit_hdr_os != fit || images->fit_hdr_fdt != fit ||
+	    images->fit_hdr_rd != fit ||
 	    images->os.start != handoff->fit_phys ||
 	    images->os.end != handoff->fit_phys + fit_bytes ||
 	    images->os.type != IH_TYPE_KERNEL ||
@@ -173,8 +208,9 @@ static int validate_bootm_selection(const struct fplinux_uboot_handoff *handoff,
 	    images->ep != handoff->zimage_phys || !images->os.image_len ||
 	    !range_contains(handoff->zimage_phys, handoff->zimage_limit,
 			    handoff->zimage_phys, images->os.image_len) ||
-	    images->rd_start || images->rd_end || images->initrd_start ||
-	    images->initrd_end ||
+	    images->rd_end <= images->rd_start ||
+	    !range_contains(handoff->fit_phys, fit_bytes, images->rd_start,
+			    images->rd_end - images->rd_start) ||
 	    images->ft_addr != (void *)handoff->dtb_phys || !images->ft_len ||
 	    images->ft_len > handoff->dtb_limit ||
 	    CONFIG_SYS_FDT_PAD > handoff->dtb_limit - images->ft_len ||
@@ -208,6 +244,9 @@ static int pack_prepared_fdt(const struct fplinux_uboot_handoff *handoff,
 			     const struct bootm_headers *images,
 			     uint32_t *dtb_bytes)
 {
+	bool autonomous = handoff->entry == FPLINUX_UBOOT_ENTRY_SD;
+	const char *entry = autonomous ? "sd" : "usb";
+	int chosen;
 	int size;
 
 	if ((handoff->dtb_phys & (FPLINUX_BOOT_FDT_ALIGNMENT - 1U)) ||
@@ -217,6 +256,27 @@ static int pack_prepared_fdt(const struct fplinux_uboot_handoff *handoff,
 	size = fdt_totalsize(images->ft_addr);
 	if (size <= 0 || size > handoff->dtb_limit)
 		return -EINVAL;
+	if (fdt_open_into(images->ft_addr, images->ft_addr, handoff->dtb_limit))
+		return -EINVAL;
+	chosen = fdt_path_offset(images->ft_addr, "/chosen");
+	if (chosen < 0 ||
+	    fdt_setprop_string(images->ft_addr, chosen, "fplinux,uboot-sha256",
+			       handoff->uboot_sha256) ||
+	    fdt_setprop_string(images->ft_addr, chosen, "fplinux,boot-entry",
+			       entry))
+		return -EINVAL;
+	if (autonomous) {
+		int session =
+			fdt_path_offset(images->ft_addr, "/fplinux-session");
+
+		if (session < 0 || fdt_del_node(images->ft_addr, session))
+			return -EINVAL;
+		/* The card template's marker must never seed the RNG. */
+		chosen = fdt_path_offset(images->ft_addr, "/chosen");
+		if (chosen < 0 ||
+		    fdt_delprop(images->ft_addr, chosen, "rng-seed"))
+			return -EINVAL;
+	}
 	/* Unused bootm padding may retain duplicate session marker names. */
 	if (fdt_pack(images->ft_addr))
 		return -EINVAL;
@@ -228,7 +288,8 @@ static int prepare_fit(const struct fplinux_uboot_handoff *handoff,
 		       uint32_t fit_bytes, uint32_t *zimage_bytes,
 		       uint32_t *dtb_bytes)
 {
-	char fit_spec[32];
+	char fit_spec[2 * sizeof(handoff->fit_phys) +
+		      sizeof("#" UMS9117_SDBOOT_CONFIG)];
 	struct bootm_info bmi;
 	ulong fdt_high;
 	int length;
@@ -266,6 +327,13 @@ static int prepare_fit(const struct fplinux_uboot_handoff *handoff,
 				       zimage_bytes);
 	if (ret)
 		return ret;
+	/* The verified archive already lies inside the reserved FIT load range. */
+	if (env_set_hex("initrd_high", ~0UL))
+		return -EIO;
+	ret = bootm_run_states(&bmi, BOOTM_STATE_RAMDISK);
+	if (ret || bmi.images->initrd_start != bmi.images->rd_start ||
+	    bmi.images->initrd_end != bmi.images->rd_end)
+		return ret ? ret : -EINVAL;
 	fdt_high = handoff->dtb_phys + bmi.images->ft_len + CONFIG_SYS_FDT_PAD;
 	if (env_set_hex("fdt_high", fdt_high))
 		return -EIO;

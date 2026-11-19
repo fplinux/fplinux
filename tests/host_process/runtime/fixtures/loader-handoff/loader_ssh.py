@@ -16,9 +16,10 @@ def main() -> None:
     command = sys.argv[-1]
     with (root / "ssh-commands.txt").open("a", encoding="utf-8") as trace:
         trace.write(command + "\n")
-    if command == "uname -r":
+    if command.startswith("uname -r && "):
         suffix = "8" * 16 if mode == "identity-failure" else "9" * 16
         print(f"6.18.42-fplinux-{suffix}")
+        print("9" * 64)
     elif command.startswith("fplinux-clock "):
         print("system=1234 rtc=kept")
     elif "-tt" in sys.argv:

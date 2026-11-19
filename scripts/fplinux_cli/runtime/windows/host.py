@@ -216,6 +216,14 @@ class WindowsHost:
         if not isinstance(self.sid, str) or re.fullmatch(r"S-1-5-[0-9-]+", self.sid) is None:
             fail("Cannot identify the current Windows user")
 
+    def route_networks(self) -> set[ipaddress.IPv4Network]:
+        """Return occupied IPv4 ranges without counting the default route."""
+        routes = {
+            ipaddress.IPv4Network(route["prefix"], strict=False)
+            for route in self.ps("routes.ps1")["routes"]
+        }
+        return {route for route in routes if route.prefixlen > 0}
+
     def ps(
         self,
         script: str,

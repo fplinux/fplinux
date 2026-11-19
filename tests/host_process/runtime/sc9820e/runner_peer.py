@@ -16,6 +16,7 @@ from unittest import mock
 from fplinux_cli.runtime.ssh import transport as ssh_transport
 
 from tests import ROOT
+from tests.boot_identity import IDENTITY_9
 from tests.host_process.runtime.sc9820e.fixtures import load_program, prepare_runtime
 
 if TYPE_CHECKING:
@@ -123,7 +124,7 @@ def main() -> None:
             root,
             runtime,
             session,
-            expected_device_identity="9" * 64,
+            expected_device_identity=IDENTITY_9,
             events=event,
             loader_trace=mode == "trace",
         )

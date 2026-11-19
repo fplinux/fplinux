@@ -213,12 +213,12 @@ def target_build_source_files(  # noqa: PLR0913 -- target inputs and captured da
         add_source(profile_manifest_path(target, selected_profile))
     if target_config["uboot"]["kind"] == "full":
         add_source(ROOT / target_config["uboot"]["source"])
-        add_source(target_root / target_config["uboot"]["defconfig"])
+        add_source(ROOT / target_config["uboot"]["defconfig"])
         for relative in target_config["uboot"]["patches"]:
             add_source(ROOT / relative)
         for step in target_config["uboot"]["copies"]:
             add_source(ROOT / step["source"])
-    add_source(target_root / target_config["bootstrap"]["source"])
+    add_source(ROOT / target_config["bootstrap"]["source"])
     if platform["bootstrap"]["backend"] == "sc9820e":
         add_source(target_root / target_config["loader"]["build"]["source"])
     lcd_config = target_config["bootstrap"].get("lcd_config")
@@ -278,8 +278,6 @@ def _linux_source_operations(
                 yield from linux_declarations(
                     linux, owner=owner, kind=kind, source_base=source_base
                 )
-        for relative in target.config.get("microsd", {}).get("linux_patches", []):
-            yield "target-patch", f"targets/{target.name}/{relative}", ""
 
 
 def shared_linux_source_files(
@@ -402,6 +400,7 @@ def target_workspace_snapshot(  # noqa: PLR0913 -- target, build context and per
     release_context: ReleaseContext | None = None,
     phone_data: Path | None = None,
     selected_data_root: Path | None = None,
+    prepared_firmware: dict[str, tuple[firmware_inputs.FirmwareInput, ...]] | None = None,
 ) -> WorkspaceSnapshot:
     """Capture selected sources and, by default, locally prepared device data."""
     cache = data_root(ROOT) if selected_data_root is None else selected_data_root
@@ -450,11 +449,15 @@ def target_workspace_snapshot(  # noqa: PLR0913 -- target, build context and per
     build_uses_device_data = firmware_inputs.rootfs_receives_firmware(
         root_kind=target_config["linux"]["root"]["kind"],
     )
-    captured_groups = (
-        firmware_inputs.capture_external_device_data(target, device_data_groups, root=phone_data)
-        if include_device_data and build_uses_device_data
-        else {}
-    )
+    captured_groups = {}
+    if include_device_data and build_uses_device_data:
+        captured_groups = (
+            firmware_inputs.capture_external_device_data(
+                target, device_data_groups, root=phone_data
+            )
+            if prepared_firmware is None
+            else prepared_firmware
+        )
     firmware_files = tuple(
         WorkspaceFile(
             firmware_inputs.snapshot_device_data_path(
@@ -468,8 +471,15 @@ def target_workspace_snapshot(  # noqa: PLR0913 -- target, build context and per
         for group_name, group in captured_groups.items()
         for firmware in group
     )
+    card_inputs: tuple[WorkspaceFile, ...] = ()
+    if (
+        not include_device_data
+        and target_config["platform"] == "ums9117"
+        and target_config.get("profile") == "microsd-uboot"
+    ):
+        card_inputs = (WorkspaceFile(".fplinux-release-card", b"1\n", 0o644),)
     snapshot_files = tuple(
-        sorted((*causal_files.values(), *firmware_files), key=lambda item: item.path)
+        sorted((*causal_files.values(), *firmware_files, *card_inputs), key=lambda item: item.path)
     )
     if len({source.path for source in snapshot_files}) != len(snapshot_files):
         fail("firmware input collides with a build workspace source path")

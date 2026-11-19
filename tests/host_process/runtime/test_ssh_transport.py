@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Any
 from unittest import mock
 
 import pytest
+from fplinux_cli.runtime.connection import BOOT_IDENTITY_COMMAND
 from fplinux_cli.runtime.ssh import session as ssh_session
 from fplinux_cli.runtime.ssh import transport as ssh_transport
 
@@ -25,6 +26,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
 
 from tests import ROOT
+from tests.boot_identity import IDENTITY_9
 from tests.process import python_environment
 from tests.ssh_transport_support import create_ready_session
 
@@ -133,7 +135,7 @@ class SshTransportFakeToolTests:
             readiness = ssh_transport._network_ready("usb0", session)  # noqa: SLF001
             assert readiness == ready
 
-    @pytest.mark.parametrize("stalled_command", ["fplinux-session-id", "uname -r"])
+    @pytest.mark.parametrize("stalled_command", ["fplinux-session-id", BOOT_IDENTITY_COMMAND])
     def test_reacquire_bounds_an_unresponsive_identity_command(
         self, private_runtime: Path, stalled_command: str
     ) -> None:
@@ -162,7 +164,7 @@ class SshTransportFakeToolTests:
         ):
             started = time.monotonic()
             with pytest.raises(SystemExit, match="did not reconnect before the deadline"):
-                ssh_transport.reacquire_bound_session(session, expected_device_identity="9" * 64)
+                ssh_transport.reacquire_bound_session(session, expected_device_identity=IDENTITY_9)
             assert (time.monotonic() - started) < (3)
 
     @pytest.mark.parametrize(
@@ -210,11 +212,13 @@ class SshTransportFakeToolTests:
         ):
             if kernel_matches:
                 ready = ssh_transport.wait_for_bound_session(
-                    state, expected_device_identity="9" * 64
+                    state, expected_device_identity=IDENTITY_9
                 )
             else:
                 with pytest.raises(SystemExit, match="different kernel identity"):
-                    ssh_transport.wait_for_bound_session(state, expected_device_identity="9" * 64)
+                    ssh_transport.wait_for_bound_session(
+                        state, expected_device_identity=IDENTITY_9
+                    )
                 ssh_session.finish_session(state)
 
         assert (scan_count.read_text(encoding="ascii")) == ("2\n")

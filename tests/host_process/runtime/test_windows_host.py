@@ -35,6 +35,7 @@ from fplinux_cli.runtime.windows import session as windows_session
 from fplinux_cli.runtime.windows import transport as windows_transport
 
 from tests import ROOT
+from tests.boot_identity import IDENTITY_12
 from tests.fdt import binary_tree
 from tests.fixtures.executables import install_python_script
 from tests.fixtures.portable_archive import capsule_files, refresh_archive
@@ -310,6 +311,89 @@ def test_binary_stream_preserves_bytes_and_excludes_stderr(tmp_path: Path) -> No
     with output.open("w+b") as destination:
         transport.stream_remote(session, "binary", destination, timeout=3)
     assert output.read_bytes() == b"\x00\r\n\xff\x80"
+
+
+def test_upload_publishes_binary_bytes_through_bound_ssh_without_a_terminal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    transport = native_process_transport(tmp_path)
+    session = endpoint_session(tmp_path / "session")
+    arguments = tmp_path / "upload-arguments.json"
+    monkeypatch.setenv("FPLINUX_TEST_UPLOAD_ARGUMENTS", str(arguments))
+    source = tmp_path / "Образ & 'name' $file.img.xz"
+    destination = tmp_path / "staged.img.xz"
+    payload = bytes(range(256)) * 2048
+    source.write_bytes(payload)
+    destination.write_bytes(b"previous contents")
+
+    transport.upload(session, str(source), str(destination))
+
+    assert destination.read_bytes() == payload
+    assert list(tmp_path.glob(".fplinux-upload.*")) == []
+    argv = json.loads(arguments.read_text(encoding="utf-8"))
+    assert {
+        "-T",
+        'StrictHostKeyChecking="yes"',
+        'BindAddress="10.23.45.1"',
+        f'UserKnownHostsFile="{session["known_hosts"]}"',
+        session["private_key"],
+        "root@10.23.45.2",
+    } <= set(argv[:-1])
+    assert str(source) not in argv[-1]
+
+
+@pytest.mark.parametrize("destination", ["relative/image", "/stage/../image", "/stage/image;exit"])
+def test_upload_rejects_unsafe_remote_path_before_starting_ssh(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, destination: str
+) -> None:
+    transport = native_process_transport(tmp_path)
+    session = endpoint_session(tmp_path / "session")
+    arguments = tmp_path / "upload-arguments.json"
+    monkeypatch.setenv("FPLINUX_TEST_UPLOAD_ARGUMENTS", str(arguments))
+    source = tmp_path / "source.img.xz"
+    source.write_bytes(b"source contents")
+
+    with pytest.raises(SystemExit, match="upload destination must"):
+        transport.upload(session, str(source), destination)
+
+    assert not arguments.exists()
+
+
+def test_upload_integrity_failure_keeps_the_previous_destination_and_cleans_up(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    transport = native_process_transport(tmp_path)
+    session = endpoint_session(tmp_path / "session")
+    monkeypatch.setenv("FPLINUX_TEST_UPLOAD_CORRUPT", "1")
+    source = tmp_path / "source.img.xz"
+    source.write_bytes(b"expected bytes!")
+    destination = tmp_path / "staged.img.xz"
+    destination.write_bytes(b"previous contents")
+
+    with pytest.raises(SystemExit, match="status 1: device-side SHA-256 verification"):
+        transport.upload(session, str(source), str(destination))
+
+    assert destination.read_bytes() == b"previous contents"
+    assert list(tmp_path.glob(".fplinux-upload.*")) == []
+
+
+def test_upload_timeout_reaps_the_owned_writer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    transport = native_process_transport(tmp_path)
+    session = endpoint_session(tmp_path / "session")
+    pid_file = tmp_path / "writer.pid"
+    monkeypatch.setenv("FPLINUX_TEST_UPLOAD_PID", str(pid_file))
+    monkeypatch.setattr(windows_transport, "_UPLOAD_TIMEOUT_SECONDS", 0.5)
+    source = tmp_path / "source.img.xz"
+    source.write_bytes(b"source contents")
+    destination = tmp_path / "staged.img.xz"
+
+    with pytest.raises(SystemExit, match="SSH upload timed out"):
+        transport.upload(session, str(source), str(destination))
+
+    assert not (Path("/proc") / pid_file.read_text()).exists()
+    assert not destination.exists()
 
 
 def test_binary_stream_progress_reports_written_bytes(tmp_path: Path) -> None:
@@ -746,7 +830,7 @@ def test_authenticated_handoff_requires_ram_and_kernel_identity(
         "6.12.0-fplinux-1212121212121212" if identity != "wrong-kernel" else "6.12.0-other",
     )
     if identity == "correct":
-        transport.authenticate(session, expected_device_identity="12" * 32, timeout=3)
+        transport.authenticate(session, expected_device_identity=IDENTITY_12, timeout=3)
         assert session["status"] == "ready"
         assert (
             "fplinux-0123456789abcdef0123456789abcdef ssh-ed25519 "
@@ -756,13 +840,13 @@ def test_authenticated_handoff_requires_ram_and_kernel_identity(
         with pytest.raises(
             SystemExit, match=r"another RAM session identity|another kernel build identity"
         ):
-            transport.authenticate(session, expected_device_identity="12" * 32, timeout=3)
+            transport.authenticate(session, expected_device_identity=IDENTITY_12, timeout=3)
         assert session["status"] == "prepared"
 
 
 @pytest.mark.parametrize("identity", ["correct", "wrong-session", "wrong-kernel"])
 @pytest.mark.parametrize(
-    "expected_identity", [None, "12" * 32], ids=["saved-build", "selected-build"]
+    "expected_identity", [None, IDENTITY_12], ids=["saved-build", "selected-build"]
 )
 def test_saved_connection_reuses_the_pinned_key_and_requires_live_identities(
     tmp_path: Path,
@@ -850,7 +934,7 @@ def test_reappearing_ready_binding_authenticates_with_a_new_network_interface_in
     monkeypatch.setenv("FPLINUX_TEST_KERNEL", "6.12.0-fplinux-1212121212121212")
 
     assert transport.usb_present(saved) is True
-    current = transport.reacquire_bound_session(saved, expected_device_identity="12" * 32)
+    current = transport.reacquire_bound_session(saved, expected_device_identity=IDENTITY_12)
 
     assert current is saved
     assert state_path.read_bytes() == original_state
@@ -889,7 +973,9 @@ def test_ready_connection_reopens_while_an_owned_boot_candidate_is_prepared(
     assert current == saved
     assert current is not None
     assert transport.usb_present(current)
-    assert transport.reacquire_bound_session(current, expected_device_identity="12" * 32) == saved
+    assert (
+        transport.reacquire_bound_session(current, expected_device_identity=IDENTITY_12) == saved
+    )
 
     assert candidate["status"] == "prepared"
     assert {path.name: path.read_bytes() for path in candidate_directory.iterdir()} == retained
@@ -928,7 +1014,7 @@ def test_concurrent_ready_authentication_preserves_saved_session_and_pinned_keys
             "test-phone", session_root=tmp_path / "data/session"
         )
         assert current is not None
-        return transport.reacquire_bound_session(current, expected_device_identity="12" * 32)
+        return transport.reacquire_bound_session(current, expected_device_identity=IDENTITY_12)
 
     with state_path.open("rb") as original, ThreadPoolExecutor(max_workers=2) as workers:
         first = workers.submit(reconnect)
@@ -976,7 +1062,7 @@ def test_saved_usb_presence_is_independent_of_network_readiness(
     assert now == 0
     if present:
         with pytest.raises(SystemExit, match="did not become ready before the deadline"):
-            transport.reacquire_bound_session(current, expected_device_identity="12" * 32)
+            transport.reacquire_bound_session(current, expected_device_identity=IDENTITY_12)
         assert now >= 3
     assert Path(saved["known_hosts"]).read_bytes() == pinned
 
@@ -1353,8 +1439,9 @@ def test_windows_loader_processes_receive_private_capsule_and_retain_one_archive
     assert Path(session["private_key"]).exists()
 
 
+@pytest.mark.parametrize("profile", [None, "microsd-uboot"], ids=["ram", "system-card"])
 def test_two_boots_retain_one_ready_session_and_failed_next_boot_preserves_its_keys(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, profile: str | None
 ) -> None:
     """Execute real session, loader and SSH processes with controlled native USB/ACL state."""
     archive = tmp_path / "archive"
@@ -1367,7 +1454,7 @@ def test_two_boots_retain_one_ready_session_and_failed_next_boot_preserves_its_k
         "keyscan": "tests/fixtures/ssh_transport/windows_peer.py",
     }.items():
         install_python_script(ROOT / source, bundle.tools[role])
-    runtime = bundle.runtime
+    runtime = {**bundle.runtime, "profile": profile}
     for relative in runtime["sha256"]:
         runtime["sha256"][relative] = hashlib.sha256((archive / relative).read_bytes()).hexdigest()
     runtime_path = archive / "runtime-manifest.json"
@@ -1379,6 +1466,7 @@ def test_two_boots_retain_one_ready_session_and_failed_next_boot_preserves_its_k
     windows_path.write_text(json.dumps(windows))
     build_path = archive / "build-manifest.json"
     build = json.loads(build_path.read_text())
+    build["profile"] = profile
     for relative, record in build["files"].items():
         contents = (archive / relative).read_bytes()
         record["sha256"] = hashlib.sha256(contents).hexdigest()
@@ -1388,7 +1476,11 @@ def test_two_boots_retain_one_ready_session_and_failed_next_boot_preserves_its_k
     build["generation"] = hashlib.sha256(canonical).hexdigest()
     build_path.write_text(json.dumps(build))
     active = tmp_path / "active-session-path"
+    sent_image = tmp_path / "sent-image.bin"
+    bridge_payload = tmp_path / "bridge-payload.json"
     monkeypatch.setenv("FPLINUX_TEST_ACTIVE_SESSION", str(active))
+    monkeypatch.setenv("FPLINUX_TEST_LOADER_IMAGE", str(sent_image))
+    monkeypatch.setenv("FPLINUX_TEST_BRIDGE_PAYLOAD", str(bridge_payload))
     monkeypatch.setenv("FPLINUX_TEST_KERNEL", "6.12.0-fplinux-1212121212121212")
 
     class ArchiveWindowsHost(StubWindowsHost):
@@ -1439,13 +1531,14 @@ def test_two_boots_retain_one_ready_session_and_failed_next_boot_preserves_its_k
     capsule = archive / "data/phone/device-data.cpio"
     capsule.parent.mkdir(parents=True)
     capsule.write_bytes(b"controlled capsule")
+    boot_capsule = capsule if profile is None else None
     unrelated = archive / "data/session/notes/keep.txt"
     unrelated.parent.mkdir(parents=True)
     unrelated.write_text("unrelated user data\n")
 
     _transport, first = windows_boot.boot_archive(
         admitted_windows(archive),
-        capsule,
+        boot_capsule,
         session_root=archive / "data/session",
         events=host.progress,
         log=archive / "logs/first.log",
@@ -1453,13 +1546,23 @@ def test_two_boots_retain_one_ready_session_and_failed_next_boot_preserves_its_k
     first_directory = Path(first["directory"])
     _transport, second = windows_boot.boot_archive(
         admitted_windows(archive),
-        capsule,
+        boot_capsule,
         session_root=archive / "data/session",
         events=host.progress,
         log=archive / "logs/second.log",
     )
 
     assert first["usb_serial"] != second["usb_serial"]
+    usb_fields = sent_image.read_bytes()[1204:1460].rstrip(b"\0").splitlines()
+    if profile is None:
+        assert json.loads(bridge_payload.read_text()) == {
+            "device-data.cpio": b"controlled capsule".hex()
+        }
+        assert not any(field.startswith(b"transport=") for field in usb_fields)
+    else:
+        assert json.loads(bridge_payload.read_text()) == {}
+        assert usb_fields[-1] == b"transport=rndis"
+        assert second["prepared_data_sha256"] is None
     assert not first_directory.exists()
     second_directory = Path(second["directory"])
     assert list((archive / "data/session").glob("*/session.json")) == [
@@ -1474,7 +1577,7 @@ def test_two_boots_retain_one_ready_session_and_failed_next_boot_preserves_its_k
     with pytest.raises(SystemExit, match="failed with status 7"):
         windows_boot.boot_archive(
             admitted_windows(archive),
-            capsule,
+            boot_capsule,
             session_root=archive / "data/session",
             events=host.progress,
             log=archive / "logs/failed.log",

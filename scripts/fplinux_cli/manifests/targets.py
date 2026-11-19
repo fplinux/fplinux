@@ -39,7 +39,6 @@ from fplinux_cli.manifests.values import (
     integer_value,
     nonempty_string,
     package_array,
-    path_array,
     relative_value,
 )
 
@@ -180,7 +179,10 @@ def _sc_loader(target: str, value: object) -> dict[str, Any]:
 
 
 def _combined_bootstrap(
-    bootstrap: dict[str, Any], platform: dict[str, Any], selected_profile: dict[str, Any]
+    target: str,
+    bootstrap: dict[str, Any],
+    platform: dict[str, Any],
+    selected_profile: dict[str, Any],
 ) -> dict[str, Any]:
     """Derive one bootstrap and initramfs-delivery contract for downstream consumers."""
     backend = platform["backend"]
@@ -196,14 +198,15 @@ def _combined_bootstrap(
             fail("resident stage must start at the platform load address")
     if selected_profile["linux"]["root"]["kind"] == "external":
         initramfs_delivery = "none"
-    elif backend == "ums9117":
-        initramfs_delivery = "embedded"
     else:
         initramfs_delivery = "external"
+    source = (
+        profile_bootstrap["source"] if kind == "uboot-stage0" else f"targets/{target}/bootstrap"
+    )
     result: dict[str, Any] = {
         "backend": backend,
         "kind": kind,
-        "source": profile_bootstrap["source"] if kind == "uboot-stage0" else "bootstrap",
+        "source": source,
         "image": profile_bootstrap["image"] if kind == "uboot-stage0" else bootstrap["image"],
         "map": profile_bootstrap["map"] if kind == "uboot-stage0" else bootstrap["map"],
         "record_prefix": bootstrap["record_prefix"],
@@ -357,7 +360,7 @@ def load_target(
         raw_linux,
         {
             "dtb",
-            "config_fragment",
+            *({"config_fragment"} if backend == "sc9820e" else set()),
             "memory",
             "debug_dtb",
             "patches",
@@ -374,7 +377,8 @@ def load_target(
         },
         "target linux",
     )
-    relative_value(linux.get("config_fragment"), "target linux config_fragment")
+    if backend == "sc9820e":
+        relative_value(linux.get("config_fragment"), "target linux config_fragment")
     memory = exact_table(linux.get("memory"), {"base", "size"}, "target linux memory")
     for key in ("base", "size"):
         integer_value(
@@ -418,11 +422,8 @@ def load_target(
         fail(f"target {target} does not support profile {profile}")
     microsd: dict[str, Any] = {}
     if "microsd" in config:
-        microsd_fields = {"linux_patches"}
-        if backend == "ums9117":
-            microsd_fields |= {"bootstrap", "uboot"}
+        microsd_fields = {"bootstrap"} if backend == "ums9117" else set()
         microsd = exact_table(config["microsd"], microsd_fields, "target microsd")
-        path_array(microsd.get("linux_patches"), "target microsd linux_patches", allow_empty=True)
     selected_profile = load_profile(target, profile or "default", platform, microsd)
     if backend == "ums9117":
         physical = platform["bootstrap"]["layout"]
@@ -435,14 +436,10 @@ def load_target(
             fail("target Linux memory must fit inside physical RAM")
     if identity["compatible"] == platform["identity"]["compatible"]:
         fail("target and platform compatibles must be distinct")
-    profile_linux = selected_profile["linux"]
     config["linux"] = {
         **linux,
         "dt_config_checks": [*platform["linux"]["dt_config_checks"], *linux["dt_config_checks"]],
-        "config_enable": profile_linux["config_enable"],
-        "config_disable": profile_linux["config_disable"],
-        "patches": [*linux["patches"], *profile_linux["patches"]],
-        "root": profile_linux["root"],
+        "root": selected_profile["linux"]["root"],
     }
     device_data_groups: dict[str, list[dict[str, Any]]] = {}
     audio_fields = AUDIO_POLICY_FIELDS
@@ -526,7 +523,9 @@ def load_target(
     config["profile"] = profile
     config["build_type"] = build_type
     platform_runtime = platform["runtime"]
-    config["bootstrap"] = _combined_bootstrap(bootstrap, platform["bootstrap"], selected_profile)
+    config["bootstrap"] = _combined_bootstrap(
+        target, bootstrap, platform["bootstrap"], selected_profile
+    )
     for key in ("uboot", "fit", "layout", "storage", "image"):
         config[key] = selected_profile[key]
     transport = selected_profile["runtime"]["transport"]

@@ -51,7 +51,7 @@ def test_sc_ram_target_declares_source_loaders_without_reading_firmware(
     assert config["bootstrap"] == {
         "backend": "sc9820e",
         "kind": "linux",
-        "source": "bootstrap",
+        "source": "targets/phone/bootstrap",
         "image": "ramboot.bin",
         "map": "ramboot.map",
         "record_prefix": "EXAMPLE_PHONE",
@@ -106,7 +106,7 @@ def test_sc_microsd_root_uses_ram_linux_and_a_real_ext4_root_without_uboot(
     """The board admits direct external root while retaining its unchanged RAM loader."""
     manifest = sc_checkout / "targets/phone/target.toml"
     original = manifest.read_text(encoding="utf-8")
-    manifest.write_text(original + "\n[microsd]\nlinux_patches = []\n", encoding="utf-8")
+    manifest.write_text(original + "\n[microsd]\n", encoding="utf-8")
     ram = load_target("phone")
     card = load_target("phone", "microsd-root")
 
@@ -126,8 +126,6 @@ def test_sc_microsd_root_uses_ram_linux_and_a_real_ext4_root_without_uboot(
     assert card["fit"] == {"kind": "none"}
     assert card["image"]["kind"] == "ext4-root"
     assert card["image"]["size"] == 512 * 1024 * 1024
-    assert "CONFIG_BLK_DEV_INITRD" in card["linux"]["config_disable"]
-    assert "CONFIG_EXT4_FS" in card["linux"]["config_enable"]
     bootargs = root_bootargs_dtsi(card["linux"]["root"])
     assert b"root=PARTUUID=46504c52-02 rootfstype=ext4 rootwait=10 rw init=/sbin/init" in bootargs
     assert b"linux,initrd-" not in bootargs
@@ -339,9 +337,7 @@ def test_named_original_manifest_preserves_its_preparer_and_payload_across_root_
     """Both root profiles retain the same originals boundary and declared radio payload."""
     manifest = sc_checkout / "targets/phone/target.toml"
     declaration = (ROOT / "tests/fixtures/original-files/device-data.toml").read_bytes()
-    manifest.write_bytes(
-        manifest.read_bytes() + b"\n" + declaration + b"\n[microsd]\nlinux_patches = []\n"
-    )
+    manifest.write_bytes(manifest.read_bytes() + b"\n" + declaration + b"\n[microsd]\n")
 
     config = load_target("phone", profile)
 

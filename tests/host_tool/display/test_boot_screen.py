@@ -81,7 +81,7 @@ def test_boot_and_failure_are_visible(boot_screen: tuple[str, Path], tmp_path: P
     profile, executable = boot_screen
     width, height = map(int, profile.split("x"))
     images = []
-    for state in ("boot", "expected", "error", "error2"):
+    for state in ("boot", "expected", "boot-offline", "expected-offline", "error", "error2"):
         output = tmp_path / state
         run_process(
             [str(executable), str(width), str(height), state, str(output)],
@@ -90,8 +90,10 @@ def test_boot_and_failure_are_visible(boot_screen: tuple[str, Path], tmp_path: P
             check=True,
         )
         images.append(struct.unpack(f"={width * height}H", output.read_bytes()))
-    boot, expected, error, other_error = images
+    boot, expected, offline, expected_offline, error, other_error = images
     assert boot == expected
+    assert offline == expected_offline
+    assert offline != boot
     assert boot != error
     assert error != other_error
     assert 0xE71B in boot  # Light centre of the shared boot mark.

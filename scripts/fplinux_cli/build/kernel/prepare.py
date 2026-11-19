@@ -146,8 +146,6 @@ def shared_integration(
     copies: dict[str, LinuxInput] = {}
     generated: dict[str, bytes] = {}
     for target in targets:
-        if target.config.get("microsd", {}).get("linux_patches"):
-            fail(f"target {target.name}: profile-specific Linux patches cannot share source")
         for values in integration_inputs(target.name, target.config, target.platform):
             step = LinuxInput(*values)
             if step in seen:

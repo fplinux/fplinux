@@ -10,7 +10,6 @@ import hmac
 import json
 import math
 import os
-import re
 import signal
 import stat
 import subprocess
@@ -21,9 +20,22 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from fplinux_cli.common import is_sha256, sha256_file
-from fplinux_cli.runtime.connection import ConnectionLostError
+from fplinux_cli.runtime.connection import (
+    BOOT_IDENTITY_COMMAND,
+    ConnectionLostError,
+    observed_device_identity,
+)
 
-from .commands import SSH_PORT, require_tool, ssh_argv, ssh_options, stream_stderr_detail
+from .commands import (
+    SSH_PORT,
+    remote_path,
+    require_tool,
+    ssh_argv,
+    ssh_options,
+    stream_stderr_detail,
+    upload_publication,
+    upload_space_check,
+)
 from .errors import fail
 from .session import mark_current, validate_session
 
@@ -31,8 +43,6 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from types import FrameType
     from typing import BinaryIO
-
-REMOTE_PATH = re.compile(r"/(?:[A-Za-z0-9._-]+/)*[A-Za-z0-9._-]+")
 
 
 def _usb_devices(session: dict[str, Any], *, require_absence_proof: bool = False) -> list[Path]:
@@ -397,26 +407,26 @@ def run_remote(
 def require_device_identity(
     session: dict[str, Any], device_identity: str, *, timeout: float | None = None
 ) -> str:
-    """Require the authenticated phone to expose the selected kernel identity."""
+    """Require the authenticated phone to expose the selected kernel and boot recipe."""
     if not is_sha256(device_identity):
         fail("expected device identity is invalid")
-    result = run_remote(session, "uname -r", capture_output=True, shared=True, timeout=timeout)
+    result = run_remote(
+        session, BOOT_IDENTITY_COMMAND, capture_output=True, shared=True, timeout=timeout
+    )
     if result.returncode:
         detail = result.stderr.strip().splitlines()
         fail(
             f"cannot read the running kernel identity (exit {result.returncode})"
             + (f": {detail[-1]}" if detail else "")
         )
-    releases = result.stdout.splitlines()
-    expected_suffix = f"-fplinux-{device_identity[:16]}"
-    if len(releases) != 1 or not releases[0].endswith(expected_suffix):
-        actual = result.stdout.strip() or "no kernel release"
+    lines = result.stdout.splitlines()
+    if observed_device_identity(lines) != device_identity:
+        actual = lines[0] if lines else "no kernel release"
         fail(
-            "current SSH session exposes a different kernel identity\n"
-            f"  phone:  {actual}\n"
-            f"  bundle: kernel *{expected_suffix}"
+            "current SSH session exposes a different kernel identity or boot recipe\n"
+            f"  phone:  {actual}"
         )
-    return releases[0]
+    return lines[0]
 
 
 def _terminate_stream_process(process: subprocess.Popen[bytes]) -> None:
@@ -505,14 +515,6 @@ def stream_remote(
             fail(message + (f": {detail}" if detail else ""))
 
 
-def _remote_path(value: str, name: str) -> str:
-    if len(value) > 200 or REMOTE_PATH.fullmatch(value) is None:
-        fail(f"{name} must be an absolute file path using only letters, digits, '.', '_', '-'")
-    if any(component.strip(".") == "" for component in value.split("/")[1:]):
-        fail(f"{name} must not contain dot-only path components")
-    return value
-
-
 def _sftp_quote(value: str) -> str:
     if any(character in value for character in ("\0", "\n", "\r")):
         fail("SFTP path contains a line separator")
@@ -555,7 +557,7 @@ def _remote_metadata(session: dict[str, Any], remote: str) -> tuple[int, str]:
 def upload(session: dict[str, Any], local_name: str, remote_name: str) -> None:
     """Upload through SFTP, then verify and atomically publish on the phone."""
     session = validate_session(session)
-    remote = _remote_path(remote_name, "upload destination")
+    remote = remote_path(remote_name, "upload destination")
     local = Path(local_name)
     try:
         metadata = local.lstat()
@@ -566,12 +568,9 @@ def upload(session: dict[str, Any], local_name: str, remote_name: str) -> None:
     expected_hash = sha256_file(local)
     expected_size = metadata.st_size
     directory = remote.rsplit("/", 1)[0] or "/"
-    free_kib = expected_size // 1024 + 64
     check = run_remote(
         session,
-        f"[ -d '{directory}' ] && free=$(stat -f -c '%a %S' '{directory}') && "
-        "set -- $free && "
-        f'[ "$(($1 * $2 / 1024))" -ge {free_kib} ]',
+        upload_space_check(directory, expected_size),
         capture_output=True,
         shared=True,
     )
@@ -594,10 +593,7 @@ def upload(session: dict[str, Any], local_name: str, remote_name: str) -> None:
             fail(f"upload source changed while it was sent: {local}")
         publish = run_remote(
             session,
-            f"got=$(sha256sum '{temporary}'); got=${{got%% *}}; "
-            f"size=$(wc -c < '{temporary}'); "
-            f'[ "$got" = \'{expected_hash}\' ] && [ "$size" -eq {expected_size} ] && '
-            f"[ ! -d '{remote}' ] && [ ! -L '{remote}' ] && mv -f '{temporary}' '{remote}'",
+            upload_publication(temporary, remote, expected_hash, expected_size),
             capture_output=True,
             shared=True,
         )
@@ -616,7 +612,7 @@ def upload(session: dict[str, Any], local_name: str, remote_name: str) -> None:
 def pull(session: dict[str, Any], remote_name: str, local_name: str) -> None:
     """Download through SFTP and publish locally only after end-to-end verification."""
     session = validate_session(session)
-    remote = _remote_path(remote_name, "pull source")
+    remote = remote_path(remote_name, "pull source")
     expected_size, expected_hash = _remote_metadata(session, remote)
     destination = Path(local_name)
     parent = destination.parent

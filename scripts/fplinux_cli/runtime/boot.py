@@ -151,8 +151,6 @@ def _run_new_bundle(  # noqa: PLR0913 -- the waiting observer preserves the admi
     if os.name == "nt":
         from fplinux_cli.runtime.windows.boot import boot_archive  # noqa: PLC0415
 
-        if device_data is None:
-            fail("This Windows phone requires its RAM data capsule")
         if admitted.windows is None:
             fail("This bundle has no admitted Windows host tools")
         return boot_archive(

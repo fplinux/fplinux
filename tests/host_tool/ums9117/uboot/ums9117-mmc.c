@@ -18,6 +18,12 @@ static struct fake_register registers[96];
 static unsigned int register_count;
 static uintptr_t adi_read_address;
 static u64 elapsed_us;
+static struct fplinux_uboot_handoff handoff;
+
+const struct fplinux_uboot_handoff *ums9117_uboot_handoff_get(void)
+{
+	return &handoff;
+}
 
 static u32 *fake_register(uintptr_t address)
 {
@@ -136,6 +142,7 @@ int main(int argc, char **argv)
 	struct udevice dev = { .name = "test-slot" };
 	bool removable_absent;
 	bool invalid_voltage;
+	bool cold_entry;
 	u32 mask;
 	int failed = 0;
 	int ret;
@@ -145,17 +152,24 @@ int main(int argc, char **argv)
 	dev.non_removable = !strncmp(argv[1], "fixed-", 6);
 	removable_absent = !strcmp(argv[1], "removable-absent");
 	invalid_voltage = !strcmp(argv[1], "fixed-invalid-voltage");
+	cold_entry = !strcmp(argv[1], "removable-cold");
+	handoff.entry = cold_entry ? FPLINUX_UBOOT_ENTRY_SD :
+				     FPLINUX_UBOOT_ENTRY_USB;
 	mask = !strcmp(argv[1], "fixed-busy-detect") ? 2U : 0U;
 	*fake_register(0x402c0004U) = mask;
 	*fake_register(0x402c0000U) =
 		dev.non_removable || removable_absent ? 1U : 0U;
 	*fake_register(0x40600030U) = 0x400U;
-	*fake_register(0x40608d00U) = 1U;
+	*fake_register(0x40608d00U) = cold_entry ? 0U : 1U;
 	*fake_register(0x40608d04U) = 0x50U;
-	*fake_register(0x40608d0cU) = 1U;
+	*fake_register(0x40608d0cU) = cold_entry ? 0U : 1U;
 	*fake_register(0x40608d10U) = invalid_voltage ? 0x6eU : 0x6fU;
 	*fake_register(0x20300024U) = 0x00100000U;
 	*fake_register(0x203000fcU) = 0x00040000U;
+	if (cold_entry) {
+		*fake_register(0x20e00000U) = 0x80U;
+		*fake_register(0x2030002cU) = 7U;
+	}
 	dev.plat = calloc(1, ums9117_mmc.plat_auto);
 	dev.priv = calloc(1, ums9117_mmc.priv_auto);
 	if (!dev.plat || !dev.priv)
@@ -191,10 +205,11 @@ int main(int argc, char **argv)
 	ums9117_mmc_release();
 	failed |= expect(*fake_register(0x402c0004U) == mask,
 			 "slot changed unrelated card-detect ownership");
-	failed |= expect(!*fake_register(0x20e00000U) &&
-				 (*fake_register(0x40608d00U) & 1U) &&
-				 (*fake_register(0x40608d0cU) & 1U),
-			 "release did not restore slot power and gate state");
+	failed |= expect(
+		!*fake_register(0x20e00000U) &&
+			!!(*fake_register(0x40608d00U) & 1U) == !cold_entry &&
+			!!(*fake_register(0x40608d0cU) & 1U) == !cold_entry,
+		"release did not restore slot power and gate state");
 	failed |= expect(!ums9117_mmc.remove(&dev), "driver remove failed");
 done:
 	free(dev.priv);

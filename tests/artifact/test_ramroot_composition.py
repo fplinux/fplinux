@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import stat
 import struct
 import subprocess
@@ -14,6 +15,99 @@ from fplinux_cli.alpine import rootfs_files as alpine_builder
 
 from tests import ROOT
 from tests.process import run_process
+
+
+def unpack_board_images(archive: Path, destination: Path) -> None:
+    destination.mkdir()
+    run_process(
+        [
+            "cpio",
+            "--extract",
+            "--quiet",
+            "--file",
+            str(archive),
+            "root.squashfs",
+            "board.squashfs",
+        ],
+        cwd=destination,
+        name="extract shared and board RAM images",
+        timeout=10,
+        check=True,
+    )
+    run_process(
+        [
+            "unsquashfs",
+            "-no-progress",
+            "-processors",
+            "1",
+            "-d",
+            str(destination / "board"),
+            str(destination / "board.squashfs"),
+        ],
+        name="extract the board files",
+        timeout=10,
+        check=True,
+    )
+
+
+def test_board_ram_images_share_base_and_preserve_apk_and_board_files(tmp_path: Path) -> None:
+    """Each archive retains the same compressed base and its own effective root contents."""
+    base = tmp_path / "system"
+    for relative in ("bin", "lib/apk/db", "usr/lib", "usr/share/fonts", "etc/apk"):
+        (base / relative).mkdir(parents=True)
+    (base / "bin/busybox").write_bytes(b"shared runtime\n")
+    (base / "lib/ld-musl-armhf.so.1").write_bytes(b"loader\n")
+    (base / "lib/libc.musl-armv7.so.1").symlink_to("ld-musl-armhf.so.1")
+    (base / "usr/lib/libgcc_s.so.1").write_bytes(b"library\n")
+    (base / "lib/apk/db/installed").write_bytes(b"system packages\n")
+    (base / "etc/apk/world").write_bytes(b"system\n")
+    (base / "etc/apk/world").chmod(0o600)
+    base_output = tmp_path / "base-output"
+    base_output.mkdir()
+    alpine_builder._write_ramroot_initramfs(base, base_output)  # noqa: SLF001
+    base_archive = base_output / "initramfs.cpio"
+
+    wifi = tmp_path / "wifi"
+    compact = tmp_path / "compact"
+    for board, font in ((wifi, "8x16"), (compact, "6x12")):
+        system = board / "system"
+        shutil.copytree(base, system, symlinks=True)
+        (system / "usr/share/fonts" / font).write_text(font, encoding="ascii")
+        (system / "etc/apk/world").write_text(f"font-{font}\nsystem\n", encoding="ascii")
+        (system / "etc/brightness.conf").write_text(f"board={font}\n", encoding="ascii")
+    wifi_system = wifi / "system"
+    (wifi_system / "bin/hostapd").write_bytes(b"board executable\n")
+    (wifi_system / "bin/hostapd").chmod(0o755)
+    os.setxattr(wifi_system / "bin/hostapd", "user.fplinux.fixture", b"preserved")
+    os.link(wifi_system / "bin/hostapd", wifi_system / "bin/wifi-service")
+    (wifi_system / "lib/apk/db/installed").write_bytes(b"system and Wi-Fi packages\n")
+
+    for board in (wifi, compact):
+        alpine_builder._write_ramroot_initramfs(  # noqa: SLF001
+            board / "system", board, base_initramfs=base_archive
+        )
+        unpack_board_images(board / "initramfs.cpio", board / "images")
+
+    assert (wifi / "images/root.squashfs").read_bytes() == (
+        compact / "images/root.squashfs"
+    ).read_bytes()
+    wifi_layer = wifi / "images/board"
+    compact_layer = compact / "images/board"
+    assert (wifi_layer / "etc/apk/world").read_bytes() == b"font-8x16\nsystem\n"
+    assert (compact_layer / "etc/apk/world").read_bytes() == b"font-6x12\nsystem\n"
+    assert (wifi_layer / "lib/apk/db/installed").read_bytes() == b"system and Wi-Fi packages\n"
+    assert (wifi_layer / "etc/brightness.conf").read_bytes() == b"board=8x16\n"
+    assert (compact_layer / "etc/brightness.conf").read_bytes() == b"board=6x12\n"
+    assert sorted(path.name for path in (wifi_layer / "usr/share/fonts").iterdir()) == ["8x16"]
+    assert sorted(path.name for path in (compact_layer / "usr/share/fonts").iterdir()) == ["6x12"]
+    hostapd = wifi_layer / "bin/hostapd"
+    assert hostapd.read_bytes() == b"board executable\n"
+    assert stat.S_IMODE(hostapd.stat().st_mode) == 0o755
+    assert os.getxattr(hostapd, "user.fplinux.fixture") == b"preserved"
+    assert (wifi_layer / "bin/wifi-service").stat().st_ino == hostapd.stat().st_ino
+    assert not (wifi_layer / "bin/busybox").exists()
+    assert not (compact_layer / "bin/hostapd").exists()
+    assert not (compact_layer / "lib/apk/db/installed").exists()
 
 
 class RamrootCompositionTests:

@@ -40,11 +40,11 @@ from .rootfs_files import (
     _write_rootfs_cpio,
 )
 from .rootfs_verify import _require_cached_bundle_packages_installable, _verify_alpine_rootfs
-from .selection import aport_build_order
+from .selection import aport_build_order, selected_packages
 from .signing import _ensure_apk_signing_key
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Mapping, Sequence
 
 _ROOTFS_BUILD_LOCK = ".build.lock"
 _alpine_tar_filter = partial(alpine_tar_filter, on_error=fail)
@@ -150,6 +150,36 @@ def _rootfs_remove_command(
     return _rootfs_apk_command(lock, root, keys, repository, "del", *packages)
 
 
+def shared_ram_packages(
+    platform: Mapping[str, object], target: Mapping[str, object]
+) -> tuple[str, ...] | None:
+    """Select the common and platform packages for every UMS9117 RAM root."""
+    if target.get("platform") != "ums9117":
+        return None
+    return selected_packages(
+        platform,
+        {
+            "build_type": target.get("build_type"),
+            "rootfs": {"base_packages": [], "packages": []},
+        },
+    )
+
+
+def shared_card_packages(
+    platform: Mapping[str, object], target: dict[str, Any]
+) -> tuple[str, ...] | None:
+    """Select the packages shared by the UMS9117 microSD system cards."""
+    if target.get("platform") != "ums9117" or target.get("profile") != "microsd-uboot":
+        return None
+    return selected_packages(
+        platform,
+        {
+            "build_type": target["build_type"],
+            "rootfs": {"base_packages": [], "packages": target["rootfs"]["packages"]},
+        },
+    )
+
+
 def build_rootfs(  # noqa: PLR0913 -- rootfs content and optional image output stay explicit.
     jobs: int,
     packages: tuple[str, ...],
@@ -159,11 +189,17 @@ def build_rootfs(  # noqa: PLR0913 -- rootfs content and optional image output s
     display_brightness: dict[str, Any] | None = None,
     external_image: dict[str, Any] | None = None,
     external_output: Path | None = None,
+    ram_base_packages: tuple[str, ...] | None = None,
 ) -> tuple[Path, Path, str, dict[str, Path]]:
-    """Build the standard rootfs and any APKs published in its bundle."""
+    """Build a rootfs and its APKs, caching any ext4 image without an explicit output."""
     environment_recipe = os.environ.get("FPLINUX_ENVIRONMENT_ARTIFACT_RECIPE", "")
     release_id = current_release_context().release_id
     signing_private_key, signing_public_key, signing_key_identity = _ensure_apk_signing_key()
+    ram_base_recipe = None
+    ram_base_initramfs = None
+    if ram_base_packages is not None:
+        _, ram_base_output, ram_base_recipe, _ = build_rootfs(jobs, ram_base_packages)
+        ram_base_initramfs = require_file(ram_base_output / rootfs_state.INITRAMFS_NAME)
     recipe = alpine_rootfs_recipe(
         environment_recipe,
         signing_key_identity,
@@ -173,6 +209,7 @@ def build_rootfs(  # noqa: PLR0913 -- rootfs content and optional image output s
         display_brightness=display_brightness,
         root_kind="external" if external_image is not None else "initramfs",
     )
+    recipe = rootfs_state.layered_rootfs_recipe(recipe, ram_base_recipe)
     overlap = set(packages) & set(bundle_packages)
     if overlap:
         fail(
@@ -185,8 +222,11 @@ def build_rootfs(  # noqa: PLR0913 -- rootfs content and optional image output s
     ext4_root: Any | None = None
     ext4_plan: Any | None = None
     ext4_hit = external_image is None
-    if (external_image is None) != (external_output is None):
-        fail("external root image and output must be selected together")
+    if external_image is None and external_output is not None:
+        fail("external root output requires an image specification")
+    cached_ext4 = external_image is not None and external_output is None
+    if cached_ext4:
+        external_output = output / rootfs_state.EXT4_IMAGE_DIRECTORY
 
     with _open_rootfs_build_lock(rootfs_directory) as lock_stream:
         fcntl.flock(lock_stream.fileno(), fcntl.LOCK_EX)
@@ -326,7 +366,7 @@ def build_rootfs(  # noqa: PLR0913 -- rootfs content and optional image output s
             if not rootfs_hit:
                 _write_rootfs_cpio(root, staging / rootfs_state.ROOTFS_NAME)
                 if external_image is None:
-                    _write_ramroot_initramfs(root, staging)
+                    _write_ramroot_initramfs(root, staging, base_initramfs=ram_base_initramfs)
                 rootfs_state.write_receipt(staging, recipe)
                 rootfs_receipt = rootfs_state.trusted_receipt_identity(staging, recipe)
             else:
@@ -343,7 +383,10 @@ def build_rootfs(  # noqa: PLR0913 -- rootfs content and optional image output s
                         rootfs_receipt,
                         environment_recipe,
                     )
-                    ext4_root.build(root, external_output, ext4_plan)
+                    image_output = external_output
+                    if cached_ext4 and not rootfs_hit:
+                        image_output = staging / rootfs_state.EXT4_IMAGE_DIRECTORY
+                    ext4_root.build(root, image_output, ext4_plan)
                 except (OSError, subprocess.SubprocessError, ext4_root.Ext4RootError) as error:
                     fail(str(error))
             shutil.rmtree(sysroot)

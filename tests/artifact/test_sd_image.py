@@ -6,6 +6,7 @@ from __future__ import annotations
 import shutil
 import struct
 import subprocess
+import tarfile
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -13,6 +14,8 @@ from typing import TYPE_CHECKING
 from unittest import mock
 
 import pytest
+from fplinux_cli.alpine.rootfs_files import write_card_rootfs_layer
+from fplinux_cli.build.bootstrap.result import ColdSdBootstrap
 from fplinux_cli.build.storage import sd as sd_image
 from fplinux_cli.common import sha256_file
 
@@ -53,7 +56,7 @@ class SdInputs:
     rootfs: Path
     output: Path
 
-    def build(self) -> Path:
+    def build(self, cold_boot: ColdSdBootstrap | None = None) -> Path:
         """Build from the current exact fixture inputs."""
         return sd_image.build(
             self.fit,
@@ -61,6 +64,7 @@ class SdInputs:
             self.output,
             fit_spec=FIT_SPEC,
             storage=STORAGE,
+            cold_boot=cold_boot,
         )
 
     def extract_raw(self) -> Path:
@@ -119,9 +123,19 @@ def sd_inputs(sd_files: SdInputs) -> SdInputs:
 class SdImageTests:
     """Create and inspect real MBR, FAT and ext4 artifacts without loop devices."""
 
-    def test_builds_one_complete_mbr_image(self, sd_inputs: SdInputs) -> None:
-        """A real image contains FIT in FAT p1 and the exact ext4 bytes in p2."""
-        assert (sd_inputs.build()) == (sd_inputs.output)
+    @pytest.mark.parametrize("autonomous", [False, True], ids=["pc-only", "with-card-entry"])
+    def test_builds_one_complete_mbr_image(self, sd_inputs: SdInputs, *, autonomous: bool) -> None:
+        """Both startup options retain the same partition layout and system bytes."""
+        cold_boot = None
+        reader_bytes = bytes(range(256)) * 3
+        stage0_bytes = b"independent resident-stage fixture\n"
+        if autonomous:
+            reader = sd_inputs.root / "reader.bin"
+            stage0 = sd_inputs.root / "resident.bin"
+            reader.write_bytes(reader_bytes)
+            stage0.write_bytes(stage0_bytes)
+            cold_boot = ColdSdBootstrap(reader, stage0)
+        assert sd_inputs.build(cold_boot) == sd_inputs.output
         assert not ((sd_inputs.output.parent / "FPLINUX.img").exists())
         raw = sd_inputs.extract_raw()
         assert (raw.stat().st_size) == (ROOT_OFFSET + ROOT_SIZE)
@@ -129,6 +143,9 @@ class SdImageTests:
             mbr = stream.read(512)
             assert (mbr[510:512]) == (b"\x55\xaa")
             assert (struct.unpack_from("<I", mbr, 440)[0]) == (MBR_SIGNATURE)
+            if autonomous:
+                assert mbr[:440] == reader_bytes[:440]
+                assert stream.read(len(reader_bytes) - 512) == reader_bytes[512:]
             boot = struct.unpack_from("<B3sB3sII", mbr, 446)
             root = struct.unpack_from("<B3sB3sII", mbr, 462)
             assert ((boot[0], boot[2], boot[4], boot[5])) == ((0, 0x0C, 2048, 131072))
@@ -146,6 +163,20 @@ class SdImageTests:
             timeout=120,
         )
         assert (extracted.read_bytes()) == (sd_inputs.fit.read_bytes())
+        if autonomous:
+            extracted_stage0 = sd_inputs.root / "extracted-stage0.bin"
+            subprocess.run(
+                [
+                    "mcopy",
+                    "-i",
+                    f"{raw}@@{BOOT_OFFSET}",
+                    "::fpbin_t117/fpmain.bin",
+                    str(extracted_stage0),
+                ],
+                check=True,
+                timeout=120,
+            )
+            assert extracted_stage0.read_bytes() == stage0_bytes
 
     def test_fit_content_is_causal(self, sd_inputs: SdInputs) -> None:
         """Changed FIT bytes replace the old image with the exact fresh-build result."""
@@ -190,6 +221,47 @@ class SdImageTests:
             timeout=120,
         )
         assert directory.stdout == ""
+
+    def test_card_prefix_contains_cold_entry_and_leaves_fit_absent(
+        self, sd_inputs: SdInputs
+    ) -> None:
+        """A staged full card layout cannot boot before the final FIT is installed."""
+        reader = sd_inputs.root / "reader.bin"
+        stage0 = sd_inputs.root / "resident.bin"
+        reader_payload = bytes(range(256)) * 3
+        stage0_payload = b"independent card-resident entry\n"
+        reader.write_bytes(reader_payload)
+        stage0.write_bytes(stage0_payload)
+        prefix = sd_inputs.root / "boot.xz"
+        digest = sd_image.write_boot_prefix(
+            sd_inputs.rootfs,
+            prefix,
+            storage=STORAGE,
+            cold_boot=ColdSdBootstrap(reader, stage0),
+        )
+        raw = sd_inputs.root / "boot.raw"
+        with raw.open("wb") as stream:
+            subprocess.run(["xz", "-dc", str(prefix)], stdout=stream, check=True, timeout=120)
+        assert raw.stat().st_size == 68157440
+        assert digest == sha256_file(raw)
+        with raw.open("rb") as stream:
+            mbr = stream.read(512)
+            assert mbr[:440] == reader_payload[:440]
+            assert mbr[510:512] == b"\x55\xaa"
+            assert struct.unpack_from("<II", mbr, 470) == (133120, 131072)
+            assert stream.read(256) == reader_payload[512:]
+        fat = f"{raw}@@{BOOT_OFFSET}"
+        directory = subprocess.run(
+            ["mdir", "-b", "-i", fat, "::"], capture_output=True, check=True, timeout=120
+        )
+        assert b"fplinux.itb" not in directory.stdout.lower()
+        extracted = sd_inputs.root / "checked-resident.bin"
+        subprocess.run(
+            ["mcopy", "-i", fat, "::fpbin_t117/fpmain.bin", str(extracted)],
+            check=True,
+            timeout=120,
+        )
+        assert extracted.read_bytes() == stage0_payload
 
     @pytest.mark.parametrize("with_fit", [False, True], ids=["missing-fit", "unexpected-fit"])
     def test_fit_bytes_and_specification_must_be_selected_together(
@@ -254,3 +326,45 @@ class SdImageTests:
         ):
             sd_files.build()
         assert sd_files.output.read_bytes() == before
+
+
+def test_card_board_archive_applies_additions_and_replacements(tmp_path: Path) -> None:
+    """Apply the board tar to a shared tree with an independent archive extractor."""
+    base = tmp_path / "base"
+    target = tmp_path / "target"
+    for root in (base, target):
+        (root / "etc").mkdir(parents=True)
+        (root / "etc" / "common").write_bytes(b"common data\n")
+    (base / "etc" / "world").write_bytes(b"common packages\n")
+    (target / "etc" / "world").write_bytes(b"common and board packages\n")
+    (target / "etc" / "brightness").write_bytes(b"board brightness levels\n")
+    (target / "etc" / "brightness").chmod(0o640)
+
+    base_cpio = tmp_path / "base.cpio"
+    target_cpio = tmp_path / "target.cpio"
+    for root, archive in ((base, base_cpio), (target, target_cpio)):
+        entries = [str(path.relative_to(root)) for path in sorted(root.rglob("*"))]
+        with archive.open("wb") as stream:
+            subprocess.run(
+                ["cpio", "-o", "-H", "newc", "--quiet"],
+                input=("\n".join(entries) + "\n").encode(),
+                stdout=stream,
+                cwd=root,
+                check=True,
+                timeout=20,
+            )
+
+    board = tmp_path / "board.tar"
+    write_card_rootfs_layer(target_cpio, base_cpio, board)
+    with tarfile.open(board) as board_archive:
+        files = {
+            Path(member.name).as_posix(): member for member in board_archive if member.isfile()
+        }
+    assert set(files) == {"etc/brightness", "etc/world"}
+    assert files["etc/brightness"].mode == 0o640
+    assert files["etc/brightness"].uid == files["etc/brightness"].gid == 0
+
+    subprocess.run(["tar", "-xf", str(board)], cwd=base, check=True, timeout=20)
+    assert (base / "etc" / "common").read_bytes() == b"common data\n"
+    assert (base / "etc" / "world").read_bytes() == b"common and board packages\n"
+    assert (base / "etc" / "brightness").read_bytes() == b"board brightness levels\n"

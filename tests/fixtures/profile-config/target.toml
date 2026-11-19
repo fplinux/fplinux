@@ -14,7 +14,6 @@ packages = []
 packages = []
 
 [linux]
-config_fragment = "kernel/config.fragment"
 memory = { base = 0x80200000, size = 0x03c00000 }
 dtb = "%(target)s.dtb"
 debug_dtb = "%(target)s.dtb"
@@ -45,15 +44,6 @@ source = "radio.bin"
 destination = "demo/radio.bin"
 size = 4
 
-[microsd]
-linux_patches = []
-
 [microsd.bootstrap]
-source = "bootstrap-microsd"
 image = "sd-stage0.bin"
 map = "sd-stage0.map"
-
-[microsd.uboot]
-defconfig = "uboot/defconfig"
-patches = []
-copies = []

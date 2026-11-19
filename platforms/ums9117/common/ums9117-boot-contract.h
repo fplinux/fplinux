@@ -20,6 +20,10 @@
 
 #define FPLINUX_BOOT_USB_TX_DMA_CHANNEL 5U
 #define FPLINUX_BOOT_USB_RX_DMA_CHANNEL 21U
+
+#define FPLINUX_UBOOT_ENTRY_USB 0U
+#define FPLINUX_UBOOT_ENTRY_SD 1U
+#define FPLINUX_UBOOT_SHA256_BYTES 65U
 enum fplinux_stage0_checkpoint_code {
 	FPLINUX_STAGE0_CHECKPOINT_UBOOT_READY = 1,
 	FPLINUX_STAGE0_CHECKPOINT_FIT_LOADED,
@@ -65,6 +69,8 @@ struct fplinux_uboot_handoff {
 	uint32_t dtb_limit;
 	uint32_t fit_phys;
 	uint32_t fit_limit;
+	uint32_t entry;
+	char uboot_sha256[FPLINUX_UBOOT_SHA256_BYTES];
 };
 
 #endif

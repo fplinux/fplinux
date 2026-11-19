@@ -11,6 +11,7 @@ import shutil
 import subprocess
 import time
 from contextlib import contextmanager, suppress
+from dataclasses import replace as replace_fields
 from typing import TYPE_CHECKING, Any
 
 from fplinux_cli.common import replace_file_atomically
@@ -24,6 +25,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from fplinux_cli.device_data.inputs import FirmwareInput
+    from fplinux_cli.device_data.nand_geometry import NandGeometry
     from fplinux_cli.device_data.prepare import DeviceDataSpec, DeviceDataTools
 
     from .bundle import ValidatedBundle
@@ -202,13 +204,13 @@ class _PreparationProgress:
 
 @contextmanager
 def preparation_progress(
-    connection: tuple[Any, dict[str, Any]] | None, log: RunLog
+    connection: tuple[Any, dict[str, Any]] | None, log: RunLog, *, initial: str = "waiting"
 ) -> Iterator[_PreparationProgress | None]:
     """Retain reader access and the original failure when preparation is interrupted."""
     progress = _PreparationProgress(connection, log) if connection is not None else None
     try:
         if progress is not None:
-            progress.stage("waiting")
+            progress.stage(initial)
         yield progress
     except BaseException as error:
         if progress is not None:
@@ -272,6 +274,22 @@ def _read_backup(  # noqa: PLR0913 -- NAND output and optional phone feedback ha
     return backup
 
 
+def _verify_reader_backup(
+    connection: tuple[Any, dict[str, Any]], raw_device: str, expected: NandGeometry, log: RunLog
+) -> None:
+    """Confirm the fitted chip before using a saved backup to install a card."""
+    from .nand_backup import parse_geometry_report, read_geometry_report  # noqa: PLC0415
+
+    transport, session = connection
+    with log.capture():
+        observed = parse_geometry_report(read_geometry_report(transport, session, raw_device))
+    if replace_fields(observed, chip=expected.chip) != expected:
+        fail(
+            "The connected NAND geometry differs from the saved backup. "
+            "Select the correct handset and phone data with --phone-data PATH."
+        )
+
+
 def run_nand(  # noqa: PLR0913 -- the admitted connection, action and selected data stay explicit.
     admitted: ValidatedBundle,
     data: Path,
@@ -317,6 +335,7 @@ def finish_reader(
     log: RunLog,
     *,
     progress: _PreparationProgress | None,
+    restart: bool = True,
 ) -> None:
     """Keep recovery keys until read-only inspection proves no persistent storage is in use."""
     transport, session = connection
@@ -341,7 +360,7 @@ def finish_reader(
         ram_lower = (
             len(fields) >= 4
             and re.fullmatch(r"/dev/loop[0-9]+", source) is not None
-            and fields[1] == "/run/fplinux-root/lower"
+            and fields[1] in {"/run/fplinux-root/lower", "/run/fplinux-root/board"}
             and fields[2] == "squashfs"
             and "ro" in fields[3].split(",")
             and "rw" not in fields[3].split(",")
@@ -361,9 +380,12 @@ def finish_reader(
         )
     if progress is not None:
         progress.stage("ready")
+    elif not restart:
+        _PreparationProgress(connection, log).stage("card-ready")
     shutil.rmtree(data / "reader")
-    log.message("Disconnect USB. If the phone stays on, remove and reinsert its battery.")
-    log.message("Run the same launcher again with the phone powered off.")
+    if restart:
+        log.message("Disconnect USB. If the phone stays on, remove and reinsert its battery.")
+        log.message("Run the same launcher again with the phone powered off.")
 
 
 def prepare_phone_data(  # noqa: PLR0913 -- preparation inputs and their state owners are distinct.
@@ -376,8 +398,9 @@ def prepare_phone_data(  # noqa: PLR0913 -- preparation inputs and their state o
     from_dump: Path | None,
     replace: bool,
     loader_trace: bool,
+    retain_reader: bool = False,
 ) -> bool:
-    """Refresh shared data and report whether a live reader needs a second boot."""
+    """Refresh shared data and report whether a preparation session ran."""
     from fplinux_cli.device_data.cache import (  # noqa: PLC0415 -- selected preparation.
         current_backup,
         prepared_data_current,
@@ -401,6 +424,7 @@ def prepare_phone_data(  # noqa: PLR0913 -- preparation inputs and their state o
             from_dump=from_dump,
             replace=replace,
             loader_trace=loader_trace,
+            retain_reader=retain_reader,
         )
     tools = _phone_data_tools(admitted)
     connection = None
@@ -416,6 +440,7 @@ def prepare_phone_data(  # noqa: PLR0913 -- preparation inputs and their state o
     record = current_backup(backup, target=runtime["target"], nand=runtime["nand"])
     if record is None:
         log.message("No compatible NAND backup is available; a new backup is required.")
+    if record is None or retain_reader:
         connection = _reader_connection(admitted, data, log, emit, loader_trace=loader_trace)
     elif (data / "reader").is_dir():
         with log.capture():
@@ -428,6 +453,8 @@ def prepare_phone_data(  # noqa: PLR0913 -- preparation inputs and their state o
         if record is None and connection is not None:
             _read_backup(connection, runtime, data, log, output=backup, phone_progress=progress)
             record = current_backup(backup, target=runtime["target"], nand=runtime["nand"])
+        elif record is not None and retain_reader and connection is not None:
+            _verify_reader_backup(connection, runtime["nand"]["raw_device"], record.geometry, log)
         if record is None:
             fail("The NAND backup did not satisfy the selected reader contract")
         destination = store / "phone"
@@ -440,9 +467,9 @@ def prepare_phone_data(  # noqa: PLR0913 -- preparation inputs and their state o
         else:
             log.message("Using your saved phone data.")
         log.message(f"Your phone data is ready in {destination}.")
-        if connection is not None:
+        if connection is not None and not retain_reader:
             finish_reader(connection, data, log, progress=progress)
-        elif (data / "reader").is_dir():
+        elif connection is None and (data / "reader").is_dir():
             shutil.rmtree(data / "reader")
     return connection is not None
 
@@ -457,6 +484,7 @@ def _prepare_emmc_data(  # noqa: PLR0913 -- selected source and reader lifetime 
     from_dump: Path | None,
     replace: bool,
     loader_trace: bool,
+    retain_reader: bool = False,
 ) -> bool:
     """Capture selected stock files once and reprepare them without another full disk dump."""
     from fplinux_cli.device_data.cache import (  # noqa: PLC0415
@@ -494,6 +522,7 @@ def _prepare_emmc_data(  # noqa: PLR0913 -- selected source and reader lifetime 
     source = current_original_files(spec, originals)
     if source is None:
         log.message("The phone's saved settings are not available; reading them from eMMC.")
+    if source is None or retain_reader:
         connection = _reader_connection(admitted, data, log, emit, loader_trace=loader_trace)
     elif (data / "reader").is_dir():
         with log.capture():
@@ -533,9 +562,9 @@ def _prepare_emmc_data(  # noqa: PLR0913 -- selected source and reader lifetime 
         else:
             log.message("Using your saved phone data.")
         log.message(f"Your phone data is ready in {destination}.")
-        if connection is not None:
+        if connection is not None and not retain_reader:
             finish_reader(connection, data, log, progress=progress)
-        elif (data / "reader").is_dir():
+        elif connection is None and (data / "reader").is_dir():
             shutil.rmtree(data / "reader")
     return connection is not None
 

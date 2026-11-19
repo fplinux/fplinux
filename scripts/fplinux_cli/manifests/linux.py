@@ -333,17 +333,6 @@ def discover_linux_targets(
             config["audio_policy"] = audio_policy_from_profile(raw.get("audio_profile"))
         except AudioPolicyError as error:
             fail(str(error))
-        if "microsd" in raw:
-            microsd = raw["microsd"]
-            if not isinstance(microsd, dict):
-                fail(f"target {target} microsd must be a table")
-            config["microsd"] = {
-                "linux_patches": path_array(
-                    microsd.get("linux_patches"),
-                    f"target {target} microsd linux_patches",
-                    allow_empty=True,
-                )
-            }
         targets.append(
             LinuxTarget(target, config, {"identity": platform_identity, "linux": linux})
         )

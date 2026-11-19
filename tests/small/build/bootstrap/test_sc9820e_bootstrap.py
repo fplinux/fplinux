@@ -269,7 +269,11 @@ def test_sc_recipe_tracks_entry_layout_and_loader_guard_without_firmware_or_gui_
     entry = target_source / "entry.s"
     entry.write_bytes(b"entry implementation\n")
     target: dict[str, Any] = {
-        "bootstrap": {"source": "bootstrap", "layout": ram_layout, "toolchain": "arm-none-eabi"},
+        "bootstrap": {
+            "source": "targets/demo/bootstrap",
+            "layout": ram_layout,
+            "toolchain": "arm-none-eabi",
+        },
         "linux": {"memory": {"base": 0x80000000, "size": 0x20000000}},
         "loader": {"stack_guard_start": 0x808E0000, "stack_guard_end": 0x808F0000},
     }

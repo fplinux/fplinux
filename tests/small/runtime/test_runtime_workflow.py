@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Any
 import pytest
 from fplinux_cli.cli.logs import read_run
 from fplinux_cli.device_data import prepare as device_data_prepare
-from fplinux_cli.runtime import boot, live, phone_data, workflow
+from fplinux_cli.runtime import boot, live, nand_backup, phone_data, workflow
 from fplinux_cli.runtime import bundle as bundle_runtime
 from fplinux_cli.runtime.bundle import ValidatedBundle
 from fplinux_cli.runtime.events import RunLog
@@ -218,11 +218,23 @@ def test_manual_nand_backup_preserves_user_display_and_writes_actual_reader_byte
     ]
 
 
-@pytest.mark.parametrize("saved_input", ["canonical", "explicit"])
+@pytest.mark.parametrize(
+    ("saved_input", "retain_reader", "chip_id"),
+    [
+        ("canonical", False, "e521"),
+        ("explicit", False, "e521"),
+        ("canonical", True, "e521"),
+        ("canonical", True, "c881"),
+    ],
+    ids=["saved-ram", "imported-ram", "saved-card", "different-card-nand"],
+)
 def test_saved_backup_reconnects_reader_before_extraction_and_preserves_failed_preparation(
     saved_backup_workspace: Path,
     monkeypatch: pytest.MonkeyPatch,
     saved_input: str,
+    chip_id: str,
+    *,
+    retain_reader: bool,
 ) -> None:
     """Real orchestration resumes a saved backup while extraction and SSH are controlled."""
     tmp_path = saved_backup_workspace
@@ -329,7 +341,12 @@ def test_saved_backup_reconnects_reader_before_extraction_and_preserves_failed_p
         "target": "phone",
         "identity": {"target": {"compatible": "test,phone"}},
         "host_tools": {},
-        "nand": {"id": 0x21E5, "raw_page_bytes": 2112, "acquisition_recipe": "a" * 64},
+        "nand": {
+            "id": 0x21E5,
+            "raw_page_bytes": 2112,
+            "acquisition_recipe": "a" * 64,
+            "raw_device": "/dev/raw-nand",
+        },
         "emmc": None,
         "device_data": {
             "preparation_recipe": "b" * 64,
@@ -349,10 +366,38 @@ def test_saved_backup_reconnects_reader_before_extraction_and_preserves_failed_p
     monkeypatch.setattr(boot, "reconnect_live_bundle", reconnect)
     monkeypatch.setattr(boot, "run_bundle", unexpected_boot)
     monkeypatch.setattr(device_data_prepare, "prepare_from_nand", extract)
+
+    def geometry(transport: object, _session: object, raw_device: str) -> str:
+        assert retain_reader
+        assert transport is phone
+        assert raw_device == "/dev/raw-nand"
+        return (
+            f"id_bytes={chip_id}\nchip=fitted NAND\npage_main_bytes=2048\noob_bytes=64\n"
+            "pages_per_block=64\nblock_count=1024\nraw_bytes=138412032\n"
+            "geometry_source=table\nfeature_a0=0x00\nfeature_b0=0x00\nfeature_c0=0x00\n"
+        )
+
+    monkeypatch.setattr(nand_backup, "read_geometry_report", geometry)
     logs = tmp_path / "logs"
     logs.mkdir()
     log = RunLog(logs, protect=lambda _path: None)
     try:
+        if chip_id != "e521":
+            with pytest.raises(SystemExit, match="geometry differs from the saved backup"):
+                phone_data.prepare_phone_data(
+                    admitted,
+                    data,
+                    log,
+                    lambda _stage: None,
+                    store=store,
+                    from_dump=from_dump,
+                    replace=False,
+                    loader_trace=False,
+                    retain_reader=retain_reader,
+                )
+            assert reader.is_dir()
+            assert not extraction_phases
+            return
         with pytest.raises(OSError, match="controlled extraction unavailable") as failed:
             phone_data.prepare_phone_data(
                 admitted,
@@ -363,6 +408,7 @@ def test_saved_backup_reconnects_reader_before_extraction_and_preserves_failed_p
                 from_dump=from_dump,
                 replace=False,
                 loader_trace=False,
+                retain_reader=retain_reader,
             )
         assert failed.value is original_error
         assert reader.is_dir()
@@ -376,14 +422,18 @@ def test_saved_backup_reconnects_reader_before_extraction_and_preserves_failed_p
             from_dump=from_dump,
             replace=False,
             loader_trace=False,
+            retain_reader=retain_reader,
         )
         assert reader_used is True
     finally:
         log.close("success")
 
     assert extraction_phases == ["extracting", "extracting"]
-    assert phases == ["waiting", "extracting", "error", "waiting", "extracting", "ready"]
-    assert not (data / "reader").exists()
+    expected_phases = ["waiting", "extracting", "error", "waiting", "extracting"]
+    if not retain_reader:
+        expected_phases.append("ready")
+    assert phases == expected_phases
+    assert (data / "reader").exists() is retain_reader
     with saved.open("rb") as stream:
         assert hashlib.file_digest(stream, "sha256").hexdigest() == digest
 
@@ -584,6 +634,60 @@ def test_linux_qin_content_identity_does_not_add_a_transport_capsule(
     runtime = {"device_data": None, "identity": {"platform": {"name": "sc9820e"}}}
 
     assert phone_data.prepared_content_identity(tmp_path, runtime) is None
+
+
+def test_system_card_boot_uses_stage0_and_skips_existing_ram_reader(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    data = tmp_path / "data"
+    reader = data / "reader"
+    reader.mkdir(parents=True)
+    marker = reader / "retained"
+    marker.write_text("separate RAM state")
+    admitted = ValidatedBundle(
+        tmp_path,
+        {
+            "identity": {"target": {"display_name": "Test phone"}},
+            "device_data": None,
+            "target": "phone",
+            "profile": "microsd-uboot",
+            "build_type": "release",
+        },
+        "a" * 64,
+        "b" * 64,
+        None,
+    )
+    actions: list[str] = []
+
+    def reconnect(
+        bundle: ValidatedBundle, *, session_root: Path, prepared_data_sha256: str | None
+    ) -> None:
+        assert bundle is admitted
+        assert session_root == data / "session"
+        assert prepared_data_sha256 is None
+        actions.append("reconnect")
+
+    def load(
+        bundle: ValidatedBundle, session_root: Path, *_inputs: object, **options: object
+    ) -> tuple[None, dict[str, Any]]:
+        assert bundle is admitted
+        assert session_root == data / "session"
+        assert options["capsule"] is None
+        assert options["prepared_data_sha256"] is None
+        actions.append("load")
+        return None, {}
+
+    monkeypatch.setattr(workflow, "host_preflight", lambda: None)
+    monkeypatch.setattr(workflow, "admit_bundle", lambda _bundle: admitted)
+    monkeypatch.setattr(workflow, "os", SimpleNamespace(isatty=lambda _fd: False))
+    monkeypatch.setattr(phone_data, "os", SimpleNamespace(name="nt"))
+    monkeypatch.setattr(boot, "reconnect_live_bundle", reconnect)
+    monkeypatch.setattr(boot, "boot_connection", load)
+
+    assert workflow.run_phone(tmp_path, data, tmp_path / "logs") == 0
+    assert actions == ["reconnect", "load"]
+    assert marker.read_text() == "separate RAM state"
+    assert not (data / "phone").exists()
 
 
 @pytest.mark.parametrize("host", ["posix", "nt"])

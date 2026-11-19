@@ -9,7 +9,7 @@ from typing import Any
 
 from fplinux_cli import common
 from fplinux_cli.common import fail
-from fplinux_cli.manifests.paths import profile_manifest_path, target_directory
+from fplinux_cli.manifests.paths import profile_manifest_path
 from fplinux_cli.manifests.source_catalog import resolve_source
 from fplinux_cli.manifests.values import (
     GIT_COMMIT,
@@ -17,11 +17,8 @@ from fplinux_cli.manifests.values import (
     basename_value,
     exact_table,
     integer_value,
-    kconfig_line_array,
     nonempty_string,
     package_array,
-    path_array,
-    path_steps,
     relative_value,
     sha256_value,
 )
@@ -52,22 +49,27 @@ def _profile_linux_root(value: object, name: str) -> dict[str, Any]:
     }
 
 
-def _profile_bootstrap(target: str, value: object, board: object) -> dict[str, str]:
-    """Select Linux or the board-declared resident U-Boot bootstrap."""
+def _profile_bootstrap(value: object, board: object, platform: dict[str, Any]) -> dict[str, str]:
+    """Select the Linux bootstrap or the platform's resident U-Boot bootstrap."""
     selection = exact_table(value, {"kind"}, "profile bootstrap")
     kind = selection["kind"]
     if kind == "linux":
         return {"kind": "linux"}
     if kind != "uboot-stage0":
         fail("profile bootstrap kind must be linux or uboot-stage0")
-    bootstrap = exact_table(board, {"source", "image", "map"}, "target microsd bootstrap")
-    result = {"kind": kind}
-    for key in ("source", "image", "map"):
-        result[key] = relative_value(bootstrap.get(key), f"target microsd bootstrap {key}")
-    source = target_directory(target) / result["source"]
-    if source.is_symlink() or not source.is_dir():
-        fail(f"target microSD bootstrap source is missing or invalid: {source}")
-    return result
+    bootstrap = exact_table(board, {"image", "map"}, "target microsd bootstrap")
+    source = relative_value(
+        platform["bootstrap"].get("stage0_source"), "platform bootstrap stage0_source"
+    )
+    source_path = common.ROOT / source
+    if source_path.is_symlink() or not source_path.is_dir():
+        fail(f"platform microSD bootstrap source is missing or invalid: {source_path}")
+    return {
+        "kind": kind,
+        "source": source,
+        "image": relative_value(bootstrap.get("image"), "target microsd bootstrap image"),
+        "map": relative_value(bootstrap.get("map"), "target microsd bootstrap map"),
+    }
 
 
 def _profile_uboot_lock(profile: str, relative: str) -> dict[str, str]:
@@ -116,53 +118,29 @@ def _profile_uboot_lock(profile: str, relative: str) -> dict[str, str]:
     return normalized
 
 
-def _profile_uboot(
-    target: str, profile: str, value: object, board: object, platform: dict[str, Any]
-) -> dict[str, Any]:
-    """Combine shared U-Boot sources with the selected board integration."""
+def _profile_uboot(profile: str, value: object, platform: dict[str, Any]) -> dict[str, Any]:
+    """Select the platform U-Boot for this boot profile."""
     selection = exact_table(value, {"kind"}, "profile uboot")
     kind = selection["kind"]
     if kind == "none":
         return {"kind": "none"}
     if kind != "full":
         fail("profile uboot kind must be none or full")
-    uboot = exact_table(board, {"defconfig", "patches", "copies"}, "target microsd uboot")
-    base = exact_table(
-        platform.get("uboot"),
-        {"source", "archive_prefix", "patches", "required_config", "copies"},
-        "platform uboot",
-    )
-    source = relative_value(base.get("source"), "platform uboot source")
-    archive_prefix = relative_value(base.get("archive_prefix"), "platform uboot archive_prefix")
-    required_config = kconfig_line_array(
-        base.get("required_config"), "platform uboot required_config"
-    )
-    defconfig = relative_value(uboot.get("defconfig"), "target microsd uboot defconfig")
-    patches = path_array(uboot.get("patches"), "target microsd uboot patches", allow_empty=True)
-    patches = [
-        *path_array(base.get("patches"), "platform uboot patches", allow_empty=True),
-        *(f"targets/{target}/{path}" for path in patches),
-    ]
-    copies = [
-        *path_steps(base.get("copies"), "platform uboot copies"),
-        *path_steps(uboot.get("copies"), "target microsd uboot copies"),
-    ]
-    for path in (target_directory(target) / defconfig, *(common.ROOT / path for path in patches)):
+    base = platform.get("uboot")
+    if base is None:
+        fail(f"profile {profile} requires platform U-Boot sources")
+    for relative in [base["defconfig"], *base["patches"]]:
+        path = common.ROOT / relative
         if path.is_symlink() or not path.is_file():
             fail(f"U-Boot source is missing or invalid: {path}")
-    for step in copies:
+    for step in base["copies"]:
         path = common.ROOT / step["source"]
         if path.is_symlink() or not path.is_file():
             fail(f"U-Boot copy source is missing or invalid: {path}")
     return {
         "kind": kind,
-        "source": source,
-        "archive_prefix": archive_prefix,
-        "lock": _profile_uboot_lock(profile, source),
-        "defconfig": defconfig,
-        "patches": patches,
-        "copies": copies,
-        "required_config": required_config,
+        **base,
+        "lock": _profile_uboot_lock(profile, base["source"]),
     }
 
 
@@ -387,8 +365,8 @@ def load_profile(
     )
     if runtime != {"transport": "usb-ncm", "runnable": True}:
         fail("boot profiles require runnable usb-ncm transport")
-    bootstrap = _profile_bootstrap(target, config["bootstrap"], microsd.get("bootstrap"))
-    uboot = _profile_uboot(target, profile, config["uboot"], microsd.get("uboot"), platform)
+    bootstrap = _profile_bootstrap(config["bootstrap"], microsd.get("bootstrap"), platform)
+    uboot = _profile_uboot(profile, config["uboot"], platform)
     layout = (
         _profile_layout(
             config["layout"], f"profile {profile} layout", platform["bootstrap"]["layout"]
@@ -402,7 +380,6 @@ def load_profile(
         else None
     )
     fit = _profile_fit(config["fit"], f"profile {profile} fit", layout)
-    external = root["kind"] == "external"
     uboot_boot = profile == "microsd-uboot"
     if (
         (bootstrap["kind"] == "uboot-stage0") != uboot_boot
@@ -423,57 +400,9 @@ def load_profile(
             "block_size": storage["block_size"],
             "inode_size": storage["inode_size"],
         }
-    if external:
-        config_enable = [
-            "CONFIG_EXT4_FS",
-            "CONFIG_ZRAM_BACKEND_LZO",
-            "CONFIG_ZRAM_DEF_COMP_LZORLE",
-        ]
-        config_disable = [
-            "CONFIG_BLK_DEV_INITRD",
-            "CONFIG_ZRAM_BACKEND_ZSTD",
-            "CONFIG_ZRAM_DEF_COMP_ZSTD",
-        ]
-    else:
-        config_enable = [
-            "CONFIG_ZRAM_BACKEND_ZSTD",
-            "CONFIG_ZRAM_DEF_COMP_ZSTD",
-            "CONFIG_BLK_DEV_LOOP",
-            "CONFIG_MISC_FILESYSTEMS",
-            "CONFIG_SQUASHFS",
-            "CONFIG_SQUASHFS_XATTR",
-            "CONFIG_SQUASHFS_FILE_DIRECT",
-            "CONFIG_SQUASHFS_COMPILE_DECOMP_SINGLE",
-            "CONFIG_SQUASHFS_XZ",
-            "CONFIG_OVERLAY_FS",
-            "CONFIG_TMPFS_XATTR",
-            "CONFIG_TMPFS_POSIX_ACL",
-        ]
-        config_disable = [
-            "CONFIG_ZRAM_BACKEND_LZO",
-            "CONFIG_ZRAM_DEF_COMP_LZORLE",
-            "CONFIG_SQUASHFS_ZLIB",
-            "CONFIG_SQUASHFS_LZO",
-            "CONFIG_SQUASHFS_ZSTD",
-            "CONFIG_SQUASHFS_LZ4",
-            "CONFIG_SQUASHFS_COMP_CACHE_FULL",
-            "CONFIG_SQUASHFS_FILE_CACHE",
-            "CONFIG_SQUASHFS_CHOICE_DECOMP_BY_MOUNT",
-            "CONFIG_SQUASHFS_COMPILE_DECOMP_MULTI",
-            "CONFIG_SQUASHFS_COMPILE_DECOMP_MULTI_PERCPU",
-            "CONFIG_SQUASHFS_MOUNT_DECOMP_THREADS",
-            "CONFIG_OVERLAY_FS_INDEX",
-            "CONFIG_OVERLAY_FS_REDIRECT_DIR",
-            "CONFIG_OVERLAY_FS_XINO_AUTO",
-        ]
     return {
         "name": profile,
-        "linux": {
-            "config_enable": config_enable,
-            "config_disable": config_disable,
-            "patches": microsd["linux_patches"] if external else [],
-            "root": root,
-        },
+        "linux": {"root": root},
         "rootfs": {"packages": packages},
         "bootstrap": bootstrap,
         "uboot": uboot,

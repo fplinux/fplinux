@@ -44,6 +44,7 @@ class FitPlan:
     spec: dict[str, Any]
     zimage: dict[str, int | str]
     dtb: dict[str, int | str]
+    ramdisk: dict[str, int | str]
     tools_receipt: dict[str, str]
     its: bytes
 
@@ -75,6 +76,7 @@ def create_plan(  # noqa: PLR0913 -- causal inputs remain separate.
     *,
     zimage: Path,
     dtb: Path,
+    ramdisk: Path,
     tools_receipt: dict[str, str],
 ) -> FitPlan:
     """Create the causal recipe for one unsigned, SHA-256-hashed FIT."""
@@ -93,12 +95,14 @@ def create_plan(  # noqa: PLR0913 -- causal inputs remain separate.
     its = _its_source(target, display_name, spec)
     zimage_record = regular_file_record(zimage, "FIT file", FitImageError)
     dtb_record = regular_file_record(dtb, "FIT file", FitImageError)
+    ramdisk_record = regular_file_record(ramdisk, "FIT file", FitImageError)
     manifest = {
         "target": target,
         "display_name": display_name,
         "spec": spec,
         "zimage": zimage_record,
         "dtb": dtb_record,
+        "ramdisk": ramdisk_record,
         "tools_receipt": normalized_tools,
         "source_date_epoch": build_env.SOURCE_DATE_EPOCH,
         "its_sha256": hashlib.sha256(its).hexdigest(),
@@ -120,6 +124,7 @@ def create_plan(  # noqa: PLR0913 -- causal inputs remain separate.
         dict(spec),
         zimage_record,
         dtb_record,
+        ramdisk_record,
         normalized_tools,
         its,
     )
@@ -160,7 +165,7 @@ def _string(properties: dict[str, bytes], name: str, expected: str) -> None:
         raise FitImageError(f"FIT {name} differs from its recipe")
 
 
-def _verify_fit(fit: Path, plan: FitPlan, zimage: Path, dtb: Path) -> None:
+def _verify_fit(fit: Path, plan: FitPlan, zimage: Path, dtb: Path, ramdisk: Path) -> None:
     configuration = f"/configurations/{plan.target}"
     properties = exact_path_properties(
         fit,
@@ -170,6 +175,8 @@ def _verify_fit(fit: Path, plan: FitPlan, zimage: Path, dtb: Path) -> None:
             "/images/kernel/hash",
             "/images/fdt",
             "/images/fdt/hash",
+            "/images/ramdisk",
+            "/images/ramdisk/hash",
             "/configurations",
             configuration,
         ),
@@ -180,8 +187,10 @@ def _verify_fit(fit: Path, plan: FitPlan, zimage: Path, dtb: Path) -> None:
     _string(root, "description", f"FPLinux {plan.display_name}")
     kernel = properties["/images/kernel"]
     fdt = properties["/images/fdt"]
+    firmware = properties["/images/ramdisk"]
     kernel_data = kernel.get("data", b"")
     fdt_data = fdt.get("data", b"")
+    firmware_data = firmware.get("data", b"")
     if (
         kernel_data != zimage.read_bytes()
         or regular_file_record(zimage, "FIT file", FitImageError) != plan.zimage
@@ -192,7 +201,12 @@ def _verify_fit(fit: Path, plan: FitPlan, zimage: Path, dtb: Path) -> None:
         or regular_file_record(dtb, "FIT file", FitImageError) != plan.dtb
     ):
         raise FitImageError("FIT device-tree payload differs from its recipe")
-    for node, data in (("kernel", kernel_data), ("fdt", fdt_data)):
+    if (
+        firmware_data != ramdisk.read_bytes()
+        or regular_file_record(ramdisk, "FIT file", FitImageError) != plan.ramdisk
+    ):
+        raise FitImageError("FIT early firmware payload differs from its recipe")
+    for node, data in (("kernel", kernel_data), ("fdt", fdt_data), ("ramdisk", firmware_data)):
         digest = properties[f"/images/{node}/hash"]
         _string(digest, "algo", "sha256")
         if digest.get("value") != hashlib.sha256(data).digest():
@@ -210,13 +224,22 @@ def _verify_fit(fit: Path, plan: FitPlan, zimage: Path, dtb: Path) -> None:
     _string(fdt, "compression", "none")
     if _cell(fdt.get("load", b""), "FDT load") != plan.spec["fdt_load"]:
         raise FitImageError("FIT FDT load address differs from its recipe")
+    _string(firmware, "type", "ramdisk")
+    _string(firmware, "arch", "arm")
+    _string(firmware, "os", "linux")
+    _string(firmware, "compression", "none")
+    if "load" in firmware or "entry" in firmware:
+        raise FitImageError("FIT early firmware must remain in the loaded FIT")
     _string(properties["/configurations"], "default", plan.target)
     _string(properties[configuration], "description", plan.display_name)
     _string(properties[configuration], "kernel", "kernel")
     _string(properties[configuration], "fdt", "fdt")
+    _string(properties[configuration], "ramdisk", "ramdisk")
 
 
-def _run_dumpimage(dumpimage: Path, fit: Path, temporary: Path, zimage: Path, dtb: Path) -> None:
+def _run_dumpimage(
+    dumpimage: Path, fit: Path, temporary: Path, payloads: tuple[tuple[Path, str], ...]
+) -> None:
     listed = subprocess.run(
         [str(dumpimage), "-l", str(fit)],
         capture_output=True,
@@ -227,7 +250,7 @@ def _run_dumpimage(dumpimage: Path, fit: Path, temporary: Path, zimage: Path, dt
     )
     if listed.returncode != 0:
         raise FitImageError(listed.stderr.strip() or "dumpimage rejected the FIT")
-    for position, source, name in ((0, zimage, "zImage"), (1, dtb, "linux.dtb")):
+    for position, (source, name) in enumerate(payloads):
         extracted = temporary / f"extracted-{name}"
         result = subprocess.run(
             [
@@ -258,6 +281,7 @@ def build(  # noqa: PLR0913 -- tool and artifact paths remain explicit.
     dumpimage: Path,
     zimage: Path,
     dtb: Path,
+    ramdisk: Path,
     output: Path,
     plan: FitPlan,
 ) -> Path:
@@ -265,10 +289,11 @@ def build(  # noqa: PLR0913 -- tool and artifact paths remain explicit.
     if cache_hit(output, plan):
         return output / str(plan.spec["filename"])
     output.parent.mkdir(parents=True, exist_ok=True)
+    payloads = ((zimage, "zImage"), (dtb, "linux.dtb"), (ramdisk, "early-firmware.cpio"))
     with tempfile.TemporaryDirectory(dir=output.parent, prefix=".fit-image.") as name:
         temporary = Path(name)
-        shutil.copyfile(zimage, temporary / "zImage")
-        shutil.copyfile(dtb, temporary / "linux.dtb")
+        for source, filename in payloads:
+            shutil.copyfile(source, temporary / filename)
         (temporary / _ITS_NAME).write_bytes(plan.its)
         fit = temporary / str(plan.spec["filename"])
         subprocess.run(
@@ -279,8 +304,8 @@ def build(  # noqa: PLR0913 -- tool and artifact paths remain explicit.
             timeout=_COMMAND_TIMEOUT_SECONDS,
         )
         fit.chmod(0o644)
-        _verify_fit(fit, plan, zimage, dtb)
-        _run_dumpimage(dumpimage, fit, temporary, zimage, dtb)
+        _verify_fit(fit, plan, zimage, dtb, ramdisk)
+        _run_dumpimage(dumpimage, fit, temporary, payloads)
 
         staging = temporary / "publish"
         staging.mkdir()

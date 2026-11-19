@@ -19,24 +19,18 @@ backlight = "inoi244-backlight"
 levels = [0, 2, 5, 8, 10, 12, 15, 18, 20, 21, 24]
 
 [rootfs]
-packages = ["fplinux-audio", "fplinux-font-terminus-8x16"]
+packages = ["fplinux-font-terminus-8x16"]
 
 [bundle]
 packages = []
 
 [linux]
-config_fragment = "linux/config/config.fragment"
 memory = { base = 0x80200000, size = 0x03c00000 }
 dtb = "unisoc/ums9117-inoi-244-modern-4g.dtb"
 debug_dtb = "ums9117-inoi-244-modern-4g.dtb"
 patches = []
 additional_forbidden_dtb_markers = []
-additional_forbidden_config = [
-  "CONFIG_MMC_REMOVABLE=y",
-  "CONFIG_MMC_GPIO=y",
-  "CONFIG_GPIO_EIC_SPRD=y",
-  "CONFIG_GPIO_EIC_SPRD=m",
-]
+additional_forbidden_config = []
 overlay = "linux/overlay"
 copies = []
 
@@ -93,18 +87,6 @@ firmware = [
   { source = "inoi244-fm-config.bin", destination = "fplinux/inoi244-fm-config.bin", size = 128 },
 ]
 
-[microsd]
-linux_patches = []
-
 [microsd.bootstrap]
-source = "bootstrap-microsd"
 image = "inoi244_sd_stage0.bin"
 map = "obj/inoi244_sd_stage0_map.txt"
-
-[microsd.uboot]
-defconfig = "uboot/inoi244_defconfig"
-patches = []
-
-[[microsd.uboot.copies]]
-source = "targets/inoi-244-modern-4g/uboot/ums9117-inoi244-u-boot.dts"
-destination = "arch/arm/dts/ums9117-inoi244-u-boot.dts"

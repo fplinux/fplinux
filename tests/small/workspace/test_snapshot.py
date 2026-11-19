@@ -283,7 +283,7 @@ class WorkspaceSnapshotTests:
                 "copies": [{"source": "kernel/copy.c"}],
                 "appends": [{"source": "kernel/append.cfg"}],
             },
-            "bootstrap": {"backend": "ums9117", "source": "bootstrap"},
+            "bootstrap": {"backend": "ums9117", "source": "targets/phone/bootstrap"},
             "uboot": {"kind": "none"},
             "fit": {"kind": "none"},
             "image": {"kind": "none"},
@@ -567,15 +567,23 @@ class WorkspaceSnapshotTests:
             assert before_path.is_dir()
 
     @staticmethod
-    def test_bootstrap_edit_changes_ram_source_recipe_but_not_microsd(tmp_path: Path) -> None:
-        """An edit consumed only by RAM boot leaves the SD source recipe reusable."""
+    @pytest.mark.parametrize(
+        ("relative", "ram_changes", "card_changes"),
+        [
+            ("alpine/ramroot-init.sh", True, False),
+            ("platforms/ums9117/bootstrap-microsd/Makefile", False, True),
+        ],
+    )
+    def test_boot_input_edit_changes_only_its_profile_recipe(
+        tmp_path: Path, relative: str, *, ram_changes: bool, card_changes: bool
+    ) -> None:
+        """Each boot input invalidates only the profile that consumes it."""
         files = dict(workspace_inputs.target_build_source_files("nokia-ta1618"))
         files.update(workspace_inputs.target_build_source_files("nokia-ta1618", "microsd-uboot"))
         snapshot = workspace_capture.workspace_snapshot(sorted(files.items()))
         with workspace_root(tmp_path):
             source = workspace_staging.stage_workspace_snapshot(snapshot)
-        bootstrap = source / "alpine/ramroot-init.sh"
-        bootstrap.write_bytes(b"#!/bin/sh\nexit 0\n")
+        boot_input = source / relative
         with (
             workspace_root(source),
             mock.patch.object(common, "ROOT", source),
@@ -586,15 +594,15 @@ class WorkspaceSnapshotTests:
             before_sd = workspace_capture.workspace_snapshot(
                 workspace_inputs.target_build_source_files("nokia-ta1618", "microsd-uboot")
             ).recipe
-            bootstrap.write_bytes(b"#!/bin/sh\nexit 1\n")
+            boot_input.write_bytes(boot_input.read_bytes() + b"\n")
             after_ram = workspace_capture.workspace_snapshot(
                 workspace_inputs.target_build_source_files("nokia-ta1618")
             ).recipe
             after_sd = workspace_capture.workspace_snapshot(
                 workspace_inputs.target_build_source_files("nokia-ta1618", "microsd-uboot")
             ).recipe
-        assert (before_ram) != (after_ram)
-        assert (before_sd) == (after_sd)
+        assert (before_ram != after_ram) is ram_changes
+        assert (before_sd != after_sd) is card_changes
 
     def test_snapshot_rejects_symlinked_input(self, tmp_path: Path) -> None:
         """A snapshot cannot turn a linked source into a regular staged file."""

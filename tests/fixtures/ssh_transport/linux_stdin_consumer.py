@@ -11,6 +11,7 @@ from unittest import mock
 
 from fplinux_cli.runtime.ssh import transport as ssh_transport
 
+from tests.boot_identity import IDENTITY_12
 from tests.fixtures.executables import install_python_script
 
 
@@ -32,10 +33,10 @@ def main() -> int:
     ):
         if probe in {"ram-session", "both"}:
             session = ssh_transport.reacquire_bound_session(
-                session, expected_device_identity="12" * 32
+                session, expected_device_identity=IDENTITY_12
             )
         if probe in {"kernel-identity", "both"}:
-            ssh_transport.require_device_identity(session, "12" * 32)
+            ssh_transport.require_device_identity(session, IDENTITY_12)
         result = ssh_transport.run_remote(session, "receive-stdin", capture_output=capture_output)
     if capture_output:
         sys.stdout.write(result.stdout)

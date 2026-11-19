@@ -113,7 +113,8 @@ def test_adapter_observes_exact_fixed_command_and_requires_kernel_identity(
         "complete",
     ]
     commands = (tmp_path / "ssh-commands").read_text(encoding="utf-8").splitlines()
-    assert commands == ["uname -r"]
+    assert len(commands) == 1
+    assert commands[0].startswith("uname -r && ")
 
 
 @pytest.mark.parametrize(

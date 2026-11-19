@@ -19,7 +19,7 @@ from fplinux_cli.common import replace_file_atomically
 
 from . import boot
 from . import phone_data as phone_data_runtime
-from .bundle import admit_bundle, fail, host_preflight
+from .bundle import admit_bundle, boots_system_card, fail, host_preflight
 from .connection import ConnectionLostError
 from .events import RunLog, record_events
 from .state import exclusive_lock, private_directory
@@ -28,7 +28,13 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
     from types import FrameType
 
+    from fplinux_cli.device_data.inputs import FirmwareInput
+
     from .bundle import ValidatedBundle
+
+    CardInstaller = Callable[
+        [tuple[Any, dict[str, Any]], dict[str, tuple[FirmwareInput, ...]], RunLog], bool
+    ]
 
 
 @contextmanager
@@ -111,16 +117,18 @@ def _run_phone(  # noqa: PLR0913 -- runtime actions and explicit paths preserve 
     prepare_only: bool,
     replace: bool,
     loader_trace: bool,
+    install_card: CardInstaller | None = None,
 ) -> None:
     bundle, runtime = admitted.root, admitted.runtime
     log.message(f"FPLinux — {runtime['identity']['target']['display_name']}")
+    system_card = boots_system_card(runtime)
     spec = phone_data_runtime.device_data_spec(bundle, runtime)
     selected = None
     if spec is not None:
         from fplinux_cli.device_data.store import locked_phone_store  # noqa: PLC0415
 
         with locked_phone_store(runtime["target"], root=phone_data) as store:
-            if spec.required_declarations or prepare_only or from_dump is not None:
+            if spec.required_declarations or prepare_only or from_dump is not None or install_card:
                 reader_used = phone_data_runtime.prepare_phone_data(
                     admitted,
                     data,
@@ -130,13 +138,39 @@ def _run_phone(  # noqa: PLR0913 -- runtime actions and explicit paths preserve 
                     from_dump=from_dump,
                     replace=replace,
                     loader_trace=loader_trace,
+                    retain_reader=install_card is not None,
                 )
-                if prepare_only or reader_used:
+                if install_card is None and (prepare_only or reader_used):
                     return
-            selected = phone_data_runtime.selected_phone_data(spec, store / "phone")
-    elif prepare_only or from_dump is not None:
+            if install_card is None:
+                selected = phone_data_runtime.selected_phone_data(spec, store / "phone")
+            else:
+                from fplinux_cli.device_data.inputs import (  # noqa: PLC0415 -- card only.
+                    capture_phone_data,
+                )
+
+                firmware = capture_phone_data(spec.groups, store / "phone", require_all=False)
+    elif prepare_only or from_dump is not None or install_card is not None:
         fail("This bundle boots directly and does not require phone-data preparation")
-    if (data / "reader").exists():
+    if install_card is not None:
+        with log.capture():
+            reader_connection = boot.reconnect_live_bundle(
+                admitted,
+                session_root=data / "reader/session",
+                prepared_data_sha256=phone_data_runtime.content_identity(
+                    phone_data_runtime.capsule_bytes({}, preparation=True)
+                ),
+                required=True,
+            )
+        if reader_connection is None:
+            fail("The phone left its RAM preparation session")
+        if install_card(reader_connection, firmware, log):
+            phone_data_runtime.finish_reader(
+                reader_connection, data, log, progress=None, restart=False
+            )
+            log.message("System card verified. Power off the phone before starting from the card.")
+        return
+    if not system_card and (data / "reader").exists():
         with log.capture():
             reader_connection = boot.reconnect_live_bundle(
                 admitted,
@@ -150,7 +184,7 @@ def _run_phone(  # noqa: PLR0913 -- runtime actions and explicit paths preserve 
                 phone_data_runtime.finish_reader(reader_connection, data, log, progress=progress)
             return
         shutil.rmtree(data / "reader")
-    contents = phone_data_runtime.selected_capsule(selected)
+    contents = None if system_card else phone_data_runtime.selected_capsule(selected)
     identity = phone_data_runtime.content_identity(contents)
     log.message("Checking the saved phone connection...")
     with log.capture():
@@ -160,7 +194,7 @@ def _run_phone(  # noqa: PLR0913 -- runtime actions and explicit paths preserve 
             prepared_data_sha256=identity,
         )
     if connection is None:
-        log.message("Starting FPLinux...")
+        log.message("Starting FPLinux from microSD..." if system_card else "Starting FPLinux...")
         with tempfile.TemporaryDirectory(prefix=".boot-", dir=data) as temporary:
             staging = private_directory(Path(temporary))
             capsule = None
@@ -203,6 +237,7 @@ def run_phone(  # noqa: PLR0913 -- explicit CLI policies keep preparation and re
     loader_trace: bool = False,
     nand_action: str | None = None,
     nand_output: Path | None = None,
+    install_card: CardInstaller | None = None,
 ) -> int:
     """Run the shared workflow with diagnostics and one state lock through SSH exit."""
     log = None
@@ -261,6 +296,7 @@ def run_phone(  # noqa: PLR0913 -- explicit CLI policies keep preparation and re
                         prepare_only=prepare_only,
                         replace=replace,
                         loader_trace=loader_trace,
+                        install_card=install_card,
                     )
             status = "success"
             return 0

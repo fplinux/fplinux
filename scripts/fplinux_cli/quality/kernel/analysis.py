@@ -18,13 +18,10 @@ from fplinux_cli.build.device_tree import (
     verify_profile_dtb_layout,
     verify_root_bootargs,
     verify_target_identity,
+    write_boot_dtb,
 )
 from fplinux_cli.build.inputs import CACHE, require_file, root_source, target_source
 from fplinux_cli.build.kernel import state as linux_state
-from fplinux_cli.build.kernel.configuration import (
-    profile_kconfig_actions,
-    profile_kconfig_arguments,
-)
 from fplinux_cli.build.kernel.projection import patch_destinations
 from fplinux_cli.build.process import report_stage, run
 from fplinux_cli.build.sources import source_lock_entry
@@ -247,19 +244,14 @@ def check_one_context(
         linux = source_lock_entry(sources, platform["linux"]["source_lock"])
         archive = CACHE / linux["destination"]
         config_paths = kernel_config_paths(target, target_config, platform)
-        defconfig = compose_kernel_config(
-            *config_paths, boot_font=target_config["display"]["boot_font"]
-        ).decode()
+        boot_font = (
+            None
+            if platform["bootstrap"]["backend"] == "ums9117"
+            else target_config["display"]["boot_font"]
+        )
+        defconfig = compose_kernel_config(*config_paths, boot_font=boot_font).decode()
         objects = sparse_targets(target, target_config, platform)
         output = sparse_output(target, profile, build_type=build_type)
-        initramfs = output / "initramfs"
-        initramfs_delivery = target_config["bootstrap"]["initramfs_delivery"]
-        embedded_initramfs = initramfs_delivery == "embedded"
-        if embedded_initramfs:
-            defconfig += f'CONFIG_INITRAMFS_SOURCE="{initramfs}"\n'
-        elif initramfs_delivery == "external":
-            defconfig += 'CONFIG_INITRAMFS_SOURCE=""\n'
-        config_enable, config_disable = profile_kconfig_actions(target_config)
         kbuild = [
             "make",
             "-C",
@@ -276,15 +268,6 @@ def check_one_context(
             *style_files,
         ]
         checkpatch_sources = [*checkpatch, "-f", *style_files, *kconfig_files]
-        first_kconfig_command = [*kbuild, "olddefconfig"]
-        profile_config_command: list[str] | None = None
-        if config_enable or config_disable:
-            profile_config_command = [
-                str(require_file(source / platform["linux"]["config_script"])),
-                "--file",
-                str(output / ".config"),
-                *profile_kconfig_arguments(config_enable, config_disable),
-            ]
         kconfig_command = [*kbuild, "olddefconfig", "prepare"]
         dtbs_command = [*kbuild, "W=1", "dtbs_check"]
         linux_state.require_prepared_linux(source, prepared_linux)
@@ -303,30 +286,13 @@ def check_one_context(
         if config_diff.stat().st_size:
             run_checkpatch([*checkpatch, str(config_diff)])
     with report_stage(reporter, f"kconfig-{label}"):
-        if embedded_initramfs:
-            initramfs.mkdir()
         (output / ".config").write_text(defconfig)
-        if profile_config_command is not None:
-            run(first_kconfig_command)
-            run(profile_config_command)
         run(kconfig_command)
-        requested = kconfig_values(defconfig)
-        requested.update(dict.fromkeys(config_enable, "y"))
-        requested.update(dict.fromkeys(config_disable, "n"))
-        if initramfs_delivery == "none":
-            # Disabling initial RAM disks removes this entire Kconfig subtree.
-            requested = {
-                symbol: value
-                for symbol, value in requested.items()
-                if not symbol.startswith(("CONFIG_INITRAMFS_", "CONFIG_RD_"))
-            }
-        elif not embedded_initramfs:
-            # Only an embedded archive has a Kbuild compression choice.
-            requested = {
-                symbol: value
-                for symbol, value in requested.items()
-                if not symbol.startswith("CONFIG_INITRAMFS_COMPRESSION_")
-            }
+        requested = {
+            symbol: value
+            for symbol, value in kconfig_values(defconfig).items()
+            if not symbol.startswith("CONFIG_INITRAMFS_COMPRESSION_")
+        }
         actual = kconfig_values(require_file(output / ".config").read_text())
         for symbol, value in requested.items():
             if actual.get(symbol, "n") != value:
@@ -344,6 +310,8 @@ def check_one_context(
         platform_identity = platform["identity"]
         dtb = output / platform["linux"]["dtb_output_directory"] / target_config["linux"]["dtb"]
         try:
+            if target_config["linux"]["root"]["kind"] == "external":
+                dtb = write_boot_dtb(dtb, output / "boot-dtb", target_config)
             verify_target_identity(
                 dtb,
                 target,

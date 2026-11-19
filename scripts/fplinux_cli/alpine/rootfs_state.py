@@ -6,7 +6,7 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING
 
-from fplinux_cli.common import fail, is_sha256, replace_file_atomically, sha256_file
+from fplinux_cli.common import fail, is_sha256, replace_file_atomically, sha256_bytes, sha256_file
 
 from .lock import _sha256
 
@@ -16,6 +16,14 @@ if TYPE_CHECKING:
 RECEIPT_NAME = ".fplinux-rootfs-receipt.json"
 ROOTFS_NAME = "rootfs.cpio"
 INITRAMFS_NAME = "initramfs.cpio"
+EXT4_IMAGE_DIRECTORY = "ext4"
+
+
+def layered_rootfs_recipe(recipe: str, base_recipe: str | None) -> str:
+    """Bind a board composition to the shared root used to derive its layer."""
+    if base_recipe is None:
+        return recipe
+    return sha256_bytes(f"fplinux.ram-rootfs\n{recipe}\n{base_recipe}\n".encode("ascii"))
 
 
 def rootfs_output(cache: Path, recipe: str) -> Path:

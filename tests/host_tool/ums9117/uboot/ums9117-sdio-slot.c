@@ -11,10 +11,14 @@
 
 struct fake_slot {
 	u32 regs[UMS9117_SDIO_SLOT_REG_COUNT];
+	u32 controller[UMS9117_SDIO_REG_COUNT];
 	u16 analog[UMS9117_SDIO_SLOT_ANALOG_COUNT];
 	unsigned int writes;
 	u32 sleep_ms;
+	u64 time_us;
 };
+
+static int expect(bool condition, const char *message);
 
 static u32 fake_read(void *context, enum ums9117_sdio_slot_reg reg)
 {
@@ -26,7 +30,44 @@ static void fake_write(void *context, enum ums9117_sdio_slot_reg reg, u32 value)
 	struct fake_slot *fake = context;
 
 	fake->regs[reg] = value;
+	if (reg == UMS9117_SDIO_SLOT_REG_GATE_CLEAR)
+		fake->regs[UMS9117_SDIO_SLOT_REG_GATE_STATE] &= ~value;
 	fake->writes++;
+}
+
+static u32 fake_controller_read(void *context, enum ums9117_sdio_reg reg)
+{
+	return ((struct fake_slot *)context)->controller[reg];
+}
+
+static void fake_controller_write(void *context, enum ums9117_sdio_reg reg,
+				  u32 value)
+{
+	struct fake_slot *fake = context;
+
+	if (reg == UMS9117_SDIO_REG_INTERRUPT_STATUS)
+		fake->controller[reg] &= ~value;
+	else if (reg == UMS9117_SDIO_REG_CLOCK_RESET)
+		fake->controller[reg] = value & ~UMS9117_SDIO_HOST_RESET;
+	else
+		fake->controller[reg] = value;
+	fake->writes++;
+}
+
+static u64 fake_time_us(void *context)
+{
+	return ((struct fake_slot *)context)->time_us;
+}
+
+static void fake_delay_us(void *context, u32 usec)
+{
+	((struct fake_slot *)context)->time_us += usec;
+}
+
+static void fake_sleep_us(void *context, u32 min, u32 max)
+{
+	(void)max;
+	fake_delay_us(context, min);
 }
 
 static int fake_adi_transaction(void *context)
@@ -61,6 +102,14 @@ static struct ums9117_sdio_slot_io fake_io(struct fake_slot *fake)
 {
 	struct ums9117_sdio_slot_io io = {
 		.context = fake,
+		.controller = {
+			.context = fake,
+			.read = fake_controller_read,
+			.write = fake_controller_write,
+			.time_us = fake_time_us,
+			.delay_us = fake_delay_us,
+			.sleep_us = fake_sleep_us,
+		},
 		.read = fake_read,
 		.write = fake_write,
 		.adi_begin = fake_adi_transaction,
@@ -71,6 +120,45 @@ static struct ums9117_sdio_slot_io fake_io(struct fake_slot *fake)
 	};
 
 	return io;
+}
+
+static int test_cold_takeover(void)
+{
+	struct fake_slot fake = { 0 };
+	struct ums9117_sdio_slot_io io = fake_io(&fake);
+	struct ums9117_sdio_slot_state state = { 0 };
+	int failed = 0;
+
+	fake.regs[UMS9117_SDIO_SLOT_REG_GATE_STATE] = 0x180U;
+	fake.analog[UMS9117_SDIO_SLOT_ANALOG_CORE_VOLT] = 0x0050U;
+	fake.analog[UMS9117_SDIO_SLOT_ANALOG_IO_VOLT] = 0x006fU;
+	fake.controller[UMS9117_SDIO_REG_PRESENT_STATE] =
+		UMS9117_SDIO_DAT0_LEVEL;
+	fake.controller[UMS9117_SDIO_REG_CLOCK_RESET] =
+		UMS9117_SDIO_CLOCK_CARD_EN | UMS9117_SDIO_CLOCK_INT_EN;
+	fake.controller[UMS9117_SDIO_REG_INTERRUPT_SIGNAL_ENABLE] = 0xffU;
+	failed |= expect(
+		ums9117_sdio_slot_snapshot(&io, &state) == -EBUSY,
+		"ordinary snapshot accepted an inherited active controller");
+	failed |= expect(!ums9117_sdio_slot_takeover(&io, 100U),
+			 "cold controller takeover failed");
+	failed |= expect(
+		fake.regs[UMS9117_SDIO_SLOT_REG_GATE_STATE] == 0x100U &&
+			!(fake.controller[UMS9117_SDIO_REG_CLOCK_RESET] &
+			  UMS9117_SDIO_CLOCK_CARD_EN) &&
+			!fake.controller
+				 [UMS9117_SDIO_REG_INTERRUPT_SIGNAL_ENABLE],
+		"cold takeover did not quiesce the controller and gate");
+	failed |= expect(!ums9117_sdio_slot_snapshot(&io, &state),
+			 "slot snapshot failed after cold takeover");
+
+	fake.regs[UMS9117_SDIO_SLOT_REG_GATE_STATE] = 0x80U;
+	fake.controller[UMS9117_SDIO_REG_PRESENT_STATE] = 0;
+	failed |= expect(ums9117_sdio_slot_takeover(&io, 20U) == -ETIMEDOUT &&
+				 fake.regs[UMS9117_SDIO_SLOT_REG_GATE_STATE] ==
+					 0x80U,
+			 "busy cold controller was gated without quiescence");
+	return failed;
 }
 
 static int expect(bool condition, const char *message)
@@ -192,5 +280,6 @@ static int test_power_preserves_voltage_and_other_pmic_bits(void)
 int main(void)
 {
 	return test_voltage_admission() | test_card_detect_ownership() |
-	       test_power_preserves_voltage_and_other_pmic_bits();
+	       test_power_preserves_voltage_and_other_pmic_bits() |
+	       test_cold_takeover();
 }

@@ -24,21 +24,24 @@ static struct mmc fake_mmc;
 static jmp_buf finished;
 static uint32_t failure;
 static size_t fit_bytes;
-static size_t expected_dtb_bytes;
 static int released;
 static int padded_fdt;
+static int autonomous;
+static const char *expected_usb_status;
 
 static void fail(uint32_t code, uint32_t detail) __attribute__((noreturn));
 static void finalize(uint32_t kernel, uint32_t kernel_size, uint32_t dtb,
 		     uint32_t dtb_size) __attribute__((noreturn));
 
-static const struct fplinux_uboot_handoff handoff = {
+static struct fplinux_uboot_handoff handoff = {
 	.fit_phys = FIT_ADDRESS,
 	.fit_limit = ARENA_BYTES,
 	.zimage_phys = KERNEL_ADDRESS,
 	.zimage_limit = ARENA_BYTES,
 	.dtb_phys = DTB_ADDRESS,
 	.dtb_limit = ARENA_BYTES,
+	.uboot_sha256 =
+		"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 };
 
 static int checkpoint(uint32_t code, uint32_t value)
@@ -67,7 +70,7 @@ static int padded_tree_handoff_valid(uint32_t dtb_bytes)
 	int length;
 	int chosen;
 
-	if (dtb_bytes != expected_dtb_bytes || fdt_check_header(tree) ||
+	if (dtb_bytes >= 0x1000U || fdt_check_header(tree) ||
 	    fdt_totalsize(tree) != dtb_bytes || dtb_bytes < sizeof(seed_name))
 		return 0;
 	chosen = fdt_path_offset(tree, "/chosen");
@@ -87,6 +90,8 @@ static int padded_tree_handoff_valid(uint32_t dtb_bytes)
 static void finalize(uint32_t kernel, uint32_t kernel_size, uint32_t dtb,
 		     uint32_t dtb_size)
 {
+	const void *tree = (const void *)(uintptr_t)dtb;
+
 	if (kernel != KERNEL_ADDRESS || kernel_size != 64 ||
 	    dtb != DTB_ADDRESS || !dtb_size)
 		failure = UINT32_MAX;
@@ -94,6 +99,28 @@ static void finalize(uint32_t kernel, uint32_t kernel_size, uint32_t dtb,
 		fputs("DTB handoff includes padding or changed the RNG property\n",
 		      stderr);
 		failure = UINT32_MAX;
+	}
+	if (autonomous) {
+		int chosen = fdt_path_offset(tree, "/chosen");
+		const char *entry =
+			fdt_getprop(tree, chosen, "fplinux,boot-entry", NULL);
+
+		if (!entry || strcmp(entry, "sd") ||
+		    fdt_path_offset(tree, "/fplinux-session") >= 0 ||
+		    fdt_getprop(tree, chosen, "rng-seed", NULL) ||
+		    !fdt_getprop(tree, chosen, "linux,initrd-end", NULL))
+			failure = UINT32_MAX;
+	}
+	if (expected_usb_status) {
+		int usb = fdt_path_offset(tree, "/usb");
+		const char *status = fdt_getprop(tree, usb, "status", NULL);
+
+		if (!status || strcmp(status, expected_usb_status)) {
+			fprintf(stderr, "expected USB status %s, got %s\n",
+				expected_usb_status,
+				status ? status : "(missing)");
+			failure = UINT32_MAX;
+		}
 	}
 	longjmp(finished, 1);
 }
@@ -158,6 +185,8 @@ int env_set(const char *name, const char *value)
 
 int env_set_hex(const char *name, ulong value)
 {
+	if (!strcmp(name, "initrd_high"))
+		return value != ~0UL;
 	return strcmp(name, "fdt_high") || value <= DTB_ADDRESS;
 }
 
@@ -220,6 +249,8 @@ int fit_image_get_type(const void *fit, int node, uint8_t *type)
 {
 	if (!image_enum(fit, node, "type", "kernel", IH_TYPE_KERNEL, type))
 		return 0;
+	if (!image_enum(fit, node, "type", "ramdisk", IH_TYPE_RAMDISK, type))
+		return 0;
 	return image_enum(fit, node, "type", "flat_dt", IH_TYPE_FLATDT, type);
 }
 
@@ -231,6 +262,11 @@ int fit_image_get_arch(const void *fit, int node, uint8_t *arch)
 int fit_image_get_comp(const void *fit, int node, uint8_t *comp)
 {
 	return image_enum(fit, node, "compression", "none", IH_COMP_NONE, comp);
+}
+
+int fit_image_get_os(const void *fit, int node, uint8_t *os)
+{
+	return image_enum(fit, node, "os", "linux", IH_OS_LINUX, os);
 }
 
 void bootm_init(struct bootm_info *bmi)
@@ -246,9 +282,12 @@ int bootm_run_states(struct bootm_info *bmi, int states)
 	size_t size;
 	int node;
 
-	(void)bmi;
 	if (states == (BOOTM_STATE_START | BOOTM_STATE_FINDOS)) {
-		selected.fit_uname_cfg = "test-board";
+		const char *config = strchr(bmi->addr_img, '#');
+
+		if (!config || fit_conf_get_node(fit, config + 1) < 0)
+			return -1;
+		selected.fit_uname_cfg = config + 1;
 		selected.fit_uname_os = "kernel";
 		selected.fit_hdr_os = fit;
 		node = fdt_path_offset(fit, "/images/kernel");
@@ -272,13 +311,32 @@ int bootm_run_states(struct bootm_info *bmi, int states)
 		if (fdt_check_header(selected.ft_addr))
 			return -1;
 		selected.ft_len = fdt_totalsize(selected.ft_addr);
-		expected_dtb_bytes = size;
 		selected.fit_hdr_fdt = fit;
 		selected.fit_uname_fdt = "fdt";
 		selected.fit_noffset_fdt = node;
+		node = fdt_path_offset(fit, "/images/ramdisk");
+		if (fit_image_get_data(fit, node, &data, &size))
+			return -1;
+		selected.fit_hdr_rd = fit;
+		selected.fit_uname_rd = "ramdisk";
+		selected.rd_start = (ulong)(uintptr_t)data;
+		selected.rd_end = selected.rd_start + size;
 	} else if (states == BOOTM_STATE_LOADOS) {
 		fit_image_get_data(fit, selected.fit_noffset_os, &data, &size);
 		memcpy((void *)(uintptr_t)KERNEL_ADDRESS, data, size);
+	} else if (states == BOOTM_STATE_RAMDISK) {
+		selected.initrd_start = selected.rd_start;
+		selected.initrd_end = selected.rd_end;
+	} else if (states == BOOTM_STATE_OS_PREP && autonomous) {
+		int chosen;
+		uint32_t end = htobe32(selected.initrd_end);
+
+		if (fdt_open_into(selected.ft_addr, selected.ft_addr, 0x1000))
+			return -1;
+		chosen = fdt_path_offset(selected.ft_addr, "/chosen");
+		if (fdt_setprop(selected.ft_addr, chosen, "linux,initrd-end",
+				&end, sizeof(end)))
+			return -1;
 	} else if (states == BOOTM_STATE_OS_PREP && padded_fdt) {
 		static const char stale_name[] = "rng-seed";
 		unsigned char *tree = selected.ft_addr;
@@ -303,12 +361,19 @@ int main(int argc, char **argv)
 	size_t size;
 	int expected, alignment;
 
-	if (argc != 4 && argc != 5)
+	if (argc < 4 || argc > 6)
 		return 2;
-	if (argc == 5) {
-		if (strcmp(argv[4], "padded-fdt"))
+	if (argc == 6)
+		expected_usb_status = argv[5];
+	if (argc >= 5) {
+		if (!strcmp(argv[4], "padded-fdt")) {
+			padded_fdt = 1;
+		} else if (!strcmp(argv[4], "autonomous")) {
+			autonomous = 1;
+			handoff.entry = FPLINUX_UBOOT_ENTRY_SD;
+		} else {
 			return 2;
-		padded_fdt = 1;
+		}
 	}
 	alignment = atoi(argv[2]);
 	expected = atoi(argv[3]);

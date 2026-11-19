@@ -44,8 +44,9 @@ def _nand_backup_action(
 def command_action(
     args: argparse.Namespace,
     check_parser: argparse.ArgumentParser,
-) -> Callable[[], None]:
+) -> Callable[[], object]:
     """Bind parsed command arguments to one deferred command invocation."""
+    action: Callable[[], object]
     if args.command == "doctor":
         from fplinux_cli.environment.doctor import doctor  # noqa: PLC0415 -- selected backend.
 

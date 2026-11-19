@@ -20,6 +20,8 @@ from fplinux_cli.build.device_tree import (
     parse_nul_string_list,
     verify_dtb_kconfig,
     verify_profile_dtb_layout,
+    verify_root_bootargs,
+    write_boot_dtb,
 )
 from fplinux_cli.build.identity import (
     linux_audio_policy_dtsi,
@@ -42,6 +44,32 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
 
 TREE_FIXTURES = ROOT / "tests/host_tool/build/fixtures/linux-device-tree"
+
+
+@pytest.mark.parametrize("profile", [None, "microsd-uboot"], ids=["ram", "card"])
+def test_profile_boot_dtb_preserves_arguments_from_board(
+    tmp_path: Path, profile: str | None
+) -> None:
+    """Board arguments in /chosen/bootargs survive profile specialization."""
+    board_dtb = tmp_path / "base" / "itel.dtb"
+    board_dtb.parent.mkdir()
+    board_args = b"clk_ignore_unused regulator_ignore_unused\0"
+    board_dtb.write_bytes(binary_tree([], [("chosen", [("bootargs", board_args)], [])]))
+    target = targets.load_target("itel-neo-r60-plus", profile)
+
+    # Exercise DTB stamping with fdtput independently of Kbuild.
+    dtb = write_boot_dtb(board_dtb, tmp_path, target, "a" * 64)
+    verify_root_bootargs(dtb, target["linux"]["root"])
+
+    chosen = exact_path_properties(dtb, "/chosen")["/chosen"]
+    bootargs = parse_nul_string(chosen["bootargs"], "bootargs").split()
+    if profile is None:
+        assert bootargs.count("rdinit=/init") == 1
+    else:
+        assert bootargs.count("root=PARTUUID=46504c58-02") == 1
+        assert "rdinit=/init" not in bootargs
+    assert "clk_ignore_unused" in bootargs
+    assert "regulator_ignore_unused" in bootargs
 
 
 @pytest.mark.parametrize(

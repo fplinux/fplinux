@@ -154,7 +154,7 @@ def test_archive_preparation_uses_its_private_directory_without_xdg_or_sftp(
         "template_sha256": hashlib.sha256(b"\0" * 512).hexdigest(),
     }
     monkeypatch.delenv("XDG_RUNTIME_DIR", raising=False)
-    monkeypatch.setattr(ssh_session, "_host_route_networks", lambda _tool: set())
+    monkeypatch.setattr(ssh_session, "host_route_networks", set)
     find_tool = shutil.which
     monkeypatch.setattr(shutil, "which", lambda name: None if name == "sftp" else find_tool(name))
 
@@ -353,8 +353,11 @@ class SshTransportOpenSshDirectTests:
             value: dict[str, Any],
             *,
             connect_timeout: int = 5,
+            global_known_hosts: str = "/dev/null",
         ) -> list[tuple[str, str]]:
-            options = original_options(value, connect_timeout=connect_timeout)
+            options = original_options(
+                value, connect_timeout=connect_timeout, global_known_hosts=global_known_hosts
+            )
             replacements = {"BindAddress": "127.0.0.1"}
             return [(name, replacements.get(name, option)) for name, option in options]
 

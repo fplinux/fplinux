@@ -27,6 +27,8 @@ IDENTITY_PATH = "scripts/fplinux_cli/manifests/identity.py"
 SSH_HELPER_PATH = "scripts/fplinux_cli/runtime/ssh/transport.py"
 EVENTS_HELPER_PATH = "scripts/fplinux_cli/runtime/events.py"
 REQUIRED_PYTHON = (3, 14)
+MICROSD_BOOT_MODE = "microsd"
+MICROSD_BOOT_PROFILE = "microsd-uboot"
 
 
 @dataclass(frozen=True)
@@ -60,6 +62,11 @@ def adapter_path(runtime: dict[str, Any]) -> str:
     if not isinstance(platform, str) or re.fullmatch(r"[a-z0-9][a-z0-9-]*", platform) is None:
         fail("runtime platform name must be a normalized basename")
     return f"platforms/{platform}/host/adapter.py"
+
+
+def boots_system_card(runtime: dict[str, Any]) -> bool:
+    """Identify the Stage0 runtime that loads the system already on a microSD."""
+    return runtime.get("profile") == MICROSD_BOOT_PROFILE
 
 
 def validate_runtime_identity(runtime: dict[str, Any]) -> dict[str, Any]:
@@ -299,6 +306,10 @@ def load_runtime_manifest(path: Path) -> dict[str, Any]:
     root["device_data"] = validate_device_data(root["device_data"])
     if root["device_data"] is not None and root["nand"] is None and root["emmc"] is None:
         fail("runtime preparation requires a declared physical reader")
+    if boots_system_card(root) and (
+        root["identity"]["platform"]["name"] != "ums9117" or root["device_data"] is not None
+    ):
+        fail("The system-card runtime must use UMS9117 Stage0 without RAM phone-data preparation")
     expected_paths = {
         root["image"],
         "fplinux.py",

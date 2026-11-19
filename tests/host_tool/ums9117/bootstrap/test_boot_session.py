@@ -31,7 +31,9 @@ SEED = bytes.fromhex(
     "b0b1b2b3b4b5b6b7b8b9babbbcbdbebf"
 )
 CLIENT_KEY = b"AAAAC3NzaC1lZDI1NTE5AAAAIAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8g"
-USB_CONFIG = b"SERIAL=test-session\nHOST_IP=10.2.3.1\nPHONE_IP=10.2.3.2\n".ljust(256, b"\0")
+USB_CONFIG = b"SERIAL=test-session\nHOST_IP=10.2.3.1\nPHONE_IP=10.2.3.2\ntransport=rndis\n".ljust(
+    256, b"\0"
+)
 
 
 def _seal_record(record: bytearray) -> bytes:

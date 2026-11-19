@@ -48,17 +48,21 @@ class ProfileAndToolCliHelpWorkflowTests:
             assert "nokia-ta1618" in result.stdout
             assert "--profile NAME" in result.stdout
 
-    def test_package_help_exposes_the_microsd_boot_alias_and_global_profile_selector(self) -> None:
-        """Package exposes both supported ways to select the microSD profile."""
+    def test_package_help_exposes_distribution_selections(self) -> None:
+        """Package lets callers select the phone, host and output directory."""
         result = run_process(
             [str(ROOT / "fplinux"), "package", "--help"],
             name="fplinux package help",
             timeout=_PUBLIC_HELP_TIMEOUT_SECONDS,
             cwd=ROOT,
         )
-        assert (result.returncode) == (0), result.stderr
-        assert ("--boot {microsd}") in (result.stdout)
-        assert ("--profile NAME") in (result.stdout)
+        assert result.returncode == 0, result.stderr
+        assert "--target" in result.stdout
+        assert "konrow-senior-280-plus" in result.stdout
+        assert "--host {linux,windows}" in result.stdout
+        assert "--output-directory PATH" in result.stdout
+        assert "--boot" not in result.stdout
+        assert "--profile" not in result.stdout
 
     def test_device_data_help_exposes_every_preparation_input(self) -> None:
         """The canonical command exposes the complete fitted-data source contract."""

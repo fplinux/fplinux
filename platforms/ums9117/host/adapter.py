@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-2.0-only
 # ruff: noqa: INP001
-"""Fixed UMS9117 host translation for the shared RAM runner."""
+"""Fixed UMS9117 host translation for RAM and system microSD boot."""
 
 from __future__ import annotations
 
@@ -15,6 +15,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NoReturn
 
+from fplinux_cli.runtime.bundle import boots_system_card
 from fplinux_cli.runtime.ssh import session as ssh_session
 from fplinux_cli.runtime.ssh import transport as ssh_transport
 
@@ -317,7 +318,7 @@ def run(  # noqa: PLR0913 -- runtime, session, handoff, user data and output are
     loader_trace: bool = False,
     on_wait: Callable[[], None] | None = None,
 ) -> dict[str, Any]:
-    """Execute the fixed RAM-only UMS9117 sequence and authenticate its SSH session."""
+    """Load the selected UMS9117 payload and authenticate its SSH session."""
     display_name = runtime_target_display_name(runtime)
     session_token = prepared_session_token(session)
     assets = runtime["assets"]
@@ -355,7 +356,8 @@ def run(  # noqa: PLR0913 -- runtime, session, handoff, user data and output are
     if loader_trace:
         loader_argv[1:1] = ["--verbose", "1"]
     bootrom_id = f"{bootrom_usb['vendor_id']:04x}:{bootrom_usb['product_id']:04x}"
-    print(f"{display_name} console RAM boot")
+    boot_label = "microSD boot" if boots_system_card(runtime) else "console RAM boot"
+    print(f"{display_name} {boot_label}")
     operations = ["RAM FDL1 load", "RAM payload load"]
     if config["exec_distance"]:
         operations.insert(0, "exec-distance setup")

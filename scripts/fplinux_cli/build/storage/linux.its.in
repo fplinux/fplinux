@@ -32,6 +32,19 @@
 				algo = "sha256";
 			};
 		};
+
+		ramdisk {
+			description = "FPLinux early firmware";
+			data = /incbin/("early-firmware.cpio");
+			type = "ramdisk";
+			arch = "arm";
+			os = "linux";
+			compression = "none";
+
+			hash {
+				algo = "sha256";
+			};
+		};
 	};
 
 	configurations {
@@ -41,6 +54,7 @@
 			description = "@DISPLAY_NAME@";
 			kernel = "kernel";
 			fdt = "fdt";
+			ramdisk = "ramdisk";
 		};
 	};
 };

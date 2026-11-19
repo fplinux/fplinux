@@ -12,6 +12,10 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
 
+# The ARM zImage decompressor needs its BSS, stack and 64 KiB heap after the file.
+ZIMAGE_WORKSPACE_BYTES = 0x00100000
+
+
 def boot_layout_header(layout: Mapping[str, int]) -> bytes:
     """Return the C constants shared by the resident stage and U-Boot."""
     license_tag = "SPDX-License-" + "Identifier"
@@ -41,13 +45,8 @@ def boot_layout_header(layout: Mapping[str, int]) -> bytes:
             }
         )
     else:
-        device_data_start = layout["kernel_load"] + layout["kernel_size"]
-        fields.update(
-            {
-                "DEVICE_DATA_ARENA_PHYS": device_data_start,
-                "DEVICE_DATA_ARENA_BYTES": layout["fdt_load"] - device_data_start,
-            }
-        )
+        fields["ZIMAGE_LIMIT_BYTES"] -= ZIMAGE_WORKSPACE_BYTES
+        fields["INITRAMFS_ARENA_PHYS"] = layout["kernel_load"] + layout["kernel_size"]
     defines = "".join(
         f"#define FPLINUX_BOOT_LAYOUT_{name} 0x{value:08x}U\n" for name, value in fields.items()
     )
@@ -103,20 +102,16 @@ def uboot_defconfig(base: bytes, layout: Mapping[str, int]) -> bytes:
     ).encode("ascii")
 
 
-def root_bootargs_dtsi(root: Mapping[str, Any]) -> bytes:
+def root_bootargs(root: Mapping[str, Any]) -> str:
     """Select the root filesystem while retaining the shared boot policy."""
     if root["kind"] == "initramfs":
         root_arguments = "init=/init rdinit=/init initramfs_options=size=40M"
-        initrd_properties = (
-            "linux,initrd-start = <0xe5e5e5e5>;\nlinux,initrd-end = <0xf6f6f6f6>;\n"
-        )
     elif root["kind"] == "external":
         root_arguments = (
             f"root=PARTUUID={root['partuuid']} "
             f"rootfstype={root['filesystem']} rootwait={root['wait_seconds']} rw "
             "init=/sbin/init"
         )
-        initrd_properties = ""
     else:
         message = "unsupported Linux root filesystem kind"
         raise ValueError(message)
@@ -129,12 +124,19 @@ def root_bootargs_dtsi(root: Mapping[str, Any]) -> bytes:
     # buffer twice over. The default claim is 2.75 MB on these phones, which a
     # loaded system cannot spare, so the buffer a tracer grows into is sized for
     # the machine; callers that need more still ask for it explicitly.
-    bootargs = (
+    return (
         f"console=tty0 loglevel=8 {root_arguments} "
         "panic=-1 vt.global_cursor_default=1 random.trust_bootloader=on "
         "sysctl.vm.watermark_boost_factor=0 trace_buf_size=256K"
     )
-    return f'bootargs = "{bootargs}";\n{initrd_properties}'.encode("ascii")
+
+
+def root_bootargs_dtsi(root: Mapping[str, Any]) -> bytes:
+    """Provide the base boot arguments and the RAM loader's patchable cells."""
+    contents = f'bootargs = "{root_bootargs(root)}";\n'
+    if root["kind"] == "initramfs":
+        contents += "linux,initrd-start = <0xe5e5e5e5>;\nlinux,initrd-end = <0xf6f6f6f6>;\n"
+    return contents.encode("ascii")
 
 
 def uboot_layout_dtsi(layout: Mapping[str, int]) -> bytes:
@@ -147,7 +149,9 @@ memory@{layout["ram_base"]:x} {{
 """.encode("ascii")
 
 
-def genimage_config(fit: Mapping[str, Any] | None, storage: Mapping[str, Any]) -> bytes:
+def genimage_config(
+    fit: Mapping[str, Any] | None, storage: Mapping[str, Any], *, cold_boot: bool = False
+) -> bytes:
     """Return one deterministic MBR/FAT/ext4 genimage configuration."""
     template = Path(__file__).with_name("genimage.cfg.in").read_text(encoding="ascii")
     boot_files = (
@@ -155,6 +159,10 @@ def genimage_config(fit: Mapping[str, Any] | None, storage: Mapping[str, Any]) -
         if fit is not None
         else ""
     )
+    if cold_boot:
+        boot_files += (
+            '\n\t\tfile "fpbin_t117/fpmain.bin" {\n\t\t\timage = "cold-stage0.bin"\n\t\t}'
+        )
     return substitute_template(
         template,
         {

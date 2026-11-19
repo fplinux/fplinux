@@ -1,0 +1,57 @@
+--- a/ums9117/entry.c
++++ b/ums9117/entry.c
+@@ -8,2 +8,5 @@
+-#include <stdlib.h>
+-#if LIBC_SDIO
++#include <stdlib.h>
++#if FPLINUX_COLD_SD
++#include "fplinux-bootstrap-options.h"
++#endif
++#if LIBC_SDIO
+@@ -115,3 +118,3 @@
+-#if LIBC_SDIO < 3
+-	{
+-		static const uint8_t fdl_ack[8] = {
++#if LIBC_SDIO < 3 && !FPLINUX_COLD_SD
++	{
++		static const uint8_t fdl_ack[8] = {
+@@ -210,3 +213,6 @@
+-#if CHIPRAM_ARGS || LIBC_SDIO >= 3
+-	{
+-		char *p = (char*)CHIPRAM_ADDR + 4;
++#if FPLINUX_COLD_SD
++	argc1 = FPLINUX_BOOTSTRAP_ARGC;
++	argv = fplinux_bootstrap_argv;
++#elif CHIPRAM_ARGS || LIBC_SDIO >= 3
++	{
++		char *p = (char*)CHIPRAM_ADDR + 4;
+--- a/fpdoom/libc.c
++++ b/fpdoom/libc.c
+@@ -111,7 +111,7 @@
+ #include "usbio.h"
+ 
+ void _debug_msg(const char *msg) {
+-#if LIBC_SDIO >= 3
++#if LIBC_SDIO >= 3 || FPLINUX_COLD_SD
+ 	(void)msg;
+ #else
+ 	union { uint8_t u8[4]; uint16_t u16[2]; } buf;
+@@ -288,6 +288,10 @@
+ }
+ 
+ static size_t _write_raw(int handle, size_t size, const void *src) {
++#if FPLINUX_COLD_SD
++	(void)handle; (void)src;
++	return size;
++#else
+ 	union { uint8_t u8[6]; uint16_t u16[3]; } buf;
+ 	unsigned tmp;
+ 
+@@ -300,6 +304,7 @@
+ 	usb_write(src, size);
+ 	usb_read(buf.u16, 2, USB_WAIT);
+ 	return buf.u16[0];
++#endif
+ }
+ 
+ static int _close_raw(int handle) {

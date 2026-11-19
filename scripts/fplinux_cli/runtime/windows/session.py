@@ -15,6 +15,7 @@ from contextlib import suppress
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from fplinux_cli.runtime.bundle import boots_system_card
 from fplinux_cli.runtime.ssh import material
 
 from .host import WindowsHost, console_creation_flags, fail
@@ -55,21 +56,11 @@ def prepare_session(
     root = host.runtime_root(session_root)
     if events is not None:
         events("network-preparation")
-    occupied = {
-        ipaddress.IPv4Network(route["prefix"], strict=False)
-        for route in host.ps("routes.ps1")["routes"]
-        if ipaddress.IPv4Network(route["prefix"], strict=False).prefixlen > 0
-    }
+    occupied = host.route_networks()
     for path in root.glob("*/session.json"):
         previous = json.loads(path.read_text(encoding="utf-8"))
         occupied.add(ipaddress.IPv4Network(previous["network"]))
-    for _attempt in range(4096):
-        # The SSH helper owns the shared session addressing and binary ABI.
-        network = material.candidate_network(secrets.token_bytes(5))
-        if all(not network.overlaps(used) for used in occupied):
-            break
-    else:
-        fail("Cannot allocate a free private USB network")
+    network = material.allocate_network(occupied)
     session_id = secrets.token_bytes(32)
     serial = hashlib.sha256(session_id).hexdigest()[:32]
     directory = root / serial
@@ -99,14 +90,7 @@ def _prepare_session_directory(  # noqa: PLR0913 -- owned session inputs stay ex
 ) -> dict[str, Any]:
     host.secure_new(directory, directory=True)
     serial = directory.name
-    macs: list[str] = []
-    while len(macs) < 2:
-        octets = bytearray(secrets.token_bytes(6))
-        octets[0] = (octets[0] & 0xFC) | 0x02
-        mac = ":".join(f"{octet:02x}" for octet in octets)
-        if mac not in macs:
-            macs.append(mac)
-    host_mac, device_mac = macs
+    host_mac, device_mac = material.mac_pair()
     private_key = directory / "id_ed25519"
     if events is not None:
         events("session-preparation")
@@ -138,7 +122,13 @@ def _prepare_session_directory(  # noqa: PLR0913 -- owned session inputs stay ex
         session_id,
         secrets.token_bytes(64),
         material.public_key_body(public_key),
-        material.usb_config(serial, network, host_mac, device_mac),
+        material.usb_config(
+            serial,
+            network,
+            host_mac,
+            device_mac,
+            transport="rndis" if boots_system_card(bundle.runtime) else None,
+        ),
     )
     image = directory / "image.bin"
     if events is not None:

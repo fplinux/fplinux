@@ -13,6 +13,17 @@ from pathlib import Path
 PUBLIC_KEY = "AAAAC3NzaC1lZDI1NTE5AAAAIHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBw"
 
 
+def _upload(command: str) -> None:
+    if arguments := os.environ.get("FPLINUX_TEST_UPLOAD_ARGUMENTS"):
+        Path(arguments).write_text(json.dumps(sys.argv[1:]), encoding="utf-8")
+    if pid_file := os.environ.get("FPLINUX_TEST_UPLOAD_PID"):
+        Path(pid_file).write_text(str(os.getpid()))
+        time.sleep(60)
+    if os.environ.get("FPLINUX_TEST_UPLOAD_CORRUPT"):
+        command = "cat() { printf 'corrupted bytes'; }\n" + command
+    os.execv("/bin/sh", ["/bin/sh", "-c", command])
+
+
 def main() -> int:  # noqa: PLR0911 -- each branch supplies a distinct external command result.
     if Path(sys.argv[0]).name in {"keyscan", "ssh-keyscan.exe"}:
         if os.environ.get("FPLINUX_TEST_FORBID_KEYSCAN"):
@@ -33,13 +44,16 @@ def main() -> int:  # noqa: PLR0911 -- each branch supplies a distinct external 
         Path(command.removeprefix("sleep:")).write_text(str(os.getpid()))
         time.sleep(60)
         return 0
-    if command == "fplinux-session-id; uname -r":
+    if command.startswith("set -eu\n"):
+        _upload(command)
+    if command.startswith("fplinux-session-id && uname -r && "):
         if active := os.environ.get("FPLINUX_TEST_ACTIVE_SESSION"):
             session = json.loads(Path(Path(active).read_text()).read_text())
             print(session["session_id"])
         else:
             print(os.environ["FPLINUX_TEST_SESSION_ID"])
         print(os.environ["FPLINUX_TEST_KERNEL"])
+        print(os.environ.get("FPLINUX_TEST_BOOT_RECIPE", "12" * 32))
         return 0
     if command == "uname -r; sed -n 's/^BUILD_ID=//p' /etc/os-release":
         if pid_file := os.environ.get("FPLINUX_TEST_BUILD_READER_PID"):

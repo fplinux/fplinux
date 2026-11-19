@@ -8,7 +8,8 @@ import os
 
 from fplinux_cli import common
 from fplinux_cli.alpine.lock import bundle_runtime_packages, load_alpine_lock
-from fplinux_cli.alpine.rootfs import build_rootfs
+from fplinux_cli.alpine.rootfs import build_rootfs, shared_card_packages, shared_ram_packages
+from fplinux_cli.alpine.rootfs_state import EXT4_IMAGE_DIRECTORY
 from fplinux_cli.alpine.selection import bundle_packages, selected_packages
 from fplinux_cli.artifacts.bundles import bundle_slot
 from fplinux_cli.build import assets as assets_build
@@ -69,12 +70,16 @@ def main() -> None:
             target_config["device_data"]["groups"],
             common.ROOT,
         )
+        card_packages = None
+        if (common.ROOT / ".fplinux-release-card").is_file():
+            card_packages = shared_card_packages(platform, target_config)
+            if card_packages is None or device_data:
+                fail("release card build requires a supported profile without device data")
         external_root = target_config["linux"]["root"]["kind"] == "external"
         rootfs_delivery = firmware_inputs.rootfs_receives_firmware(
             root_kind=target_config["linux"]["root"]["kind"],
         )
         firmware = firmware_inputs.rootfs_firmware_inputs(device_data) if rootfs_delivery else ()
-        audio_profile_firmware = device_data.get("audio-profile") if external_root else None
         sources = common.load_toml(common.ROOT / "sources.lock.toml")
         linux_base = sha256_value(
             sources_build.source_lock_entry(sources, platform["linux"]["source_lock"]).get(
@@ -90,6 +95,18 @@ def main() -> None:
             / "work"
         )
         work.mkdir(parents=True, exist_ok=True)
+        early_firmware = None
+        if external_root:
+            early_firmware = work / "early-firmware.cpio"
+            early_payload = create_device_data_initramfs(
+                {"audio-profile": device_data.get("audio-profile", ())}
+            )
+            if card_packages is not None:
+                from fplinux_cli.runtime.card_media import CARD_FIT_RAMDISK_SIZE  # noqa: PLC0415
+
+                early_payload = early_payload.ljust(CARD_FIT_RAMDISK_SIZE, b"\0")
+            early_firmware.write_bytes(early_payload)
+            early_firmware.chmod(0o600)
         if not external_root:
             device_data_initramfs = work / "device-data.cpio"
             capsule_groups = {} if rootfs_delivery else device_data
@@ -105,6 +122,8 @@ def main() -> None:
             platform,
         )
 
+    card_rootfs = None
+    card_ext4 = None
     with process_build.report_stage(reporter, "rootfs"):
         if target_config["image"]["kind"] == "ext4-root":
             rootfs, rootfs_output, rootfs_recipe, bundle_apk_outputs = build_rootfs(
@@ -123,15 +142,32 @@ def main() -> None:
                 selected_bundle_packages,
                 firmware=firmware,
                 display_brightness=target_config.get("display_brightness"),
+                ram_base_packages=shared_ram_packages(platform, target_config),
             )
         ext4_artifact = storage_build.profile_ext4_artifact(
             target_config,
-            work,
+            work / "rootfs-image",
             rootfs_output,
             rootfs_recipe,
         )
+        if card_packages is not None:
+            card_rootfs, card_output, card_recipe, _ = build_rootfs(
+                args.jobs, card_packages, external_image=target_config["image"]
+            )
+            card_ext4 = storage_build.profile_ext4_artifact(
+                target_config,
+                card_output / EXT4_IMAGE_DIRECTORY,
+                card_output,
+                card_recipe,
+            )
     cross = platform["linux"]["cross_compile"]
-    kernel_output = work / "kernel"
+    kernel_output = (
+        inputs_build.CACHE
+        / "linux/builds"
+        / target_config["platform"]
+        / args.build_type
+        / "kernel"
+    )
     with process_build.report_stage(reporter, "kernel"):
         bootstrap_recipe = bootstrap_recipe_digest(
             sources,
@@ -148,11 +184,11 @@ def main() -> None:
             prepared_linux=prepared_linux,
             linux_base=linux_base,
             output=kernel_output,
+            board_output=work,
             cross=cross,
-            rootfs=rootfs,
             rootfs_output=rootfs_output,
             rootfs_recipe=rootfs_recipe,
-            audio_profile_firmware=audio_profile_firmware,
+            early_firmware=early_firmware,
             jobs=args.jobs,
         )
     profile_uboot = None
@@ -170,21 +206,9 @@ def main() -> None:
                 work=work,
                 zimage=zimage,
                 dtb=dtb,
+                ramdisk=early_firmware,
                 uboot=profile_uboot,
             )
-    sd_image_artifact = None
-    if target_config["image"]["kind"] != "none":
-        with process_build.report_stage(reporter, "sd-image"):
-            sd_image_artifact = storage_build.build_profile_sd_image(
-                target_config,
-                work,
-                fit_artifact,
-                ext4_artifact,
-            )
-    boot_files, boot_artifacts = storage_build.profile_boot_artifact_set(
-        target_config,
-        sd_image_artifact,
-    )
     with process_build.report_stage(reporter, "bootstrap"):
         bootstrap = build_bootstrap(
             sources,
@@ -197,7 +221,39 @@ def main() -> None:
             uboot=profile_uboot,
             kernel_output=kernel_output,
             rootfs_output=rootfs_output,
+            early_firmware=early_firmware,
         )
+    sd_image_artifact = None
+    if target_config["image"]["kind"] != "none":
+        with process_build.report_stage(reporter, "sd-image"):
+            sd_image_artifact = storage_build.build_profile_sd_image(
+                target_config,
+                work,
+                fit_artifact,
+                ext4_artifact,
+                cold_boot=bootstrap.cold_sd,
+            )
+    boot_files, boot_artifacts = storage_build.profile_boot_artifact_set(
+        target_config,
+        sd_image_artifact,
+    )
+    if card_rootfs is not None:
+        from fplinux_cli.build.storage import card as card_build  # noqa: PLC0415
+
+        with process_build.report_stage(reporter, "card-install-assets"):
+            boot_files.update(
+                card_build.build(
+                    args.target,
+                    target_config,
+                    work / "card",
+                    board_rootfs=rootfs,
+                    shared_rootfs=card_rootfs,
+                    shared_ext4=card_ext4,
+                    fit=fit_artifact,
+                    ramdisk=early_firmware,
+                    cold_boot=bootstrap.cold_sd,
+                )
+            )
     with process_build.report_stage(reporter, "assets"):
         asset_lock_path = work / "assets.lock.toml"
         if target_config["bootstrap"]["backend"] == "sc9820e":

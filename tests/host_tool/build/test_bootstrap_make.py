@@ -17,8 +17,14 @@ if TYPE_CHECKING:
 
 @pytest.mark.parametrize(
     ("mode", "width", "loader_display"),
-    [("linux", 0, False), ("linux", 128, True), ("uboot", 128, True), ("linux", 240, False)],
-    ids=["ram-headless", "ram-display", "uboot-display", "linux-only-display"],
+    [
+        ("linux", 0, False),
+        ("linux", 128, True),
+        ("uboot", 128, True),
+        ("linux", 240, False),
+        ("uboot", 240, False),
+    ],
+    ids=["ram-headless", "ram-display", "uboot-display", "linux-only-display", "uboot-headless"],
 )
 def test_bootstrap_make_selects_display_objects_and_blocks_storage_overrides(
     tmp_path: Path, mode: str, width: int, *, loader_display: bool

@@ -175,7 +175,6 @@ firmware = [
 ]
 
 [microsd]
-linux_patches = []
 
 [loader]
 fdl1_load = 0x00005000

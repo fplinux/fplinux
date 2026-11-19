@@ -22,6 +22,7 @@ from fplinux_cli.runtime.ssh import session as ssh_session
 from fplinux_cli.runtime.ssh import transport as ssh_transport
 
 from tests import ROOT
+from tests.boot_identity import IDENTITY_9
 from tests.bundle_support import file_record
 from tests.ssh_transport_support import create_ready_session
 
@@ -387,34 +388,42 @@ class SshTransportSmallTests:
     ) -> None:
         """Accept an authenticated session when uname identifies the selected runtime."""
         session = ssh_runtime.session()
-        device_identity = "9" * 64
+        device_identity = IDENTITY_9
         result = subprocess.CompletedProcess(
             [],
             0,
-            stdout=f"6.12-fplinux-{device_identity[:16]}\n",
+            stdout=f"6.12-fplinux-9999999999999999\n{'9' * 64}\n",
             stderr="",
         )
         with mock.patch.object(ssh_transport, "run_remote", return_value=result):
             release = ssh_transport.require_device_identity(session, device_identity)
 
-        assert (release) == (f"6.12-fplinux-{device_identity[:16]}")
+        assert release == "6.12-fplinux-9999999999999999"
 
-    def test_device_identity_rejects_a_different_running_kernel(
-        self, ssh_runtime: SshRuntime
+    @pytest.mark.parametrize(
+        ("kernel", "recipe"),
+        [
+            ("6.12-fplinux-aaaaaaaaaaaaaaaa", "9" * 64),
+            ("6.12-fplinux-9999999999999999", "a" * 64),
+        ],
+        ids=("different-kernel", "different-dtb"),
+    )
+    def test_device_identity_rejects_a_different_running_build(
+        self, ssh_runtime: SshRuntime, kernel: str, recipe: str
     ) -> None:
         """Reject a ready authenticated session running another device runtime."""
         session = ssh_runtime.session()
         result = subprocess.CompletedProcess(
             [],
             0,
-            stdout="6.12-fplinux-aaaaaaaaaaaaaaaa\n",
+            stdout=f"{kernel}\n{recipe}\n",
             stderr="",
         )
         with (
             mock.patch.object(ssh_transport, "run_remote", return_value=result),
             pytest.raises(SystemExit, match="different kernel identity"),
         ):
-            ssh_transport.require_device_identity(session, "9" * 64)
+            ssh_transport.require_device_identity(session, IDENTITY_9)
 
     def test_device_identity_rejects_a_failed_kernel_probe(self, ssh_runtime: SshRuntime) -> None:
         """A matching-looking stdout cannot hide a failed authenticated probe."""
@@ -456,6 +465,17 @@ class SshTransportSmallTests:
 
         assert (config) == (expected.ljust(256, b"\0"))
 
+    def test_usb_session_rejects_text_without_room_for_the_required_nul(self) -> None:
+        """Never emit a full slot that the bootstrap treats as unterminated."""
+        with pytest.raises(SystemExit, match="USB session configuration exceeds"):
+            ssh_material.usb_config(
+                "s" * 80,
+                ipaddress.IPv4Network("10.23.45.0/30"),
+                "02:00:00:00:00:01",
+                "02:00:00:00:00:02",
+                transport="ncm",
+            )
+
     def test_session_block_uses_current_fixed_abi_header(self) -> None:
         """Emit the exact RAM-session header consumed by the bundled bootstrap."""
         session_id = bytes(range(32))
@@ -489,7 +509,7 @@ class SshTransportSmallTests:
             subprocess.CompletedProcess([], 255, stdout="", stderr="not ready"),
             subprocess.CompletedProcess([], 0, stdout=f"{state['session_id']}\n", stderr=""),
             subprocess.CompletedProcess(
-                [], 0, stdout="6.18.42-fplinux-9999999999999999\n", stderr=""
+                [], 0, stdout=f"6.18.42-fplinux-9999999999999999\n{'9' * 64}\n", stderr=""
             ),
         ]
         with (
@@ -500,7 +520,9 @@ class SshTransportSmallTests:
             mock.patch.object(ssh_transport, "ssh_argv", return_value=["ssh"]),
             mock.patch("fplinux_cli.runtime.ssh.transport.subprocess.run", side_effect=failures),
         ):
-            ready = ssh_transport.reacquire_bound_session(state, expected_device_identity="9" * 64)
+            ready = ssh_transport.reacquire_bound_session(
+                state, expected_device_identity=IDENTITY_9
+            )
             ssh_session.finish_session(state)
 
         assert (ready["interface"]) == ("usb1")
@@ -527,9 +549,9 @@ class SshTransportSmallTests:
         def ssh_reply(
             arguments: list[str], **_options: object
         ) -> subprocess.CompletedProcess[str]:
-            if arguments[-1] == "uname -r":
+            if arguments[-1].startswith("uname -r && "):
                 return subprocess.CompletedProcess(
-                    [], 0, stdout="6.18.42-fplinux-9999999999999999\n", stderr=""
+                    [], 0, stdout=f"6.18.42-fplinux-9999999999999999\n{'9' * 64}\n", stderr=""
                 )
             return next(ssh_attempts)
 
@@ -548,7 +570,7 @@ class SshTransportSmallTests:
         ):
             ready = ssh_transport.wait_for_bound_session(
                 state,
-                expected_device_identity="9" * 64,
+                expected_device_identity=IDENTITY_9,
                 on_linux_usb=lambda: observations.append(
                     ("linux-usb", network.has_reported_ready())
                 ),
@@ -662,7 +684,7 @@ class SshTransportSmallTests:
             ),
             mock.patch.object(
                 ssh_session,
-                "_mac_pair",
+                "mac_pair",
                 return_value=("02:00:00:00:00:01", "02:00:00:00:00:02"),
             ),
             mock.patch(

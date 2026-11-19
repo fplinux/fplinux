@@ -19,13 +19,12 @@ backlight = "konrow-senior-280-plus-backlight"
 levels = [0, 25, 51, 76, 102, 127, 153, 178, 204, 229, 255]
 
 [rootfs]
-packages = ["fplinux-audio", "fplinux-font-terminus-8x16"]
+packages = ["fplinux-font-terminus-8x16"]
 
 [bundle]
 packages = []
 
 [linux]
-config_fragment = "linux/config/config.fragment"
 memory = { base = 0x80200000, size = 0x02c00000 }
 dtb = "unisoc/ums9117-konrow-senior-280-plus.dtb"
 debug_dtb = "ums9117-konrow-senior-280-plus.dtb"
@@ -62,7 +61,7 @@ ram_base = 0x80000000
 ram_size = 0x03000000
 kernel_load = 0x82000000
 kernel_entry = 0x82000000
-kernel_size = 0x00c00000
+kernel_size = 0x00500000
 fdt_load = 0x82e00000
 fdt_size = 0x00010000
 framebuffer = 0x82f00000

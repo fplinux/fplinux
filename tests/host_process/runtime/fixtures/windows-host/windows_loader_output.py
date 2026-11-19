@@ -22,6 +22,8 @@ if Path.cwd().name == "payload" and (destination := os.environ.get("FPLINUX_TEST
     )
 
 if Path(sys.argv[0]).name == "spd_dump.exe":
+    if image := os.environ.get("FPLINUX_TEST_LOADER_IMAGE"):
+        Path(image).write_bytes(Path("image.bin").read_bytes())
     if pending := os.environ.get("FPLINUX_TEST_PENDING_LOADER_PID"):
         Path(pending).write_text(str(os.getpid()), encoding="ascii")
         time.sleep(60)

@@ -19,6 +19,14 @@ class PayloadRegion(TypedDict):
 
 
 @dataclass(frozen=True)
+class ColdSdBootstrap:
+    """Read-only card loader and its resident entry to the shared U-Boot."""
+
+    reader: Path
+    stage0: Path
+
+
+@dataclass(frozen=True)
 class BootstrapBuild:
     """Verified public payload and its host-side session contract."""
 
@@ -27,3 +35,4 @@ class BootstrapBuild:
     personalization: dict[str, int | str]
     regions: dict[str, PayloadRegion] | None = None
     dtb: Path | None = None
+    cold_sd: ColdSdBootstrap | None = None

@@ -10,6 +10,7 @@ from unittest import mock
 import pytest
 from fplinux_cli import common
 from fplinux_cli.alpine import selection as alpine_state
+from fplinux_cli.build.bootstrap.recipe import bootstrap_display, generated_bootstrap_files
 from fplinux_cli.build.bootstrap.verify import verify_forbidden_dtb_markers
 from fplinux_cli.build.kernel import configuration as kernel_build
 from fplinux_cli.build.kernel import prepare as linux_build
@@ -44,14 +45,14 @@ class ProfileContext:
         (shared / "loader").mkdir()
         shutil.copyfile(PROFILE_FIXTURES / "assets.lock.toml", shared / "loader/assets.lock.toml")
         shutil.copyfile(PROFILE_FIXTURES / "uboot.lock.toml", shared / "uboot.lock.toml")
+        (shared / "bootstrap-microsd").mkdir()
+        (shared / "uboot").mkdir()
+        (shared / "uboot/board_defconfig").write_text("CONFIG_ARM=y\n")
         for target in ("first", "second"):
             target_root = self.root / "targets" / target
             (target_root / "kernel").mkdir(parents=True)
             (target_root / "linux/overlay").mkdir(parents=True)
             (target_root / "kernel/config.fragment").write_text("CONFIG_BOARD=2\n")
-            (target_root / "bootstrap-microsd").mkdir()
-            (target_root / "uboot").mkdir()
-            (target_root / "uboot/defconfig").write_text("CONFIG_ARM=y\n")
             self.write_target_manifest(target)
 
     def write_target_manifest(self, target: str, fixture: str = "target.toml") -> None:
@@ -89,7 +90,7 @@ class GlobalProfileTests:
 
     @staticmethod
     @pytest.mark.usefixtures("profile_context")
-    def test_root_selection_keeps_feature_policy_and_board_boot_sources() -> None:
+    def test_root_selection_keeps_feature_policy_and_board_stage0_outputs() -> None:
         """MicroSD changes root placement but keeps feature and firmware inputs."""
         target = "first"
         ram = targets.load_target(target)
@@ -117,9 +118,8 @@ class GlobalProfileTests:
         )
         assert (card["device_data"]) == (ram["device_data"])
         assert (card["linux"]["memory"]) == ({"base": 0x80200000, "size": 0x03C00000})
-        assert (card["linux"]["config_fragment"]) == (ram["linux"]["config_fragment"])
-        assert (card["bootstrap"]["source"]) == ("bootstrap-microsd")
-        assert (card["uboot"]["defconfig"]) == ("uboot/defconfig")
+        assert card["bootstrap"]["image"] == "sd-stage0.bin"
+        assert card["bootstrap"]["map"] == "sd-stage0.map"
         assert (card["runtime"]) == (ram["runtime"])
 
     @staticmethod
@@ -280,13 +280,24 @@ class GlobalProfileTests:
             "bluetooth": [{"source": "radio.bin", "destination": "demo/radio.bin"}]
         }
 
-    def test_missing_board_boot_sources_fail_only_when_microsd_is_selected(
-        self, profile_context: ProfileContext
+    @pytest.mark.parametrize(
+        ("source", "message"),
+        [
+            ("platforms/demo/uboot/board_defconfig", "U-Boot source is missing"),
+            ("platforms/demo/bootstrap-microsd", "platform microSD bootstrap source is missing"),
+        ],
+    )
+    def test_missing_platform_boot_sources_fail_only_when_microsd_is_selected(
+        self, profile_context: ProfileContext, source: str, message: str
     ) -> None:
-        """RAM operation does not read unused U-Boot sources or fall back to another board."""
-        (profile_context.root / "targets/second/uboot/defconfig").unlink()
+        """RAM operation does not read unused platform Stage0 and U-Boot sources."""
+        path = profile_context.root / source
+        if path.is_dir():
+            path.rmdir()
+        else:
+            path.unlink()
         assert (targets.load_target("second")["bootstrap"]["kind"]) == ("linux")
-        with pytest.raises(SystemExit, match="U-Boot source is missing"):
+        with pytest.raises(SystemExit, match=message):
             targets.load_target("second", "microsd-uboot")
 
     def test_board_without_microsd_inputs_offers_only_the_ram_profile(
@@ -310,53 +321,56 @@ class GlobalProfileTests:
         """A partial microSD declaration is still refused, even for the RAM profile."""
         path = profile_context.root / "targets/first/target.toml"
         manifest = path.read_text(encoding="utf-8")
-        uboot = '[microsd.uboot]\ndefconfig = "uboot/defconfig"\npatches = []\ncopies = []\n'
-        assert (uboot) in (manifest)
-        path.write_text(manifest.replace(uboot, ""), encoding="utf-8")
+        path.write_text(
+            manifest.partition("[microsd.bootstrap]")[0] + "[microsd]\n", encoding="utf-8"
+        )
 
         with (
             pytest.raises(SystemExit, match="target microsd must contain exactly"),
         ):
             targets.load_target("first", profile)
 
-    @pytest.mark.parametrize("target", ["first", "second"])
-    def test_uboot_combines_shared_sources_with_the_selected_board(
-        self, profile_context: ProfileContext, target: str
+    @pytest.mark.parametrize(
+        ("target", "stage0_image"),
+        [
+            ("bq-2830l-tank-connect-max", "bq_2830l_tank_connect_max_sd_stage0.bin"),
+            ("inoi-240-modern-4g", "inoi240_sd_stage0.bin"),
+            ("inoi-244-modern-4g", "inoi244_sd_stage0.bin"),
+            ("itel-neo-r60-plus", "itel_neo_r60_plus_sd_stage0.bin"),
+            ("maxvi-k15n-4g", "maxvi_k15n_4g_sd_stage0.bin"),
+            ("nokia-110-4g", "nokia_110_4g_sd_stage0.bin"),
+            ("nokia-ta1618", "ta1618_sd_stage0.bin"),
+            ("uniwa-v1000-4g", "uniwa_v1000_sd_stage0.bin"),
+        ],
+    )
+    def test_ums9117_system_card_preserves_board_boot_policy(
+        self, target: str, stage0_image: str
     ) -> None:
-        """The target loader combines shared and selected board inputs in the U-Boot config."""
-        shared = profile_context.root / "platforms/demo"
-        (shared / "boot.c").write_text("shared boot flow\n")
-        (shared / "boot.patch").write_text("shared integration patch\n")
-        profile_context.platform["uboot"]["patches"] = ["platforms/demo/boot.patch"]
-        profile_context.platform["uboot"]["required_config"] = [
-            "CONFIG_TARGET_DEMO=y",
-            'CONFIG_BOOTCOMMAND="demoboot"',
-        ]
-        profile_context.platform["uboot"]["copies"] = [
-            {"source": "platforms/demo/boot.c", "destination": "board/demo/boot.c"}
-        ]
-        target_root = profile_context.root / "targets" / target
-        (target_root / "uboot/slot.c").write_text(f"{target} slot\n")
-        (target_root / "uboot/board.patch").write_text(f"{target} integration patch\n")
-        profile_context.write_target_manifest(target, "with-uboot-sources/target.toml")
+        """All eight released UMS9117 targets offer the intended system-card entry points."""
+        assert paths.discover_profiles(target) == ("default", "microsd-uboot")
+        card = targets.load_target(target, "microsd-uboot")
+        assert card["bootstrap"]["image"] == stage0_image
+        assert card["linux"]["memory"] == targets.load_target(target)["linux"]["memory"]
+        generated = generated_bootstrap_files(card, platforms.load_platform("ums9117"))
+        assert "generated/fplinux-bootstrap-options.h" in generated
 
-        uboot = targets.load_target(target, "microsd-uboot")["uboot"]
-        assert ([(profile_context.root / path).read_text() for path in uboot["patches"]]) == (
-            ["shared integration patch\n", f"{target} integration patch\n"]
-        )
-        projected = {
-            step["destination"]: (profile_context.root / step["source"]).read_text()
-            for step in uboot["copies"]
-        }
-        assert (projected) == (
-            {
-                "board/demo/boot.c": "shared boot flow\n",
-                "board/demo/slot.c": f"{target} slot\n",
-            }
-        )
-        assert (uboot["required_config"]) == (
-            ["CONFIG_TARGET_DEMO=y", 'CONFIG_BOOTCOMMAND="demoboot"']
-        )
+    def test_itel_system_card_stage0_is_headless(self) -> None:
+        """The Linux panel remains available after the headless loader hands off."""
+        card = targets.load_target("itel-neo-r60-plus", "microsd-uboot")
+        assert card["display"]["width"] > 0
+        assert card["display"]["height"] > 0
+        assert bootstrap_display(card) == {"width": 0, "height": 0}
+        generated = generated_bootstrap_files(card, platforms.load_platform("ums9117"))
+        assert b'"--headless"' in generated["generated/fplinux-bootstrap-options.h"]
+
+    def test_konrow_stays_on_ram_and_qin_keeps_its_developer_profile(self) -> None:
+        """Extra UMS9117 cards do not enable Konrow or change Qin's Linux entry."""
+        assert paths.discover_profiles("konrow-senior-280-plus") == ("default",)
+        assert paths.discover_profiles("xiaomi-qin-1s-plus") == ("default", "microsd-root")
+        qin = targets.load_target("xiaomi-qin-1s-plus", "microsd-root")
+        assert qin["bootstrap"]["kind"] == "linux"
+        assert qin["uboot"]["kind"] == "none"
+        assert qin["linux"]["root"]["kind"] == "external"
 
     @pytest.mark.parametrize("profile", ["default", "microsd-uboot"])
     def test_nand_reader_stays_board_owned_across_boot_profiles(
@@ -501,82 +515,3 @@ class BuildTypeSelectionTests:
         assert (linux_build.linux_recipe_digest(linux, target, release, platform)) == (
             linux_build.linux_recipe_digest(linux, target, debug, platform)
         )
-
-
-class RepositoryProfileCompressionTests:
-    """Admit prepared Kconfig files only for the selected compressor policy."""
-
-    @staticmethod
-    @pytest.mark.parametrize(
-        ("target", "profile"),
-        [
-            pytest.param("nokia-ta1618", "default", id="initramfs"),
-            pytest.param("xiaomi-qin-1s-plus", "microsd-root", id="external"),
-        ],
-    )
-    def test_root_kind_rejects_the_opposite_prepared_compressor(
-        tmp_path: Path, target: str, profile: str
-    ) -> None:
-        """RAM admits ZSTD and an external root admits LZO-RLE."""
-        prepared_configs = {
-            "initramfs": {
-                "correct": (
-                    "CONFIG_ZRAM=y\n"
-                    "# CONFIG_ZRAM_BACKEND_LZO is not set\n"
-                    "CONFIG_ZRAM_BACKEND_ZSTD=y\n"
-                    "CONFIG_ZRAM_DEF_COMP_ZSTD=y\n"
-                ),
-                "opposite": (
-                    "CONFIG_ZRAM=y\n"
-                    "CONFIG_ZRAM_BACKEND_LZO=y\n"
-                    "# CONFIG_ZRAM_BACKEND_ZSTD is not set\n"
-                    "CONFIG_ZRAM_DEF_COMP_LZORLE=y\n"
-                ),
-            },
-            "external": {
-                "correct": (
-                    "# CONFIG_BLK_DEV_INITRD is not set\n"
-                    "CONFIG_EXT4_FS=y\n"
-                    "CONFIG_ZRAM=y\n"
-                    "CONFIG_ZRAM_BACKEND_LZO=y\n"
-                    "# CONFIG_ZRAM_BACKEND_ZSTD is not set\n"
-                    "CONFIG_ZRAM_DEF_COMP_LZORLE=y\n"
-                ),
-                "opposite": (
-                    "# CONFIG_BLK_DEV_INITRD is not set\n"
-                    "CONFIG_EXT4_FS=y\n"
-                    "CONFIG_ZRAM=y\n"
-                    "# CONFIG_ZRAM_BACKEND_LZO is not set\n"
-                    "CONFIG_ZRAM_BACKEND_ZSTD=y\n"
-                    "CONFIG_ZRAM_DEF_COMP_ZSTD=y\n"
-                ),
-            },
-        }
-
-        prepared = tmp_path / ".config"
-        linux = targets.load_target(target, profile)["linux"]
-        contents = prepared_configs[linux["root"]["kind"]]
-        compressor_enable = [
-            symbol
-            for symbol in linux["config_enable"]
-            if symbol.startswith(("CONFIG_ZRAM_BACKEND_", "CONFIG_ZRAM_DEF_COMP_"))
-        ]
-        compressor_disable = [
-            symbol
-            for symbol in linux["config_disable"]
-            if symbol.startswith(("CONFIG_ZRAM_BACKEND_", "CONFIG_ZRAM_DEF_COMP_"))
-        ]
-        prepared.write_text(contents["correct"])
-        kernel_build.assert_profile_kconfig(
-            prepared,
-            compressor_enable,
-            compressor_disable,
-        )
-
-        prepared.write_text(contents["opposite"])
-        with pytest.raises(SystemExit, match=r"profile did not (enable|disable)"):
-            kernel_build.assert_profile_kconfig(
-                prepared,
-                compressor_enable,
-                compressor_disable,
-            )

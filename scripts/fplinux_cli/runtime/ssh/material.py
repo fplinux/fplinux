@@ -8,6 +8,7 @@ import binascii
 import hashlib
 import ipaddress
 import os
+import secrets
 import shutil
 import struct
 import zlib
@@ -19,6 +20,7 @@ from .errors import fail
 
 if TYPE_CHECKING:
     from pathlib import Path
+    from typing import Literal
 
 SESSION_MAGIC = b"FPLSESS\0"
 SESSION_BYTES = 512
@@ -45,21 +47,44 @@ def candidate_network(random_bytes: bytes) -> ipaddress.IPv4Network:
     return ipaddress.IPv4Network((base + (value % subnet_count) * 4, 30))
 
 
+def allocate_network(occupied: set[ipaddress.IPv4Network]) -> ipaddress.IPv4Network:
+    """Choose a private USB subnet outside the host routes and existing bindings."""
+    for _attempt in range(4096):
+        candidate = candidate_network(secrets.token_bytes(5))
+        if all(not candidate.overlaps(network) for network in occupied):
+            return candidate
+    return fail("could not allocate a free private USB /30")
+
+
+def mac_pair() -> tuple[str, str]:
+    """Generate distinct locally administered unicast MAC addresses."""
+    macs: list[str] = []
+    while len(macs) < 2:
+        octets = bytearray(secrets.token_bytes(6))
+        octets[0] = (octets[0] & 0xFC) | 0x02
+        address = ":".join(f"{octet:02x}" for octet in octets)
+        if address not in macs:
+            macs.append(address)
+    return macs[0], macs[1]
+
+
+def valid_ed25519_key_body(body: str) -> bool:
+    if len(body) != 68:
+        return False
+    try:
+        decoded = base64.b64decode(body.encode("ascii"), validate=True)
+    except binascii.Error, UnicodeEncodeError:
+        return False
+    return len(decoded) == 51 and decoded.startswith(b"\0\0\0\x0bssh-ed25519\0\0\0\x20")
+
+
 def public_key_body(public_key: Path) -> bytes:
     try:
         fields = public_key.read_text(encoding="ascii").strip().split()
     except (OSError, UnicodeDecodeError) as error:
         fail(f"cannot read generated SSH public key: {error}")
-    if len(fields) < 2 or fields[0] != "ssh-ed25519" or len(fields[1]) != 68:
+    if len(fields) < 2 or fields[0] != "ssh-ed25519" or not valid_ed25519_key_body(fields[1]):
         fail("ssh-keygen did not produce the required Ed25519 public key")
-    try:
-        decoded = base64.b64decode(fields[1], validate=True)
-    except binascii.Error:
-        fail("ssh-keygen produced invalid public-key base64")
-    if decoded[:15] != b"\0\0\0\x0bssh-ed25519" or decoded[15:19] != b"\0\0\0\x20":
-        fail("ssh-keygen produced an unexpected Ed25519 public-key blob")
-    if len(decoded) != 51:
-        fail("ssh-keygen produced an unexpected Ed25519 public-key size")
     return fields[1].encode("ascii")
 
 
@@ -68,7 +93,11 @@ def usb_config(
     network: ipaddress.IPv4Network,
     host_mac: str,
     device_mac: str,
+    *,
+    transport: Literal["ncm", "rndis"] | None = None,
 ) -> bytes:
+    if transport not in (None, "ncm", "rndis"):
+        fail(f"unsupported USB session transport: {transport}")
     hosts = list(network.hosts())
     host_address, phone_address = hosts[0], hosts[1]
     text = "".join(
@@ -80,9 +109,10 @@ def usb_config(
             f"broadcast={network.broadcast_address}\n",
             f"device_mac={device_mac}\n",
             f"host_mac={host_mac}\n",
+            f"transport={transport}\n" if transport is not None else "",
         )
     ).encode("ascii")
-    if len(text) > 256:
+    if len(text) >= 256:
         fail("USB session configuration exceeds its fixed field")
     return text.ljust(256, b"\0")
 

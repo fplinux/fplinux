@@ -6,6 +6,7 @@
 #include <linux/libfdt.h>
 
 #define IH_TYPE_KERNEL 2
+#define IH_TYPE_RAMDISK 3
 #define IH_TYPE_FLATDT 8
 #define IH_ARCH_ARM 2
 #define IH_OS_LINUX 5
@@ -16,6 +17,7 @@
 #define FIT_KERNEL_PROP "kernel"
 #define FIT_FDT_PROP "fdt"
 #define FIT_RAMDISK_PROP "ramdisk"
+#define FIT_LOAD_PROP "load"
 #define FIT_LOADABLE_PROP "loadables"
 #define FIT_FPGA_PROP "fpga"
 
@@ -28,6 +30,7 @@ int fit_image_get_data(const void *fit, int node, const void **data,
 int fit_image_get_load(const void *fit, int node, ulong *load);
 int fit_image_get_type(const void *fit, int node, uint8_t *type);
 int fit_image_get_arch(const void *fit, int node, uint8_t *arch);
+int fit_image_get_os(const void *fit, int node, uint8_t *os);
 int fit_image_get_comp(const void *fit, int node, uint8_t *comp);
 
 #define fit_get_name fdt_get_name

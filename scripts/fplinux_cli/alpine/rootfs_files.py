@@ -6,17 +6,18 @@ from __future__ import annotations
 import os
 import shlex
 import shutil
-from typing import TYPE_CHECKING, Any
+import stat
+import tempfile
+from collections import defaultdict
+from pathlib import Path
+from typing import Any
 
 from fplinux_cli.build import process as process_build
 from fplinux_cli.build.environment import SOURCE_DATE_EPOCH
 from fplinux_cli.build.inputs import require_file
-from fplinux_cli.common import ROOT
+from fplinux_cli.common import ROOT, fail, sha256_file
 
 from .rootfs_state import INITRAMFS_NAME
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 
 def _stamp_build_id(root: Path, release_id: str) -> None:
@@ -63,7 +64,177 @@ def _write_rootfs_cpio(root: Path, destination: Path) -> None:
     require_file(destination)
 
 
-def _write_ramroot_initramfs(root: Path, staging: Path) -> None:
+def _write_squashfs(root: Path, output: Path) -> None:
+    process_build.run(
+        [
+            "mksquashfs",
+            str(root),
+            str(output),
+            "-noappend",
+            "-no-progress",
+            "-exit-on-error",
+            "-processors",
+            "1",
+            "-all-root",
+            "-exports",
+            "-xattrs",
+            "-xattrs-exclude",
+            "^security[.]selinux$",
+            "-b",
+            "64K",
+            "-comp",
+            "xz",
+            "-Xdict-size",
+            "64K",
+        ]
+    )
+
+
+def _hardlink_groups(entries: dict[Path, os.stat_result]) -> dict[Path, tuple[Path, ...]]:
+    """Identify links by their paths within this composition."""
+    by_inode: dict[tuple[int, int], list[Path]] = defaultdict(list)
+    for path, metadata in entries.items():
+        if metadata.st_nlink > 1 and not stat.S_ISDIR(metadata.st_mode):
+            by_inode[metadata.st_dev, metadata.st_ino].append(path)
+    groups = (tuple(sorted(paths)) for paths in by_inode.values() if len(paths) > 1)
+    return {path: group for group in groups for path in group}
+
+
+def _xattrs(path: Path) -> dict[str, bytes]:
+    return {
+        name: os.getxattr(path, name, follow_symlinks=False)
+        for name in os.listxattr(path, follow_symlinks=False)
+        if name != "security.selinux"
+    }
+
+
+def _same_lower_entry(
+    target: Path, base: Path, target_stat: os.stat_result, base_stat: os.stat_result
+) -> bool:
+    # Both SquashFS layers use the same normalized timestamps and root ownership.
+    if target_stat.st_mode != base_stat.st_mode or _xattrs(target) != _xattrs(base):
+        return False
+    if stat.S_ISREG(target_stat.st_mode):
+        return target_stat.st_size == base_stat.st_size and sha256_file(target) == sha256_file(
+            base
+        )
+    if stat.S_ISLNK(target_stat.st_mode):
+        return target.readlink() == base.readlink()
+    return target_stat.st_rdev == base_stat.st_rdev
+
+
+def _stage_board_layer(root: Path, base: Path, layer: Path) -> None:
+    """Stage the files the board composition adds or replaces in the shared root."""
+    target_entries = {path.relative_to(root): path.lstat() for path in root.rglob("*")}
+    base_entries = {path.relative_to(base): path.lstat() for path in base.rglob("*")}
+    removed = sorted(base_entries.keys() - target_entries.keys())
+    if removed:
+        fail(f"board composition removes shared root path: /{removed[0]}")
+    target_groups = _hardlink_groups(target_entries)
+    base_groups = _hardlink_groups(base_entries)
+    changed: set[Path] = set()
+    directories = [Path()]
+    layer.mkdir()
+    for path, metadata in sorted(target_entries.items()):
+        if stat.S_ISDIR(metadata.st_mode):
+            (layer / path).mkdir()
+            directories.append(path)
+            continue
+        original = base_entries.get(path)
+        links = target_groups.get(path, (path,))
+        if (
+            original is None
+            or links != base_groups.get(path, (path,))
+            or not _same_lower_entry(root / path, base / path, metadata, original)
+        ):
+            changed.update(links)
+    for path in sorted(changed):
+        os.link(root / path, layer / path, follow_symlinks=False)
+    for path in reversed(directories):
+        shutil.copystat(root / path, layer / path)
+
+
+def write_card_rootfs_layer(rootfs: Path, base_rootfs: Path, destination: Path) -> None:
+    """Pack the board additions and replacements for a shared writable card root."""
+    with tempfile.TemporaryDirectory(dir=destination.parent, prefix=".card-rootfs.") as name:
+        temporary = Path(name)
+        target = temporary / "target"
+        base = temporary / "base"
+        board = temporary / "board"
+        for root, archive in ((target, rootfs), (base, base_rootfs)):
+            root.mkdir()
+            process_build.run(
+                [
+                    "cpio",
+                    "--extract",
+                    "--quiet",
+                    "--make-directories",
+                    "--no-preserve-owner",
+                    "--preserve-modification-time",
+                    "--file",
+                    str(archive),
+                    "--directory",
+                    str(root),
+                ]
+            )
+        _stage_board_layer(target, base, board)
+        process_build.run(
+            [
+                "tar",
+                "--create",
+                "--format=ustar",
+                "--sort=name",
+                "--numeric-owner",
+                "--owner=0",
+                "--group=0",
+                f"--mtime=@{SOURCE_DATE_EPOCH}",
+                "--file",
+                str(destination),
+                "--directory",
+                str(board),
+                ".",
+            ]
+        )
+
+
+def _write_board_squashfs(
+    root: Path, staging: Path, bootstrap: Path, base_initramfs: Path
+) -> None:
+    process_build.run(
+        [
+            "cpio",
+            "--extract",
+            "--quiet",
+            "--no-preserve-owner",
+            "--file",
+            str(base_initramfs),
+            "--directory",
+            str(bootstrap),
+            "root.squashfs",
+        ]
+    )
+    base = staging / "base"
+    process_build.run(
+        [
+            "unsquashfs",
+            "-no-progress",
+            "-processors",
+            "1",
+            "-d",
+            str(base),
+            str(require_file(bootstrap / "root.squashfs")),
+        ]
+    )
+    board = staging / "board"
+    _stage_board_layer(root, base, board)
+    _write_squashfs(board, bootstrap / "board.squashfs")
+    shutil.rmtree(board)
+    shutil.rmtree(base)
+
+
+def _write_ramroot_initramfs(
+    root: Path, staging: Path, *, base_initramfs: Path | None = None
+) -> None:
     """Pack the verified composition behind a small boot-only RAM filesystem."""
     bootstrap = staging / "bootstrap"
     bootstrap.mkdir()
@@ -85,29 +256,10 @@ def _write_ramroot_initramfs(root: Path, staging: Path) -> None:
     (bootstrap / "bin/sh").symlink_to("busybox")
     shutil.copyfile(require_file(ROOT / "alpine/ramroot-init.sh"), bootstrap / "init")
     (bootstrap / "init").chmod(0o755)
-    process_build.run(
-        [
-            "mksquashfs",
-            str(root),
-            str(bootstrap / "root.squashfs"),
-            "-noappend",
-            "-no-progress",
-            "-exit-on-error",
-            "-processors",
-            "1",
-            "-all-root",
-            "-exports",
-            "-xattrs",
-            "-xattrs-exclude",
-            "^security[.]selinux$",
-            "-b",
-            "64K",
-            "-comp",
-            "xz",
-            "-Xdict-size",
-            "64K",
-        ]
-    )
+    if base_initramfs is None:
+        _write_squashfs(root, bootstrap / "root.squashfs")
+    else:
+        _write_board_squashfs(root, staging, bootstrap, base_initramfs)
     _normalize_rootfs(bootstrap)
     _write_rootfs_cpio(bootstrap, staging / INITRAMFS_NAME)
     shutil.rmtree(bootstrap)

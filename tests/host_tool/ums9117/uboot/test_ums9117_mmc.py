@@ -57,6 +57,7 @@ class Ums9117MmcSlotPolicyTests:
             "fixed-invalid-voltage",
             "removable-present",
             "removable-absent",
+            "removable-cold",
         ],
     )
     def test_slot_presence_initialization_and_release(

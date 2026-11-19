@@ -1,0 +1,66 @@
+diff --git a/fs/squashfs/super.c b/fs/squashfs/super.c
+index 5dabc57..bc4c444 100644
+--- a/fs/squashfs/super.c
++++ b/fs/squashfs/super.c
+@@ -28,6 +28,7 @@
+ #include <linux/init.h>
+ #include <linux/module.h>
+ #include <linux/magic.h>
++#include <linux/uuid.h>
+ #include <linux/xattr.h>
+
+ #include "squashfs_fs.h"
+@@ -48,12 +49,14 @@ enum Opt_errors {
+ enum squashfs_param {
+ 	Opt_errors,
+ 	Opt_threads,
++	Opt_fplinux_uuid,
+ };
+
+ struct squashfs_mount_opts {
+ 	enum Opt_errors errors;
+ 	const struct squashfs_decompressor_thread_ops *thread_ops;
+ 	int thread_num;
++	uuid_t uuid;
+ };
+
+ static const struct constant_table squashfs_param_errors[] = {
+@@ -65,10 +68,10 @@ static const struct constant_table squashfs_param_errors[] = {
+ static const struct fs_parameter_spec squashfs_fs_parameters[] = {
+ 	fsparam_enum("errors", Opt_errors, squashfs_param_errors),
+ 	fsparam_string("threads", Opt_threads),
++	fsparam_string("fplinux_uuid", Opt_fplinux_uuid),
+ 	{}
+ };
+
+-
+ static int squashfs_parse_param_threads_str(const char *str, struct squashfs_mount_opts *opts)
+ {
+ #ifdef CONFIG_SQUASHFS_CHOICE_DECOMP_BY_MOUNT
+@@ -142,6 +145,15 @@ static int squashfs_parse_param(struct fs_context *fc, struct fs_parameter *para
+ 		if (squashfs_parse_param_threads(param->string, opts) != 0)
+ 			return -EINVAL;
+ 		break;
++	case Opt_fplinux_uuid:
++		if (fc->purpose != FS_CONTEXT_FOR_MOUNT)
++			return invalf(fc,
++				      "fplinux_uuid requires an initial mount");
++		if (strlen(param->string) != UUID_STRING_LEN ||
++		    uuid_parse(param->string, &opts->uuid) ||
++		    uuid_is_null(&opts->uuid))
++			return invalf(fc, "invalid fplinux_uuid");
++		break;
+ 	default:
+ 		return -EINVAL;
+ 	}
+@@ -204,6 +216,10 @@ static int squashfs_fill_super(struct super_block *sb, struct fs_context *fc)
+ 	msblk = sb->s_fs_info;
+ 	msblk->thread_ops = opts->thread_ops;
+
++	/* Distinguish the RAM board layer from the shared OverlayFS lower. */
++	if (!uuid_is_null(&opts->uuid))
++		super_set_uuid(sb, opts->uuid.b, sizeof(opts->uuid.b));
++
+ 	msblk->panic_on_errors = (opts->errors == Opt_errors_panic);
+
+ 	msblk->devblksize = devblksize;

@@ -21,9 +21,17 @@
 			type = "flat_dt";
 			hash { algo = "sha256"; value = /incbin/("fdt.sha256"); };
 		};
+		ramdisk {
+			arch = "arm";
+			compression = "none";
+			data = /incbin/("early-firmware.cpio");
+			os = "linux";
+			type = "ramdisk";
+			hash { algo = "sha256"; value = /incbin/("ramdisk.sha256"); };
+		};
 	};
 	configurations {
-		default = "test-board";
-		test-board { kernel = "kernel"; fdt = "fdt"; };
+		default = "bq-2830l-tank-connect-max";
+		bq-2830l-tank-connect-max { kernel = "kernel"; fdt = "fdt"; ramdisk = "ramdisk"; };
 	};
 };

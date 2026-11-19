@@ -25,6 +25,7 @@ class UmsImage:
     image: Path
     kernel: Path
     dtb: Path
+    initramfs: Path
     map_file: Path
     symbols: dict[str, int]
     uboot: UbootBuild | None
@@ -51,6 +52,7 @@ class UmsImage:
             self.image,
             zimage=self.kernel,
             dtb=self.dtb,
+            initramfs=self.initramfs,
             map_file=self.map_file,
             load_address=0x80100000,
             payload_limit=payload_limit,
@@ -63,6 +65,7 @@ def ums_image(request: pytest.FixtureRequest, tmp_path: Path) -> UmsImage:
     """Create independent payload layouts with a 64-aligned 512-byte zero slot."""
     kernel = tmp_path / "kernel.bin"
     dtb = tmp_path / "target.dtb"
+    initramfs = tmp_path / "initramfs.cpio"
     image = tmp_path / "ramboot.bin"
     map_file = tmp_path / "ramboot.map"
     symbols = {"__image_start": 0x80100000, "FPLINUX_BOOTSTRAP_STORAGE_DISABLED": 1}
@@ -114,16 +117,23 @@ def ums_image(request: pytest.FixtureRequest, tmp_path: Path) -> UmsImage:
         uboot = UbootBuild(kernel, kernel, kernel, kernel, dtb, map_file, kernel, 0x83800000, {})
     kernel.write_bytes(payload)
     slot = (end + 63) & ~63
-    contents = bytearray(slot + 512)
+    root_start = slot + 512
+    contents = bytearray(root_start)
     contents[:4] = b"DHTB"
     struct.pack_into("<I", contents, 48, len(contents) - 512)
     contents[512 : 512 + len(payload)] = payload
     if tree:
         contents[dtb_offset : dtb_offset + len(tree)] = tree
+        root = b"07070100"
+        initramfs.write_bytes(root)
+        contents.extend(root)
+        symbols["linux_initramfs_start"] = 0x80100000 + root_start
+        symbols["linux_initramfs_end"] = 0x80100000 + len(contents)
+        struct.pack_into("<I", contents, 48, len(contents) - 512)
     image.write_bytes(contents)
     symbols["fplinux_session_start"] = 0x80100000 + slot
     symbols["fplinux_session_end"] = 0x80100000 + slot + 512
-    fixture = UmsImage(image, kernel, dtb, map_file, symbols, uboot, slot)
+    fixture = UmsImage(image, kernel, dtb, initramfs, map_file, symbols, uboot, slot)
     fixture.write_symbols()
     return fixture
 
@@ -192,7 +202,7 @@ def test_session_slot_requires_the_exact_abi_size(ums_image: UmsImage, slot_byte
 
 def test_session_slot_rejects_a_truncated_zero_template(ums_image: UmsImage) -> None:
     """Even zero-valued bytes cannot supply a slot extending beyond the actual image."""
-    image = bytearray(ums_image.image.read_bytes()[:-1])
+    image = bytearray(ums_image.image.read_bytes()[: ums_image.slot + 511])
     struct.pack_into("<I", image, 48, len(image) - 512)
     ums_image.image.write_bytes(image)
     error = (
@@ -211,4 +221,15 @@ def test_session_slot_rejects_existing_personalization(ums_image: UmsImage, offs
     ums_image.image.write_bytes(image)
 
     with pytest.raises(SystemExit, match="slot is not all zero"):
+        ums_image.verify()
+
+
+@pytest.mark.parametrize("ums_image", ["ram"], indirect=True)
+def test_ram_image_rejects_another_root_payload(ums_image: UmsImage) -> None:
+    """A published root must match the separate payload in the primary loader image."""
+    image = bytearray(ums_image.image.read_bytes())
+    image[-1] ^= 1
+    ums_image.image.write_bytes(image)
+
+    with pytest.raises(SystemExit, match="embedded initramfs differs"):
         ums_image.verify()

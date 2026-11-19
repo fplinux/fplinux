@@ -5,6 +5,18 @@ override TWO_STAGE := 0
 override T117 := 1
 override LIBC_SDIO := 0
 
+FPLINUX_BOOTSTRAP_ENTRY ?= usb
+ifeq ($(FPLINUX_BOOTSTRAP_ENTRY),sd)
+ifneq ($(FPLINUX_BOOTSTRAP_MODE),uboot)
+$(error Cold SD entry requires U-Boot stage0)
+endif
+override FPLINUX_COLD_SD := 1
+else ifeq ($(FPLINUX_BOOTSTRAP_ENTRY),usb)
+override FPLINUX_COLD_SD := 0
+else
+$(error FPLinux bootstrap entry must be usb or sd)
+endif
+
 override VENDOR := ../vendor/fpdoom
 override SYSDIR := $(VENDOR)/fpdoom
 override SYSDIR_T117 := $(VENDOR)/ums9117
@@ -16,10 +28,9 @@ override FPLINUX_BOOT_LAYOUT_HEADER := generated/fplinux-boot-layout.h
 override FPLINUX_BOOTSTRAP_MEMORY_LD := generated/fplinux-bootstrap-memory.ld
 override FPLINUX_UBOOT_BUILD_HEADER := generated/fplinux-uboot-build.h
 override FPLINUX_BOOTSTRAP_DISPLAY_HEADER := generated/fplinux-bootstrap-display.h
+override FPLINUX_BOOTSTRAP_OPTIONS_HEADER := generated/fplinux-bootstrap-options.h
 
-ifeq ($(FPLINUX_BOOTSTRAP_MODE),uboot)
-override FPLINUX_STATUS_SRCS := fplinux-boot-screen/boot-screen fplinux-status-screen generated/fplinux-status-fonts
-else ifeq ($(FPLINUX_BOOTSTRAP_HAS_DISPLAY),1)
+ifeq ($(FPLINUX_BOOTSTRAP_HAS_DISPLAY),1)
 override FPLINUX_STATUS_SRCS := fplinux-boot-screen/boot-screen fplinux-status-screen generated/fplinux-status-fonts
 else ifeq ($(FPLINUX_BOOTSTRAP_HAS_DISPLAY),0)
 override FPLINUX_STATUS_SRCS :=
@@ -59,11 +70,11 @@ override FPLINUX_VENDOR_CFLAGS := $(CFLAGS)
 override FPLINUX_VENDOR_APP_CFLAGS := $(APP_CFLAGS)
 override FPLINUX_VENDOR_SYS_CFLAGS := $(SYS_CFLAGS)
 override FPLINUX_VENDOR_LFLAGS := $(LFLAGS)
-override FPLINUX_STORAGE_OFF := -ULIBC_SDIO -DLIBC_SDIO=0 -UFAT_WRITE -DFAT_WRITE=0 -DFPLINUX_BOOTSTRAP_STORAGE_DISABLED=1
+override FPLINUX_STORAGE_OFF := -ULIBC_SDIO -DLIBC_SDIO=0 -UFAT_WRITE -DFAT_WRITE=0 -DFPLINUX_BOOTSTRAP_STORAGE_DISABLED=1 -DFPLINUX_COLD_SD=$(FPLINUX_COLD_SD)
 override FPLINUX_STORAGE_LDFLAG := -Wl,--defsym=FPLINUX_BOOTSTRAP_STORAGE_DISABLED=1
 override CFLAGS := $(FPLINUX_VENDOR_CFLAGS) $(FPLINUX_STORAGE_OFF)
 override APP_CFLAGS := $(FPLINUX_VENDOR_APP_CFLAGS) -std=c99 -pedantic -I$(CURDIR) -I$(CURDIR)/generated -I$(CURDIR)/fplinux-boot-screen -I$(SYSDIR) $(FPLINUX_STORAGE_OFF)
-override SYS_CFLAGS := $(FPLINUX_VENDOR_SYS_CFLAGS) -I$(CURDIR)/ums9117-bootstrap $(FPLINUX_STORAGE_OFF)
+override SYS_CFLAGS := $(FPLINUX_VENDOR_SYS_CFLAGS) -I$(CURDIR)/ums9117-bootstrap -I$(CURDIR)/generated $(FPLINUX_STORAGE_OFF)
 override LFLAGS := $(FPLINUX_VENDOR_LFLAGS) $(FPLINUX_STORAGE_LDFLAG)
 
 ifneq ($(FPLINUX_BOOTSTRAP_MODE),uboot)
@@ -88,6 +99,11 @@ ifeq ($(wildcard $(FPLINUX_UBOOT_BUILD_HEADER)),)
 $(error FPLinux U-Boot build header is not generated)
 endif
 endif
+ifeq ($(FPLINUX_COLD_SD),1)
+ifeq ($(wildcard $(FPLINUX_BOOTSTRAP_OPTIONS_HEADER)),)
+$(error FPLinux bootstrap options header is not generated)
+endif
+endif
 ifneq ($(LIBC_SDIO),0)
 $(error FPLinux bootstrap requires LIBC_SDIO=0)
 endif
@@ -95,18 +111,12 @@ ifneq ($(strip $(SYS_SRCS)),asmcode usbio common libc syscomm syscode)
 $(error FPLinux bootstrap source closure changed: $(SYS_SRCS))
 endif
 ifeq ($(FPLINUX_BOOTSTRAP_MODE),uboot)
-ifneq ($(strip $(APP_SRCS)),main fplinux-boot-screen/boot-screen fplinux-status-screen generated/fplinux-status-fonts ums9117-bootstrap/sd-stage0 ums9117-bootstrap/boot-common ums9117-bootstrap/boot-session ums9117-bootstrap/bootstrap ums9117-bootstrap/handoff ums9117-bootstrap/uboot-handoff payload)
+ifneq ($(strip $(filter-out $(FPLINUX_STATUS_SRCS),$(APP_SRCS))),main ums9117-bootstrap/sd-stage0 ums9117-bootstrap/boot-common ums9117-bootstrap/boot-session ums9117-bootstrap/bootstrap ums9117-bootstrap/handoff ums9117-bootstrap/uboot-handoff payload)
 $(error FPLinux U-Boot stage0 source closure changed: $(APP_SRCS))
 endif
 else
-ifeq ($(FPLINUX_BOOTSTRAP_HAS_DISPLAY),1)
-ifneq ($(strip $(APP_SRCS)),main fplinux-boot-screen/boot-screen fplinux-status-screen generated/fplinux-status-fonts ums9117-bootstrap/boot-main ums9117-bootstrap/boot-common ums9117-bootstrap/boot-session ums9117-bootstrap/bootstrap ums9117-bootstrap/handoff payload)
+ifneq ($(strip $(filter-out $(FPLINUX_STATUS_SRCS),$(APP_SRCS))),main ums9117-bootstrap/boot-main ums9117-bootstrap/boot-common ums9117-bootstrap/boot-session ums9117-bootstrap/bootstrap ums9117-bootstrap/handoff payload)
 $(error FPLinux bootstrap application closure changed: $(APP_SRCS))
-endif
-else
-ifneq ($(strip $(APP_SRCS)),main ums9117-bootstrap/boot-main ums9117-bootstrap/boot-common ums9117-bootstrap/boot-session ums9117-bootstrap/bootstrap ums9117-bootstrap/handoff payload)
-$(error FPLinux bootstrap application closure changed: $(APP_SRCS))
-endif
 endif
 endif
 override FPLINUX_FORBIDDEN_OBJS := $(OBJDIR)/sys/sdio.o $(OBJDIR)/sys/microfat.o
@@ -128,8 +138,11 @@ $(FPLINUX_FORBIDDEN_OBJS):
 
 $(OBJDIR)/app/ums9117-bootstrap/boot-main.o: $(FPLINUX_BOOTSTRAP_IDENTITY_HEADER) $(FPLINUX_BOOT_LAYOUT_HEADER) $(FPLINUX_BOOTSTRAP_DISPLAY_HEADER)
 $(OBJDIR)/app/main.o: $(FPLINUX_BOOTSTRAP_DISPLAY_HEADER)
+ifeq ($(FPLINUX_COLD_SD),1)
+$(OBJDIR)/sys/entry.o: $(FPLINUX_BOOTSTRAP_OPTIONS_HEADER)
+endif
 $(OBJDIR)/app/ums9117-bootstrap/boot-common.o: $(FPLINUX_BOOT_LAYOUT_HEADER)
-$(OBJDIR)/app/ums9117-bootstrap/sd-stage0.o: $(FPLINUX_BOOTSTRAP_IDENTITY_HEADER) $(FPLINUX_BOOT_LAYOUT_HEADER) $(FPLINUX_UBOOT_BUILD_HEADER)
+$(OBJDIR)/app/ums9117-bootstrap/sd-stage0.o: $(FPLINUX_BOOTSTRAP_IDENTITY_HEADER) $(FPLINUX_BOOT_LAYOUT_HEADER) $(FPLINUX_UBOOT_BUILD_HEADER) $(FPLINUX_BOOTSTRAP_DISPLAY_HEADER)
 
 $(OBJDIR)/app/fplinux-boot-screen/boot-screen.o: generated/fplinux-status-profile.h generated/fplinux-boot-mark.h
 
@@ -137,6 +150,6 @@ ifeq ($(FPLINUX_BOOTSTRAP_MODE),uboot)
 $(OBJDIR)/app/payload.o: payload.s generated/fplinux-bootstrap-payload.s ../out/u-boot.bin | objdir
 	$(call compile_asm,)
 else
-$(OBJDIR)/app/payload.o: payload.s generated/fplinux-bootstrap-payload.s ums9117-bootstrap/ram-payload.s ../out/zImage ../out/$(FPLINUX_BOOTSTRAP_DTB) | objdir
+$(OBJDIR)/app/payload.o: payload.s generated/fplinux-bootstrap-payload.s ums9117-bootstrap/ram-payload.s ../out/zImage ../out/$(FPLINUX_BOOTSTRAP_DTB) ../out/initramfs.cpio | objdir
 	$(call compile_asm,)
 endif

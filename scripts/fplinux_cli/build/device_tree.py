@@ -1,11 +1,15 @@
 # SPDX-License-Identifier: GPL-2.0-only
 # ruff: noqa: EM101 -- parser failures use exact local protocol diagnostics.
-"""Parse exact properties from compiled flattened device trees."""
+"""Project and verify properties of compiled flattened device trees."""
 
 from __future__ import annotations
 
+import shutil
 import struct
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
+
+from fplinux_cli.build.process import run
+from fplinux_cli.build.storage.layout import root_bootargs
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping, Sequence
@@ -384,6 +388,33 @@ def verify_target_identity(
             f"{target} DTB compatible mismatch: expected {expected_compatibles!r}, "
             f"got {actual_compatibles!r}"
         )
+
+
+def write_boot_dtb(
+    source: Path, output: Path, target_config: dict[str, Any], boot_recipe: str | None = None
+) -> Path:
+    """Apply the root profile and preserve board arguments in a copy of the DTB."""
+    output.mkdir(parents=True, exist_ok=True)
+    target = output / source.name
+    shutil.copyfile(source, target)
+    root = target_config["linux"]["root"]
+    root_args = root_bootargs(root)
+    bootargs = f"{root_args} fbcon=font:{target_config['display']['boot_font']}"
+    chosen = exact_path_properties(source, "/chosen")["/chosen"]
+    if board_args := chosen.get("bootargs"):
+        default_args = root_bootargs({"kind": "initramfs"})
+        flags = parse_nul_string(board_args, "board boot arguments")
+        extra_args = flags.removeprefix(root_args).removeprefix(default_args).strip()
+        if extra_args:
+            bootargs += f" {extra_args}"
+    run(["fdtput", "-t", "s", str(target), "/chosen", "bootargs", bootargs])
+    if boot_recipe is not None:
+        run(["fdtput", "-t", "s", str(target), "/chosen", "fplinux,boot-recipe", boot_recipe])
+    if root["kind"] == "external" and target_config["platform"] == "ums9117":
+        for name in ("linux,initrd-start", "linux,initrd-end"):
+            if name in chosen:
+                run(["fdtput", "-d", str(target), "/chosen", name])
+    return target
 
 
 def verify_root_bootargs(tree: bytes | Path, root: dict[str, object]) -> None:

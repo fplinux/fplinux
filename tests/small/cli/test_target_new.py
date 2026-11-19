@@ -18,7 +18,6 @@ from fplinux_cli.alpine import selection
 from fplinux_cli.cli import target_new
 from fplinux_cli.manifests import paths, platforms, targets
 from fplinux_cli.packaging import archive as package
-from fplinux_cli.packaging.readme import ordinary_readme
 
 REPOSITORY = common.ROOT
 DISPLAY_KEYS = {"spi_mode", "lcd_id", "backlight_channels", "backlight_level"}
@@ -105,6 +104,9 @@ class NewTargetTests:
         )
         assert (config["nand"]) == ({"raw_device": "/dev/ums9117-nand-raw"})
         assert (config["runtime"]["assets"]) == ({"fdl1": "assets/t117_fdl1.bin"})
+        assert config["adapter"]["boot_instructions"] == (
+            "Power the phone off, hold *, then connect USB while keeping * pressed."
+        )
         assert not (
             target_checkout.targets / "hammer-horizon-lte/loader/assets.lock.toml"
         ).exists()
@@ -130,38 +132,6 @@ class NewTargetTests:
         )
         assert (sorted(line.strip() for line in lines[1:-1])) == (created)
 
-    def test_new_target_release_readme_identifies_the_phone_and_loader_sequence(
-        self, target_checkout: TargetCheckout
-    ) -> None:
-        """Generated instructions identify the skeleton and preserve its loader sequence."""
-        create_target("hammer-horizon-lte")
-        routes = target_checkout.root / "site/src/data/phones.json"
-        routes.parent.mkdir(parents=True)
-        routes.write_text("[]\n", encoding="utf-8")
-        config = targets.load_target("hammer-horizon-lte")
-        readme = ordinary_readme("hammer-horizon-lte", config).decode("utf-8")
-        prose = " ".join(readme.split())
-
-        assert readme.startswith("FPLinux for HAMMER Horizon LTE\n")
-        assert "Turn the phone off and leave USB disconnected." in prose
-        assert "python3.14 -I fplinux.py run\n" in readme
-        assert "Wait until the launcher asks you to connect the phone." in prose
-        assert "Power the phone off, hold *, then connect USB while keeping * pressed." in prose
-        assert (
-            "If you connected too early, disconnect USB, turn the phone off and start again."
-            in prose
-        )
-        assert readme.index("python3.14 -I fplinux.py run\n") < readme.index(
-            "Wait until the launcher"
-        )
-        assert readme.index("Wait until the launcher") < readme.index(
-            "Power the phone off, hold *"
-        )
-        assert "python3.14 -I fplinux.py console" in readme
-        assert "Phone support, controls and limits: docs/porting/checklist/index.html" in prose
-        assert "confirm it on this phone before use" in prose
-        assert "A configuration file alone does not mean the phone has been tested." in prose
-
     @pytest.mark.usefixtures("target_checkout")
     def test_new_target_release_carries_declared_apks_and_required_runtime_font(self) -> None:
         """Optional apps carry their local libraries while the UI font stays in rootfs."""
@@ -182,9 +152,7 @@ class NewTargetTests:
         }
         assert release_apks == declared_apks | {
             "apks/fplinux-font-terminus-8x16.apk",
-            "apks/fplinux-media.apk",
             "apks/fplinux-midi.apk",
-            "apks/fplinux-mpg123.apk",
             "apks/fplinux-runtime-media.apk",
             "apks/fplinux-soundfont.apk",
         }

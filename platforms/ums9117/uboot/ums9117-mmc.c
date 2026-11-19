@@ -52,6 +52,7 @@ struct ums9117_mmc_priv {
 };
 
 static struct ums9117_mmc_priv *ums9117_mmc_instance;
+static bool ums9117_mmc_cold_takeover_attempted;
 
 static bool ums9117_mmc_is_fixed_slot(struct udevice *dev)
 {
@@ -678,6 +679,8 @@ static int ums9117_mmc_bind(struct udevice *dev)
 
 static int ums9117_mmc_probe(struct udevice *dev)
 {
+	const struct fplinux_uboot_handoff *handoff =
+		ums9117_uboot_handoff_get();
 	struct mmc_uclass_priv *upriv = dev_get_uclass_priv(dev);
 	struct ums9117_mmc_plat *plat = dev_get_plat(dev);
 	struct ums9117_mmc_priv *priv = dev_get_priv(dev);
@@ -685,6 +688,16 @@ static int ums9117_mmc_probe(struct udevice *dev)
 
 	priv->io = sdio_io;
 	priv->io.context = priv;
+	if (!handoff)
+		return -EINVAL;
+	if (handoff->entry == FPLINUX_UBOOT_ENTRY_SD &&
+	    !ums9117_mmc_cold_takeover_attempted) {
+		ums9117_mmc_cold_takeover_attempted = true;
+		ret = ums9117_sdio_slot_takeover(
+			&priv->io, UMS9117_MMC_QUIESCE_TIMEOUT_US);
+		if (ret)
+			return ret;
+	}
 	ret = ums9117_sdio_slot_snapshot(&priv->io, &priv->state);
 	if (ret)
 		return ret;

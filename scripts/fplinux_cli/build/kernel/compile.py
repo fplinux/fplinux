@@ -6,7 +6,7 @@ from __future__ import annotations
 import os
 import shutil
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from fplinux_cli.alpine import rootfs_state as alpine_state
 from fplinux_cli.build import inputs as inputs_build
@@ -17,27 +17,23 @@ from fplinux_cli.build.device_tree import (
     verify_profile_dtb_layout,
     verify_root_bootargs,
     verify_target_identity,
+    write_boot_dtb,
 )
-from fplinux_cli.common import fail
+from fplinux_cli.common import canonical_json_bytes, fail, sha256_bytes, sha256_file
 from fplinux_cli.manifests.kernel import kconfig_values
 from fplinux_cli.manifests.values import sha256_value
+from fplinux_cli.runtime.connection import device_identity
 
 from . import receipts as kbuild_state
 from . import state as linux_state
 from .configuration import (
     assert_build_type_kconfig,
-    assert_profile_kconfig,
     prepare_builtin_firmware,
     prepare_kernel_config,
-    profile_kconfig_actions,
-    profile_kconfig_arguments,
 )
 from .identity import DeviceStateError, device_kernel_identity, localversion
 from .receipts import KbuildStateError
 from .state import LinuxStateError, PreparedLinuxState
-
-if TYPE_CHECKING:
-    from fplinux_cli.device_data import inputs as firmware_inputs
 
 
 def kernel_build_commands(
@@ -67,11 +63,11 @@ def build_kernel(  # noqa: PLR0913 -- build inputs and causal receipts stay expl
     linux_base: str,
     output: Path,
     cross: str,
-    rootfs: Path,
     rootfs_output: Path,
     rootfs_recipe: str,
-    audio_profile_firmware: tuple[firmware_inputs.FirmwareInput, ...] | None,
     jobs: int,
+    board_output: Path,
+    early_firmware: Path | None = None,
 ) -> tuple[Path, Path, dict[str, str], str]:
     """Build or exactly reuse the declared kernel image and DTB in ``work/kernel``."""
     try:
@@ -79,16 +75,12 @@ def build_kernel(  # noqa: PLR0913 -- build inputs and causal receipts stay expl
         defconfig, config_paths = prepare_kernel_config(target, target_config, platform, work)
         root_contract = target_config["linux"]["root"]
         initramfs_delivery = target_config["bootstrap"]["initramfs_delivery"]
-        initramfs_record: dict[str, int | str] | None = None
-        initramfs_input: Path | None = None
-        initramfs_receipt: dict[str, str] | None = None
         if root_contract["kind"] == "initramfs":
-            kernel_rootfs = inputs_build.require_file(
-                rootfs.with_name(alpine_state.INITRAMFS_NAME)
-            )
-            initramfs_record = kbuild_state.initramfs_identity(kernel_rootfs)
-            if initramfs_delivery == "embedded":
-                initramfs_input = kbuild_state.initramfs_input_path(work, initramfs_record)
+            kernel_rootfs = inputs_build.require_file(rootfs_output / alpine_state.INITRAMFS_NAME)
+            initramfs_record = {
+                "sha256": sha256_file(kernel_rootfs),
+                "size": kernel_rootfs.stat().st_size,
+            }
             initramfs_receipt = alpine_state.trusted_receipt_identity(rootfs_output, rootfs_recipe)
             device_root: dict[str, object] = {
                 "kind": "initramfs",
@@ -112,41 +104,51 @@ def build_kernel(  # noqa: PLR0913 -- build inputs and causal receipts stay expl
             linux_source / platform["linux"]["config_script"]
         )
         current_linux = linux_state.require_prepared_linux(linux_source, prepared_linux)
-        builtin_firmware = prepare_builtin_firmware(
-            target_config, audio_profile_firmware, source=linux_source, work=work
-        )
+        builtin_firmware = prepare_builtin_firmware(target_config, source=linux_source, work=work)
         implementation = inputs_build.kernel_implementation_sources()
         implementation.extend(builtin_firmware.implementation())
-        config_enable, config_disable = profile_kconfig_actions(target_config)
-        device_identity = device_kernel_identity(
+        environment_recipe = os.environ["FPLINUX_ENVIRONMENT_ARTIFACT_RECIPE"]
+        implementation_recipe = kbuild_state.implementation_identity(implementation)
+        board_recipe = device_kernel_identity(
             target=target,
             linux_recipe=current_linux.linux_recipe,
             bootstrap_recipe=bootstrap_recipe,
-            environment_recipe=os.environ["FPLINUX_ENVIRONMENT_ARTIFACT_RECIPE"],
+            environment_recipe=environment_recipe,
             root=device_root,
             initramfs_delivery=initramfs_delivery,
-            kbuild_implementation=kbuild_state.implementation_identity(implementation),
+            kbuild_implementation=implementation_recipe,
             arch=platform["linux"]["arch"],
             defconfig=defconfig,
             dtb=target_config["linux"]["dtb"],
             profile=inputs_build.selected_profile(target_config),
             build_type=target_config["build_type"],
-            config_enable=config_enable,
-            config_disable=config_disable,
         )
-        initramfs_source = str(initramfs_input) if initramfs_input is not None else ""
+        binary_recipe = sha256_bytes(
+            canonical_json_bytes(
+                {
+                    "linux": current_linux.tree_recipe,
+                    "environment": environment_recipe,
+                    "implementation": implementation_recipe,
+                    "config": sha256_file(defconfig),
+                }
+            )
+        )
+        kernel_localversion = localversion(binary_recipe)
+        early_firmware_digest = sha256_file(early_firmware) if early_firmware is not None else ""
+        boot_recipe = sha256_bytes(
+            f"{board_recipe}\n{rootfs_recipe}\n{early_firmware_digest}\n".encode("ascii")
+        )
         config_command = [
             str(config_script),
             "--file",
             str(output / ".config"),
             "--set-str",
             "INITRAMFS_SOURCE",
-            initramfs_source,
+            "",
             "--set-str",
             "LOCALVERSION",
-            localversion(device_identity),
+            kernel_localversion,
             *builtin_firmware.kconfig_arguments(),
-            *profile_kconfig_arguments(config_enable, config_disable),
         ]
         commands = kernel_build_commands(
             kbuild,
@@ -154,47 +156,41 @@ def build_kernel(  # noqa: PLR0913 -- build inputs and causal receipts stay expl
             platform["linux"]["targets"],
             jobs,
         )
+        board_dtb = str(
+            Path(platform["linux"]["dtb_output_directory"]) / target_config["linux"]["dtb"]
+        )
         output_paths = (
             platform["linux"]["image_output"],
-            str(Path(platform["linux"]["dtb_output_directory"]) / target_config["linux"]["dtb"]),
             "vmlinux",
             "System.map",
             ".config",
         )
         plan = kbuild_state.create_plan(
-            linux_recipe=current_linux.linux_recipe,
+            linux_recipe=current_linux.tree_recipe,
             linux_base=sha256_value(linux_base, "Linux base source"),
             defconfig=defconfig,
             defconfig_path="generated/kernel.defconfig",
-            root=root_contract,
-            initramfs_delivery=initramfs_delivery,
-            initramfs=initramfs_record,
-            initramfs_input=initramfs_input,
-            initramfs_receipt=initramfs_receipt,
             arch=platform["linux"]["arch"],
             cross_compile=cross,
             commands=commands,
             outputs=output_paths,
             implementation=implementation,
         )
+        ccache_environment = {
+            "CCACHE_DIR": str(inputs_build.CACHE / "ccache"),
+            "CCACHE_MAXSIZE": "1GiB",
+            "CCACHE_BASEDIR": str(inputs_build.OUTPUT),
+            "CCACHE_NAMESPACE": environment_recipe,
+        }
         if kbuild_state.cache_hit(work, output, plan):
             process_build.log_message(f"Kbuild causal receipt hit: {plan.recipe[:16]}")
         else:
             kbuild_state.discard_success_receipt(work)
             kbuild_state.prepare_output(work, output)
-            linux_state.write_profile_root(output, target_config)
-            if initramfs_input is not None:
-                kbuild_state.materialize_initramfs_input(work, kernel_rootfs, plan)
+            linux_state.write_default_bootargs(output)
             shutil.copyfile(defconfig, output / ".config")
-            ccache_environment = {
-                "CCACHE_DIR": str(inputs_build.CACHE / "ccache"),
-                "CCACHE_MAXSIZE": "1GiB",
-                "CCACHE_BASEDIR": str(inputs_build.OUTPUT),
-                "CCACHE_NAMESPACE": os.environ["FPLINUX_ENVIRONMENT_ARTIFACT_RECIPE"],
-            }
             for command in commands[:-1]:
                 process_build.run(command, environment=ccache_environment)
-            assert_profile_kconfig(output / ".config", config_enable, config_disable)
             assert_build_type_kconfig(
                 output / ".config", config_paths[-1], target_config["build_type"]
             )
@@ -202,9 +198,17 @@ def build_kernel(  # noqa: PLR0913 -- build inputs and causal receipts stay expl
 
         zimage = inputs_build.require_file(output / platform["linux"]["image_output"])
         vmlinux = inputs_build.require_file(output / "vmlinux")
-        dtb = inputs_build.require_file(
-            output / platform["linux"]["dtb_output_directory"] / target_config["linux"]["dtb"]
-        )
+        if not (output / board_dtb).is_file():
+            process_build.run([*kbuild, f"-j{jobs}", "dtbs"], environment=ccache_environment)
+        try:
+            dtb = write_boot_dtb(
+                inputs_build.require_file(output / board_dtb),
+                board_output,
+                target_config,
+                boot_recipe,
+            )
+        except DeviceTreeError as error:
+            fail(str(error))
         config_text = inputs_build.require_file(output / ".config").read_text()
         try:
             verify_dtb_kconfig(
@@ -226,7 +230,6 @@ def build_kernel(  # noqa: PLR0913 -- build inputs and causal receipts stay expl
                 verify_profile_dtb_layout(dtb, layout, target_config["linux"]["memory"])
         except DeviceTreeError as error:
             fail(str(error))
-        assert_profile_kconfig(output / ".config", config_enable, config_disable)
         assert_build_type_kconfig(
             output / ".config", config_paths[-1], target_config["build_type"]
         )
@@ -236,6 +239,11 @@ def build_kernel(  # noqa: PLR0913 -- build inputs and causal receipts stay expl
                 fail(f"kernel unexpectedly contains {forbidden}")
         if not kbuild_state.cache_hit(work, output, plan):
             kbuild_state.publish_success(work, output, plan)
-        return zimage, dtb, kbuild_state.receipt_identity(work, output, plan), device_identity
+        return (
+            zimage,
+            dtb,
+            kbuild_state.receipt_identity(work, output, plan),
+            device_identity(kernel_localversion, boot_recipe),
+        )
     except (DeviceStateError, KbuildStateError, LinuxStateError) as error:
         fail(str(error))

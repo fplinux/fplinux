@@ -18,6 +18,7 @@ from tests.process import run_process
 
 ZIMAGE = b"FPLinux test zImage payload\n"
 DTB = b"FPLinux test DTB payload\n"
+RAMDISK = b"FPLinux test firmware payload\n"
 
 
 @pytest.fixture(scope="module")
@@ -64,6 +65,7 @@ class FitInputs:
     dumpimage: Path
     zimage: Path
     dtb: Path
+    ramdisk: Path
     output: Path
     spec: dict[str, Any]
     tools_receipt: dict[str, str]
@@ -76,6 +78,7 @@ class FitInputs:
             self.spec,
             zimage=self.zimage,
             dtb=self.dtb,
+            ramdisk=self.ramdisk,
             tools_receipt=self.tools_receipt,
         )
 
@@ -91,6 +94,7 @@ class FitInputs:
             dumpimage=self.dumpimage,
             zimage=self.zimage,
             dtb=self.dtb,
+            ramdisk=self.ramdisk,
             output=self.output,
             plan=self.plan() if plan is None else plan,
         )
@@ -123,9 +127,11 @@ def fit_inputs(tmp_path: Path, installed_fit_tools: tuple[Path, Path]) -> FitInp
     dumpimage = _copy_declared_tool(root, source_dumpimage)
     zimage = root / "zImage"
     dtb = root / "linux.dtb"
+    ramdisk = root / "early-firmware.cpio"
     output = root / "output"
     zimage.write_bytes(ZIMAGE)
     dtb.write_bytes(DTB)
+    ramdisk.write_bytes(RAMDISK)
     spec: dict[str, Any] = {
         "kind": "sha256",
         "filename": "FPLINUX.ITB",
@@ -134,7 +140,7 @@ def fit_inputs(tmp_path: Path, installed_fit_tools: tuple[Path, Path]) -> FitInp
         "fdt_load": 0x83E00000,
     }
     tools_receipt = {"recipe": "a" * 64, "sha256": "b" * 64}
-    return FitInputs(root, mkimage, dumpimage, zimage, dtb, output, spec, tools_receipt)
+    return FitInputs(root, mkimage, dumpimage, zimage, dtb, ramdisk, output, spec, tools_receipt)
 
 
 class FitImageTests:
@@ -153,10 +159,12 @@ class FitImageTests:
         assert (fit_inputs.read_fit(fit, "/images/fdt", "load", "x")) == ("83e00000")
         assert (fit_inputs.fit_payload(fit, "/images/kernel")) == (ZIMAGE)
         assert (fit_inputs.fit_payload(fit, "/images/fdt")) == (DTB)
+        assert fit_inputs.fit_payload(fit, "/images/ramdisk") == RAMDISK
         assert (fit_inputs.read_fit(fit, "/configurations", "default", "s")) == ("nokia-ta1618")
         configuration = "/configurations/nokia-ta1618"
         assert (fit_inputs.read_fit(fit, configuration, "kernel", "s")) == ("kernel")
         assert (fit_inputs.read_fit(fit, configuration, "fdt", "s")) == ("fdt")
+        assert fit_inputs.read_fit(fit, configuration, "ramdisk", "s") == "ramdisk"
         assert fit_image.cache_hit(fit_inputs.output, plan)
 
     def test_changed_zimage_misses_then_rebuilds_the_fit(self, fit_inputs: FitInputs) -> None:

@@ -1,2 +1,2 @@
 # SPDX-License-Identifier: GPL-2.0-only
-dtb-$(CONFIG_MACH_@SYMBOL@) += ums9117-@TARGET@.dtb
+dtb-$(CONFIG_ARCH_UMS9117) += ums9117-@TARGET@.dtb

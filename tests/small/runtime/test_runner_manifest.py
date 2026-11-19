@@ -126,21 +126,23 @@ def emmc_manifest() -> dict[str, Any]:
     return manifest
 
 
+@pytest.mark.parametrize("required", [[], ["audio-profile"]])
 def test_emmc_manifest_retains_optional_groups_without_requiring_them(
-    runtime_manifest_path: Path, emmc_manifest: dict[str, Any]
+    runtime_manifest_path: Path, emmc_manifest: dict[str, Any], required: list[str]
 ) -> None:
+    emmc_manifest["device_data"]["required_groups"] = required
     loaded = load_manifest(runtime_manifest_path, emmc_manifest)
     assert loaded["emmc"]["raw_device"] == "/dev/mmcblk1"
-    assert loaded["device_data"]["required_groups"] == ["audio-profile"]
+    assert loaded["device_data"]["required_groups"] == required
     assert "wcn-firmware" in loaded["device_data"]["groups"]
 
 
-@pytest.mark.parametrize("required", [[], ["unknown"], ["audio-profile", "audio-profile"], [1]])
+@pytest.mark.parametrize("required", [["unknown"], ["audio-profile", "audio-profile"], [1]])
 def test_emmc_manifest_rejects_invalid_required_groups(
     runtime_manifest_path: Path, emmc_manifest: dict[str, Any], required: object
 ) -> None:
     emmc_manifest["device_data"]["required_groups"] = required
-    with pytest.raises(SystemExit, match="required_groups must be"):
+    with pytest.raises(SystemExit, match="required_groups must name unique declared groups"):
         load_manifest(runtime_manifest_path, emmc_manifest)
 
 

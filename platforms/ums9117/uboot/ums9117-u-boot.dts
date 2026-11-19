@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
+/dts-v1/;
+
 / {
 	#address-cells = <1>;
 	#size-cells = <1>;
@@ -25,10 +27,13 @@
 		clock-frequency = <FPLINUX_UBOOT_TIMER_HZ>;
 	};
 
-	mmc@20300000 {
+	sdio0_mmc: mmc@20300000 {
 		compatible = "fplinux,ums9117-mmc";
 		reg = <0x20300000 0x100>;
 		bus-width = <4>;
 		max-frequency = <48750000>;
+		non-removable;
 	};
 };
+
+#include "fplinux-uboot-board.dtsi"

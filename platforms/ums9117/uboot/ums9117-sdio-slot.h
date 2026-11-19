@@ -97,6 +97,8 @@ u32 ums9117_sdio_slot_analog_offset(enum ums9117_sdio_slot_analog_reg reg);
 
 int ums9117_sdio_slot_snapshot(const struct ums9117_sdio_slot_io *io,
 			       struct ums9117_sdio_slot_state *state);
+int ums9117_sdio_slot_takeover(const struct ums9117_sdio_slot_io *io,
+			       u32 quiesce_timeout_us);
 int ums9117_sdio_slot_enable_card_detect(const struct ums9117_sdio_slot_io *io,
 					 struct ums9117_sdio_slot_state *state);
 int ums9117_sdio_slot_restore_card_detect(const struct ums9117_sdio_slot_io *io,

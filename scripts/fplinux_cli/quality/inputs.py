@@ -375,16 +375,6 @@ def _kernel_scope_paths(
                 target_data.get("linux"), base=target_path.parent, captured=captured
             )
         )
-        if profile in {"microsd-uboot", "microsd-root"}:
-            microsd = target_data.get("microsd", {})
-            if isinstance(microsd, dict):
-                patches = microsd.get("linux_patches")
-                if isinstance(patches, list):
-                    selected.update(
-                        (target_path.parent / patch).as_posix()
-                        for patch in patches
-                        if isinstance(patch, str)
-                    )
         platform = target_data.get("platform")
         if not isinstance(platform, str):
             continue

@@ -3,10 +3,32 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from fplinux_cli.common import fail
+from fplinux_cli.common import fail, is_sha256, sha256_bytes
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+BOOT_IDENTITY_COMMAND = (
+    "uname -r && tr '\\000' '\\n' </proc/device-tree/chosen/fplinux,boot-recipe"
+)
+_KERNEL_LOCALVERSION = re.compile(r"(-fplinux-[0-9a-f]{16})$")
+
+
+def device_identity(kernel_localversion: str, boot_recipe: str) -> str:
+    """Bind the visible kernel identifier and the boot composition."""
+    return sha256_bytes(f"{kernel_localversion}\n{boot_recipe}\n".encode("ascii"))
+
+
+def observed_device_identity(lines: Sequence[str]) -> str | None:
+    """Derive the identity from the authenticated phone's reported kernel and DTB."""
+    if len(lines) != 2 or not is_sha256(lines[1]):
+        return None
+    version = _KERNEL_LOCALVERSION.search(lines[0])
+    return None if version is None else device_identity(version[1], lines[1])
 
 
 @dataclass(frozen=True)

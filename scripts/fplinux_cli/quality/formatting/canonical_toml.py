@@ -96,10 +96,7 @@ _TARGET_ORDER = {
     "fm_radio.firmware": _FIRMWARE_FIELDS,
     "wcn_firmware": ("firmware",),
     "wcn_firmware.firmware": _FIRMWARE_FIELDS,
-    "microsd": ("linux_patches", "bootstrap", "uboot"),
-    "microsd.bootstrap": ("source", "image", "map"),
-    "microsd.uboot": ("defconfig", "patches", "copies"),
-    "microsd.uboot.copies": _COPY_FIELDS,
+    "microsd.bootstrap": ("image", "map"),
 }
 
 _PLATFORM_ORDER = {
@@ -107,7 +104,7 @@ _PLATFORM_ORDER = {
     "identity": ("vendor", "soc", "aliases", "compatible"),
     "rootfs": ("packages",),
     "bundle": ("packages",),
-    "uboot": ("source", "archive_prefix", "patches", "required_config", "copies"),
+    "uboot": ("source", "archive_prefix", "defconfig", "patches", "required_config", "copies"),
     "uboot.copies": _COPY_FIELDS,
     "linux": (
         "source_lock",
@@ -136,6 +133,7 @@ _PLATFORM_ORDER = {
         "vendor_source_lock",
         "vendor_cache_name",
         "archive_prefix",
+        "stage0_source",
         "source_destination",
         "vendor_destination",
         "output_destination",

@@ -13,6 +13,7 @@ from fplinux_cli.common import fail
 from fplinux_cli.data_paths import data_root
 from fplinux_cli.manifests.paths import normalize_profile
 
+from .bundle import MICROSD_BOOT_MODE, MICROSD_BOOT_PROFILE
 from .data_paths import checkout_runtime_root
 
 if TYPE_CHECKING:
@@ -20,8 +21,6 @@ if TYPE_CHECKING:
 
     from fplinux_cli.artifacts.bundles import CurrentBundle
 
-MICROSD_BOOT_MODE = "microsd"
-MICROSD_BOOT_PROFILE = "microsd-uboot"
 PUBLIC_BOOT_MODES = (MICROSD_BOOT_MODE,)
 
 

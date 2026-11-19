@@ -15,6 +15,10 @@
 
 / {
 	memory@80200000 {
+	chosen {
+		bootargs = "clk_ignore_unused regulator_ignore_unused";
+	};
+
 		device_type = "memory";
 		reg = <0x80200000 0x03c00000>;
 	};

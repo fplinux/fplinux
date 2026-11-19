@@ -38,9 +38,10 @@ def _ssh(boundary: Path) -> None:
     command = sys.argv[-1]
     if command == "fplinux-session-id":
         print("00" * 32 if mode == "session-identity" else session["session_id"])
-    elif command == "uname -r":
+    elif command.startswith("uname -r && "):
         suffix = "34" * 8 if mode == "kernel-identity" else "12" * 8
         print(f"6.18.42-fplinux-{suffix}")
+        print("12" * 32)
     elif command == "uname -r; sed -n 's/^BUILD_ID=//p' /etc/os-release":
         print("6.18.42-fplinux-" + "12" * 8)
         print("e268349a31ad")

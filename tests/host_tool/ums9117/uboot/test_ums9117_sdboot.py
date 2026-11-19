@@ -81,19 +81,33 @@ class SdbootFitAdmissionTests:
             fit, alignment = self.make_fit(work, payload, "padding")
             self.check_admission(executable, fit, alignment, 4)
 
-    def test_prepared_dtb_padding_does_not_reach_handoff(
-        self, executable: Path, tmp_path: Path
+    @pytest.mark.parametrize(
+        ("mode", "compatible", "status"),
+        [
+            ("padded-fdt", "fplinux,ums9117-musb-inherited", "okay"),
+            ("autonomous", "sprd,ums9117-musb", "okay"),
+        ],
+    )
+    def test_handoff_retains_only_the_selected_boot_properties(
+        self, executable: Path, tmp_path: Path, mode: str, compatible: str, status: str
     ) -> None:
-        """Preserve the RNG property while excluding a stale name in unused DTB padding."""
-        dtb = self.make_dtb(tmp_path)
+        """Keep live USB properties in USB mode and discard them on autonomous boot."""
+        self.make_dtb(tmp_path)
+        tree = tmp_path / "linux.dtb"
+        run_process(
+            ["fdtput", "-t", "s", str(tree), "/usb", "compatible", compatible],
+            name="select the board USB controller",
+            timeout=10,
+        )
+        dtb = tree.read_bytes()
         kernel = bytearray(64)
         struct.pack_into("<III", kernel, 0x24, 0x016F2818, 0, 64)
         (tmp_path / "zImage").write_bytes(kernel)
         (tmp_path / "kernel.sha256").write_bytes(hashlib.sha256(kernel).digest())
         fit, alignment = self.make_fit(tmp_path, dtb, "padding")
         result = run_process(
-            [str(executable), str(fit), str(alignment), "0", "padded-fdt"],
-            name="run sdboot with prepared DTB padding",
+            [str(executable), str(fit), str(alignment), "0", mode, status],
+            name=f"run sdboot with {mode}",
             timeout=10,
         )
         assert result.returncode == 0, result.stdout + result.stderr
@@ -110,6 +124,9 @@ class SdbootFitAdmissionTests:
         """Vary a normal FIT string to exercise its two possible data alignments."""
         (work / "linux.dtb").write_bytes(dtb)
         (work / "fdt.sha256").write_bytes(hashlib.sha256(dtb).digest())
+        ramdisk = b"early firmware"
+        (work / "early-firmware.cpio").write_bytes(ramdisk)
+        (work / "ramdisk.sha256").write_bytes(hashlib.sha256(ramdisk).digest())
         source = work / "fit.its"
         template = (HARNESS / "fixtures/sdboot-fit.dts").read_text()
         source.write_text(template.replace("ALIGNMENT", padding))

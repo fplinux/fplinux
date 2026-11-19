@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any
 
 from . import boot
 from . import phone_data as phone_data_runtime
-from .bundle import admit_bundle, fail, host_preflight, load_runtime_manifest
+from .bundle import admit_bundle, boots_system_card, fail, host_preflight, load_runtime_manifest
 from .connection import read_running_build
 from .events import RunLog
 from .ssh import session as ssh_session
@@ -75,6 +75,8 @@ def select_connection(
 
 
 def _prepared_identity(admitted: ValidatedBundle, phone_data: Path | None) -> str | None:
+    if boots_system_card(admitted.runtime):
+        return None
     spec = phone_data_runtime.device_data_spec(admitted.root, admitted.runtime)
     selected = None
     if spec is not None:

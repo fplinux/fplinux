@@ -29,6 +29,8 @@ from fplinux_cli.workspace import staging as workspace_staging
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from fplinux_cli.artifacts.release import ReleaseContext
+    from fplinux_cli.device_data.inputs import FirmwareInput
     from fplinux_cli.workspace.capture import WorkspaceSnapshot
 
 
@@ -261,10 +263,12 @@ def build(  # noqa: PLR0913 -- CLI options and caller-owned reporting remain exp
     profile: str | None = None,
     build_type: str = "release",
     include_device_data: bool = True,
+    release_context: ReleaseContext | None = None,
     verbose: bool = False,
     reporter: RunReporter | None = None,
     phone_data: Path | None = None,
-) -> None:
+    prepared_firmware: dict[str, tuple[FirmwareInput, ...]] | None = None,
+) -> tuple[CurrentBundle, dict[str, Any]]:
     """Build or reuse a bundle, leaving a supplied reporter to its caller."""
     own_reporter = reporter is None
     cache = data_root(common.ROOT)
@@ -276,8 +280,10 @@ def build(  # noqa: PLR0913 -- CLI options and caller-owned reporting remain exp
         profile,
         build_type=build_type,
         include_device_data=include_device_data,
+        release_context=release_context,
         phone_data=phone_data,
         selected_data_root=cache,
+        prepared_firmware=prepared_firmware,
     )
     environment_lock = definition.load_environment_lock()
     environment_recipe = definition.environment_recipe_digest(environment_lock)
@@ -322,7 +328,7 @@ def build(  # noqa: PLR0913 -- CLI options and caller-owned reporting remain exp
                 profile=profile,
                 target=target,
             )
-        return
+        return current
 
     if reporter is None:
         reporter = RunReporter.create(
@@ -431,3 +437,4 @@ def build(  # noqa: PLR0913 -- CLI options and caller-owned reporting remain exp
         workspace_staging.discard_staged_workspace_snapshot(
             snapshot, workspace, selected_data_root=cache
         )
+    return current

@@ -20,9 +20,10 @@ from .commands import require_tool, ssh_config
 from .errors import fail
 from .material import (
     SESSION_BYTES,
-    candidate_network,
+    allocate_network,
     copy_personalized_image,
     is_rfc1918,
+    mac_pair,
     public_key_body,
     session_block,
     usb_config,
@@ -106,9 +107,9 @@ def _regular_file_bytes(path: Path, name: str) -> bytes:
     return data
 
 
-def _host_route_networks(ip_tool: str) -> set[ipaddress.IPv4Network]:
+def host_route_networks() -> set[ipaddress.IPv4Network]:
     result = subprocess.run(
-        [ip_tool, "-4", "-j", "route", "show", "table", "all"],
+        [require_tool("ip"), "-4", "-j", "route", "show", "table", "all"],
         capture_output=True,
         text=True,
         check=False,
@@ -156,26 +157,7 @@ def _active_session_networks(sessions: Path) -> set[ipaddress.IPv4Network]:
 
 
 def _choose_network(sessions: Path) -> ipaddress.IPv4Network:
-    occupied = _host_route_networks(require_tool("ip")) | _active_session_networks(sessions)
-    for _attempt in range(4096):
-        candidate = candidate_network(os.getrandom(5))
-        if all(not candidate.overlaps(network) for network in occupied):
-            return candidate
-    return fail("could not allocate a free private USB /30")
-
-
-def _mac_address() -> str:
-    octets = bytearray(os.getrandom(6))
-    octets[0] = (octets[0] & 0xFC) | 0x02
-    return ":".join(f"{octet:02x}" for octet in octets)
-
-
-def _mac_pair() -> tuple[str, str]:
-    host = _mac_address()
-    device = _mac_address()
-    while device == host:
-        device = _mac_address()
-    return host, device
+    return allocate_network(host_route_networks() | _active_session_networks(sessions))
 
 
 def _session_directory(root: Path, target: str, usb_serial: str) -> Path:
@@ -298,7 +280,7 @@ def prepare_session(
     personalized_image = session_directory / "ramboot.bin"
     try:
         network = _choose_network(sessions)
-        host_mac, device_mac = _mac_pair()
+        host_mac, device_mac = mac_pair()
         keygen = require_tool("ssh-keygen")
         result = subprocess.run(
             [
@@ -327,7 +309,7 @@ def prepare_session(
             session_id,
             rng_seed,
             key_body,
-            usb_config(usb_serial, network, host_mac, device_mac),
+            usb_config(usb_serial, network, host_mac, device_mac, transport="ncm"),
         )
         copy_personalized_image(image, personalized_image, personalization, block)
     except BaseException:

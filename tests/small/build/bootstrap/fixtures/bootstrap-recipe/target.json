@@ -17,7 +17,7 @@
   "bootstrap": {
     "kind": "linux",
     "toolchain": "arm-none-eabi",
-    "source": "bootstrap",
+    "source": "targets/demo/bootstrap",
     "image": "ramboot.bin",
     "map": "obj/ramboot.map",
     "kernel_destination": "zImage",

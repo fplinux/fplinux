@@ -11,8 +11,7 @@ from fplinux_cli.build.identity import (
     linux_machine_binding_path,
     linux_platform_identity_header,
     runtime_identity,
-    uboot_identity_dtsi,
-    uboot_identity_dtsi_name,
+    uboot_board_dtsi,
 )
 from fplinux_cli.build.kernel import prepare as linux_build
 from fplinux_cli.manifests.identity import (
@@ -102,7 +101,7 @@ class IdentityTests:
         dtsi = linux_identity_dtsi(target, platform)
         binding = linux_machine_binding(target, platform, arch="arm")
         platform_header = linux_platform_identity_header(platform)
-        uboot = uboot_identity_dtsi(target, platform)
+        uboot = uboot_board_dtsi(target, platform)
 
         assert (runtime["target"]["display_name"]) == (target["display_name"])
         assert (runtime["platform"]["display_name"]) == (platform["display_name"])
@@ -114,10 +113,6 @@ class IdentityTests:
         assert (b'FPLINUX_PLATFORM_COMPATIBLE "sprd,ums9117"') in (platform_header)
         assert b'model = "Nokia 3210 4G (TA-1618) U-Boot control tree";' in uboot
         assert b'compatible = "nokia,ta-1618", "sprd,ums9117";' in uboot
-
-    def test_uboot_identity_paths_do_not_collide_between_targets(self) -> None:
-        """Different targets receive distinct generated include names."""
-        assert uboot_identity_dtsi_name("first-phone") != uboot_identity_dtsi_name("second-phone")
 
     @pytest.mark.parametrize(
         ("arch", "directory"),

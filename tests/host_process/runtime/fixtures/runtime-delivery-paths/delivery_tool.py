@@ -56,8 +56,9 @@ def _ssh(boundary: Path) -> None:
     command = sys.argv[-1]
     if command == "fplinux-session-id":
         print(session["session_id"])
-    elif command == "uname -r":
+    elif command.startswith("uname -r && "):
         print("6.18.42-fplinux-1212121212121212")
+        print("12" * 32)
     elif command.startswith("fplinux-clock "):
         with (boundary / "clock-commands").open("a", encoding="ascii") as stream:
             stream.write(command + "\n")
@@ -78,6 +79,7 @@ def _ssh(boundary: Path) -> None:
     elif command == "cat /proc/mounts && printf '\\nFPLINUX_SWAPS\\n' && cat /proc/swaps":
         print("rootfs / rootfs rw 0 0")
         print("/dev/loop0 /run/fplinux-root/lower squashfs ro,relatime 0 0")
+        print("/dev/loop1 /run/fplinux-root/board squashfs ro,relatime 0 0")
         print("\nFPLINUX_SWAPS")
         print("Filename Type Size Used Priority")
         print("/dev/zram0 partition 65532 0 -2")

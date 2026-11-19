@@ -7,6 +7,7 @@ import json
 import sys
 from pathlib import Path
 
+from tests.boot_identity import IDENTITY_12
 from tests.fixtures.executables import install_python_script
 from tests.windows_host_support import native_process_transport
 
@@ -23,7 +24,7 @@ def main() -> int:
     if probe in {"authentication", "both"}:
         session["status"] = "prepared"
         transport.authenticate(
-            session, expected_device_identity="12" * 32, timeout=3, scan_host_key=False
+            session, expected_device_identity=IDENTITY_12, timeout=3, scan_host_key=False
         )
     if probe in {"metadata", "both"}:
         metadata = transport.run_remote(session, "uname -r", capture_output=True, shared=True)

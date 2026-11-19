@@ -13,9 +13,10 @@ def main() -> None:
     root = Path(os.environ["SC9820E_TEST_ROOT"])
     with (root / "ssh-commands").open("a", encoding="utf-8") as output:
         output.write(command + "\n")
-    if command == "uname -r":
+    if command.startswith("uname -r && "):
         identity = "1" * 16 if os.environ["SC9820E_TEST_MODE"] == "wrong-identity" else "9" * 16
         print(f"7.2.9-fplinux-{identity}")
+        print("9" * 64)
     elif command.startswith("fplinux-clock "):
         print("system=1 rtc=written")
     else:

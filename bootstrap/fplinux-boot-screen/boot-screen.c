@@ -35,7 +35,7 @@ static void error_heading(char *out, uint32_t code)
 	out[i] = '\0';
 }
 
-static int render(struct fplinux_boot_screen *screen)
+static int render(struct fplinux_boot_screen *screen, const char *boot_detail)
 {
 	const struct fplinux_boot_mark *asset = NULL;
 	struct fplinux_status_mark mark = { 0 };
@@ -51,7 +51,7 @@ static int render(struct fplinux_boot_screen *screen)
 		.layout = FPLINUX_STATUS_BOOT,
 		.indicator = FPLINUX_STATUS_NONE,
 		.heading = "Starting FPLinux",
-		.detail = "Keep USB connected.",
+		.detail = boot_detail,
 	};
 	char heading[22];
 
@@ -80,7 +80,8 @@ static int render(struct fplinux_boot_screen *screen)
 }
 
 int fplinux_boot_screen_init(struct fplinux_boot_screen *screen,
-			     const struct fplinux_status_canvas *canvas)
+			     const struct fplinux_status_canvas *canvas,
+			     bool requires_usb)
 {
 	if (!screen)
 		return -1;
@@ -93,7 +94,7 @@ int fplinux_boot_screen_init(struct fplinux_boot_screen *screen,
 	screen->error_code = 0;
 	screen->failed = 0;
 	screen->initialized = 1;
-	if (render(screen)) {
+	if (render(screen, requires_usb ? "Keep USB connected." : NULL)) {
 		screen->initialized = 0;
 		return -1;
 	}
@@ -108,5 +109,5 @@ void fplinux_boot_screen_fail(struct fplinux_boot_screen *screen, uint32_t code,
 	screen->error_code = code;
 	copy_text(screen->detail, sizeof(screen->detail), detail);
 	screen->failed = 1;
-	(void)render(screen);
+	(void)render(screen, NULL);
 }

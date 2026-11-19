@@ -6,6 +6,7 @@ from __future__ import annotations
 import shutil
 import stat
 from pathlib import Path
+from uuid import UUID
 
 import pytest
 
@@ -29,14 +30,20 @@ def install_shell(root: Path) -> None:
     shutil.copy2(loader, root / loader.relative_to("/"))
 
 
-@pytest.mark.parametrize("marker", [None, b"1\n"], ids=["ordinary-session", "preparation-session"])
 @pytest.mark.parametrize(
-    "transport", [None, b"rndis\n"], ids=["default-transport", "explicit-rndis"]
+    ("marker", "transport", "board_layer"),
+    [
+        pytest.param(None, None, False, id="default-runtime"),
+        pytest.param(None, b"rndis\n", True, id="board-and-rndis"),
+        pytest.param(b"1\n", None, True, id="board-and-reader"),
+        pytest.param(b"1\n", b"rndis\n", False, id="reader-and-rndis"),
+        pytest.param(None, None, None, id="board-mount-failure"),
+    ],
 )
 def test_runtime_configuration_survives_initial_root_handoff(
-    tmp_path: Path, marker: bytes | None, transport: bytes | None
+    tmp_path: Path, marker: bytes | None, transport: bytes | None, *, board_layer: bool | None
 ) -> None:
-    """The unchanged script carries selected files into the root that executes init."""
+    """A board mount joins the writable root before it receives firmware and configuration."""
     root = tmp_path / "initial-root"
     root.mkdir()
     install_shell(root)
@@ -46,6 +53,10 @@ def test_runtime_configuration_survives_initial_root_handoff(
     for directory in ("dev", "proc", "sys", "run"):
         (root / directory).mkdir()
         (newroot / directory).mkdir()
+    if board_layer is not False:
+        (root / "board.squashfs").touch()
+    if board_layer is None:
+        (root / "fail-board-mount").touch()
     # Mount creation is simulated; the full production mount validation still runs.
     (root / "proc/mounts").write_text(
         "overlay /newroot overlay rw,index=on,redirect_dir=on 0 0\n", encoding="ascii"
@@ -76,6 +87,11 @@ def test_runtime_configuration_survives_initial_root_handoff(
         timeout=5,
     )
 
+    if board_layer is None:
+        assert result.returncode != 0
+        assert result.stderr == "fplinux-ramroot: cannot mount compressed board files\n"
+        assert not (root / "run/overlay-options").exists()
+        return
     assert result.returncode == 0, result.stderr
     assert result.stderr == ""
     transport_line = (
@@ -102,3 +118,16 @@ def test_runtime_configuration_survives_initial_root_handoff(
         assert stat.S_IMODE((copied / "preparation").stat().st_mode) == 0o600
     assert not (copied / "bootstrap-only").exists()
     assert (newroot / "lib/firmware/device.bin").read_bytes() == b"phone firmware\n"
+    overlay = (root / "run/overlay-options").read_text(encoding="ascii").strip().split(",")
+    base = "/run/fplinux-root/lower"
+    if board_layer:
+        options, destination = (root / "run/board-mount").read_text(encoding="ascii").splitlines()
+        assert destination == "/run/fplinux-root/board"
+        assert options.split(",")[:2] == ["ro", "loop"]
+        assert UUID(options.split(",")[2].removeprefix("fplinux_uuid=")).int != 0
+        assert f"lowerdir=/run/fplinux-root/board:{base}" in overlay
+    else:
+        assert not (root / "run/board-mount").exists()
+        assert f"lowerdir={base}" in overlay
+    assert "index=on" in overlay
+    assert "redirect_dir=on" in overlay

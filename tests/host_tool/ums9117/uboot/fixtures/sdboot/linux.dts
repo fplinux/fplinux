@@ -7,4 +7,14 @@
 	chosen {
 		rng-seed = [01 23 45 67 89 ab cd ef];
 	};
+
+	fplinux-session {
+		compatible = "fplinux,ram-session";
+	};
+
+	usb {
+		compatible = "fplinux,ums9117-musb-inherited";
+
+		status = "okay";
+	};
 };

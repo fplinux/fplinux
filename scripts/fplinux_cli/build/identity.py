@@ -79,15 +79,8 @@ def linux_identity_dtsi(
     ).encode("ascii")
 
 
-def uboot_identity_dtsi_name(target: str) -> str:
-    """Keep each board's generated U-Boot root identity distinct."""
-    return f"fplinux-{target}-uboot-identity.dtsi"
-
-
-def uboot_identity_dtsi(
-    target_identity: dict[str, Any], platform_identity: dict[str, Any]
-) -> bytes:
-    """Generate the U-Boot control tree's current root identity."""
+def uboot_board_dtsi(target_identity: dict[str, Any], platform_identity: dict[str, Any]) -> bytes:
+    """Generate the phone identity for the U-Boot control tree."""
     return (
         f"// {_SPDX_TAG}: GPL-2.0-only\n"
         "/ {\n"

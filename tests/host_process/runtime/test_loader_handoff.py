@@ -90,7 +90,7 @@ class LoaderHandoffProcessTests:
             ]
         )
         assert (loader_handoff.events()) == (shell["events"])
-        assert (loader_handoff.commands()[0]) == ("uname -r")
+        assert loader_handoff.commands()[0].startswith("uname -r && ")
         assert (loader_handoff.commands()[1]) == ("root@10.23.45.2")
         assert (
             len(list(loader_handoff.root.glob("runtime/fplinux/sessions/*/client_ed25519")))
@@ -131,6 +131,9 @@ class LoaderHandoffProcessTests:
         assert ("complete") not in ([event["event"] for event in events])
         assert ("ssh-ready") not in ([event["event"] for event in events])
         assert not ((loader_handoff.root / "shell.json").exists())
-        assert (loader_handoff.commands()) == (
-            [] if mode == "authentication-failure" else ["uname -r"]
-        )
+        commands = loader_handoff.commands()
+        if mode == "authentication-failure":
+            assert commands == []
+        else:
+            assert len(commands) == 1
+            assert commands[0].startswith("uname -r && ")

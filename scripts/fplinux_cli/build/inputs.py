@@ -179,6 +179,8 @@ def selected_build_sources(target_config: dict[str, Any]) -> tuple[str, ...]:
             )
         )
     if target_config["fit"]["kind"] == "sha256":
+        sources.add("scripts/fplinux_cli/build/storage/card.py")
         sources.add("scripts/fplinux_cli/build/storage/fit.py")
         sources.add("scripts/fplinux_cli/build/storage/linux.its.in")
+        sources.add("scripts/fplinux_cli/runtime/card_media.py")
     return tuple(sorted(sources))

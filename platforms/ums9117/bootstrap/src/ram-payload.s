@@ -1,7 +1,7 @@
 	@ SPDX-License-Identifier: GPL-2.0-only
 	.syntax unified
 
-	.macro ums9117_ram_payload dtb
+	.macro ums9117_ram_payload dtb, initramfs
 	.section .fplinux_payload, "a", %progbits
 	.balign 64
 	.global linux_zimage_start
@@ -23,4 +23,11 @@ linux_dtb_end:
 fplinux_session_start:
 	.space 512, 0
 fplinux_session_end:
+
+	.balign 4
+	.global linux_initramfs_start
+	.global linux_initramfs_end
+linux_initramfs_start:
+	.incbin "\initramfs"
+linux_initramfs_end:
 	.endm

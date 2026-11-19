@@ -84,7 +84,7 @@ def declaration_checkout(tmp_path: Path) -> Iterator[SourceDeclarationCheckout]:
             "copies": [],
             "appends": [],
         },
-        "bootstrap": {"backend": "ums9117", "source": "bootstrap"},
+        "bootstrap": {"backend": "ums9117", "source": "targets/phone-a/bootstrap"},
         "uboot": {"kind": "none"},
         "fit": {"kind": "none"},
         "image": {"kind": "none"},
@@ -135,6 +135,10 @@ def declaration_checkout(tmp_path: Path) -> Iterator[SourceDeclarationCheckout]:
     for source in runtime_source_files("phone-a", target_config, root=root).values():
         write(source.relative_to(root).as_posix())
 
+    def load_target(target: str, *_args: object, **_kwargs: object) -> dict[str, Any]:
+        bootstrap = {**target_config["bootstrap"], "source": f"targets/{target}/bootstrap"}
+        return {**target_config, "bootstrap": bootstrap}
+
     # Build implementation content is irrelevant to these controlled source-input cases.
     # Peer Linux discovery and package selection are separate component boundaries.
     with (
@@ -144,7 +148,7 @@ def declaration_checkout(tmp_path: Path) -> Iterator[SourceDeclarationCheckout]:
         mock.patch.object(
             build_inputs, "STAGED_BUILD_SOURCES", ("sources.lock.toml", "alpine.lock.toml")
         ),
-        mock.patch.object(build_inputs, "load_target", return_value=target_config),
+        mock.patch.object(build_inputs, "load_target", side_effect=load_target),
         mock.patch.object(build_inputs, "load_platform", return_value=platform_config),
         mock.patch.object(build_inputs, "discover_linux_targets", return_value=()),
     ):
@@ -487,15 +491,14 @@ def test_uboot_catalog_change_is_causal_only_when_profile_consumes_it(
         checkout.target_config["uboot"] = {
             "kind": "full",
             "source": "platforms/demo/uboot/u-boot.lock.toml",
-            "defconfig": "uboot/demo_defconfig",
+            "defconfig": "platforms/demo/uboot/demo_defconfig",
             "patches": [],
             "copies": [],
         }
         lock = checkout.root / "platforms/demo/uboot/u-boot.lock.toml"
         lock.parent.mkdir()
         lock.write_text('source = "storage_boot"\n')
-        defconfig = checkout.root / "targets/phone-a/uboot/demo_defconfig"
-        defconfig.parent.mkdir()
+        defconfig = checkout.root / "platforms/demo/uboot/demo_defconfig"
         defconfig.write_text("CONFIG_BOARD=y\n")
         implementation = checkout.root / "scripts/fplinux_cli/build/storage/uboot.py"
         implementation.parent.mkdir(parents=True, exist_ok=True)

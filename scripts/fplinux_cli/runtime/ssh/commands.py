@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 from typing import TYPE_CHECKING, Any
 
@@ -13,6 +14,7 @@ if TYPE_CHECKING:
     from typing import BinaryIO
 
 SSH_PORT = 22
+_REMOTE_PATH = re.compile(r"/(?:[A-Za-z0-9._-]+/)*[A-Za-z0-9._-]+")
 
 
 def require_tool(name: str) -> str:
@@ -62,6 +64,7 @@ def _ssh_option_values(
     session: dict[str, Any],
     *,
     connect_timeout: int = 5,
+    global_known_hosts: str = "/dev/null",
 ) -> list[tuple[str, str]]:
     """Combine the phone policy with Unix identity and direct connection ownership."""
     return [
@@ -69,7 +72,7 @@ def _ssh_option_values(
         ("ControlPersist", "no"),
         ("ControlPath", "none"),
         ("IdentityFile", str(session["private_key"])),
-        ("GlobalKnownHostsFile", "/dev/null"),
+        ("GlobalKnownHostsFile", global_known_hosts),
         *ssh_policy_options(
             usb_serial=session["usb_serial"],
             known_hosts=str(session["known_hosts"]),
@@ -104,13 +107,13 @@ def _ssh_config_directive(name: str, value: str) -> str:
     return f"    {name} {rendered}\n"
 
 
-def ssh_config(session: dict[str, Any]) -> str:
+def ssh_config(session: dict[str, Any], *, global_known_hosts: str = "/dev/null") -> str:
     """Create a direct, session-scoped OpenSSH configuration for ``ssh -F``."""
     directives = [
         ("HostName", str(session["phone_address"])),
         ("User", "root"),
         ("Port", str(SSH_PORT)),
-        *_ssh_option_values(session),
+        *_ssh_option_values(session, global_known_hosts=global_known_hosts),
     ]
     return "".join(
         (
@@ -136,8 +139,38 @@ def ssh_argv(
     return argv
 
 
+def remote_path(value: str, name: str) -> str:
+    """Admit an absolute phone filename that is safe in the remote shell."""
+    if len(value) > 200 or _REMOTE_PATH.fullmatch(value) is None:
+        fail(f"{name} must be an absolute file path using only letters, digits, '.', '_', '-'")
+    if any(component.strip(".") == "" for component in value.split("/")[1:]):
+        fail(f"{name} must not contain dot-only path components")
+    return value
+
+
+def upload_space_check(directory: str, size: int) -> str:
+    """Require space for the staged file and filesystem overhead."""
+    free_kib = size // 1024 + 64
+    return (
+        f"[ -d '{directory}' ] && free=$(stat -f -c '%a %S' '{directory}') && "
+        "set -- $free && "
+        f'[ "$(($1 * $2 / 1024))" -ge {free_kib} ]'
+    )
+
+
+def upload_publication(temporary: str, destination: str, digest: str, size: int) -> str:
+    """Verify a same-directory temporary file before replacing the destination."""
+    return (
+        f"got=$(sha256sum '{temporary}'); got=${{got%% *}}; "
+        f"size=$(wc -c < '{temporary}'); "
+        f'[ "$got" = \'{digest}\' ] && [ "$size" -eq {size} ] && '
+        f"[ ! -d '{destination}' ] && [ ! -L '{destination}' ] && "
+        f"mv -f '{temporary}' '{destination}'"
+    )
+
+
 def stream_stderr_detail(stream: BinaryIO) -> str:
-    """Return a bounded diagnostic without ever mixing it into downloaded bytes."""
+    """Return a bounded diagnostic separate from binary transfer data."""
     stream.seek(0, os.SEEK_END)
     stream.seek(max(0, stream.tell() - 4096))
     return stream.read().decode("utf-8", errors="replace").strip()

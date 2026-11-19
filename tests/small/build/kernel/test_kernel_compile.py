@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -13,19 +14,12 @@ from fplinux_cli.build.display import render_linux_display_files
 from fplinux_cli.build.kernel import compile as kernel_build
 from fplinux_cli.build.kernel import state as linux_state
 from fplinux_cli.build.kernel.state import PreparedLinuxState
-from fplinux_cli.common import sha256_bytes
-from fplinux_cli.device_data.inputs import FirmwareInput
 from fplinux_cli.environment.definition import environment_artifact_recipe_digest
 from fplinux_cli.manifests.kernel import kconfig_values
 from fplinux_cli.manifests.platforms import load_platform
 from fplinux_cli.manifests.targets import load_target
 
-_BOARD_STORAGE_EXCLUSIONS = (
-    "CONFIG_MMC_REMOVABLE=y",
-    "CONFIG_MMC_GPIO=y",
-    "CONFIG_GPIO_EIC_SPRD=y",
-    "CONFIG_GPIO_EIC_SPRD=m",
-)
+from tests.fdt import binary_tree
 
 
 @dataclass
@@ -41,6 +35,9 @@ class KernelCommandPeer:
 
     def run(self, command: list[str], **_options: object) -> None:
         """Apply scripts/config strings and provide deterministic compiler output files."""
+        if command[0] == "fdtput":
+            subprocess.run(command, check=True, timeout=10)
+            return
         self.commands.append(command)
         if command[0] == str(self.source / "scripts/config"):
             actions = iter(command[3:])
@@ -75,7 +72,22 @@ class KernelCommandPeer:
             )
             for relative, content in (
                 (self.image, b"kernel " + version.encode()),
-                (self.dtb, b"device tree"),
+                (
+                    self.dtb,
+                    binary_tree(
+                        [],
+                        [
+                            (
+                                "chosen",
+                                [
+                                    ("linux,initrd-start", bytes([0xE5]) * 4),
+                                    ("linux,initrd-end", bytes([0xF6]) * 4),
+                                ],
+                                [],
+                            )
+                        ],
+                    ),
+                ),
                 ("vmlinux", b"kernel symbols" + firmware),
                 ("System.map", b"kernel map"),
             ):
@@ -89,21 +101,21 @@ class KernelCommandPeer:
     [
         pytest.param(
             "nokia-110-4g",
-            "embedded",
+            "external",
             "zImage",
             (),
             "6x8",
             "CONFIG_FONT_6x8",
-            id="ums-embedded-native-font",
+            id="ums-external-native-font",
         ),
         pytest.param(
             "nokia-110-4g",
-            "embedded",
+            "external",
             "zImage",
             (),
             "7x14",
             "CONFIG_FONT_7x14",
-            id="ums-embedded-alternate-font",
+            id="ums-external-alternate-font",
         ),
         pytest.param(
             "xiaomi-qin-1s-plus",
@@ -116,27 +128,27 @@ class KernelCommandPeer:
         ),
         pytest.param(
             "inoi-240-modern-4g",
-            "embedded",
+            "external",
             "zImage",
-            _BOARD_STORAGE_EXCLUSIONS,
+            (),
             "6x8",
             "CONFIG_FONT_6x8",
             id="inoi-240-storage-guards",
         ),
         pytest.param(
             "inoi-244-modern-4g",
-            "embedded",
+            "external",
             "zImage",
-            _BOARD_STORAGE_EXCLUSIONS,
+            (),
             "7x14",
             "CONFIG_FONT_7x14",
             id="inoi-244-storage-guards",
         ),
         pytest.param(
             "maxvi-k15n-4g",
-            "embedded",
+            "external",
             "zImage",
-            _BOARD_STORAGE_EXCLUSIONS,
+            (),
             "7x14",
             "CONFIG_FONT_7x14",
             id="maxvi-storage-guards",
@@ -214,11 +226,10 @@ def test_ram_build_uses_declared_image_delivery_and_causal_root_identity(  # noq
             prepared_linux=prepared,
             linux_base="1" * 64,
             output=output,
+            board_output=tmp_path,
             cross=platform["linux"]["cross_compile"],
-            rootfs=rootfs,
             rootfs_output=rootfs_output,
             rootfs_recipe="d" * 64,
-            audio_profile_firmware=None,
             jobs=2,
         )
 
@@ -231,13 +242,9 @@ def test_ram_build_uses_declared_image_delivery_and_causal_root_identity(  # noq
         symbol
         for symbol, value in config.items()
         if symbol.startswith("CONFIG_FONT_") and value == "y"
-    } == {font_symbol}
-    if delivery == "embedded":
-        assert config["CONFIG_INITRAMFS_SOURCE"] == f'"{tmp_path}/work/rootfs.cpio"'
-        assert (tmp_path / "work/rootfs.cpio").read_bytes() == b"boot archive a"
-    else:
-        assert config["CONFIG_INITRAMFS_SOURCE"] == '""'
-        assert not (tmp_path / "work/rootfs.cpio").exists()
+    } == ({"CONFIG_FONT_6x8", "CONFIG_FONT_7x14"} if make_target == "zImage" else {font_symbol})
+    assert config["CONFIG_INITRAMFS_SOURCE"] == '""'
+    assert not (tmp_path / "work/rootfs.cpio").exists()
 
     command_count = len(peer.commands)
     assert build()[2:] == (receipt, identity)
@@ -248,40 +255,39 @@ def test_ram_build_uses_declared_image_delivery_and_causal_root_identity(  # noq
 
     initramfs.write_bytes(b"boot archive b")
     changed = build()
-    assert changed[2]["recipe"] != receipt["recipe"]
+    assert changed[2] == receipt
     assert changed[3] != identity
-    assert len(peer.commands) == command_count + 3
+    assert len(peer.commands) == command_count
 
-    for forbidden in (
+    forbidden_config = (
         "CONFIG_MTD=y",
         "CONFIG_UBI=y",
         "CONFIG_SCSI=y",
         "CONFIG_ATA=y",
         "CONFIG_NVME_CORE=y",
         *additional_forbidden,
-    ):
+    )
+    for index, forbidden in enumerate(forbidden_config, start=1):
         peer.forbidden_config = forbidden
-        initramfs.write_bytes(forbidden.encode())
+        monkeypatch.setenv("FPLINUX_ENVIRONMENT_ARTIFACT_RECIPE", f"{index:064x}")
         with pytest.raises(SystemExit, match=f"kernel unexpectedly contains {forbidden}"):
             build()
 
 
 @pytest.mark.parametrize(
-    ("target", "profile", "make_target", "audio_destination", "firmware_names"),
+    ("target", "profile", "make_target", "firmware_names"),
     [
         (
             "nokia-ta1618",
             "microsd-uboot",
             "zImage",
-            "fplinux/ta1618-audio-profile.bin",
-            "fplinux/ta1618-audio-profile.bin",
+            "",
         ),
         (
             "xiaomi-qin-1s-plus",
             "microsd-root",
             "Image",
-            "qin1splus-audio-profile.bin",
-            "qin1splus-audio-profile.bin xiaomi,qin1splus-gc9307.bin",
+            "xiaomi,qin1splus-gc9307.bin",
         ),
     ],
 )
@@ -299,7 +305,6 @@ def test_external_root_rebuilds_for_another_environment(  # noqa: PLR0913
     target: str,
     profile: str,
     make_target: str,
-    audio_destination: str,
     firmware_names: str,
     environment_recipe: str,
     environment_content: str,
@@ -341,11 +346,8 @@ def test_external_root_rebuilds_for_another_environment(  # noqa: PLR0913
     ):
         monkeypatch.setattr(kernel_build, name, ignore_validator)
     profile_bytes = b"independent admitted sound settings\0\xff"
-    audio_profile = (
-        FirmwareInput(
-            "phone-profile.bin", audio_destination, profile_bytes, sha256_bytes(profile_bytes)
-        ),
-    )
+    early_firmware = tmp_path / "early-firmware.cpio"
+    early_firmware.write_bytes(profile_bytes)
 
     def select_environment(recipe: str, content: str) -> None:
         monkeypatch.setenv("FPLINUX_ENVIRONMENT_RECIPE", recipe)
@@ -365,11 +367,11 @@ def test_external_root_rebuilds_for_another_environment(  # noqa: PLR0913
             prepared_linux=prepared,
             linux_base="1" * 64,
             output=output,
+            board_output=tmp_path,
             cross=platform["linux"]["cross_compile"],
-            rootfs=rootfs,
             rootfs_output=rootfs_output,
             rootfs_recipe="d" * 64,
-            audio_profile_firmware=audio_profile,
+            early_firmware=early_firmware,
             jobs=2,
         )
 
@@ -379,8 +381,7 @@ def test_external_root_rebuilds_for_another_environment(  # noqa: PLR0913
     first_image = image.read_bytes()
     configuration = kconfig_values((output / ".config").read_text())
     assert configuration["CONFIG_EXTRA_FIRMWARE"] == f'"{firmware_names}"'
-    assert configuration["CONFIG_EXTRA_FIRMWARE_DIR"] == f'"{tmp_path / "work/builtin-firmware"}"'
-    assert profile_bytes in (output / "vmlinux").read_bytes()
+    assert profile_bytes not in (output / "vmlinux").read_bytes()
     first_command_count = len(peer.commands)
 
     select_environment(environment_recipe, environment_content)
