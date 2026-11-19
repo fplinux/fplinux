@@ -1,9 +1,19 @@
 // SPDX-License-Identifier: GPL-2.0-only
 package fplinux.fixtures.canvas;
 
+import com.nokia.mid.ui.DirectGraphics;
+import com.nokia.mid.ui.DirectUtils;
+import com.nokia.mid.ui.FullCanvas;
+import com.sun.midp.io.Base64;
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
 import javax.microedition.lcdui.Canvas;
+import javax.microedition.lcdui.Command;
 import javax.microedition.lcdui.Display;
 import javax.microedition.lcdui.Font;
+import javax.microedition.lcdui.Graphics;
+import javax.microedition.lcdui.FPLinuxNokiaImage;
+import javax.microedition.lcdui.Image;
 import javax.microedition.midlet.MIDlet;
 
 /**
@@ -24,6 +34,12 @@ public class CanvasProbeMIDlet extends MIDlet implements Runnable {
     // Cyrillic word "Klavishi" as escapes
     private static final String SAMPLE =
         "Keys \u041a\u043b\u0430\u0432\u0438\u0448\u0438";
+    private static final String RED_PNG =
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQI12P4z8DwHwAFAAH/" +
+        "cpxSZwAAAABJRU5ErkJggg==";
+    private static final String ALPHA_PNG =
+        "iVBORw0KGgoAAAANSUhEUgAAAAMAAAABCAYAAAAb4BS0AAAAFUlEQVQI12NgYGBg+M/A" +
+        "0MDwn+E/AA6BA36DaD1gAAAAAElFTkSuQmCC";
 
     private Display display;
     private boolean started;
@@ -57,7 +73,7 @@ public class CanvasProbeMIDlet extends MIDlet implements Runnable {
         notifyDestroyed();
     }
 
-    private void probe() throws InterruptedException {
+    private void probe() throws InterruptedException, IOException {
         say("start");
         ProbeCanvas canvas = new ProbeCanvas();
         canvas.setTitle("Probe");
@@ -76,7 +92,297 @@ public class CanvasProbeMIDlet extends MIDlet implements Runnable {
 
         game(canvas);
         showFull();
+        nokiaCanvas();
+        nokiaImages();
+        nokiaPixels();
+        nokiaDecodedImage();
+        nokiaShapes();
+        imageStream();
         font();
+    }
+
+    private static class NokiaCanvas extends FullCanvas {
+        volatile int clipHeight;
+        boolean screenPixel;
+
+        protected void paint(Graphics graphics) {
+            graphics.setColor(0x00ff00);
+            graphics.fillRect(0, 0, 1, 1);
+            int[] rgb = new int[1];
+            DirectUtils.getDirectGraphics(graphics).getPixels(rgb, 0, 1, 0, 0,
+                1, 1, DirectGraphics.TYPE_INT_8888_ARGB);
+            screenPixel = rgb[0] == 0xff00ff00 &&
+                FPLinuxNokiaImage.width(graphics) == getWidth() &&
+                FPLinuxNokiaImage.height(graphics) == getHeight();
+            clipHeight = graphics.getClipHeight();
+        }
+    }
+
+    private void nokiaCanvas() throws InterruptedException {
+        NokiaCanvas canvas = new NokiaCanvas();
+        boolean commandRejected = false;
+        boolean listenerRejected = false;
+        try {
+            canvas.addCommand(new Command("Exit", Command.EXIT, 0));
+        } catch (IllegalStateException expected) {
+            commandRejected = true;
+        }
+        try {
+            canvas.setCommandListener(null);
+        } catch (IllegalStateException expected) {
+            listenerRejected = true;
+        }
+
+        display.setCurrent(canvas);
+        for (int waited = 0; waited < TIMEOUT_MS && canvas.clipHeight == 0;
+             waited += POLL_MS) {
+            Thread.sleep(POLL_MS);
+        }
+        say("nokia size=" + canvas.getWidth() + "x" + canvas.getHeight()
+            + " clip=" + canvas.clipHeight + " commandRejected="
+            + commandRejected + " listenerRejected=" + listenerRejected
+            + " screenPixel=" + canvas.screenPixel);
+    }
+
+    private void nokiaImages() {
+        int anchor = Graphics.TOP | Graphics.LEFT;
+        Image sheet = Image.createRGBImage(new int[] {
+            0xffff0000, 0xff00ff00,
+            0xff0000ff, 0,
+            0xffffffff, 0xffffff00,
+        }, 2, 3, true);
+        Image tile = DirectUtils.createImage(4, 4, 0);
+        Graphics graphics = tile.getGraphics();
+        graphics.setClip(1, 1, 2, 2);
+        graphics.translate(1, 1);
+        DirectUtils.getDirectGraphics(graphics).drawImage(sheet, 3, 2,
+            Graphics.RIGHT | Graphics.BOTTOM,
+            DirectGraphics.ROTATE_90 | DirectGraphics.FLIP_HORIZONTAL);
+
+        int[] pixels = new int[16];
+        int[] expected = {
+            0, 0, 0, 0,
+            0, 0xff808000, 0, 0,
+            0, 0xff808080, 0xff000080, 0,
+            0, 0, 0, 0,
+        };
+        tile.getRGB(pixels, 0, 4, 0, 0, 4, 4);
+        boolean transform = true;
+        for (int i = 0; i < pixels.length; i++) {
+            if ((pixels[i] & 0xff808080) != expected[i]) {
+                transform = false;
+                break;
+            }
+        }
+
+        Image backdrop = Image.createImage(4, 4);
+        backdrop.getRGB(pixels, 0, 4, 0, 0, 4, 4);
+        boolean white = true;
+        for (int i = 0; i < pixels.length; i++) {
+            if ((pixels[i] & 0xfff8fcf8) != 0xfff8fcf8) {
+                white = false;
+                break;
+            }
+        }
+        say("image opaque pixels are white=" + white);
+        Graphics backdropGraphics = backdrop.getGraphics();
+        backdropGraphics.setColor(0xff00ff);
+        backdropGraphics.fillRect(0, 0, 4, 4);
+        backdropGraphics.drawImage(tile, 0, 0, anchor);
+        backdrop.getRGB(pixels, 0, 4, 0, 0, 4, 4);
+        boolean blit = (pixels[5] & 0xff808080) == 0xff808000 &&
+                       (pixels[6] & 0xff808080) == 0xff800080 &&
+                       (pixels[7] & 0xff808080) == 0xff800080;
+
+        Image background = DirectUtils.createImage(1, 1, 0x400000ff);
+        Image ink = DirectUtils.createImage(1, 1, 0x80ff0000);
+        Graphics pixel = background.getGraphics();
+        pixel.drawImage(ink, 0, 0, anchor);
+        background.getRGB(pixels, 0, 1, 0, 0, 1, 1);
+        boolean partial = (pixels[0] & 0xff808080) == 0xa0800000;
+
+        Image opaque = Image.createRGBImage(new int[] { 0xff00ff00 }, 1, 1, false);
+        pixel.drawImage(opaque, 0, 0, anchor);
+        background.getRGB(pixels, 0, 1, 0, 0, 1, 1);
+        boolean replaced = (pixels[0] & 0xff808080) == 0xff008000;
+        say("nokia image transform=" + transform + " blit=" + blit
+            + " partial=" + partial + " replaced=" + replaced);
+    }
+
+    private void nokiaPixels() {
+        Image image = DirectUtils.createImage(3, 2, 0);
+        Graphics graphics = image.getGraphics();
+        DirectGraphics direct = DirectUtils.getDirectGraphics(graphics);
+        graphics.translate(1, 0);
+        short[] source = { 0, (short) 0xff00, 0, 0, (short) 0xf0f0, (short) 0xf00f };
+        direct.drawPixels(source, true, 4, -3, 0, 0, 2, 2, 0,
+                          DirectGraphics.TYPE_USHORT_4444_ARGB);
+        int[] raw = new int[6];
+        image.getRGB(raw, 0, 3, 0, 0, 3, 2);
+        boolean literal = (raw[1] & 0xff808080) == 0xff008000 &&
+            (raw[2] & 0xff808080) == 0xff000080 &&
+            (raw[4] & 0xff808080) == 0xff800000 && raw[5] == 0;
+        graphics.setClip(0, 0, 1, 1);
+        short[] result = { 7, 7, 7, 7, 7, 7 };
+        direct.getPixels(result, 4, -3, 0, 0, 2, 2,
+                         DirectGraphics.TYPE_USHORT_4444_ARGB);
+        boolean shortPixels = result[0] == 7 && result[3] == 7 &&
+            result[1] == (short) 0xff00 && result[2] == 0 &&
+            result[4] == (short) 0xf0f0 && result[5] == (short) 0xf00f;
+
+        Image opaque = Image.createImage(2, 1);
+        DirectGraphics target = DirectUtils.getDirectGraphics(opaque.getGraphics());
+        target.drawPixels(new int[] { 0xffff0000, 0x000000ff }, true, 0, 2,
+                          0, 0, 2, 1, DirectGraphics.FLIP_HORIZONTAL,
+                          DirectGraphics.TYPE_INT_8888_ARGB);
+        int[] rgb = new int[2];
+        target.getPixels(rgb, 0, 2, 0, 0, 2, 1, DirectGraphics.TYPE_INT_888_RGB);
+        boolean intPixels = (rgb[0] & 0xfff8fcf8) == 0x00f8fcf8 &&
+            (rgb[1] & 0xfff8fcf8) == 0x00f80000;
+        Image stride = Image.createImage(2, 2);
+        DirectGraphics rows = DirectUtils.getDirectGraphics(stride.getGraphics());
+        rows.drawPixels(new int[] { 0xffff0000, 0xff0000ff, 0,
+                                    0xff00ff00, 0xffffffff },
+            true, 3, -3, 0, 0, 2, 2, 0, DirectGraphics.TYPE_INT_8888_ARGB);
+        stride.getRGB(raw, 0, 2, 0, 0, 2, 2);
+        boolean backwards = (raw[0] & 0xff808080) == 0xff008000 &&
+            (raw[1] & 0xff808080) == 0xff808080 &&
+            (raw[2] & 0xff808080) == 0xff800000 &&
+            (raw[3] & 0xff808080) == 0xff000080;
+        say("nokia pixels short=" + shortPixels + " literal=" + literal +
+            " int=" + intPixels + " backwards=" + backwards);
+    }
+
+    private void nokiaDecodedImage() throws IOException {
+        byte[] png = Base64.decode(ALPHA_PNG);
+        byte[] data = new byte[png.length + 6];
+        int offset = 3;
+        System.arraycopy(png, 0, data, offset, png.length);
+
+        Image immutable = Image.createImage(data, offset, png.length);
+        Image image = DirectUtils.createImage(data, offset, png.length);
+        DirectGraphics direct = DirectUtils.getDirectGraphics(image.getGraphics());
+        short[] pixels = new short[3];
+        direct.getPixels(pixels, 0, 3, 0, 0, 3, 1, DirectGraphics.TYPE_USHORT_4444_ARGB);
+        boolean decoded = pixels[0] == 0 && pixels[1] == (short) 0x8f00
+            && pixels[2] == (short) 0xf0f0;
+
+        direct.drawPixels(new int[] { 0xff0000ff }, true, 0, 1, 0, 0, 1, 1, 0,
+            DirectGraphics.TYPE_INT_8888_ARGB);
+        direct.getPixels(pixels, 0, 3, 0, 0, 3, 1, DirectGraphics.TYPE_USHORT_4444_ARGB);
+        boolean written = pixels[0] == (short) 0xf00f &&
+            pixels[1] == (short) 0x8f00 && pixels[2] == (short) 0xf0f0;
+        say("nokia decoded image alpha=" + decoded + " written=" + written
+            + " mutableOnlyOnNokia=" + (image.isMutable() && !immutable.isMutable()));
+    }
+
+    private void nokiaShapes() {
+        Image contour = DirectUtils.createImage(4, 4, 0);
+        Graphics graphics = contour.getGraphics();
+        graphics.setColor(0x123456);
+        DirectGraphics direct = DirectUtils.getDirectGraphics(graphics);
+        direct.drawTriangle(0, 0, 3, 0, 0, 3, 0x80ff0000);
+        int red = 0x80ff0000;
+        int[] triangle = {
+            red, red, red, red,
+            red,   0, red,   0,
+            red, red,   0,   0,
+            red,   0,   0,   0,
+        };
+        boolean corner = matchesPixels(contour, triangle);
+        direct.fillTriangle(0, 0, 3, 0, 0, 3, 0x0000ff00);
+        boolean transparent = matchesPixels(contour, triangle);
+
+        Image concave = DirectUtils.createImage(6, 6, 0);
+        Graphics clipped = concave.getGraphics();
+        clipped.setColor(0x654321);
+        clipped.translate(1, 1);
+        clipped.setClip(0, 1, 4, 3);
+        DirectGraphics polygons = DirectUtils.getDirectGraphics(clipped);
+        polygons.fillPolygon(new int[] { 99, 0, 4, 4, 3, 3, 1, 1, 0 }, 1,
+                             new int[] { 99, 99, 0, 0, 4, 4, 1, 1, 4, 4 }, 2,
+                             8, 0x8000ff00);
+        int green = 0x8000ff00;
+        int[] concavePixels = {
+            0,     0, 0, 0,     0, 0,
+            0,     0, 0, 0,     0, 0,
+            0, green, 0, 0, green, 0,
+            0, green, 0, 0, green, 0,
+            0, green, 0, 0, green, 0,
+            0,     0, 0, 0,     0, 0,
+        };
+        boolean evenOdd = matchesPixels(concave, concavePixels);
+        // Identical, overlapping contours cancel under the even-odd rule.
+        polygons.fillPolygon(new int[] { 0, 4, 4, 0, 0, 4, 4, 0 }, 0,
+                             new int[] { 0, 0, 4, 4, 0, 0, 4, 4 }, 0,
+                             8, 0xffffffff);
+        evenOdd = evenOdd && matchesPixels(concave, concavePixels);
+
+        Image line = DirectUtils.createImage(3, 2, 0);
+        DirectGraphics segments = DirectUtils.getDirectGraphics(line.getGraphics());
+        segments.drawPolygon(new int[] { 99, Integer.MIN_VALUE, Integer.MAX_VALUE }, 1,
+                             new int[] { 1, 1 }, 0, 2, 0x800000ff);
+        int blue = 0x800000ff;
+        boolean segment = matchesPixels(line, new int[] { 0, 0, 0, blue, blue, blue });
+
+        Image opaque = Image.createImage(4, 4);
+        Graphics background = opaque.getGraphics();
+        background.setColor(0);
+        background.fillRect(0, 0, 4, 4);
+        DirectUtils.getDirectGraphics(background)
+            .fillTriangle(0, 0, 3, 0, 0, 3, 0x80ff0000);
+        int blended = 0xff840000;
+        int black = 0xff000000;
+        boolean opaqueBlend = matchesPixels(opaque, new int[] {
+            blended, blended, blended, blended,
+            blended, blended, blended,   black,
+            blended, blended,   black,   black,
+            blended,   black,   black,   black,
+        });
+        boolean colorPreserved = graphics.getColor() == 0x123456 &&
+            clipped.getColor() == 0x654321 && background.getColor() == 0;
+        say("nokia shapes corner=" + corner + " transparent=" + transparent
+            + " evenOdd=" + evenOdd + " segment=" + segment
+            + " opaqueBlend=" + opaqueBlend + " colorPreserved=" + colorPreserved);
+    }
+
+    private static boolean matchesPixels(Image image, int[] expected) {
+        int width = image.getWidth();
+        int[] actual = new int[expected.length];
+        image.getRGB(actual, 0, width, 0, 0, width, image.getHeight());
+        for (int i = 0; i < actual.length; i++) {
+            if (actual[i] != expected[i]) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static final class TrackingStream extends ByteArrayInputStream {
+        boolean closed;
+
+        TrackingStream(byte[] bytes) {
+            super(bytes);
+        }
+
+        public void close() {
+            closed = true;
+        }
+    }
+
+    private void imageStream() throws IOException {
+        TrackingStream valid = new TrackingStream(Base64.decode(RED_PNG));
+        Image decoded = Image.createImage(valid);
+        TrackingStream broken = new TrackingStream(new byte[] { 42 });
+        boolean failed = false;
+        try {
+            Image.createImage(broken);
+        } catch (IOException expected) {
+            failed = true;
+        }
+        say("image stream size=" + decoded.getWidth() + "x" + decoded.getHeight()
+            + " openAfterDecode=" + !valid.closed
+            + " openAfterError=" + (failed && !broken.closed));
     }
 
     /** setFullScreenMode(true) from showNotify(): Display follows. */

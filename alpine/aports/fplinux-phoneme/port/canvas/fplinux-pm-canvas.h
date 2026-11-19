@@ -46,6 +46,9 @@ void fplinux_pm_keys_cleanup(void);
 /* A Canvas is shown: the display stays on meanwhile. */
 void fplinux_pm_device_canvas_shown(bool shown);
 
+void fplinux_pm_device_visibility(bool visible);
+void fplinux_pm_device_session(const struct fplinux_ui_session_message *reply);
+
 /* Stops vibration and light requests; called when the port finishes. */
 void fplinux_pm_device_cleanup(void);
 

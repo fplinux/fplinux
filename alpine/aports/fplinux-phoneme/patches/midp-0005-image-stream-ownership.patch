@@ -1,0 +1,28 @@
+--- a/midp/src/lowlevelui/image/img_putpixel/classes/javax/microedition/lcdui/ImageDataFactory.java
++++ b/midp/src/lowlevelui/image/img_putpixel/classes/javax/microedition/lcdui/ImageDataFactory.java
+@@ -159,8 +159,14 @@
+          * proceed to load and create image normally.
+          */
+         if (!loadCachedImage(data, name)) {
+-            createImageFromStream(data,
+-                                  ImageData.class.getResourceAsStream(name));
++            InputStream resource = ImageData.class.getResourceAsStream(name);
++            try {
++                createImageFromStream(data, resource);
++            } finally {
++                if (resource != null) {
++                    resource.close();
++                }
++            }
+         }
+ 
+         return data;
+@@ -470,8 +476,6 @@
+                 }
+             }
+ 
+-            stream.close();
+-
+             try {
+                 decode(data, buffer, 0, length);
+             } catch (IllegalArgumentException e) {

@@ -1376,6 +1376,7 @@ static void sync_visibility(struct pm_app *app)
 					FPLINUX_UI_FOREGROUND,
 			fplinux_ui_now_ms());
 
+	fplinux_pm_device_visibility(app->lifecycle.visible);
 	if (visibility.notify_vm) {
 		fplinux_pm_vm_set_visible(app->lifecycle.visible);
 		if (app->lifecycle.visible && !app->storage_request)
@@ -1433,8 +1434,10 @@ static void handle_event(struct fplinux_ui *ui,
 	case FPLINUX_UI_EVENT_INPUT_CANCEL:
 		fplinux_pm_keys_cancel(event->key.source);
 		break;
-	case FPLINUX_UI_EVENT_KEY:
 	case FPLINUX_UI_EVENT_SESSION:
+		fplinux_pm_device_session(event->session);
+		break;
+	case FPLINUX_UI_EVENT_KEY:
 	default:
 		break;
 	}

@@ -36,5 +36,12 @@ PM-CANVAS normal size=240x240 sizeChanged=240x240
 PM-CANVAS hide count=1
 PM-CANVAS game size=240x320 flushed=10 keyStates=0
 PM-CANVAS shownotify full size=240x320 clip=320
+PM-CANVAS nokia size=240x320 clip=320 commandRejected=true listenerRejected=true screenPixel=true
+PM-CANVAS image opaque pixels are white=true
+PM-CANVAS nokia image transform=true blit=true partial=true replaced=true
+PM-CANVAS nokia pixels short=true literal=true int=true backwards=true
+PM-CANVAS nokia decoded image alpha=true written=true mutableOnlyOnNokia=true
+PM-CANVAS nokia shapes corner=true transparent=true evenOdd=true segment=true opaqueBlend=true colorPreserved=true
+PM-CANVAS image stream size=1x1 openAfterDecode=true openAfterError=true
 PM-CANVAS font height=true width=true substring=true
 PM-CANVAS done

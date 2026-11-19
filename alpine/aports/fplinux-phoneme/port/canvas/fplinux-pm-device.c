@@ -21,6 +21,8 @@
 #include <anc_indicators.h>
 #include <anc_vibrate.h>
 
+#include <fplinux/fplinux-ui-lights.h>
+#include <fplinux/fplinux-ui-session.h>
 #include <fplinux/fplinux-ui-vibration.h>
 
 #include "fplinux-pm-canvas-core.h"
@@ -30,8 +32,81 @@ static struct {
 	bool canvas_shown;
 	bool flashing;
 	bool screen_on;
+	bool visible;
+	unsigned int requested_level;
+	uint32_t light_serial;
 	lv_timer_t *flash_timer;
+	lv_timer_t *light_retry;
 } device;
+
+static void apply_requested_level(void);
+
+static void retry_light(lv_timer_t *timer)
+{
+	lv_timer_pause(timer);
+	apply_requested_level();
+}
+
+static void schedule_light_retry(void)
+{
+	if (!device.visible)
+		return;
+	if (!device.light_retry)
+		device.light_retry = lv_timer_create(retry_light, 250, NULL);
+	if (device.light_retry) {
+		lv_timer_reset(device.light_retry);
+		lv_timer_resume(device.light_retry);
+	}
+}
+
+static void apply_requested_level(void)
+{
+	struct fplinux_ui *ui = fplinux_pm_canvas_ui();
+	struct fplinux_ui_light_effect effect = {
+		.resources = FPLINUX_UI_LIGHT_SCREEN,
+		.display_level = device.requested_level,
+	};
+
+	if (!device.visible || !effect.display_level || device.light_serial ||
+	    !(fplinux_ui_light_effects_supported(ui) & FPLINUX_UI_LIGHT_SCREEN))
+		return;
+	if (!fplinux_ui_light_effects_apply(ui, &effect,
+					    &device.light_serial) &&
+	    errno == EAGAIN)
+		schedule_light_retry();
+}
+
+void fplinux_pm_device_visibility(bool visible)
+{
+	if (device.visible == visible)
+		return;
+	device.visible = visible;
+	if (visible) {
+		apply_requested_level();
+	} else {
+		device.light_serial = 0;
+		if (device.light_retry)
+			lv_timer_pause(device.light_retry);
+	}
+}
+
+void fplinux_pm_device_session(const struct fplinux_ui_session_message *reply)
+{
+	if (!reply || !device.light_serial ||
+	    reply->serial != device.light_serial)
+		return;
+	if (reply->type == FPLINUX_UI_SESSION_LIGHT_EFFECT) {
+		device.light_serial = 0;
+		if (reply->light_effect.display_level != device.requested_level)
+			apply_requested_level();
+	} else if (reply->type == FPLINUX_UI_SESSION_ERROR &&
+		   !strcmp(reply->name, "light_effect")) {
+		device.light_serial = 0;
+		/* At launch, the busy scene can still cover the first MIDlet frame. */
+		if (!strcmp(reply->reason, "not-visible"))
+			schedule_light_retry();
+	}
+}
 
 static void update_screen_on(void)
 {
@@ -64,11 +139,30 @@ void fplinux_pm_device_cleanup(void)
 	if (device.flash_timer)
 		lv_timer_delete(device.flash_timer);
 	device.flash_timer = NULL;
+	if (device.light_retry)
+		lv_timer_delete(device.light_retry);
+	device.light_retry = NULL;
 	device.flashing = false;
 	device.canvas_shown = false;
+	if (device.requested_level && ui)
+		fplinux_ui_light_effects_clear(ui, NULL);
+	device.requested_level = 0;
+	device.light_serial = 0;
+	device.visible = false;
 	update_screen_on();
 	if (ui)
 		fplinux_ui_vibration_stop(ui);
+}
+
+/* A guest request is transient; Session restores the user's brightness. */
+KNIEXPORT KNI_RETURNTYPE_VOID
+KNIDECL(com_nokia_mid_ui_DeviceControl_setBacklight0)
+{
+	unsigned int requested = KNI_GetParameterAsInt(1);
+
+	device.requested_level = requested ? (requested + 9) / 10 : 1;
+	apply_requested_level();
+	KNI_ReturnVoid();
 }
 
 /* private static native boolean vibrate1(int duration); */

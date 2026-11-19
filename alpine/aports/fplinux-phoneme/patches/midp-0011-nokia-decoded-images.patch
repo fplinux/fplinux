@@ -1,0 +1,47 @@
+diff --git a/midp/src/lowlevelui/image/img_putpixel/classes/javax/microedition/lcdui/ImageData.java b/midp/src/lowlevelui/image/img_putpixel/classes/javax/microedition/lcdui/ImageData.java
+index 5fc789f..97f9d18 100644
+--- a/midp/src/lowlevelui/image/img_putpixel/classes/javax/microedition/lcdui/ImageData.java
++++ b/midp/src/lowlevelui/image/img_putpixel/classes/javax/microedition/lcdui/ImageData.java
+@@ -183,6 +183,10 @@ final class ImageData implements AbstractImageData {
+         return isMutable;
+     }
+ 
++    void makeMutable() {
++        isMutable = true;
++    }
++
+     private static int rgb565(int argb) {
+         return ((argb >>> 8) & 0xf800) |
+                ((argb >>> 5) & 0x07e0) |
+diff --git a/midp/src/lowlevelui/image_api/reference/classes/javax/microedition/lcdui/Image.java b/midp/src/lowlevelui/image_api/reference/classes/javax/microedition/lcdui/Image.java
+index bf1c6d3..03a9f30 100644
+--- a/midp/src/lowlevelui/image_api/reference/classes/javax/microedition/lcdui/Image.java
++++ b/midp/src/lowlevelui/image_api/reference/classes/javax/microedition/lcdui/Image.java
+@@ -396,10 +396,9 @@ public class Image {
+      */
+     public static Image createImage(byte[] imageData, int imageOffset,
+                                     int imageLength) {
+-
+-        if (imageOffset < 0 || imageOffset >= imageData.length ||
+-            imageLength < 0 ||
+-            imageOffset + imageLength > imageData.length) {
++        int size = imageData.length;
++        if (imageOffset < 0 || imageOffset >= size || imageLength < 0 ||
++            imageLength > size - imageOffset) {
+             throw new ArrayIndexOutOfBoundsException();
+         }
+ 
+@@ -888,6 +887,13 @@ public class Image {
+         return new Image(data);
+     }
+ 
++    static Image createMutableImage(byte[] imageData, int offset, int length) {
++        Image image = createImage(imageData, offset, length);
++        // The byte-array decoder allocates independent pixel and alpha storage.
++        image.imageData.makeMutable();
++        return image;
++    }
++
+     /**
+      * Resize Image optionally saving its content clipped according
+      * to the new geometry

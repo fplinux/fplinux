@@ -1,0 +1,14 @@
+--- a/midp/src/lowlevelui/graphics_api/gxapi_native/native/gxapi_graphics_kni.c
++++ b/midp/src/lowlevelui/graphics_api/gxapi_native/native/gxapi_graphics_kni.c
+@@ -1144,7 +1144,10 @@
+         success = KNI_FALSE; //KNI_ThrowNew(midpNullPointerException, NULL);
+       } else if ((transform < 0) || (transform > 7)) {
+         success = KNI_FALSE; //KNI_ThrowNew(midpIllegalArgumentException, NULL);
+-      } else if (!normalize_anchor(&x_dest, &y_dest, width, height, anchor)) {
++      } else if (!normalize_anchor(&x_dest, &y_dest,
++                   transform & TRANSFORM_INVERTED_AXES ? height : width,
++                   transform & TRANSFORM_INVERTED_AXES ? width : height,
++                   anchor)) {
+         success = KNI_FALSE; //KNI_ThrowNew(midpIllegalArgumentException, NULL);
+       } else {
+ 	const java_imagedata * srcImageDataPtr =

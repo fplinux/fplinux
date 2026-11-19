@@ -1,0 +1,47 @@
+--- a/midp/src/lowlevelui/image/img_putpixel/classes/javax/microedition/lcdui/ImageData.java
++++ b/midp/src/lowlevelui/image/img_putpixel/classes/javax/microedition/lcdui/ImageData.java
+@@ -94,12 +94,12 @@
+         initImageData(width, height, isMutable, allocateAlpha);
+ 
+         if (clearPixelData) {
+-            for (int i = 0; i < pixelData.length; i++) {
+-                pixelData[i] = (byte)0xFF;
+-            }
++            clearPixelData0(pixelData);
+         }
+     }
+ 
++    private static native void clearPixelData0(byte[] pixels);
++
+     /**
+      * Constructs mutable or immutable <code> ImageData </code>
+      * using passed in width, height and pixel data.
+--- a/midp/src/lowlevelui/image/img_putpixel/native/imgj_imagedata_kni.c
++++ b/midp/src/lowlevelui/image/img_putpixel/native/imgj_imagedata_kni.c
+@@ -32,6 +32,7 @@
+ 
+ 
+ #include <stdlib.h>
++#include <string.h>
+ #include <sni.h>
+ #include <midpError.h>
+ 
+@@ -39,6 +40,18 @@
+ #include <img_errorcodes.h>
+ #include "imgj_rgb.h"
+ 
++/* MIDP's new opaque images are initialized to white in RGB565. */
++KNIEXPORT KNI_RETURNTYPE_VOID
++KNIDECL(javax_microedition_lcdui_ImageData_clearPixelData0)
++{
++    KNI_StartHandles(1);
++    KNI_DeclareHandle(pixels);
++    KNI_GetParameterAsObject(1, pixels);
++    memset(SNI_GetRawArrayPointer(pixels), 0xff, KNI_GetArrayLength(pixels));
++    KNI_EndHandles();
++    KNI_ReturnVoid();
++}
++
+ 
+ /**
+  * Gets an ARGB integer array from this <tt>ImmutableImage</tt>. The

@@ -1,0 +1,21 @@
+--- a/midp/src/lowlevelui/graphics_api/gxapi_native/classes/javax/microedition/lcdui/Graphics.java
++++ b/midp/src/lowlevelui/graphics_api/gxapi_native/classes/javax/microedition/lcdui/Graphics.java
+@@ -1741,6 +1741,18 @@
+      */
+     private Image img;
+ 
++    Image targetImage() {
++        return img;
++    }
++
++    int targetWidth() {
++        return maxWidth;
++    }
++
++    int targetHeight() {
++        return maxHeight;
++    }
++
+     /**
+      * Retrieve the Graphics context for the given Image
+      *

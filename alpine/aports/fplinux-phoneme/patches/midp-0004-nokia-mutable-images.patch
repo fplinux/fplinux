@@ -1,0 +1,129 @@
+--- a/midp/src/lowlevelui/image_api/reference/classes/javax/microedition/lcdui/Image.java
++++ b/midp/src/lowlevelui/image_api/reference/classes/javax/microedition/lcdui/Image.java
+@@ -877,6 +877,17 @@
+         this.height    = imageData.getHeight();
+     }
+ 
++    static Image createMutableARGBImage(int width, int height, int argb) {
++        if (width <= 0 || height <= 0 ||
++                (long) width * height > Integer.MAX_VALUE / 2) {
++            throw new IllegalArgumentException("image dimensions");
++        }
++        ImageData data = new ImageData(width, height, true, false,
++                                       (argb >>> 24) != 255);
++        data.fillARGB(argb);
++        return new Image(data);
++    }
++
+     /**
+      * Resize Image optionally saving its content clipped according
+      * to the new geometry
+--- a/midp/src/lowlevelui/image/img_putpixel/classes/javax/microedition/lcdui/ImageData.java
++++ b/midp/src/lowlevelui/image/img_putpixel/classes/javax/microedition/lcdui/ImageData.java
+@@ -183,6 +183,24 @@
+         return isMutable;
+     }
+ 
++    void fillARGB(int argb) {
++        int rgb565 = ((argb >>> 8) & 0xf800) |
++                     ((argb >>> 5) & 0x07e0) |
++                     ((argb >>> 3) & 0x001f);
++        byte low = (byte) rgb565;
++        byte high = (byte) (rgb565 >>> 8);
++        for (int offset = 0; offset < pixelData.length; offset += 2) {
++            pixelData[offset] = low;
++            pixelData[offset + 1] = high;
++        }
++        if (alphaData != null) {
++            byte alpha = (byte) (argb >>> 24);
++            for (int i = 0; i < alphaData.length; i++) {
++                alphaData[i] = alpha;
++            }
++        }
++    }
++
+     /**
+      * Implements <code>AbstractImageData.getRGB() </code>.
+      * See javadoc comments there.
+--- a/midp/src/lowlevelui/graphics/gx_putpixel/native/gxj_image.c
++++ b/midp/src/lowlevelui/graphics/gx_putpixel/native/gxj_image.c
+@@ -72,7 +72,7 @@
+ 
+   CHECK_SBUF_CLIP_BOUNDS(destSBuf, clip);
+ 
+-  if (imageSBuf->alphaData == NULL) {
++  if (imageSBuf->alphaData == NULL && destSBuf->alphaData == NULL) {
+     if (x_dest >= clipX1 && y_dest >= clipY1 &&
+        (x_dest + imageSBuf->width) <= clipX2 &&
+        (y_dest + imageSBuf->height) <= clipY2) {
+@@ -193,6 +193,33 @@
+ 
+ 
+ 
++/* Straight-alpha source-over for an offscreen image with an alpha plane. */
++static void
++composite_pixel(gxj_pixel_type *dest, unsigned char *destAlpha,
++                gxj_pixel_type source, unsigned int sourceAlpha) {
++    unsigned int retained, alpha, red, green, blue;
++    gxj_pixel_type old;
++
++    if (sourceAlpha == 0)
++        return;
++    if (sourceAlpha == 255 || *destAlpha == 0) {
++        *dest = source;
++        *destAlpha = sourceAlpha;
++        return;
++    }
++    old = *dest;
++    retained = (*destAlpha * (255 - sourceAlpha) + 127) / 255;
++    alpha = sourceAlpha + retained;
++    red = ((source >> 11) * sourceAlpha + (old >> 11) * retained +
++           alpha / 2) / alpha;
++    green = (((source >> 5) & 63) * sourceAlpha + ((old >> 5) & 63) *
++             retained + alpha / 2) / alpha;
++    blue = ((source & 31) * sourceAlpha + (old & 31) * retained +
++            alpha / 2) / alpha;
++    *dest = (red << 11) | (green << 5) | blue;
++    *destAlpha = alpha;
++}
++
+ /**
+  * Renders the contents of the specified region of this
+  * mutable image onto the destination specified.
+@@ -428,7 +455,7 @@
+         height -= diff;
+     }
+ 
+-    if (width > 0) {
++    if (width > 0 && height > 0) {
+         int rowsCopied;
+         gxj_pixel_type* pDest = dest->pixelData + (y_dest * dest->width) + x_dest;
+         gxj_pixel_type* pSrc = src->pixelData + (y_src * src->width) + x_src;
+@@ -437,7 +464,26 @@
+         int srcWidthDiff = src->width - width;
+         int r1, g1, b1, a2, a3, r2, b2, g2;
+ 
+-        if (src->alphaData != NULL) {
++        if (dest->alphaData != NULL) {
++            unsigned char *dstAlpha = dest->alphaData +
++                y_dest * dest->width + x_dest;
++            for (rowsCopied = 0; rowsCopied < height; rowsCopied++) {
++                if (src->alphaData != NULL) {
++                    const unsigned char *srcAlpha = src->alphaData +
++                        (y_src + rowsCopied) * src->width + x_src;
++                    int column;
++                    for (column = 0; column < width; column++)
++                        composite_pixel(pDest + column, dstAlpha + column,
++                                        pSrc[column], srcAlpha[column]);
++                } else {
++                    memcpy(pDest, pSrc, width * sizeof(*pDest));
++                    memset(dstAlpha, 255, width);
++                }
++                pDest += dest->width;
++                pSrc += src->width;
++                dstAlpha += dest->width;
++            }
++        } else if (src->alphaData != NULL) {
+             unsigned char *pSrcAlpha = src->alphaData + (y_src * src->width) + x_src;
+ 
+             /* copy the source to the destination */

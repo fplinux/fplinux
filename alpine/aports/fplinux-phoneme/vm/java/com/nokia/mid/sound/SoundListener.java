@@ -1,0 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+package com.nokia.mid.sound;
+
+public interface SoundListener {
+    void soundStateChanged(Sound sound, int state);
+}

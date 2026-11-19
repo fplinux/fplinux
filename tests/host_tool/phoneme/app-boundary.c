@@ -726,6 +726,16 @@ void fplinux_pm_vm_set_visible(bool visible)
 		++hide_events;
 }
 
+void fplinux_pm_device_visibility(bool visible)
+{
+	(void)visible;
+}
+
+void fplinux_pm_device_session(const struct fplinux_ui_session_message *reply)
+{
+	(void)reply;
+}
+
 void fplinux_pm_files_volumes(const struct fplinux_volume_snapshot *snapshot)
 {
 	(void)snapshot;

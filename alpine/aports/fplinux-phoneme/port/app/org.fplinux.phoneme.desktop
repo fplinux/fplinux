@@ -6,4 +6,5 @@ Exec=/usr/bin/fplinux-phoneme
 Icon=org.fplinux.phoneme
 Categories=Game;
 X-FPLinux-Mode=integrated
+X-FPLinux-LightEffects=true
 X-FPLinux-FileExtensions=jar;

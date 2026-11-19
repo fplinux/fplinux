@@ -1,0 +1,54 @@
+--- a/midp/src/lowlevelui/image/img_putpixel/classes/javax/microedition/lcdui/ImageData.java
++++ b/midp/src/lowlevelui/image/img_putpixel/classes/javax/microedition/lcdui/ImageData.java
+@@ -183,10 +183,14 @@
+         return isMutable;
+     }
+ 
++    private static int rgb565(int argb) {
++        return ((argb >>> 8) & 0xf800) |
++               ((argb >>> 5) & 0x07e0) |
++               ((argb >>> 3) & 0x001f);
++    }
++
+     void fillARGB(int argb) {
+-        int rgb565 = ((argb >>> 8) & 0xf800) |
+-                     ((argb >>> 5) & 0x07e0) |
+-                     ((argb >>> 3) & 0x001f);
++        int rgb565 = rgb565(argb);
+         byte low = (byte) rgb565;
+         byte high = (byte) (rgb565 >>> 8);
+         for (int offset = 0; offset < pixelData.length; offset += 2) {
+@@ -200,6 +204,33 @@
+             }
+         }
+     }
++
++    void replaceARGB(int[] values, int start, int stride, int x, int y,
++                     int w, int h) {
++        if (w < 0 || h < 0 || x < 0 || y < 0 ||
++                w > width - x || h > height - y) {
++            throw new IllegalArgumentException("pixel region");
++        }
++        if (w == 0 || h == 0) {
++            return;
++        }
++        long last = start + (long) (h - 1) * stride;
++        if (Math.min(last, (long) start) < 0 ||
++                Math.max(last, (long) start) + w > values.length) {
++            throw new ArrayIndexOutOfBoundsException();
++        }
++        for (int row = 0; row < h; row++) {
++            int source = start + row * stride;
++            int target = (y + row) * width + x;
++            for (int col = 0; col < w; col++, target++) {
++                int argb = values[source + col];
++                int packed = rgb565(argb);
++                pixelData[target * 2] = (byte) packed;
++                pixelData[target * 2 + 1] = (byte) (packed >>> 8);
++                alphaData[target] = (byte) (argb >>> 24);
++            }
++        }
++    }
+ 
+     /**
+      * Implements <code>AbstractImageData.getRGB() </code>.
