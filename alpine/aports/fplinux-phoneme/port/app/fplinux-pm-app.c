@@ -43,7 +43,7 @@ enum command {
 	COMMAND_BACK = 1,
 	COMMAND_CLOSE,
 	COMMAND_CANCEL,
-	COMMAND_CONFIRM_CLOSE,
+	COMMAND_CONFIRM_REPLACE,
 	COMMAND_REMOVE,
 	COMMAND_RESET,
 };
@@ -58,8 +58,8 @@ struct pm_app {
 	bool in_slice;
 	bool busy;
 	bool loaded;
-	bool close_wait;
 	uint32_t document_id;
+	uint32_t replacement_id;
 	/* Deferred resource reads keep the containing filesystem in use. */
 	int jar_directory;
 	/* The chosen JAR and its suite, for the chooser and the running VM. */
@@ -384,7 +384,7 @@ static void vm_wakeup(void *context)
 	struct pm_app *app = context;
 
 	if (fplinux_pm_lifecycle_wakeup(&app->lifecycle) && !app->in_slice &&
-	    !app->close_wait)
+	    !app->replacement_id)
 		apply(app,
 		      (struct fplinux_pm_schedule){ FPLINUX_PM_TIMER_RUN, 0 },
 		      false);
@@ -461,7 +461,7 @@ static void vm_tick(lv_timer_t *timer)
 {
 	struct pm_app *app = lv_timer_get_user_data(timer);
 
-	if (app->close_wait) {
+	if (app->replacement_id) {
 		lv_timer_pause(timer);
 		return;
 	}
@@ -759,6 +759,68 @@ static int jar_error(enum fplinux_pm_jar_status status)
 	return status == FPLINUX_PM_JAR_NO_MEMORY ? ENOMEM : ENOEXEC;
 }
 
+static bool reply_replacement(struct pm_app *app,
+			      enum fplinux_ui_document_status status)
+{
+	uint32_t id = app->replacement_id;
+
+	app->replacement_id = 0;
+	if (fplinux_ui_document_reply(app->ui, id, status, 0))
+		return true;
+	perror("fplinux-phoneme: document reply");
+	return false;
+}
+
+static void replacement_command(struct fplinux_ui *ui,
+				struct fplinux_ui_screen *screen,
+				int command_id, void *context)
+{
+	struct pm_app *app = context;
+	bool confirmed = command_id == COMMAND_CONFIRM_REPLACE;
+	enum fplinux_ui_document_status status =
+		confirmed ? FPLINUX_UI_DOCUMENT_RESTART_REQUIRED :
+			    FPLINUX_UI_DOCUMENT_CANCELLED;
+
+	(void)ui;
+	(void)screen;
+	if (!app->replacement_id)
+		return;
+	if (reply_replacement(app, status) && confirmed)
+		return;
+	if (app->tick && app->lifecycle.visible)
+		apply(app,
+		      (struct fplinux_pm_schedule){ FPLINUX_PM_TIMER_RUN, 0 },
+		      false);
+}
+
+static int ask_replace(struct pm_app *app, uint32_t request_id)
+{
+	const struct fplinux_ui_command confirm = {
+		.id = COMMAND_CONFIRM_REPLACE,
+		.type = FPLINUX_UI_COMMAND_OK,
+		.label = _("Close"),
+	};
+	const struct fplinux_ui_command cancel = {
+		.id = COMMAND_CANCEL,
+		.type = FPLINUX_UI_COMMAND_CANCEL,
+	};
+	struct fplinux_ui_screen *alert = fplinux_ui_alert_new(
+		app->ui, FPLINUX_UI_ALERT_CONFIRMATION, _("Close MIDlet?"),
+		_("Close the running MIDlet?"), 0);
+
+	if (!alert)
+		return ENOMEM;
+	fplinux_ui_screen_add_command(alert, &confirm);
+	fplinux_ui_screen_add_command(alert, &cancel);
+	fplinux_ui_screen_set_listener(alert, replacement_command, NULL, app);
+	if (!fplinux_ui_push(app->ui, alert))
+		return errno;
+	app->replacement_id = request_id;
+	if (app->tick)
+		lv_timer_pause(app->tick);
+	return 0;
+}
+
 /* Validate the new suite before asking to close the current VM. */
 static struct fplinux_ui_document_result
 open_document(struct fplinux_ui *ui,
@@ -818,7 +880,14 @@ open_document(struct fplinux_ui *ui,
 			result.error = class_error;
 			return result;
 		}
-		result.status = FPLINUX_UI_DOCUMENT_RESTART_REQUIRED;
+		if (fplinux_pm_vm_get_state() == FPLINUX_PM_VM_RUNNING) {
+			result.error = ask_replace(app, request->request_id);
+			if (result.error)
+				return result;
+			result.status = FPLINUX_UI_DOCUMENT_WAIT;
+		} else {
+			result.status = FPLINUX_UI_DOCUMENT_RESTART_REQUIRED;
+		}
 		result.error = 0;
 		return result;
 	}
@@ -1293,62 +1362,6 @@ static void show_home(struct pm_app *app)
 			app->ui, FPLINUX_VOLUME_REFRESH, 0);
 }
 
-static void close_command(struct fplinux_ui *ui,
-			  struct fplinux_ui_screen *screen, int command_id,
-			  void *context)
-{
-	struct pm_app *app = context;
-	bool confirmed = command_id == COMMAND_CONFIRM_CLOSE;
-
-	(void)screen;
-	if (!app->close_wait)
-		return;
-	if (!confirmed) {
-		app->close_wait = false;
-		if (app->tick && app->lifecycle.visible)
-			apply(app,
-			      (struct fplinux_pm_schedule){
-				      FPLINUX_PM_TIMER_RUN, 0 },
-			      false);
-	}
-	fplinux_ui_close_reply(ui, confirmed ? FPLINUX_UI_CLOSE_READY :
-					       FPLINUX_UI_CLOSE_CANCEL);
-}
-
-static enum fplinux_ui_close_response prepare_close(struct fplinux_ui *ui,
-						    void *context)
-{
-	struct pm_app *app = context;
-	const struct fplinux_ui_command confirm = {
-		.id = COMMAND_CONFIRM_CLOSE,
-		.type = FPLINUX_UI_COMMAND_OK,
-		.label = _("Close"),
-	};
-	const struct fplinux_ui_command cancel = {
-		.id = COMMAND_CANCEL,
-		.type = FPLINUX_UI_COMMAND_CANCEL,
-	};
-	struct fplinux_ui_screen *alert;
-
-	if (app->close_wait)
-		return FPLINUX_UI_CLOSE_WAIT;
-	if (fplinux_pm_vm_get_state() != FPLINUX_PM_VM_RUNNING)
-		return FPLINUX_UI_CLOSE_READY;
-	alert = fplinux_ui_alert_new(ui, FPLINUX_UI_ALERT_CONFIRMATION,
-				     _("Close MIDlet?"),
-				     _("Close the running MIDlet?"), 0);
-	if (!alert)
-		return FPLINUX_UI_CLOSE_CANCEL;
-	app->close_wait = true;
-	if (app->tick)
-		lv_timer_pause(app->tick);
-	fplinux_ui_screen_add_command(alert, &confirm);
-	fplinux_ui_screen_add_command(alert, &cancel);
-	fplinux_ui_screen_set_listener(alert, close_command, NULL, app);
-	fplinux_ui_push(ui, alert);
-	return FPLINUX_UI_CLOSE_WAIT;
-}
-
 /* Events */
 
 static void sync_visibility(struct pm_app *app)
@@ -1363,7 +1376,7 @@ static void sync_visibility(struct pm_app *app)
 
 	if (visibility.notify_vm)
 		fplinux_pm_vm_set_visible(app->lifecycle.visible);
-	if (!app->close_wait)
+	if (!app->replacement_id)
 		apply(app, visibility.schedule, false);
 	if (app->lifecycle.visible && app->loaded)
 		set_busy(app, NULL);
@@ -1387,6 +1400,8 @@ static void handle_event(struct fplinux_ui *ui,
 			app->picker = NULL;
 		}
 		document_reply(app, FPLINUX_UI_DOCUMENT_CANCELLED, 0);
+		if (app->replacement_id)
+			reply_replacement(app, FPLINUX_UI_DOCUMENT_CANCELLED);
 		close_vm(app);
 		break;
 	case FPLINUX_UI_EVENT_ACTIVATION:
@@ -1440,7 +1455,6 @@ int main(int argc, char **argv)
 	}
 	fplinux_pm_lifecycle_init(&app.lifecycle, false);
 	fplinux_ui_set_document_handler(app.ui, open_document, &app);
-	fplinux_ui_set_close_handler(app.ui, prepare_close, &app);
 	fplinux_ui_set_storage_handler(app.ui, storage_result, &app);
 	app.defaults = fplinux_ui_view_settings_defaults();
 	app.settings = app.defaults;

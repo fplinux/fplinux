@@ -68,7 +68,6 @@ static unsigned int busy_notifications, quit_requests, back_requests;
 static bool busy, fail_file_sync, fail_directory_sync;
 static unsigned int resize_notifications;
 static int navigation_error;
-static enum fplinux_ui_close_response close_response;
 static struct fplinux_ui_document_result reply;
 static char running_jar[4096], running_class[256];
 static const char *scenario;
@@ -235,7 +234,7 @@ bool fplinux_ui_close_reply(struct fplinux_ui *ui,
 			    enum fplinux_ui_close_response response)
 {
 	(void)ui;
-	close_response = response;
+	(void)response;
 	return true;
 }
 
@@ -892,9 +891,7 @@ int fplinux_ui_run(struct fplinux_ui *ui)
 	struct fplinux_ui_screen *game;
 	struct fplinux_ui_screen *suite;
 	size_t game_depth;
-	size_t old_depth;
-
-	assert(ui->document && ui->close);
+	assert(ui->document);
 	if (!scenario || !strcmp(scenario, "startup")) {
 		assert(stack[0]->row_count == 3);
 		assert(!strcmp(stack[0]->rows[0], "Open JAR"));
@@ -1152,7 +1149,18 @@ int fplinux_ui_run(struct fplinux_ui *ui)
 		puts("removing last Recent entry removes its action");
 		return 0;
 	}
-	if (!strcmp(scenario, "home-resume")) {
+	if (!strcmp(scenario, "task-close")) {
+		enum fplinux_ui_close_response response;
+
+		ui->lifecycle = FPLINUX_UI_BACKGROUND;
+		send_event(FPLINUX_UI_EVENT_LIFECYCLE);
+		advance();
+		response = ui->close ? ui->close(ui, ui->close_context) :
+				       FPLINUX_UI_CLOSE_READY;
+		assert(response == FPLINUX_UI_CLOSE_READY && !destroys);
+		assert(depth == game_depth && fplinux_ui_current(ui) == game);
+		puts("confirmed task close needs no second decision");
+	} else if (!strcmp(scenario, "home-resume")) {
 		ui->lifecycle = FPLINUX_UI_BACKGROUND;
 		send_event(FPLINUX_UI_EVENT_LIFECYCLE);
 		advance();
@@ -1231,17 +1239,13 @@ int fplinux_ui_run(struct fplinux_ui *ui)
 			puts("invalid replacement preserves current VM");
 			return 0;
 		}
-		assert(result.status == FPLINUX_UI_DOCUMENT_RESTART_REQUIRED);
-		assert(ui->close(ui, ui->close_context) ==
-		       FPLINUX_UI_CLOSE_WAIT);
+		assert(result.status == FPLINUX_UI_DOCUMENT_WAIT);
 		assert(tick->paused);
-		old_depth = depth;
-		assert(ui->close(ui, ui->close_context) ==
-		       FPLINUX_UI_CLOSE_WAIT);
-		assert(depth == old_depth);
+		assert(depth == game_depth + 1);
 		if (!strcmp(scenario, "restart-cancel")) {
 			command(FPLINUX_UI_COMMAND_CANCEL);
-			assert(close_response == FPLINUX_UI_CLOSE_CANCEL &&
+			assert(reply.request_id == 18 &&
+			       reply.status == FPLINUX_UI_DOCUMENT_CANCELLED &&
 			       !tick->paused);
 			assert(starts == 1 && !destroys &&
 			       !strcmp(running_jar, jar));
@@ -1255,7 +1259,8 @@ int fplinux_ui_run(struct fplinux_ui *ui)
 			return 0;
 		}
 		command(FPLINUX_UI_COMMAND_OK);
-		assert(close_response == FPLINUX_UI_CLOSE_READY);
+		assert(reply.request_id == 18 &&
+		       reply.status == FPLINUX_UI_DOCUMENT_RESTART_REQUIRED);
 		puts("one close confirmation; ready for process restart");
 	} else if (!strcmp(scenario, "picker-single")) {
 		puts("picker routes JAR to the document handler; one VM started");
