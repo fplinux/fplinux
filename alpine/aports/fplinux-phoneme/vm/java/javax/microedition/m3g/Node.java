@@ -22,6 +22,14 @@ public abstract class Node extends Transformable {
         return rendering;
     }
 
+    public void setPickingEnable(boolean enabled) {
+        picking = enabled;
+    }
+
+    public boolean isPickingEnabled() {
+        return picking;
+    }
+
     Transform worldTransform() {
         Transform local = new Transform();
         getCompositeTransform(local);

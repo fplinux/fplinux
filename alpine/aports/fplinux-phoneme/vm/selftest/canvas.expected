@@ -43,7 +43,7 @@ PM-CANVAS nokia pixels short=true literal=true int=true backwards=true
 PM-CANVAS nokia decoded image alpha=true written=true mutableOnlyOnNokia=true
 PM-CANVAS nokia shapes corner=true transparent=true evenOdd=true segment=true opaqueBlend=true colorPreserved=true
 PM-CANVAS mascot pixels alpha=true overlay=true graphicsRestored=true
-PM-CANVAS m3g compressed=true animation=true clipAndSeams=true depth=true lightingAndFog=true implicitIndices=true transformVectors=true alphaAndHud=true skinning=true sprite=true morphing=true poseAndTexture=true textureFilters=true
+PM-CANVAS m3g compressed=true animation=true clipAndSeams=true depth=true lightingAndFog=true implicitIndices=true transformVectors=true alphaAndHud=true skinning=true sprite=true morphing=true poseAndTexture=true textureFilters=true picking=true
 PM-CANVAS image stream size=1x1 openAfterDecode=true openAfterError=true
 PM-CANVAS font height=true width=true substring=true
 PM-CANVAS done

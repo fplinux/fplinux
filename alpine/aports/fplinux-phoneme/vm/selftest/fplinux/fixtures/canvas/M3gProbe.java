@@ -101,7 +101,18 @@ final class M3gProbe {
             " transformVectors=" + transformVectors() +
             " alphaAndHud=" + alphaAndHud + " skinning=" + skinning(renderer, pixels) +
             " sprite=" + sprite(renderer, pixels) + " morphing=" + morphing(renderer, pixels) +
-            " poseAndTexture=" + poseAndTexture() + " textureFilters=" + textureFilters();
+            " poseAndTexture=" + poseAndTexture() + " textureFilters=" + textureFilters() +
+            " picking=" + picking();
+    }
+
+    private static boolean picking() {
+        Group source = new Group();
+        if (!source.isPickingEnabled()) return false;
+        source.setPickingEnable(false);
+        Group duplicate = (Group) source.duplicate();
+        source.setPickingEnable(true);
+        return source.isPickingEnabled() && !duplicate.isPickingEnabled() &&
+            duplicate.isRenderingEnabled();
     }
 
     private static boolean sprite(Graphics3D renderer, int[] pixels) {
