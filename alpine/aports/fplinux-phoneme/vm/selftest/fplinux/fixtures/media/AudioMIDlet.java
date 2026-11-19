@@ -1,6 +1,8 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 package fplinux.fixtures.media;
 
+import com.nokia.mid.sound.Sound;
+import com.nokia.mid.sound.SoundListener;
 import java.io.ByteArrayInputStream;
 import java.util.Vector;
 import javax.microedition.lcdui.Display;
@@ -96,7 +98,7 @@ public final class AudioMIDlet extends MIDlet implements Runnable {
         }
     }
 
-    private static final class Events implements PlayerListener {
+    private static final class Events implements PlayerListener, SoundListener {
         final Vector names = new Vector();
 
         public synchronized void playerUpdate(Player player, String name, Object value) {
@@ -109,6 +111,12 @@ public final class AudioMIDlet extends MIDlet implements Runnable {
             }
         }
 
+        public synchronized void soundStateChanged(Sound sound, int state) {
+            names.addElement(state == Sound.SOUND_PLAYING ?
+                PlayerListener.STARTED : PlayerListener.STOPPED);
+            notifyAll();
+        }
+
         synchronized void await(int count) throws InterruptedException {
             long deadline = System.currentTimeMillis() + 10000;
             while (names.size() < count && System.currentTimeMillis() < deadline) {
@@ -116,6 +124,38 @@ public final class AudioMIDlet extends MIDlet implements Runnable {
             }
             require(names.size() >= count, "Media event deadline");
         }
+    }
+
+    private static void nokiaSound() throws InterruptedException {
+        final Sound sound = new Sound(1000, 1200L);
+        Events events = new Events();
+        sound.setSoundListener(events);
+        try {
+            sound.setGain(128);
+            sound.play(0);
+            events.await(1);
+            require(sound.getState() == Sound.SOUND_PLAYING, "Nokia start");
+            sound.play(1);
+            events.await(4);
+            require(PlayerListener.STOPPED.equals(events.names.elementAt(1)),
+                    "Nokia restart stops the previous playback");
+            require(PlayerListener.STARTED.equals(events.names.elementAt(2)),
+                    "Nokia restart begins the new playback");
+            require(sound.getState() == Sound.SOUND_STOPPED && sound.getGain() == 128,
+                    "Nokia sound ends at its own gain");
+            sound.play(0);
+            events.await(5);
+            sound.stop();
+            events.await(6);
+            require(sound.getState() == Sound.SOUND_STOPPED, "Nokia stop");
+            sound.resume();
+            events.await(7);
+            require(sound.getState() == Sound.SOUND_PLAYING, "Nokia resume");
+        } finally {
+            sound.release();
+        }
+        require(sound.getState() == Sound.SOUND_UNINITIALIZED, "Nokia release");
+        System.out.println("PM-MEDIA Nokia play restart stop resume release");
     }
 
     private static void playWave(byte[] data, String type)
@@ -237,6 +277,7 @@ public final class AudioMIDlet extends MIDlet implements Runnable {
             Thread.sleep(500);
             System.out.println("PM-MEDIA tones");
             contentTypes();
+            nokiaSound();
             System.out.println("PM-MEDIA ok");
         } catch (Throwable failure) {
             System.out.println("PM-MEDIA FAIL " + failure);
