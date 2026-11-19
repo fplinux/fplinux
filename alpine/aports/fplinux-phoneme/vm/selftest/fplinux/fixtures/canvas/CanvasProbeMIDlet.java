@@ -101,6 +101,7 @@ public class CanvasProbeMIDlet extends MIDlet implements Runnable {
         nokiaDecodedImage();
         nokiaShapes();
         mascotPixels();
+        say(M3gProbe.check());
         imageStream();
         font();
     }
