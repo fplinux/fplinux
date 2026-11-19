@@ -47,7 +47,7 @@ The command creates the target manifest, headless bootstrap, board Devicetree, k
 
 The new target uses <Key>\*</Key> as the boot key and `exec_distance = 0`, both in the `[adapter]` table of `targets/<target>/target.toml`. This is a template default. Confirm the actual boot key of the new phone before connecting it. It offers only the default RAM profile, with no microSD support. Creating the target does not qualify its peripherals or add the phone to the list of supported phones.
 
-Keep the inherited USB setup for the first headless boot. The [platform requirements](/fplinux/porting/ums9117/#headless-targets) describe its USB ownership mode and the board inputs needed when adding peripherals.
+Check that the phone supplies USB from the SC2720 USB33 regulator at 3.3 V before using the template's USB setup. The [platform requirements](/fplinux/porting/ums9117/#headless-targets) describe the options for a board with different wiring.
 
 ## Boot without a screen
 

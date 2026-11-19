@@ -4,6 +4,7 @@
 #include <dt-bindings/leds/common.h>
 #include "ums9117.dtsi"
 #include "ums9117-sc2720.dtsi"
+#include "ums9117-musb-cold.dtsi"
 #include "fplinux-@TARGET@-identity.dtsi"
 #include "ums9117-nand-readonly.dtsi"
 
@@ -27,11 +28,4 @@
 
 &sc2720_kpled {
 	status = "disabled";
-};
-
-&usb {
-	compatible = "fplinux,ums9117-musb-inherited";
-	dr_mode = "peripheral";
-
-	status = "okay";
 };

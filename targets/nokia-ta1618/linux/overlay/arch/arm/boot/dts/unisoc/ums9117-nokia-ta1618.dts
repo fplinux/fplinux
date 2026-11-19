@@ -214,14 +214,6 @@
 	fplinux,current-calibration = <10 20>;
 };
 
-&sc2720_regulators {
-	vddusb: LDO_USB33 {
-		regulator-max-microvolt = <3300000>;
-		regulator-min-microvolt = <3300000>;
-		regulator-name = "sc2720-usb33";
-	};
-};
-
 &thm1 {
 	status = "okay";
 };
@@ -350,13 +342,6 @@
 	>;
 	sprd,eic1-keycode = <FPLINUX_KEY_POWER>;
 	sprd,eic9-keycode = <FPLINUX_KEY_8>;
-
-	status = "okay";
-};
-
-&usb {
-	dr_mode = "peripheral";
-	vddusb-supply = <&vddusb>;
 
 	status = "okay";
 };

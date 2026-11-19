@@ -7,6 +7,7 @@
 #include <dt-bindings/leds/common.h>
 #include "ums9117.dtsi"
 #include "ums9117-sc2720.dtsi"
+#include "ums9117-musb-cold.dtsi"
 #include "fplinux-maxvi-k15n-4g-identity.dtsi"
 #include "ums9117-nand-readonly.dtsi"
 #include "ums9117-bluetooth.dtsi"
@@ -259,11 +260,4 @@
 			sprd,serial-g0-data-width = <1>;
 		};
 	};
-};
-
-&usb {
-	compatible = "fplinux,ums9117-musb-inherited";
-	dr_mode = "peripheral";
-
-	status = "okay";
 };

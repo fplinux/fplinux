@@ -1,10 +1,14 @@
 // SPDX-License-Identifier: GPL-2.0-only
 
-/*
- * Cold-owned UMS9117 MUSB resources.  Targets include this profile only when
- * Linux, rather than the RAM loader handoff, owns the USB controller setup.
- * The target supplies its own USB regulator and enables the peripheral mode.
- */
+/* Peripheral-mode USB powered by the SC2720 USB33 regulator. */
+
+&sc2720_regulators {
+	vddusb: LDO_USB33 {
+		regulator-max-microvolt = <3300000>;
+		regulator-min-microvolt = <3300000>;
+		regulator-name = "sc2720-usb33";
+	};
+};
 
 &usb {
 	compatible = "sprd,ums9117-musb";
@@ -12,6 +16,10 @@
 	      <0x20e00000 0x00004000>,
 	      <0x40430000 0x00003000>,
 	      <0x403e0000 0x00003000>;
+	dr_mode = "peripheral";
 	reg-names = "musb", "ap-ahb", "anlg-phy-g8", "anlg-phy-top";
+	vddusb-supply = <&vddusb>;
 	sprd,aon-apb = <&aon_apb>;
+
+	status = "okay";
 };

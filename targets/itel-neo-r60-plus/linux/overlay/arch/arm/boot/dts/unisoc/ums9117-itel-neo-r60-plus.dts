@@ -7,6 +7,7 @@
 #include <dt-bindings/leds/common.h>
 #include "ums9117.dtsi"
 #include "ums9117-sc2720.dtsi"
+#include "ums9117-musb-cold.dtsi"
 #include "ums9117-bluetooth.dtsi"
 #include "fplinux-itel-neo-r60-plus-identity.dtsi"
 #include "fplinux-itel-neo-r60-plus-audio-policy.dtsi"
@@ -14,11 +15,11 @@
 #include "fplinux-itel-neo-r60-plus-panel-addresses.h"
 
 / {
-	memory@80200000 {
 	chosen {
 		bootargs = "clk_ignore_unused regulator_ignore_unused";
 	};
 
+	memory@80200000 {
 		device_type = "memory";
 		reg = <0x80200000 0x03c00000>;
 	};
@@ -195,12 +196,5 @@
 };
 
 &jpeg {
-	status = "okay";
-};
-
-&usb {
-	compatible = "fplinux,ums9117-musb-inherited";
-	dr_mode = "peripheral";
-
 	status = "okay";
 };

@@ -529,7 +529,7 @@ class NewTargetDeviceTreeTests:
             (source / linux_identity_dtsi_name("hammer-horizon-lte")).write_bytes(
                 linux_identity_dtsi(config["identity"], platform["identity"])
             )
-            # These stubs replace SoC descriptions; no hardware configuration is validated.
+            # Stub base SoC nodes while resolving the template's actual USB include.
             (source / "dt-bindings/leds").mkdir(parents=True)
             for relative in (
                 "dt-bindings/leds/common.h",
@@ -553,6 +553,8 @@ class NewTargetDeviceTreeTests:
                     "assembler-with-cpp",
                     "-I",
                     str(source),
+                    "-I",
+                    str(ROOT / "platforms/ums9117/linux/overlay/arch/arm/boot/dts/unisoc"),
                     str(source / "ums9117-hammer-horizon-lte.dts"),
                     "-o",
                     str(preprocessed),
@@ -567,7 +569,11 @@ class NewTargetDeviceTreeTests:
                 timeout=30,
                 check=True,
             )
-            properties = exact_path_properties(dtb.read_bytes(), ("/",))["/"]
+            nodes = exact_path_properties(dtb, ("/", "/usb@20200000", "/regulators/LDO_USB33"))
+            usb = nodes["/usb@20200000"]
+            assert parse_nul_string(usb["compatible"], "compatible") == "sprd,ums9117-musb"
+            assert usb["vddusb-supply"] == nodes["/regulators/LDO_USB33"]["phandle"]
+            properties = nodes["/"]
             assert (parse_nul_string(properties["model"], "model")) == ("HAMMER Horizon LTE")
             assert (parse_nul_string_list(properties["compatible"], "compatible")) == (
                 ("hammer,horizon-lte", "sprd,ums9117")

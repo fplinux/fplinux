@@ -57,7 +57,7 @@ A target loads headless when it has none of the loader display settings (`spi_mo
 
 `./fplinux target new` creates such a target; see [Bring up a new phone](/fplinux/porting/bring-up/).
 
-The headless target retains the boot stage's USB state through `CONFIG_USB_MUSB_UMS9117_INHERITED` and `fplinux,ums9117-musb-inherited`. A target that initializes USB in Linux uses `CONFIG_USB_MUSB_UMS9117_COLD` and `sprd,ums9117-musb`. The build requires a matching built-in ownership mode for every enabled USB node.
+The headless template includes `ums9117-musb-cold.dtsi`. Linux initializes the USB controller and PHY and powers them from the SC2720 USB33 regulator at 3.3 V. Boards with different USB power wiring supply their own regulator in the Devicetree. For an initial USB-assisted boot where the loader has already configured the controller, a board can omit the shared USB include and select `fplinux,ums9117-musb-inherited`. Autonomous startup needs a setup that works from power-on.
 
 ## Local terminal requirements
 

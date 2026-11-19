@@ -7,6 +7,7 @@
 #include <dt-bindings/leds/common.h>
 #include "ums9117.dtsi"
 #include "ums9117-sc2720.dtsi"
+#include "ums9117-musb-cold.dtsi"
 #include "fplinux-bq-2830l-tank-connect-max-identity.dtsi"
 #include "ums9117-nand-readonly.dtsi"
 
@@ -158,13 +159,6 @@
 		MATRIX_KEY(4, 4, FPLINUX_KEY_SOFT_RIGHT)
 	>;
 	sprd,eic1-keycode = <FPLINUX_KEY_POWER>;
-
-	status = "okay";
-};
-
-&usb {
-	compatible = "fplinux,ums9117-musb-inherited";
-	dr_mode = "peripheral";
 
 	status = "okay";
 };
