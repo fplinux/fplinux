@@ -8,6 +8,7 @@ import ipaddress
 import json
 import shlex
 import subprocess
+from base64 import b64encode
 from contextlib import nullcontext
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
@@ -23,7 +24,7 @@ CID = "f" * 32
 TARGET = "inoi-240-modern-4g"
 RELEASE = "123456789abc"
 MIB = 1024**2
-HOST_KEY = "AAAAC3NzaC1lZDI1NTE5AAAAIHJycnJycnJycnJycnJycnJycnJycnJycnJycnJycnJy"
+HOST_KEY = b64encode(b"\x00\x00\x00\x0bssh-ed25519\x00\x00\x00\x20" + bytes(range(32))).decode()
 CLIENT_KEY = b"AAAAC3NzaC1lZDI1NTE5AAAAIGtra2tra2tra2tra2tra2tra2tra2tra2tra2tra2tr"
 
 
