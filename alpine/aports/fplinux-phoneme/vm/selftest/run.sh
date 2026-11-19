@@ -197,4 +197,11 @@ grep -qx 'PM-MEDIA headless failure honest' "${work}/media-headless.txt" &&
 	! grep -q '^PM-MEDIA FAIL ' "${work}/media-headless.txt" ||
 	fail "headless media error state differs (${work}/media-headless.txt)"
 
-echo "phoneME self-test: PASS (vectors, hello, RMS, files, canvas, Form, List/Alert LF and headless media)"
+# MIDlets probing Bluetooth can catch the initialization failure and continue.
+build_jar bluetooth "${here}/bluetooth.mf"
+"${qemu_arm}" -L "${sysroot}" "${headless}" --system-classes "${classes}" \
+	--timeout-ms 30000 "${work}/bluetooth.jar" >"${work}/bluetooth.txt"
+grep -qx 'PM-BLUETOOTH local device unavailable' "${work}/bluetooth.txt" ||
+	fail "Bluetooth availability check differs (${work}/bluetooth.txt)"
+
+echo "phoneME self-test: PASS (vectors, hello, RMS, files, canvas, Form, List/Alert LF, headless media and Bluetooth availability)"
