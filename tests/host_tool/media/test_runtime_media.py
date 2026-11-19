@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import struct
 from pathlib import Path
 
 from tests import ROOT
@@ -62,8 +63,20 @@ def test_guest_worker_short_writes_heard_eof_pause_seek_and_midi_resources(
     )
     fixture = tmp_path / "tone-vbr.mp3"
     fixture.write_bytes(tone_mp3)
+    wrapped = tmp_path / "tone-in-wave.wav"
+    fmt = struct.pack("<HHIIHH", 0x55, 1, 44100, 16000, 1, 0)
+    body = (
+        b"WAVEfmt "
+        + struct.pack("<I", len(fmt))
+        + fmt
+        + b"data"
+        + struct.pack("<I", len(tone_mp3))
+        + tone_mp3
+        + bytes(len(tone_mp3) % 2)
+    )
+    wrapped.write_bytes(b"RIFF" + struct.pack("<I", len(body)) + body)
     result = run_process(
-        [str(executable), str(fixture)],
+        [str(executable), str(fixture), str(wrapped)],
         name="exercise guest resource worker and actual PCM",
         timeout=30,
         check=True,

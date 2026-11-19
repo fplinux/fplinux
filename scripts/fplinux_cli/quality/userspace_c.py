@@ -141,7 +141,7 @@ def userspace_c_include_flags(source: str) -> list[str]:
         flags.extend(pkg_config_cflags("xkbcommon"))
     if source == "lib/fplinux/fplinux-ui-session.c":
         flags.extend(pkg_config_cflags("json-c"))
-    if source == "lib/fplinux-media/fplinux-media-amr-nb.c":
+    if path.parts[:2] == ("lib", "fplinux-media"):
         flags.extend(pkg_config_cflags("libavcodec-fplinux-amr"))
     if path.parts[:2] in {
         ("lib", "fplinux-media"),

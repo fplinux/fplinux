@@ -9,4 +9,4 @@ exec ./configure \
 	--disable-programs --disable-avformat --disable-avdevice \
 	--disable-avfilter --disable-swscale --disable-swresample \
 	--disable-network --disable-iconv --disable-doc --disable-debug \
-	--enable-decoder=amrnb "$@"
+	--enable-decoder=amrnb,adpcm_ima_wav "$@"

@@ -31,6 +31,8 @@ struct fplinux_media_info {
 	char title[FPLINUX_MEDIA_TEXT_BYTES];
 	char artist[FPLINUX_MEDIA_TEXT_BYTES];
 	char album[FPLINUX_MEDIA_TEXT_BYTES];
+	/* True for RIFF WAVE, including a WAVE-wrapped MP3 stream. */
+	bool wave_container;
 };
 
 struct fplinux_media;
@@ -40,8 +42,9 @@ struct fplinux_media;
  * runs file IO outside its UI or guest thread. open_fd duplicates a regular
  * file descriptor and reads from byte zero without changing its offset.
  * open_bytes copies its input, bounded by RESOURCE_BYTES. Both sniff content.
- * WAV accepts PCM unsigned 8-bit or little-endian signed 16-bit, mono/stereo,
- * 8000..48000 Hz. MP3 returns signed 16-bit native-endian PCM at its rate.
+ * WAV accepts unsigned 8-bit PCM, little-endian signed 16-bit PCM, or
+ * 4-bit IMA ADPCM in complete blocks, mono/stereo, 8000..48000 Hz.
+ * MP3 may be raw or WAVE-wrapped.
  * AMR-NB accepts mono 8000 Hz files with good-quality speech frames (0..7).
  * Failures return NULL/-1 with errno; unsupported content uses ENOTSUP.
  */
@@ -52,8 +55,9 @@ const struct fplinux_media_info *
 fplinux_media_info(const struct fplinux_media *media);
 
 /*
- * At most BLOCK_FRAMES, with capacity*channels sample elements. Positive
- * results must be consumed even when info.eof becomes true. Zero is EOF.
+ * Interleaved signed 16-bit native-endian PCM, at most BLOCK_FRAMES, with
+ * capacity*channels sample elements. Positive results must be consumed even
+ * when info.eof becomes true. Zero is EOF.
  * A cooperative seek returns -1/EAGAIN until its next bounded decode step;
  * do not treat that as a playback failure. No complete PCM clip is retained.
  */

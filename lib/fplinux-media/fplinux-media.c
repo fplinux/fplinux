@@ -7,6 +7,8 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <libavcodec/avcodec.h>
+#include <libavutil/channel_layout.h>
 #include <mpg123.h>
 #include <stdlib.h>
 #include <string.h>
@@ -15,6 +17,15 @@
 
 #define MEDIA_IO_BYTES (64U * 1024U)
 #define MEDIA_CHUNKS_MAX 128U
+
+struct ima_adpcm_decoder {
+	AVCodecContext *codec;
+	AVPacket *packet;
+	AVFrame *frame;
+	uint64_t block;
+	unsigned int block_bytes;
+	unsigned int block_frames;
+};
 
 struct fplinux_media {
 	struct fplinux_media_info info;
@@ -30,6 +41,7 @@ struct fplinux_media {
 	unsigned int gain;
 	mpg123_handle *mp3;
 	struct fplinux_media_amr_nb *amr_nb;
+	struct ima_adpcm_decoder ima_adpcm;
 	size_t io_remaining;
 	int io_error;
 };
@@ -254,6 +266,68 @@ static bool has_frame_count(struct fplinux_media *media, uint64_t offset)
 
 static int open_mp3(struct fplinux_media *media);
 
+static int open_ima_adpcm(struct fplinux_media *media)
+{
+	struct ima_adpcm_decoder *decoder = &media->ima_adpcm;
+	const AVCodec *codec = avcodec_find_decoder(AV_CODEC_ID_ADPCM_IMA_WAV);
+
+	if (!codec) {
+		errno = ENOTSUP;
+		return -1;
+	}
+	decoder->codec = avcodec_alloc_context3(codec);
+	decoder->packet = av_packet_alloc();
+	decoder->frame = av_frame_alloc();
+	if (!decoder->codec || !decoder->packet || !decoder->frame ||
+	    av_new_packet(decoder->packet, (int)decoder->block_bytes) < 0) {
+		errno = ENOMEM;
+		return -1;
+	}
+	decoder->codec->thread_count = 1;
+	decoder->codec->sample_rate = (int)media->info.rate;
+	decoder->codec->block_align = (int)decoder->block_bytes;
+	decoder->codec->bits_per_coded_sample = 4;
+	av_channel_layout_default(&decoder->codec->ch_layout,
+				  (int)media->info.channels);
+	int result = avcodec_open2(decoder->codec, codec, NULL);
+	if (result < 0) {
+		errno = result == AVERROR(ENOMEM) ? ENOMEM : EIO;
+		return -1;
+	}
+	decoder->block = UINT64_MAX;
+	return 0;
+}
+
+static int read_ima_adpcm_format(struct fplinux_media *media, uint64_t at,
+				 uint32_t bytes, unsigned int block_bytes)
+{
+	unsigned char extra[4];
+	unsigned int group_bytes = 4U * media->info.channels;
+
+	if (media->bits != 4U) {
+		errno = ENOTSUP;
+		return -1;
+	}
+	if (bytes < 20U || block_bytes < group_bytes ||
+	    block_bytes % group_bytes) {
+		errno = EINVAL;
+		return -1;
+	}
+	if (read_exact(media, extra, sizeof(extra), at + 16U) < 0)
+		return -1;
+	unsigned int extra_bytes = read_le16(extra);
+	/* Each channel has a four-byte header and eight samples per group. */
+	unsigned int block_frames = 1U + (block_bytes / group_bytes - 1U) * 8U;
+	if (extra_bytes < 2U || extra_bytes > bytes - 18U ||
+	    read_le16(extra + 2U) != block_frames) {
+		errno = EINVAL;
+		return -1;
+	}
+	media->ima_adpcm.block_bytes = block_bytes;
+	media->ima_adpcm.block_frames = block_frames;
+	return 0;
+}
+
 static int open_wav(struct fplinux_media *media)
 {
 	unsigned char header[16];
@@ -264,10 +338,14 @@ static int open_wav(struct fplinux_media *media)
 		errno = EINVAL;
 		return -1;
 	}
-	enum { WAVE_PCM = 1, WAVE_MP3 = 0x55 };
+	enum { WAVE_PCM = 1, WAVE_IMA_ADPCM = 0x11, WAVE_MP3 = 0x55 };
 	unsigned int format = 0;
+	unsigned int block_bytes = 0;
 	uint64_t data_bytes = 0;
-	for (uint64_t at = 12, chunks = 0;
+	uint64_t fact_offset = 0;
+	uint32_t fact_bytes = 0;
+	uint64_t at = 12;
+	for (unsigned int chunks = 0;
 	     at <= limit && limit - at >= 8U && chunks < MEDIA_CHUNKS_MAX;
 	     chunks++) {
 		if (read_exact(media, header, 8, at) < 0)
@@ -286,9 +364,11 @@ static int open_wav(struct fplinux_media *media)
 			}
 			media->info.channels = read_le16(header + 2);
 			media->info.rate = read_le32(header + 4);
+			block_bytes = read_le16(header + 12);
 			media->bits = read_le16(header + 14);
 			format = read_le16(header);
-			if ((format != WAVE_PCM && format != WAVE_MP3) ||
+			if ((format != WAVE_PCM && format != WAVE_IMA_ADPCM &&
+			     format != WAVE_MP3) ||
 			    (media->info.channels != 1U &&
 			     media->info.channels != 2U) ||
 			    media->info.rate < 8000U ||
@@ -301,15 +381,21 @@ static int open_wav(struct fplinux_media *media)
 					errno = ENOTSUP;
 					return -1;
 				}
-				unsigned int align =
-					media->info.channels * media->bits / 8U;
-				if (read_le16(header + 12) != align ||
+				if (block_bytes != media->info.channels *
+							   media->bits / 8U ||
 				    read_le32(header + 8) !=
-					    media->info.rate * align) {
+					    media->info.rate * block_bytes) {
 					errno = EINVAL;
 					return -1;
 				}
+			} else if (format == WAVE_IMA_ADPCM &&
+				   read_ima_adpcm_format(media, at, bytes,
+							 block_bytes) < 0) {
+				return -1;
 			}
+		} else if (!memcmp(header, "fact", 4) && !fact_offset) {
+			fact_offset = at;
+			fact_bytes = bytes;
 		} else if (!memcmp(header, "data", 4)) {
 			if (media->data_offset) {
 				errno = ENOTSUP;
@@ -326,6 +412,7 @@ static int open_wav(struct fplinux_media *media)
 		errno = EINVAL;
 		return -1;
 	}
+	media->info.wave_container = true;
 	if (format == WAVE_MP3) {
 		/* The MP3 decoder's reads and seeks are relative to the data chunk. */
 		media->source_offset = media->data_offset;
@@ -333,12 +420,31 @@ static int open_wav(struct fplinux_media *media)
 		media->data_offset = 0;
 		return open_mp3(media);
 	}
-	if (data_bytes % (media->info.channels * media->bits / 8U)) {
+	if (data_bytes % block_bytes) {
 		errno = EINVAL;
 		return -1;
 	}
-	media->total_frames =
-		data_bytes / (media->info.channels * media->bits / 8U);
+	media->total_frames = data_bytes / block_bytes;
+	if (format == WAVE_IMA_ADPCM) {
+		media->total_frames *= media->ima_adpcm.block_frames;
+		if (at != limit || (fact_offset && fact_bytes < 4U)) {
+			errno = EINVAL;
+			return -1;
+		}
+		if (fact_offset) {
+			if (read_exact(media, header, 4, fact_offset) < 0)
+				return -1;
+			uint32_t frames = read_le32(header);
+			if (frames > media->total_frames) {
+				errno = EINVAL;
+				return -1;
+			}
+			/* A full final block can contain padding after the last sample. */
+			media->total_frames = frames;
+		}
+		if (open_ima_adpcm(media) < 0)
+			return -1;
+	}
 	media->info.codec = FPLINUX_MEDIA_WAV;
 	media->info.eof = !media->total_frames;
 	set_duration(media);
@@ -550,6 +656,9 @@ void fplinux_media_close(struct fplinux_media *media)
 	if (media->mp3)
 		mpg123_delete(media->mp3);
 	fplinux_media_amr_nb_close(media->amr_nb);
+	av_frame_free(&media->ima_adpcm.frame);
+	av_packet_free(&media->ima_adpcm.packet);
+	avcodec_free_context(&media->ima_adpcm.codec);
 	if (media->fd >= 0)
 		close(media->fd);
 	free(media->bytes);
@@ -562,11 +671,81 @@ fplinux_media_info(const struct fplinux_media *media)
 	return media ? &media->info : NULL;
 }
 
+static int decode_ima_adpcm_block(struct fplinux_media *media, uint64_t block)
+{
+	struct ima_adpcm_decoder *decoder = &media->ima_adpcm;
+	uint64_t offset = media->data_offset + block * decoder->block_bytes;
+
+	decoder->block = UINT64_MAX;
+	if (av_packet_make_writable(decoder->packet) < 0) {
+		errno = ENOMEM;
+		return -1;
+	}
+	if (read_exact(media, decoder->packet->data, decoder->block_bytes,
+		       offset) < 0)
+		return -1;
+	int result = avcodec_send_packet(decoder->codec, decoder->packet);
+	if (result >= 0)
+		result = avcodec_receive_frame(decoder->codec, decoder->frame);
+	if (result < 0) {
+		errno = result == AVERROR_INVALIDDATA ? EINVAL :
+			result == AVERROR(ENOMEM)     ? ENOMEM :
+							EIO;
+		return -1;
+	}
+	AVFrame *frame = decoder->frame;
+	if (frame->format != AV_SAMPLE_FMT_S16P ||
+	    frame->ch_layout.nb_channels != (int)media->info.channels ||
+	    frame->nb_samples != (int)decoder->block_frames) {
+		errno = EIO;
+		return -1;
+	}
+	decoder->block = block;
+	return 0;
+}
+
+static ssize_t read_ima_adpcm(struct fplinux_media *media, int16_t *samples,
+			      size_t capacity)
+{
+	struct ima_adpcm_decoder *decoder = &media->ima_adpcm;
+	unsigned int channels = media->info.channels;
+	uint64_t remaining = media->total_frames - media->info.position_frames;
+	size_t count = remaining < capacity ? (size_t)remaining : capacity;
+	size_t done = 0;
+
+	while (done < count) {
+		uint64_t position = media->info.position_frames;
+		uint64_t block = position / decoder->block_frames;
+		if (decoder->block != block &&
+		    decode_ima_adpcm_block(media, block) < 0)
+			return done ? (ssize_t)done : -1;
+
+		size_t start = (size_t)(position % decoder->block_frames);
+		size_t take = decoder->block_frames - start;
+		if (take > count - done)
+			take = count - done;
+		for (unsigned int channel = 0; channel < channels; channel++) {
+			const int16_t *pcm =
+				(const int16_t *)
+					decoder->frame->extended_data[channel];
+			for (size_t i = 0; i < take; i++)
+				samples[(done + i) * channels + channel] =
+					pcm[start + i];
+		}
+		media->info.position_frames += take;
+		done += take;
+	}
+	media->info.eof = media->info.position_frames == media->total_frames;
+	return (ssize_t)done;
+}
+
 static ssize_t read_pcm(struct fplinux_media *media, int16_t *samples,
 			size_t capacity)
 {
 	if (media->info.eof)
 		return 0;
+	if (media->ima_adpcm.codec)
+		return read_ima_adpcm(media, samples, capacity);
 	if (media->amr_nb) {
 		ssize_t frames = fplinux_media_amr_nb_read(
 			media->amr_nb, samples, capacity, &media->total_frames);

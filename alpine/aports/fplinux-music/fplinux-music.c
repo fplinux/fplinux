@@ -506,8 +506,7 @@ static void open_details(struct music_app *app)
 	if (app->loaded) {
 		char format[80];
 		snprintf(format, sizeof(format), "%s · %u Hz · %s",
-			 app->info.codec == FPLINUX_MEDIA_WAV ? "WAV PCM" :
-								"MP3",
+			 app->info.codec == FPLINUX_MEDIA_WAV ? "WAV" : "MP3",
 			 app->info.rate,
 			 app->info.channels == 1 ? _("Mono") : _("Stereo"));
 		fplinux_ui_form_append_property(form, _("Format"), format);

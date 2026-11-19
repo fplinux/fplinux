@@ -398,7 +398,7 @@ def _install_mpg123_headers(tool: ToolInput, temporary: Path) -> None:
 
 
 def _install_ffmpeg_amr_nb(tool: ToolInput, resources: Path, temporary: Path) -> None:
-    """Prepare the pinned native AMR decoder for host tests and analysis."""
+    """Prepare the pinned native FFmpeg decoders for host tests and analysis."""
     source = temporary / "ffmpeg"
     _extract_archive(tool.archive, source, strip_components=1)
     configure = resources / "alpine/aports/fplinux-amr-nb/configure-amr-nb.sh"

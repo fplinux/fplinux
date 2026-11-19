@@ -47,6 +47,36 @@ public final class AudioMIDlet extends MIDlet implements Runnable {
         }
     }
 
+    private static byte[] waveMp3() {
+        // A 440 Hz, 8 kHz mono MP3 tone in a RIFF WAVE data chunk.
+        String mp3 =
+            "ffe318c4000d0806e259410002923425e07fc0183e0f83e1f0401004010c" +
+            "1fe7c1f3e81c080632efd4081c9cffff13821a8130fe27041d500c3f9304" +
+            "380cff0c74aa818186180001ffe318c4060e80f6acf194280091789a31ff" +
+            "2e932644d7f8cb132014d03134d000ad0d094c0d21d1de1102874c637ff8" +
+            "88743a60f078a77f951105415111effc15ffffd7f8180180ffe318c4070e" +
+            "80ce340197100079018e425c101821404a40c010047c0c37034340c08702" +
+            "5606022824c061561a5806017810515f1be3fffffff6ffffffffffe8ffff" +
+            "df79a8ccd4aeffe318c4080ea12aa00199380035ffffccebe5118843ae97" +
+            "c44d7fe2b61f43a287cd91a1920b33ffd18f3dd80702d0a111b0fff99fce" +
+            "1d28c152bffb02a860fac427cfa3782ad56cffe318c4080e48ca5001cf18" +
+            "016cbd7b168f93c873dc312795d3a94828b8a89b50d50c5f053a86c74e9d" +
+            "2a18b09f3e8de13e8db8a0b882b828e847745745554c414d45332e313030";
+        byte[] header = {
+            82, 73, 70, 70, (byte)140, 1, 0, 0, 87, 65, 86, 69,
+            102, 109, 116, 32, 16, 0, 0, 0, 85, 0, 1, 0,
+            64, 31, 0, 0, (byte)232, 3, 0, 0, 1, 0, 0, 0,
+            100, 97, 116, 97, 104, 1, 0, 0
+        };
+        byte[] bytes = new byte[header.length + mp3.length() / 2];
+        System.arraycopy(header, 0, bytes, 0, header.length);
+        for (int i = 0; i < mp3.length(); i += 2) {
+            bytes[header.length + i / 2] =
+                (byte)Integer.parseInt(mp3.substring(i, i + 2), 16);
+        }
+        return bytes;
+    }
+
     protected void startApp() {
         if (!started) {
             started = true;
@@ -86,6 +116,46 @@ public final class AudioMIDlet extends MIDlet implements Runnable {
             }
             require(names.size() >= count, "Media event deadline");
         }
+    }
+
+    private static void playWave(byte[] data, String type)
+            throws Exception {
+        Player player = Manager.createPlayer(new ByteArrayInputStream(data), type);
+        Events events = new Events();
+        try {
+            player.realize();
+            require("audio/x-wav".equals(player.getContentType()), "WAV type " + type);
+            require(player.setMediaTime(50000) == 50000, "WAV seek " + type);
+            player.addPlayerListener(events);
+            player.start();
+            events.await(2);
+            require(PlayerListener.STARTED.equals(events.names.elementAt(0)),
+                    "WAV start " + type);
+            require(PlayerListener.END_OF_MEDIA.equals(events.names.elementAt(1)),
+                    "WAV EOF " + type);
+            require(player.getState() == Player.PREFETCHED, "WAV end state " + type);
+        } finally {
+            player.close();
+        }
+    }
+
+    private static void contentTypes() throws Exception {
+        byte[] pcm = wave();
+        playWave(pcm, null);
+        playWave(pcm, "");
+        playWave(pcm, " \t ");
+        playWave(waveMp3(), "audio/x-wav");
+        String[] unsupported = { "audio/unknown", " ; charset=x" };
+        for (int i = 0; i < unsupported.length; i++) {
+            try {
+                Player unexpected = Manager.createPlayer(new ByteArrayInputStream(pcm),
+                                                         unsupported[i]);
+                unexpected.close();
+                throw new RuntimeException("Unsupported type accepted " + unsupported[i]);
+            } catch (MediaException expected) {
+            }
+        }
+        System.out.println("PM-MEDIA default MIME and MP3 in WAV");
     }
 
     public void run() {
@@ -166,6 +236,7 @@ public final class AudioMIDlet extends MIDlet implements Runnable {
             Manager.playTone(69, 100, 25);
             Thread.sleep(500);
             System.out.println("PM-MEDIA tones");
+            contentTypes();
             System.out.println("PM-MEDIA ok");
         } catch (Throwable failure) {
             System.out.println("PM-MEDIA FAIL " + failure);

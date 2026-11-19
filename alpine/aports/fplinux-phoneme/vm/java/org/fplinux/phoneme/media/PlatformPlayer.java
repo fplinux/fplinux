@@ -78,8 +78,9 @@ public final class PlatformPlayer implements Player {
             return null;
         }
         int parameters = contentType.indexOf(';');
-        return (parameters < 0 ? contentType :
+        String normalized = (parameters < 0 ? contentType :
             contentType.substring(0, parameters)).trim().toLowerCase();
+        return parameters < 0 && normalized.length() == 0 ? null : normalized;
     }
 
     private static int format(String type) throws MediaException {

@@ -28,7 +28,7 @@ static void test_wav(void)
 	assert(media);
 	const struct fplinux_media_info *info = fplinux_media_info(media);
 	assert(info->codec == FPLINUX_MEDIA_WAV && info->rate == 8000 &&
-	       info->channels == 1);
+	       info->channels == 1 && info->wave_container);
 	assert(info->duration_known && info->duration_ms == 1 && !info->eof);
 	int16_t samples[1024];
 	assert(fplinux_media_read(media, samples, 8) == 8);
@@ -86,12 +86,12 @@ static void test_descriptor(void)
 	fplinux_media_close(media);
 }
 
-static void test_mp3(struct fplinux_media *media)
+static void test_mp3(struct fplinux_media *media, bool wave_container)
 {
 	assert(media);
 	const struct fplinux_media_info *info = fplinux_media_info(media);
 	assert(info->codec == FPLINUX_MEDIA_MP3 && info->rate == 44100 &&
-	       info->channels == 1);
+	       info->channels == 1 && info->wave_container == wave_container);
 	assert(info->duration_known && info->duration_ms == 2000);
 	assert(!strcmp(info->title, "Finite tone") &&
 	       !strcmp(info->artist, "FPLinux tests"));
@@ -153,7 +153,7 @@ static void test_amr_nb(const char *encoded_path, const char *reference_path)
 
 	assert(info && info->codec == FPLINUX_MEDIA_AMR_NB &&
 	       info->rate == 8000 && info->channels == 1 &&
-	       !info->duration_known && !info->eof);
+	       !info->wave_container && !info->duration_known && !info->eof);
 	assert(fplinux_media_read(media, samples, 1024) == 1024);
 	assert(!memcmp(samples, expected, 1024 * sizeof(*samples)));
 	assert(fplinux_media_read(media, samples, 401) == 401);
@@ -185,11 +185,73 @@ static void test_amr_nb(const char *encoded_path, const char *reference_path)
 	fplinux_media_close(media);
 }
 
+static void test_ima_adpcm(const char *path, const char *reference,
+			   unsigned int channels)
+{
+	const size_t frames = 43;
+	int16_t expected[43 * 2];
+	FILE *input = fopen(reference, "rb");
+	assert(input);
+	assert(fread(expected, sizeof(*expected), frames * channels, input) ==
+	       frames * channels);
+	assert(fgetc(input) == EOF && feof(input));
+	fclose(input);
+
+	int fd = open(path, O_RDONLY | O_CLOEXEC);
+	assert(fd >= 0);
+	struct fplinux_media *media = fplinux_media_open_fd(fd);
+	close(fd);
+	const struct fplinux_media_info *info = fplinux_media_info(media);
+	assert(info && info->codec == FPLINUX_MEDIA_WAV &&
+	       info->wave_container && info->rate == 8000 &&
+	       info->channels == channels);
+	assert(info->duration_known && info->duration_ms == 5 && !info->eof);
+
+	int16_t pcm[9 * 2];
+	for (unsigned int play = 0; play < 3; play++) {
+		assert(fplinux_media_seek(media, 0) == 0 && !info->eof);
+		for (size_t offset = 0; offset < frames; offset += 9U) {
+			size_t take = frames - offset < 9U ? frames - offset :
+							     9U;
+			assert(fplinux_media_read(media, pcm, 9) ==
+			       (ssize_t)take);
+			assert(!memcmp(pcm, expected + offset * channels,
+				       take * channels * sizeof(*pcm)));
+			assert(info->position_frames == offset + take);
+			assert(info->eof == (offset + take == frames));
+		}
+		assert(fplinux_media_read(media, pcm, 9) == 0);
+	}
+	assert(fplinux_media_seek(media, 3) == 0 && !info->eof &&
+	       !info->seeking);
+	assert(info->position_frames == 24 &&
+	       fplinux_media_read(media, pcm, 9) == 9);
+	assert(!memcmp(pcm, expected + 24 * channels,
+		       9 * channels * sizeof(*pcm)));
+	assert(fplinux_media_seek(media, 99) == 0 && info->eof);
+	assert(info->position_frames == frames &&
+	       fplinux_media_read(media, pcm, 9) == 0);
+	fplinux_media_close(media);
+}
+
 int main(int argc, char **argv)
 {
 	if (argc == 4 && !strcmp(argv[1], "amr-nb")) {
 		test_amr_nb(argv[2], argv[3]);
 		puts("AMR-NB decode: ok");
+		return 0;
+	}
+	if (argc == 5 && !strcmp(argv[1], "ima-adpcm")) {
+		test_ima_adpcm(argv[2], argv[3],
+			       !strcmp(argv[4], "1") ? 1U : 2U);
+		puts("IMA ADPCM decode: ok");
+		return 0;
+	}
+	if (argc == 3 && !strcmp(argv[1], "reject-wav")) {
+		int fd = open(argv[2], O_RDONLY | O_CLOEXEC);
+		assert(fd >= 0);
+		assert(!fplinux_media_open_fd(fd) && errno == EINVAL);
+		close(fd);
 		return 0;
 	}
 	assert(argc == 3);
@@ -199,7 +261,7 @@ int main(int argc, char **argv)
 	assert(fd >= 0);
 	struct fplinux_media *file = fplinux_media_open_fd(fd);
 	close(fd);
-	test_mp3(file);
+	test_mp3(file, false);
 
 	unsigned char buffer[64 * 1024];
 	fd = open(argv[2], O_RDONLY | O_CLOEXEC);
@@ -207,7 +269,7 @@ int main(int argc, char **argv)
 	ssize_t size = read(fd, buffer, sizeof(buffer));
 	assert(size > 0 && (size_t)size < sizeof(buffer));
 	close(fd);
-	test_mp3(fplinux_media_open_bytes(buffer, (size_t)size));
+	test_mp3(fplinux_media_open_bytes(buffer, (size_t)size), true);
 	puts("media decode: ok");
 	return 0;
 }

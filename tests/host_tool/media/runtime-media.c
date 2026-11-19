@@ -159,9 +159,61 @@ static void test_amr_nb_format(struct fplinux_runtime_media *broker)
 	fplinux_runtime_media_destroy(broker, soundtrack);
 }
 
+static void test_mp3_playback(struct fplinux_runtime_media *broker,
+			      const char *path,
+			      enum fplinux_runtime_media_format requested,
+			      enum fplinux_runtime_media_format expected)
+{
+	runtime_media_test_reset_samples();
+	FILE *file = fopen(path, "rb");
+
+	assert(file && fseek(file, 0, SEEK_END) == 0);
+	long byte_count = ftell(file);
+
+	assert(byte_count > 0 && byte_count < 1024 * 1024);
+	assert(fseek(file, 0, SEEK_SET) == 0);
+	void *mp3_bytes = malloc((size_t)byte_count);
+
+	assert(mp3_bytes && fread(mp3_bytes, 1, (size_t)byte_count, file) ==
+				    (size_t)byte_count);
+	fclose(file);
+	uint32_t mp3 = fplinux_runtime_media_create(
+		broker, requested, mp3_bytes, (size_t)byte_count, 0, 0);
+
+	free(mp3_bytes);
+	assert(mp3);
+	struct fplinux_runtime_media_event prepared =
+		wait_event(mp3, FPLINUX_RUNTIME_MEDIA_RESULT,
+			   FPLINUX_RUNTIME_MEDIA_PREPARE);
+
+	assert(!prepared.error && prepared.info.format == expected);
+	struct fplinux_runtime_media_info info;
+	command(broker, mp3, FPLINUX_RUNTIME_MEDIA_SEEK, 1000000);
+	assert(fplinux_runtime_media_info(broker, mp3, &info));
+	assert(info.position_us == 1000000 && info.duration_us == 2000000);
+	assert(info.rate == 44100 && info.channels == 1);
+	command(broker, mp3, FPLINUX_RUNTIME_MEDIA_START, 0);
+	assert(wait_event(mp3, FPLINUX_RUNTIME_MEDIA_END,
+			  FPLINUX_RUNTIME_MEDIA_PREPARE)
+		       .info.position_us == 2000000);
+	const int16_t mp3_reference[] = {
+		6,     748,   1487,  2221,  2946,  3659,  4358,	 5039,
+		5701,  6341,  6956,  7543,  8101,  8627,  9119,	 9575,
+		9994,  10374, 10712, 11009, 11263, 11472, 11636, 11755,
+		11827, 11853, 11832, 11765, 11652, 11492, 11288, 11040,
+	};
+	int16_t mp3_samples[32];
+
+	assert(runtime_media_test_samples(mp3_samples, 32) == 32);
+	assert(runtime_media_test_accepted() == 44100);
+	for (size_t i = 0; i < 32; i++)
+		assert(abs(mp3_samples[i] - mp3_reference[i]) <= 32);
+	fplinux_runtime_media_destroy(broker, mp3);
+}
+
 int main(int argc, char **argv)
 {
-	assert(argc == 2);
+	assert(argc == 3);
 	struct fplinux_ui *ui = runtime_media_test_ui_open();
 	struct fplinux_runtime_media *broker =
 		fplinux_runtime_media_open(ui, record_event, NULL);
@@ -308,50 +360,14 @@ int main(int argc, char **argv)
 
 	require_drained = false;
 	runtime_media_test_set_write_limit(511);
-	runtime_media_test_reset_samples();
-	FILE *file = fopen(argv[1], "rb");
-
-	assert(file && fseek(file, 0, SEEK_END) == 0);
-	long byte_count = ftell(file);
-
-	assert(byte_count > 0 && byte_count < 1024 * 1024);
-	assert(fseek(file, 0, SEEK_SET) == 0);
-	void *mp3_bytes = malloc((size_t)byte_count);
-
-	assert(mp3_bytes && fread(mp3_bytes, 1, (size_t)byte_count, file) ==
-				    (size_t)byte_count);
-	fclose(file);
-	uint32_t mp3 = fplinux_runtime_media_create(broker,
-						    FPLINUX_RUNTIME_MEDIA_MP3,
-						    mp3_bytes,
-						    (size_t)byte_count, 0, 0);
-
-	free(mp3_bytes);
-	assert(mp3);
-	assert(!wait_event(mp3, FPLINUX_RUNTIME_MEDIA_RESULT,
-			   FPLINUX_RUNTIME_MEDIA_PREPARE)
-			.error);
-	command(broker, mp3, FPLINUX_RUNTIME_MEDIA_SEEK, 1000000);
-	assert(fplinux_runtime_media_info(broker, mp3, &info));
-	assert(info.position_us == 1000000 && info.duration_us == 2000000);
-	assert(info.rate == 44100 && info.channels == 1);
-	command(broker, mp3, FPLINUX_RUNTIME_MEDIA_START, 0);
-	assert(wait_event(mp3, FPLINUX_RUNTIME_MEDIA_END,
-			  FPLINUX_RUNTIME_MEDIA_PREPARE)
-		       .info.position_us == 2000000);
-	const int16_t mp3_reference[] = {
-		6,     748,   1487,  2221,  2946,  3659,  4358,	 5039,
-		5701,  6341,  6956,  7543,  8101,  8627,  9119,	 9575,
-		9994,  10374, 10712, 11009, 11263, 11472, 11636, 11755,
-		11827, 11853, 11832, 11765, 11652, 11492, 11288, 11040,
-	};
-	int16_t mp3_samples[32];
-
-	assert(runtime_media_test_samples(mp3_samples, 32) == 32);
-	assert(runtime_media_test_accepted() == 44100);
-	for (size_t i = 0; i < 32; i++)
-		assert(abs(mp3_samples[i] - mp3_reference[i]) <= 32);
-	fplinux_runtime_media_destroy(broker, mp3);
+	test_mp3_playback(broker, argv[1], FPLINUX_RUNTIME_MEDIA_MP3,
+			  FPLINUX_RUNTIME_MEDIA_MP3);
+	test_mp3_playback(broker, argv[2], FPLINUX_RUNTIME_MEDIA_WAV,
+			  FPLINUX_RUNTIME_MEDIA_WAV);
+	test_mp3_playback(broker, argv[2], FPLINUX_RUNTIME_MEDIA_MP3,
+			  FPLINUX_RUNTIME_MEDIA_MP3);
+	test_mp3_playback(broker, argv[2], FPLINUX_RUNTIME_MEDIA_AUTO,
+			  FPLINUX_RUNTIME_MEDIA_MP3);
 
 	uint32_t first = fplinux_runtime_media_create(
 		broker, FPLINUX_RUNTIME_MEDIA_MIDI, midi, sizeof(midi), 0, 0);

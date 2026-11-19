@@ -135,6 +135,9 @@ static void decoder_info(struct media_slot *slot,
 			fplinux_media_info(slot->decoder);
 
 		info->format = pcm_format(decoded->codec);
+		if (slot->decoded_format == FPLINUX_RUNTIME_MEDIA_WAV &&
+		    decoded->wave_container)
+			info->format = FPLINUX_RUNTIME_MEDIA_WAV;
 		info->rate = decoded->rate;
 		info->channels = decoded->channels;
 		info->duration_us = decoded->duration_ms * 1000;
@@ -173,7 +176,9 @@ static int decoder_prepare(struct media_slot *slot)
 		const struct fplinux_media_info *info =
 			fplinux_media_info(slot->decoder);
 
-		if (format != pcm_format(info->codec)) {
+		if (format == FPLINUX_RUNTIME_MEDIA_WAV ?
+			    !info->wave_container :
+			    format != pcm_format(info->codec)) {
 			errno = ENOTSUP;
 			return -1;
 		}

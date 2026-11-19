@@ -2,7 +2,7 @@
 pkgname=fplinux-amr-nb
 pkgver=@version:aport_ffmpeg_9_0_2_tar_xz@
 pkgrel=0
-pkgdesc="AMR-NB speech decoding libraries for FPLinux"
+pkgdesc="AMR-NB and IMA ADPCM decoding libraries for FPLinux"
 url="https://ffmpeg.org"
 arch="armv7"
 license="LGPL-2.1-or-later"
@@ -46,5 +46,5 @@ package() {
 }
 
 sha512sums="
-7fa865e2a086003a4337bb37153282ca678a521f8121f9e6ddb2a661a2472e5c5710faa73e33ae83bd15d89a3a3073abce51c93cb9384ed9b261423078ab9f44  configure-amr-nb.sh
+746bdbdedcbc48519ada2d88664ad524359ef3203f87499f3d717fe31b48ccc5c991b3ae75baaa9dc27f5e472bf498cb3eb99e4009038d936978a4e3e05bf909  configure-amr-nb.sh
 "
