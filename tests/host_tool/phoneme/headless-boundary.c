@@ -1,12 +1,25 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 #define _GNU_SOURCE
+#include "fplinux-pm-files.h"
 #include "fplinux-pm-vm.h"
 
+#include <fplinux/fplinux-volumes.h>
+#include <assert.h>
 #include <fcntl.h>
 #include <stdio.h>
 #include <unistd.h>
 
-/* Replace only the VM; the headless runner and CLI are production code. */
+void fplinux_pm_files_volumes(const struct fplinux_volume_snapshot *snapshot)
+{
+	assert(snapshot->count == 1);
+	const struct fplinux_volume *card = &snapshot->volumes[0];
+
+	assert(card->state == FPLINUX_VOLUME_MOUNTED);
+	assert(card->mount_id != 0);
+	printf("card %s\n", card->path);
+}
+
+/* Replace the VM and its volumes consumer; the runner and CLI are real. */
 bool fplinux_pm_vm_start(const struct fplinux_pm_vm_config *config)
 {
 	int directory;

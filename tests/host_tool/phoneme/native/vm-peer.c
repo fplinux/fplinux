@@ -2,6 +2,7 @@
 #include "fplinux-pm-app.h"
 #include "fplinux-pm-vm.h"
 #include <fplinux/fplinux-ui-screen.h>
+#include <fplinux/fplinux-volumes.h>
 
 #include <assert.h>
 
@@ -43,6 +44,11 @@ void fplinux_pm_vm_request_destroy(void)
 void fplinux_pm_vm_set_visible(bool visible)
 {
 	(void)visible;
+}
+
+void fplinux_pm_files_volumes(const struct fplinux_volume_snapshot *snapshot)
+{
+	(void)snapshot;
 }
 
 enum fplinux_pm_vm_state fplinux_pm_vm_get_state(void)

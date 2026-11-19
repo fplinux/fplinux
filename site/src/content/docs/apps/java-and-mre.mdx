@@ -35,6 +35,8 @@ If saving fails, the chosen value remains applied and Settings shows **Unsaved**
 
 Open the JAR itself. When it contains several MIDlets, choose the one to run. Opening another JAR asks to close the current program; cancel to keep it running.
 
+Java programs using FileConnection access My files as `c:/` and a mounted data card as `e:/`. PhoneME supports listing, reading and writing files in these folders. A program that depends on notifications when a storage root is added or removed may need to be reopened to find the card.
+
 Java record stores remain after closing and reopening phoneME. Programs with the same **MIDlet-Vendor** and **MIDlet-Name** share their records across version updates and moves to another folder. A program missing either field uses its JAR path instead: moving it gives it a separate store. Different suites keep separate records.
 
 Records live in your home directory. During a RAM boot, they survive closing the application but are lost when the phone loses power. A memory card containing the JAR does not make these records persistent. See [Files](/fplinux/use/files/) for the home directory's lifetime.

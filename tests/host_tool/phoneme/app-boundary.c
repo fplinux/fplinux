@@ -9,6 +9,7 @@
 #include <fplinux/fplinux-ui-session.h>
 #include <fplinux/fplinux-ui-file-picker.h>
 #include <fplinux/fplinux-ui-prefs.h>
+#include <fplinux/fplinux-volumes.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -723,6 +724,11 @@ void fplinux_pm_vm_set_visible(bool visible)
 		++show_events;
 	else
 		++hide_events;
+}
+
+void fplinux_pm_files_volumes(const struct fplinux_volume_snapshot *snapshot)
+{
+	(void)snapshot;
 }
 
 enum fplinux_pm_vm_state fplinux_pm_vm_get_state(void)

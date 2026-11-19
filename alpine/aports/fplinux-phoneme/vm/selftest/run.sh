@@ -90,6 +90,32 @@ grep -qx 'PM-RMS read 1 2 next 3' "${work}/rms-read.txt" &&
 grep -qx 'PM-RMS storage-error' "${work}/rms-error.txt" ||
 	fail "RMS storage error not reported (${work}/rms-error.txt)"
 
+# The file protocol walks from "/". Load the ARM libraries explicitly so
+# QEMU does not redirect that open to the read-only library sysroot.
+build_jar files "${here}/files.mf"
+files_home=$(mktemp -d "${work}/files-home.XXXXXX")
+files_card=$(mktemp -d "${work}/files-card.XXXXXX")
+HOME="${files_home}" "${qemu_arm}" -L / "${sysroot}/lib/ld-musl-armhf.so.1" \
+	--library-path "${sysroot}/lib:${sysroot}/usr/lib" "${headless}" \
+	--system-classes "${classes}" --timeout-ms 30000 \
+	"${work}/files.jar" >"${work}/files.txt" 2>&1
+if ! grep -qx 'PM-FILES c:/ create list read rewrite rename truncate delete' \
+	"${work}/files.txt" || ! grep -qx 'PM-FILES e:/ absent' "${work}/files.txt"; then
+	cat "${work}/files.txt" >&2
+	fail "FileConnection behavior differs"
+fi
+HOME="${files_home}" "${qemu_arm}" -L / "${sysroot}/lib/ld-musl-armhf.so.1" \
+	--library-path "${sysroot}/lib:${sysroot}/usr/lib" "${headless}" \
+	--system-classes "${classes}" --timeout-ms 30000 --card-dir "${files_card}" \
+	"${work}/files.jar" >"${work}/files-card.txt" 2>&1
+if ! grep -qx 'PM-FILES c:/ create list read rewrite rename truncate delete' \
+	"${work}/files-card.txt" || ! grep -qx 'PM-FILES e:/ create list read rewrite rename truncate delete' \
+	"${work}/files-card.txt"; then
+	cat "${work}/files-card.txt" >&2
+	fail "FileConnection mounted-card behavior differs"
+fi
+rmdir "${files_card}" "${files_home}/Files" "${files_home}"
+
 # Canvas port headless: sizes of the modes, sizeChanged after a mode change,
 # game actions, key names and codes, GameCanvas flushes, font metrics.
 build_jar canvas "${here}/canvas.mf"
@@ -156,4 +182,4 @@ grep -qx 'PM-MEDIA headless failure honest' "${work}/media-headless.txt" &&
 	! grep -q '^PM-MEDIA FAIL ' "${work}/media-headless.txt" ||
 	fail "headless media error state differs (${work}/media-headless.txt)"
 
-echo "phoneME self-test: PASS (vectors, hello, RMS, canvas, Form, List/Alert LF and headless media)"
+echo "phoneME self-test: PASS (vectors, hello, RMS, files, canvas, Form, List/Alert LF and headless media)"

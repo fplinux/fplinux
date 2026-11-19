@@ -30,7 +30,9 @@ def headless(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
                 "-Wall",
                 "-Wextra",
                 "-Werror",
+                f"-I{ROOT / 'include'}",
                 f"-I{ROOT / 'include/fplinux'}",
+                f"-I{PORT / 'port/files'}",
                 f"-I{PORT / 'vm'}",
                 str(HERE / "headless-boundary.c"),
                 str(PORT / "vm/fplinux-pm-headless.c"),
@@ -87,6 +89,28 @@ def test_explicit_storage_is_preserved_and_passed_to_vm(headless: Path, tmp_path
     assert result.returncode == 0, result.stdout + result.stderr
     assert result.stdout == f"storage {storage}\n"
     assert (storage / "record").is_file()
+
+
+def test_card_directory_is_reported_to_the_vm_boundary(headless: Path, tmp_path: Path) -> None:
+    storage = tmp_path / "storage"
+    card = tmp_path / "card"
+    storage.mkdir()
+    card.mkdir()
+    result = run_process(
+        [
+            str(headless),
+            "--storage-dir",
+            str(storage),
+            "--card-dir",
+            str(card),
+            "suite.jar",
+            "example.Main",
+        ],
+        name="headless mounted card",
+        timeout=10,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout == f"card {card}\nstorage {storage}\n"
 
 
 def test_unusable_storage_reaches_vm_without_headless_replacement(headless: Path) -> None:

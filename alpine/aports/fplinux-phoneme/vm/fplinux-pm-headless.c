@@ -6,7 +6,7 @@
  *
  * usage: fplinux-phoneme-headless [--system-classes PATH] [--heap-kib N]
  *            [--timeout-ms N] [--keys SCRIPT] [--storage-dir PATH]
- *            [--canvas-size SIZE]
+ *            [--canvas-size SIZE] [--card-dir PATH]
  *            JAR [MIDLET-CLASS]
  * Without MIDLET-CLASS it runs MIDlet-1 of the JAR manifest. --timeout-ms
  * requests destroyApp(true) after that much time, then gives up 300 ms later.
@@ -22,9 +22,12 @@
 #define _GNU_SOURCE
 #include "fplinux-pm-vm.h"
 #include "../port/canvas/fplinux-pm-canvas-core.h"
+#include "../port/files/fplinux-pm-files.h"
 
 #include <errno.h>
+#include <fcntl.h>
 #include <fplinux-cli.h>
+#include <fplinux/fplinux-volumes.h>
 #include <ftw.h>
 #include <limits.h>
 #include <signal.h>
@@ -32,6 +35,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/resource.h>
+#include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -72,6 +76,29 @@ static void wakeup(void *context)
 {
 	(void)context;
 	wakeup_pending = true;
+}
+
+static bool use_card_directory(const char *path)
+{
+	struct statx observed;
+	struct fplinux_volume_snapshot snapshot = { .count = 1 };
+	struct fplinux_volume *card = &snapshot.volumes[0];
+
+	if (path[0] != '/' || strlen(path) >= sizeof(card->path) ||
+	    statx(AT_FDCWD, path, AT_SYMLINK_NOFOLLOW,
+		  STATX_TYPE | STATX_MNT_ID, &observed) < 0 ||
+	    (observed.stx_mask & (STATX_TYPE | STATX_MNT_ID)) !=
+		    (STATX_TYPE | STATX_MNT_ID) ||
+	    !S_ISDIR(observed.stx_mode) || !observed.stx_mnt_id ||
+	    observed.stx_mnt_id > UINT32_MAX)
+		return false;
+
+	card->state = FPLINUX_VOLUME_MOUNTED;
+	card->id = 1;
+	card->mount_id = (uint32_t)observed.stx_mnt_id;
+	strcpy(card->path, path);
+	fplinux_pm_files_volumes(&snapshot);
+	return true;
 }
 
 static long long monotonic_ms(void)
@@ -271,6 +298,9 @@ int main(int argc, char **argv)
 		{ .name = "canvas-size",
 		  .metavar = "SIZE",
 		  .help = "Virtual Canvas: native, 128x128, 128x160, 176x208, 176x220, 240x320 or 320x240" },
+		{ .name = "card-dir",
+		  .metavar = "PATH",
+		  .help = "Absolute data directory to expose as the mounted card in file tests" },
 		{ .metavar = "JAR",
 		  .help = "MIDlet suite",
 		  .flags = FPLINUX_CLI_REQUIRED },
@@ -301,9 +331,11 @@ int main(int argc, char **argv)
 	if (options[5].value &&
 	    !fplinux_pm_canvas_preset_parse(options[5].value, &canvas_preset))
 		return fplinux_cli_error(&cli, "invalid Canvas size");
-	const char *jar_path = options[6].value;
+	if (options[6].value && !use_card_directory(options[6].value))
+		return fplinux_cli_error(&cli, "invalid card directory");
+	const char *jar_path = options[7].value;
 	struct fplinux_pm_suite suite = { 0 };
-	const char *midlet_class = options[7].value;
+	const char *midlet_class = options[8].value;
 
 	if (midlet_class == NULL) {
 		enum fplinux_pm_jar_status status =

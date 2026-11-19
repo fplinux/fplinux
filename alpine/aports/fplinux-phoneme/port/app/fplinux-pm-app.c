@@ -15,6 +15,7 @@
 #include "fplinux-pm-lifecycle.h"
 #include "fplinux-pm-store.h"
 #include "../canvas/fplinux-pm-canvas.h"
+#include "../files/fplinux-pm-files.h"
 #include "../../vm/fplinux-pm-vm.h"
 
 #include <errno.h>
@@ -991,6 +992,7 @@ static void storage_result(struct fplinux_ui *ui,
 	struct pm_app *app = context;
 
 	(void)ui;
+	fplinux_pm_files_volumes(&result->snapshot);
 	if (app->picker)
 		fplinux_ui_file_picker_storage_result(app->picker, result);
 	if (result->request_id == app->storage_request &&
@@ -1374,8 +1376,12 @@ static void sync_visibility(struct pm_app *app)
 					FPLINUX_UI_FOREGROUND,
 			fplinux_ui_now_ms());
 
-	if (visibility.notify_vm)
+	if (visibility.notify_vm) {
 		fplinux_pm_vm_set_visible(app->lifecycle.visible);
+		if (app->lifecycle.visible && !app->storage_request)
+			app->storage_request = fplinux_ui_storage_request(
+				app->ui, FPLINUX_VOLUME_REFRESH, 0);
+	}
 	if (!app->replacement_id)
 		apply(app, visibility.schedule, false);
 	if (app->lifecycle.visible && app->loaded)

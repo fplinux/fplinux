@@ -25,6 +25,7 @@
 
 #include "fplinux-pm-midp.h"
 #include "fplinux-pm-network.h"
+#include "../port/files/fplinux-pm-files.h"
 #include "../port/media/fplinux-pm-media.h"
 
 #define RUNNER_CLASS "org.fplinux.phoneme.Runner"
@@ -83,6 +84,7 @@ static void finish(int exit_code)
 	vm_state = FPLINUX_PM_VM_EXITED;
 	fplinux_pm_media_cleanup();
 	fplinux_pm_network_cleanup();
+	fplinux_pm_files_cleanup();
 	fplinux_pm_midp_cleanup();
 	release_start_strings();
 }
