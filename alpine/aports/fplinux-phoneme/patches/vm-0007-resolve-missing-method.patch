@@ -1,0 +1,20 @@
+--- a/cldc/src/vm/share/handles/ConstantPool.cpp
++++ b/cldc/src/vm/share/handles/ConstantPool.cpp
+@@ -384,7 +384,7 @@
+   resolve_helper(index, name, signature, static_receiver_class JVM_CHECK_0);
+ 
+   Method::Fast m = static_receiver_class->lookup_method(name, signature);
+-  if (m().is_hidden()) {
++  if (m.is_null() || m().is_hidden()) {
+     trace_no_such_method_error(sender_class, static_receiver_class, name,
+                                signature);
+     Throw::no_such_method_error(JVM_SINGLE_ARG_THROW_0);
+@@ -608,7 +608,7 @@
+     is_uncommon = true;
+   }
+ 
+-  if (named_method().is_hidden()) {
++  if (named_method.is_null() || named_method().is_hidden()) {
+     trace_no_such_method_error(sender_class, &interface_class, &method_name,
+       &method_signature);
+     Throw::no_such_method_error(JVM_SINGLE_ARG_THROW);
