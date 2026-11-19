@@ -451,11 +451,26 @@ final class M3gProbe {
         polygon.setWinding(PolygonMode.WINDING_CW);
         int back = litPixel(renderer, graphics, target, pixels, buffer, look, placement);
         renderer.resetLights();
+
+        Transform flat = new Transform(placement);
+        flat.postScale(1, 1, 0);
+        look.setFog(null);
+        material.setColor(Material.EMISSIVE, 0x00ff00);
+        int flatModel = litPixel(renderer, graphics, target, pixels, buffer, look, flat);
+
+        boolean singularCameraRejected = false;
+        try {
+            renderer.setCamera(new Camera(), flat);
+        } catch (ArithmeticException expected) {
+            singularCameraRejected = true;
+        }
+
         // The highlight's intensity is cos(30 degrees)^4. Half-distance fog halves its red
         // component and adds half of the blue fog color. The reversed normal gets no highlight.
         return Math.abs((front >>> 16 & 255) - 72) <= 8 &&
             Math.abs((front & 255) - 127) <= 8 &&
-            (back & 0xffff0000) == 0xff000000 && (back & 255) == (front & 255);
+            (back & 0xffff0000) == 0xff000000 && (back & 255) == (front & 255) &&
+            flatModel == 0xff00ff00 && singularCameraRejected;
     }
 
     private static int litPixel(Graphics3D renderer, Graphics graphics, Image target, int[] pixels,

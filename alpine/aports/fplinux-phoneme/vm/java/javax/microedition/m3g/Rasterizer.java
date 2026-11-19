@@ -110,8 +110,12 @@ final class Rasterizer {
         float[] normal = new float[3];
         if (buffer.normals != null && look.material != null) {
             Transform normalTransform = new Transform(model);
-            normalTransform.invert();
-            inverse = normalTransform.matrix;
+            try {
+                normalTransform.invert();
+                inverse = normalTransform.matrix;
+            } catch (ArithmeticException singularModel) {
+                // Continue drawing with ambient and emissive lighting when no normal matrix exists.
+            }
         }
         prepareVertices0(vertices, count, buffer.positions.data, buffer.positions.components,
                          buffer.position, projection.matrix,
