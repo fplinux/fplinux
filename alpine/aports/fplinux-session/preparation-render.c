@@ -43,19 +43,24 @@ bool fplinux_preparation_render(
 	case FPLINUX_PREPARATION_READING:
 		view.heading = "Reading phone data";
 		view.detail = "Keep USB connected.";
-		if (status->total) {
-			view.indicator = FPLINUX_STATUS_PROGRESS;
-			view.completed = status->completed;
-			view.total = status->total;
-			snprintf(percentage, sizeof(percentage), "%u%%",
-				 fplinux_status_scale(status->completed,
-						      status->total, 100));
-			snprintf(bytes, sizeof(bytes), "%.1Lf / %.1Lf MiB",
-				 (long double)status->completed / 1048576,
-				 (long double)status->total / 1048576);
-			view.progress_percent = percentage;
-			view.progress_bytes = bytes;
-		}
+		break;
+	case FPLINUX_PREPARATION_CARD_SENDING:
+		view.heading = "Sending files";
+		view.detail = "Keep USB connected.";
+		view.indicator = FPLINUX_STATUS_BUSY;
+		break;
+	case FPLINUX_PREPARATION_CARD_WRITING:
+		view.heading = "Writing microSD";
+		view.detail = "Keep USB connected.";
+		break;
+	case FPLINUX_PREPARATION_CARD_VERIFYING:
+		view.heading = "Verifying microSD";
+		view.detail = "Keep USB connected.";
+		break;
+	case FPLINUX_PREPARATION_CARD_READY:
+		view.heading = "microSD ready";
+		view.detail =
+			"Disconnect USB. Power off the phone, then start from microSD.";
 		break;
 	case FPLINUX_PREPARATION_EXTRACTING:
 		view.heading = "Preparing files";
@@ -81,6 +86,19 @@ bool fplinux_preparation_render(
 		view.detail = "Keep USB connected.";
 		view.indicator = FPLINUX_STATUS_BUSY;
 		break;
+	}
+	if (fplinux_preparation_has_counts(status->stage) && status->total) {
+		view.indicator = FPLINUX_STATUS_PROGRESS;
+		view.completed = status->completed;
+		view.total = status->total;
+		snprintf(percentage, sizeof(percentage), "%u%%",
+			 fplinux_status_scale(status->completed, status->total,
+					      100));
+		snprintf(bytes, sizeof(bytes), "%.1Lf / %.1Lf MiB",
+			 (long double)status->completed / 1048576,
+			 (long double)status->total / 1048576);
+		view.progress_percent = percentage;
+		view.progress_bytes = bytes;
 	}
 	return fplinux_status_screen_render(&canvas, &resources, &view) == 0;
 }

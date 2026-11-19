@@ -3,7 +3,7 @@
 # shellcheck shell=sh disable=SC2034
 
 name="FPLinux SSH and SFTP server"
-description="Provide session-bound SSH and SFTP access"
+description="Provide SSH and SFTP access over USB"
 supervisor=supervise-daemon
 command=/usr/libexec/fplinux/ssh-server
 input_file=/dev/null
@@ -12,6 +12,13 @@ error_logger="/usr/libexec/fplinux/kmsg --level 4 --tag fplinux-ssh"
 respawn_delay=1
 respawn_max=3
 retry="TERM/2/KILL/2"
+
+# shellcheck source=../fplinux-usb-gadget/fplinux-usb-transport.sh
+. /usr/libexec/fplinux/usb-transport.sh
+if offline_card_boot; then
+	start() { return 0; }
+	stop() { return 0; }
+fi
 
 depend() {
 	need fplinux-usb-gadget

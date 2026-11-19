@@ -3,7 +3,7 @@
 # shellcheck shell=sh disable=SC2034
 
 name="FPLinux USB gadget"
-description="Configure the session-bound USB gadget"
+description="Configure the FPLinux USB network and host keyboard"
 
 depend() {
 	need devfs procfs sysfs

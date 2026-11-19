@@ -2,7 +2,7 @@
 pkgname=fplinux-ssh
 pkgver=1
 pkgrel=0
-pkgdesc="Session-bound SSH and SFTP service for FPLinux"
+pkgdesc="SSH and SFTP access over the phone's USB network"
 url="https://github.com/fplinux/fplinux"
 arch="noarch"
 license="GPL-2.0-only"
@@ -30,8 +30,8 @@ openrc() {
 }
 
 sha512sums="
-81fc88a08957f87c9f51f265271f6d322c25992a69b0cfe404657e6175141c3fa219a642eb1cc5b43030715d6c35f088d77314b15f2626a7293b3e8db71b7090  fplinux-ssh
-46dfcce3b94be3737342a31aa40eb689b1d2c49bf667d8ea3d041f3b6104d6285cc4768978ccbc7586980f607264822137d0511ea74f4612753bc8cd3a1ab69d  fplinux-session-id
+d5efe98229220be21d34098283996eb438a2941120d15aa6bf9d5760bff1728310ae8167cf76d2c6225310cc095f28da0b32babbbefdc489a70ab69ee5ea2998  fplinux-ssh
+93e5c9ef036aa03dfc82e411cee221a0864a2ef916ba62a78889fa0ebc2836e421d4f7e0a2c5a9b0cff75ba42fa79e42ab8b518eac19cf186404deed7327eb2d  fplinux-session-id
 d902b0d8c6abe886f8775abb753075590121fa870c2163efe448be5336ef82cb813273887e08b1b8dde9c8835ef822576dfedcf9de9fcbecd8a766d1cc87288e  fplinux-clock
-8c74f967a429193b1f29b38eb50c5ab782cb40f84b2163484581983ac58203869354a132ea7a4e304b45055dd70cd6546b8815dbb4f48d289c5ac3471a02caa5  fplinux-ssh.initd
+1ad893b055f1018117e00ceaa23964907142bca82a92838caa0cbbc9fcba3c847de779919260f7e877f6549a5050808423f3d3d42db4481e09ced12a29edd8f5  fplinux-ssh.initd
 "

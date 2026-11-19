@@ -3,6 +3,10 @@
 
 set -eu
 
+# shellcheck source=../fplinux-usb-gadget/fplinux-usb-transport.sh
+. /usr/libexec/fplinux/usb-transport.sh
+
+autonomous_card_boot && exit 1
 session_id_property=/proc/device-tree/fplinux-session/fplinux,session-id
 
 [ -f "$session_id_property" ] || exit 1

@@ -16,18 +16,21 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
 
 
-def phone_store_directory(target: str, *, root: Path | None = None) -> Path:
-    """Resolve one phone's store independently of a checkout or release archive."""
-    if root is not None:
-        return root
+def user_data_directory() -> Path:
+    """Locate persistent user data independently of a checkout or release archive."""
     if sys.platform == "win32":
         local_app_data = os.environ.get("LOCALAPPDATA")
         if not local_app_data:
             fail("LOCALAPPDATA is required to locate the private phone data store.")
-        return Path(local_app_data) / "FPLinux" / "phones" / target
+        return Path(local_app_data) / "FPLinux"
     data_home = os.environ.get("XDG_DATA_HOME")
     root_data = Path(data_home) if data_home else Path.home() / ".local" / "share"
-    return root_data / "fplinux" / "phones" / target
+    return root_data / "fplinux"
+
+
+def phone_store_directory(target: str, *, root: Path | None = None) -> Path:
+    """Resolve one phone's store independently of a checkout or release archive."""
+    return root if root is not None else user_data_directory() / "phones" / target
 
 
 @contextmanager

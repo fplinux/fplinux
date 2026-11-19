@@ -13,6 +13,13 @@ respawn_delay=1
 respawn_max=0
 retry="TERM/2/KILL/2"
 
+# shellcheck source=../fplinux-usb-gadget/fplinux-usb-transport.sh
+. /usr/libexec/fplinux/usb-transport.sh
+if autonomous_card_boot; then
+	start() { return 0; }
+	stop() { return 0; }
+fi
+
 depend() {
 	need devfs fplinux-usb-gadget
 }

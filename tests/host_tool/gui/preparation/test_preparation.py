@@ -105,10 +105,12 @@ def preparation(
                 *flags,
                 str(PEERS / "preparation-render-test.c"),
                 str(APORT / "preparation-render.c"),
+                str(APORT / "preparation-status.c"),
                 str(ROOT / "lib/fplinux-shared/fplinux-status-screen.c"),
                 str(ROOT / "lib/fplinux-shared/fplinux-activity.c"),
                 str(ROOT / "lib/fplinux/fplinux-ui-profile.c"),
                 str(fonts),
+                *json_flags,
             ],
             name="compile preparation state renderer",
         )
@@ -127,9 +129,13 @@ def preparation(
         "ready",
         "cancelled",
         "error",
+        "card-sending",
+        "card-writing",
+        "card-verifying",
+        "card-ready",
     ],
 )
-def test_actual_renderer_displays_state_and_exact_read_progress(
+def test_actual_renderer_displays_stage_and_exact_progress(
     preparation: PreparationBinaries, profile: str, state: str
 ) -> None:
     width, height = profile.split("x")
@@ -150,7 +156,9 @@ def update(preparation: PreparationBinaries, status: Path, stage: str, *counts: 
     assert result.returncode == 0, result.stderr
 
 
-@pytest.mark.parametrize("stage", ["waiting", "extracting", "ready", "error", "cancelled"])
+@pytest.mark.parametrize(
+    "stage", ["waiting", "extracting", "ready", "error", "cancelled", "card-sending", "card-ready"]
+)
 def test_stage_writer_needs_no_display(
     preparation: PreparationBinaries, tmp_path: Path, stage: str
 ) -> None:
@@ -194,6 +202,9 @@ def test_reading_preserves_exact_byte_counts(
         ["--stage", "reading", "--completed", "+1", "--total", "2"],
         ["--stage", "reading", "--completed", "0", "--total", "18446744073709551616"],
         ["--stage", "ready", "--completed", "1", "--total", "2"],
+        ["--stage", "card-writing"],
+        ["--stage", "card-verifying", "--completed", "2", "--total", "1"],
+        ["--stage", "card-ready", "--completed", "1", "--total", "2"],
         ["--completed", "1", "--total", "2"],
     ],
 )
@@ -225,6 +236,9 @@ def test_invalid_updates_preserve_previous_status(
         b'{"stage":"reading","total":2}',
         b'{"stage":"ready","completed":1}',
         b'{"stage":"ready\\u0000reading"}',
+        b'{"stage":"card-writing","total":2}',
+        b'{"stage":"card-verifying","completed":3,"total":2}',
+        b'{"stage":"card-sending","completed":1}',
         b" " * 512,
     ],
 )
@@ -345,6 +359,58 @@ def test_busy_reading_terminal_and_vt(
     result = run_process(
         [str(preparation.command), str(status)],
         name="observe preparation display",
+        timeout=10,
+        env=environment,
+        while_running=inspect,
+    )
+    assert result.returncode == 143, result.stderr
+    assert result.stdout == "closed\n"
+
+
+def test_card_install_display_animates_then_updates_and_stops(
+    preparation: PreparationBinaries, tmp_path: Path
+) -> None:
+    status = tmp_path / "status.json"
+    output = tmp_path / "frame"
+    vt = tmp_path / "vt"
+    os.mkfifo(vt)
+    environment = os.environ | {
+        "FPLINUX_TEST_GEOMETRY": "128x160",
+        "FPLINUX_TEST_VT": str(vt),
+        "FPLINUX_TEST_FRAME": str(output),
+    }
+    update(preparation, status, "card-sending")
+
+    def inspect(process: subprocess.Popen[str], deadline: float) -> None:
+        assert next_event(process, deadline) == "opened"
+        sending = next_frame(process, deadline, output)
+        assert next_frame(process, deadline, output) != sending
+
+        update(preparation, status, "card-writing", "--completed", "0", "--total", "6442450944")
+        writing = terminal_frame(process, deadline, output)
+        assert writing != sending
+
+        progress = ("--completed", "3221225472", "--total", "6442450944")
+        update(preparation, status, "card-writing", *progress)
+        assert json.loads(status.read_bytes()) == {
+            "stage": "card-writing",
+            "completed": 3221225472,
+            "total": 6442450944,
+        }
+        written = terminal_frame(process, deadline, output)
+        assert written != writing
+
+        update(preparation, status, "card-verifying", *progress)
+        verifying = terminal_frame(process, deadline, output)
+        assert verifying != written
+
+        update(preparation, status, "card-ready")
+        assert terminal_frame(process, deadline, output) != verifying
+        process.send_signal(signal.SIGTERM)
+
+    result = run_process(
+        [str(preparation.command), str(status)],
+        name="observe the card installer preparation display",
         timeout=10,
         env=environment,
         while_running=inspect,

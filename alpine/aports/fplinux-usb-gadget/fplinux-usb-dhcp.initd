@@ -14,6 +14,13 @@ respawn_delay=1
 respawn_max=3
 retry="TERM/2/KILL/2"
 
+# shellcheck source=fplinux-usb-transport.sh
+. /usr/libexec/fplinux/usb-transport.sh
+if offline_card_boot; then
+	start() { return 0; }
+	stop() { return 0; }
+fi
+
 depend() {
 	need fplinux-usb-gadget
 }

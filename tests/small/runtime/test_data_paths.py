@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -61,18 +62,24 @@ def selected_runtime(
         command="prepare",
     )
     observed: list[tuple[Path, Path, Path]] = []
+    base_args = ["fplinux.py", "prepare", "--bundle", str(options.bundle)]
 
     def phone(bundle: Path, data: Path, logs: Path, **_options: object) -> int:
         observed.append((bundle, data, logs))
         return 0
 
     def select() -> tuple[Path, Path, Path]:
+        arguments = base_args.copy()
+        for flag, path in (("--data-root", options.data_root), ("--log-root", options.log_root)):
+            if path is not None:
+                arguments.extend([flag, str(path)])
+        monkeypatch.setattr(sys, "argv", arguments)
         with pytest.raises(SystemExit) as result:
             cli.main(bundle_root=tmp_path / "entry bundle")
         assert result.value.code == 0
         return observed[-1]
 
-    monkeypatch.setattr(cli, "arguments", lambda _root: options)
+    monkeypatch.setattr(sys, "argv", base_args)
     monkeypatch.setattr(cli, "run_phone", phone)
     return options, select
 

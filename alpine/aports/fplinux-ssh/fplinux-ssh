@@ -3,13 +3,15 @@
 
 set -eu
 
+# shellcheck source-path=SCRIPTDIR
+# shellcheck source=../fplinux-usb-gadget/fplinux-usb-transport.sh
+. /usr/libexec/fplinux/usb-transport.sh
+
 session_node=/proc/device-tree/fplinux-session
-client_key_property=$session_node/fplinux,ssh-client-key
 session_id_property=$session_node/fplinux,session-id
 runtime_session=/run/fplinux-usb-session.conf
 state_dir=/run/fplinux-ssh
 decoded_key=$state_dir/.client-key.$$
-host_key=$state_dir/dropbear_ed25519_host_key
 host_key_tmp=$state_dir/.dropbear_ed25519_host_key.$$
 authorized_keys=$state_dir/authorized_keys
 authorized_keys_tmp=$state_dir/.authorized_keys.$$
@@ -30,14 +32,44 @@ terminate() {
 	exit "$status"
 }
 
+prepare_session_host_key() {
+	if ! /bin/busybox timeout -s TERM 30 /bin/busybox dd \
+		if=/dev/random of=/dev/null bs=1 count=1 2>/dev/null; then
+		fail "kernel random generator did not become ready"
+	fi
+	if [ -e "$host_key" ]; then
+		[ -f "$host_key" ] && [ ! -L "$host_key" ] || fail "invalid transient host key"
+		chmod 0600 "$host_key"
+		/usr/bin/dropbearkey -y -f "$host_key" >/dev/null 2>&1 ||
+			fail "invalid transient host key"
+	else
+		/usr/bin/dropbearkey -t ed25519 -f "$host_key_tmp" >/dev/null
+		chmod 0600 "$host_key_tmp"
+		mv -- "$host_key_tmp" "$host_key"
+	fi
+}
+
 trap cleanup_temporary_files EXIT
 trap 'terminate 129' HUP
 trap 'terminate 130' INT
 trap 'terminate 143' TERM
 
-[ -f "$client_key_property" ] || fail "missing SSH client key"
-[ "$(wc -c <"$client_key_property")" -eq 68 ] || fail "invalid SSH client key length"
-client_key=$(cat "$client_key_property")
+if autonomous_card_boot; then
+	card_access_provisioned || fail "missing private card access configuration"
+	client_key_file=$card_access_dir/client-key
+	host_key=$card_access_dir/host-key
+	key_scope=card
+else
+	client_key_file=$session_node/fplinux,ssh-client-key
+	host_key=$state_dir/dropbear_ed25519_host_key
+	key_scope=session
+	[ -f "$session_id_property" ] || fail "missing session ID"
+	[ "$(wc -c <"$session_id_property")" -eq 32 ] || fail "invalid session ID length"
+fi
+
+[ -f "$client_key_file" ] || fail "missing SSH client key"
+[ "$(wc -c <"$client_key_file")" -eq 68 ] || fail "invalid SSH client key length"
+client_key=$(cat "$client_key_file")
 [ "${#client_key}" -eq 68 ] || fail "invalid SSH client key encoding"
 case "$client_key" in
 *[!A-Za-z0-9+/=]*) fail "invalid SSH client key encoding" ;;
@@ -46,20 +78,12 @@ esac
 umask 077
 mkdir -p "$state_dir"
 chmod 0700 "$state_dir"
-/bin/busybox base64 -d <"$client_key_property" >"$decoded_key" ||
+/bin/busybox base64 -d <"$client_key_file" >"$decoded_key" ||
 	fail "invalid SSH client key encoding"
 [ "$(wc -c <"$decoded_key")" -eq 51 ] || fail "invalid Ed25519 public key"
 key_prefix=$(dd if="$decoded_key" bs=1 count=19 2>/dev/null | od -An -tx1 -v | tr -d ' \n')
 [ "$key_prefix" = 0000000b7373682d6564323535313900000020 ] ||
 	fail "invalid Ed25519 public key"
-
-[ -f "$session_id_property" ] || fail "missing session ID"
-[ "$(wc -c <"$session_id_property")" -eq 32 ] || fail "invalid session ID length"
-session_id=$(od -An -tx1 -v "$session_id_property" | tr -d ' \n')
-[ "${#session_id}" -eq 64 ] || fail "invalid session ID"
-case "$session_id" in
-*[!0-9a-f]*) fail "invalid session ID" ;;
-esac
 
 [ -f "$runtime_session" ] || fail "missing USB session configuration"
 [ "$(grep -c '^phone_address=' "$runtime_session")" -eq 1 ] ||
@@ -70,24 +94,14 @@ case "$phone_address" in
 esac
 
 [ -x /usr/lib/ssh/sftp-server ] || fail "missing SFTP server"
-if ! /bin/busybox timeout -s TERM 30 /bin/busybox dd \
-	if=/dev/random of=/dev/null bs=1 count=1 2>/dev/null; then
-	fail "kernel random generator did not become ready"
+# On a cold card boot Dropbear can wait for kernel entropy under supervision
+# while the rest of the system starts.
+if [ "$key_scope" = session ]; then
+	prepare_session_host_key
 fi
 
-if [ -e "$host_key" ]; then
-	[ -f "$host_key" ] && [ ! -L "$host_key" ] || fail "invalid transient host key"
-	chmod 0600 "$host_key"
-	/usr/bin/dropbearkey -y -f "$host_key" >/dev/null 2>&1 ||
-		fail "invalid transient host key"
-else
-	/usr/bin/dropbearkey -t ed25519 -f "$host_key_tmp" >/dev/null
-	chmod 0600 "$host_key_tmp"
-	mv -- "$host_key_tmp" "$host_key"
-fi
-
-printf '%s ssh-ed25519 %s fplinux-session\n' \
-	'no-port-forwarding,no-agent-forwarding,no-X11-forwarding' "$client_key" \
+printf '%s ssh-ed25519 %s fplinux-%s\n' \
+	'no-port-forwarding,no-agent-forwarding,no-X11-forwarding' "$client_key" "$key_scope" \
 	>"$authorized_keys_tmp"
 chmod 0600 "$authorized_keys_tmp"
 mv -f -- "$authorized_keys_tmp" "$authorized_keys"

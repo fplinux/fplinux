@@ -334,6 +334,18 @@ def command_action(
             upload=args.upload,
             pull=args.pull,
             allow_other_build=args.allow_other_build,
+    elif args.command == "card":
+        from fplinux_cli.cli.card import install_target_card  # noqa: PLC0415 -- selected backend.
+
+        action = partial(
+            install_target_card,
+            args.target,
+            jobs=args.jobs,
+            build_type=args.build_type,
+            erase_card=getattr(args, "erase_card", None),
+            from_dump=args.from_dump,
+            inspect_only=args.card_command == "inspect",
+        )
         )
     elif args.command == "nand":
         if args.nand_command == "backup":

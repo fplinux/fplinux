@@ -13,6 +13,10 @@ enum fplinux_preparation_stage {
 	FPLINUX_PREPARATION_READY,
 	FPLINUX_PREPARATION_ERROR,
 	FPLINUX_PREPARATION_CANCELLED,
+	FPLINUX_PREPARATION_CARD_SENDING,
+	FPLINUX_PREPARATION_CARD_WRITING,
+	FPLINUX_PREPARATION_CARD_VERIFYING,
+	FPLINUX_PREPARATION_CARD_READY,
 };
 
 struct fplinux_preparation_status {
@@ -36,6 +40,7 @@ bool fplinux_preparation_read(const char *path,
 bool fplinux_preparation_write(const char *path,
 			       const struct fplinux_preparation_status *status);
 bool fplinux_preparation_is_busy(enum fplinux_preparation_stage stage);
+bool fplinux_preparation_has_counts(enum fplinux_preparation_stage stage);
 bool fplinux_preparation_render(
 	const struct fplinux_preparation_surface *surface,
 	const struct fplinux_preparation_status *status, unsigned int phase);

@@ -20,7 +20,7 @@ from fplinux_cli.runtime.bundle_session import PUBLIC_BOOT_MODES
 _CHECK_SCOPE_METAVAR = "{" + ",".join(CHECK_SCOPES) + "}"
 _PUBLIC_COMMAND_METAVAR = (
     "{data-path,doctor,check,test,logs,inspect,format,setup,dependencies,ci,build,probe-build,checksum,"
-    "package,prune,run,console,nand,device-data,target,verify,site}"
+    "package,prune,run,console,card,nand,device-data,target,verify,site}"
 )
 
 
@@ -553,6 +553,22 @@ def create_parser(
     console_actions.add_argument("--keyboard", metavar="EVDEV")
     console_actions.add_argument("--exec", dest="exec_command", metavar="COMMAND")
     console_actions.add_argument("--upload", nargs=2, metavar=("LOCAL", "REMOTE"))
+    card_parser = commands.add_parser("card", help="install a microSD system card")
+    card_commands = card_parser.add_subparsers(dest="card_command", required=True)
+    card_install = card_commands.add_parser(
+        "install", help="prepare and write a card in the phone over USB"
+    )
+    card_inspect = card_commands.add_parser("inspect", help="identify the SD in the RAM session")
+    for command in (card_install, card_inspect):
+        _add_build_type_option(command)
+        _add_phone_data_option(command)
+        command.add_argument("target", choices=targets)
+        command.add_argument("--from-dump", type=Path, metavar="FILE")
+        command.add_argument("--jobs", type=_positive_integer, default=_default_build_jobs())
+    card_install.add_argument(
+        "--erase-card", metavar="CID", help="explicitly allow erasing this SD card"
+    )
+
     console_actions.add_argument("--pull", nargs=2, metavar=("REMOTE", "LOCAL"))
 
     nand_parser = commands.add_parser("nand", help="read the target's internal NAND")

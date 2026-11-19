@@ -33,12 +33,14 @@ def configfs_root(tmp_path: Path) -> Path:
     return tmp_path
 
 
-def run_transport(root: Path, contents: str | None) -> subprocess.CompletedProcess[str]:
+def run_transport(
+    root: Path, contents: str | None, *, session: str = ""
+) -> subprocess.CompletedProcess[str]:
     """Source production shell code while replacing the external ConfigFS boundary."""
     if contents is not None:
         (root / "usb-transport").write_text(contents)
     return subprocess.run(
-        ["sh", str(CASE), str(TRANSPORT), str(root)],
+        ["sh", str(CASE), str(TRANSPORT), str(root), session],
         env={"PATH": f"{root / 'bin'}:/usr/bin:/bin", "LC_ALL": "C"},
         capture_output=True,
         text=True,
@@ -109,3 +111,26 @@ def test_unknown_transport_stops_before_function_creation(configfs_root: Path) -
     assert not (configfs_root / "gadget/functions/ncm.usb0").exists()
     assert not (configfs_root / "gadget/functions/rndis.usb0").exists()
     assert not (configfs_root / "gadget/configs/c.1/.function-order").exists()
+
+
+@pytest.mark.parametrize(
+    ("configured", "session", "status", "function_order"),
+    [
+        ("ncm\n", "rndis", 0, "rndis.usb0\ngser.keyboard\n"),
+        ("rndis\n", "ncm", 0, "gser.keyboard\nncm.usb0\n"),
+        ("ncm\n", "ecm", 1, None),
+    ],
+)
+def test_selected_session_transport_overrides_the_root_filesystem(
+    configfs_root: Path, configured: str, session: str, status: int, function_order: str | None
+) -> None:
+    result = run_transport(configfs_root, configured, session=session)
+
+    assert result.returncode == status, result.stderr
+    assert (configfs_root / "usb-transport").read_text() == configured
+    order = configfs_root / "gadget/configs/c.1/.function-order"
+    if function_order is None:
+        assert "unsupported USB transport: ecm" in result.stderr
+        assert not order.exists()
+    else:
+        assert order.read_text() == function_order

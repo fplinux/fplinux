@@ -20,6 +20,7 @@ if TYPE_CHECKING:
 _EXCLUSIVE_CACHE_COMMANDS = frozenset(
     {
         "build",
+        "card",
         "check",
         "checksum",
         "dependencies",

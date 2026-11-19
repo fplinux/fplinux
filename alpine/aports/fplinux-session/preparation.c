@@ -268,11 +268,12 @@ int main(int argc, char **argv)
 {
 	struct fplinux_cli_option options[] = {
 		{ "stage", "STAGE",
-		  "Write waiting, reading, extracting, ready, error or cancelled",
+		  "Write waiting, reading, extracting, ready, error, cancelled, "
+		  "card-sending, card-writing, card-verifying or card-ready",
 		  0, NULL, 0 },
-		{ "completed", "BYTES", "Bytes read from the phone", 0, NULL,
-		  0 },
-		{ "total", "BYTES", "Total bytes to read from the phone", 0,
+		{ "completed", "BYTES", "Bytes read, written or verified", 0,
+		  NULL, 0 },
+		{ "total", "BYTES", "Total bytes for the current stage", 0,
 		  NULL, 0 },
 		{ NULL, "STATUS_FILE", "Preparation status file",
 		  FPLINUX_CLI_REQUIRED, NULL, 0 },
@@ -280,7 +281,7 @@ int main(int argc, char **argv)
 	struct fplinux_cli cli = {
 		.program = "preparation",
 		.description =
-			"Show first-start progress, or atomically update its status.",
+			"Show preparation progress, or atomically update its status.",
 		.options = options,
 		.option_count = sizeof(options) / sizeof(options[0]),
 	};
@@ -289,25 +290,23 @@ int main(int argc, char **argv)
 
 	if (parsed != FPLINUX_CLI_READY)
 		return parsed;
-	if (!options[0].value) {
-		if (options[1].value || options[2].value)
-			return fplinux_cli_error(
-				&cli, "byte counts require --stage reading");
+	if (!options[0].value && !options[1].value && !options[2].value)
 		return run_display(options[3].value);
-	}
-	if (!fplinux_preparation_parse_stage(options[0].value, &status.stage))
+	if (options[0].value &&
+	    !fplinux_preparation_parse_stage(options[0].value, &status.stage))
 		return fplinux_cli_error(&cli, "unknown preparation stage");
-	if (status.stage == FPLINUX_PREPARATION_READING) {
+	if (fplinux_preparation_has_counts(status.stage)) {
 		if (!options[1].value || !options[2].value ||
 		    !parse_count(options[1].value, &status.completed) ||
 		    !parse_count(options[2].value, &status.total) ||
 		    !status.total || status.completed > status.total)
 			return fplinux_cli_error(
 				&cli,
-				"reading requires 0 <= completed <= total and total > 0");
+				"expected 0 <= completed <= total and total > 0");
 	} else if (options[1].value || options[2].value) {
-		return fplinux_cli_error(&cli,
-					 "byte counts require --stage reading");
+		return fplinux_cli_error(
+			&cli,
+			"byte counts require --stage reading, card-writing or card-verifying");
 	}
 	if (!fplinux_preparation_write(options[3].value, &status)) {
 		fprintf(stderr, "preparation: cannot write status: %s\n",

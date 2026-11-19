@@ -6,12 +6,11 @@ set -eu
 # shellcheck source-path=SCRIPTDIR
 # shellcheck source=fplinux-usb-network-policy.sh
 . /usr/libexec/fplinux/usb-network-policy.sh
+# shellcheck source-path=SCRIPTDIR
 # shellcheck source=fplinux-usb-transport.sh
 . /usr/libexec/fplinux/usb-transport.sh
 
 session_node=/proc/device-tree/fplinux-session
-usb_session_property=$session_node/fplinux,usb-session
-session_id_property=$session_node/fplinux,session-id
 gadget=/sys/kernel/config/usb_gadget/fplinux
 configuration=$gadget/configs/c.1
 runtime_session=/run/fplinux-usb-session.conf
@@ -45,16 +44,6 @@ remove_temporary_files() {
 
 remove_runtime_files() {
 	rm -f -- "$runtime_session" "$runtime_dhcp" /run/fplinux-udhcpd.leases
-}
-
-read_session_id() {
-	[ -f "$session_id_property" ] || return 1
-	[ "$(wc -c <"$session_id_property")" -eq 32 ] || return 1
-	session_id=$(od -An -tx1 -v "$session_id_property" | tr -d ' \n')
-	[ "${#session_id}" -eq 64 ] || return 1
-	case "$session_id" in
-	*[!0-9a-f]*) return 1 ;;
-	esac
 }
 
 validate_ipv4() {
@@ -106,18 +95,20 @@ validate_mac() {
 }
 
 parse_usb_session() {
-	[ -f "$usb_session_property" ] || return 1
-	[ "$(wc -c <"$usb_session_property")" -eq 256 ] || return 1
+	usb_network_file=$1
+	usb_identity_file=$2
+	[ -f "$usb_network_file" ] || return 1
+	[ "$(wc -c <"$usb_network_file")" -eq 256 ] || return 1
 
-	tr -d '\000' <"$usb_session_property" >"$session_ascii"
+	tr -d '\000' <"$usb_network_file" >"$session_ascii"
 	ascii_size=$(wc -c <"$session_ascii")
 	[ "$ascii_size" -gt 0 ] || return 1
 	[ "$ascii_size" -lt 256 ] || return 1
-	dd if="$usb_session_property" of="$session_prefix" bs=1 \
+	dd if="$usb_network_file" of="$session_prefix" bs=1 \
 		count="$ascii_size" 2>/dev/null
 	cmp "$session_ascii" "$session_prefix" >/dev/null 2>&1 || return 1
 	non_padding_size=$(
-		dd if="$usb_session_property" bs=1 skip="$ascii_size" 2>/dev/null |
+		dd if="$usb_network_file" bs=1 skip="$ascii_size" 2>/dev/null |
 			tr -d '\000' | wc -c
 	)
 	[ "$non_padding_size" -eq 0 ] || return 1
@@ -131,6 +122,7 @@ parse_usb_session() {
 	broadcast=
 	device_mac=
 	host_mac=
+	session_transport=
 	seen_usb_serial=0
 	seen_phone_address=0
 	seen_host_address=0
@@ -138,9 +130,7 @@ parse_usb_session() {
 	seen_broadcast=0
 	seen_device_mac=0
 	seen_host_mac=0
-	line_count=0
 	while IFS= read -r line; do
-		line_count=$((line_count + 1))
 		case "$line" in
 		*=*)
 			key=${line%%=*}
@@ -184,11 +174,14 @@ parse_usb_session() {
 			host_mac=$value
 			seen_host_mac=1
 			;;
+		transport)
+			[ -z "$session_transport" ] && [ -n "$value" ] || return 1
+			session_transport=$value
+			;;
 		*) return 1 ;;
 		esac
 	done <"$session_ascii"
 
-	[ "$line_count" -eq 7 ] || return 1
 	[ "$seen_usb_serial$seen_phone_address$seen_host_address" = 111 ] ||
 		return 1
 	[ "$seen_netmask$seen_broadcast$seen_device_mac$seen_host_mac" = 1111 ] ||
@@ -230,7 +223,7 @@ parse_usb_session() {
 	validate_mac "$host_mac" || return 1
 	[ "$device_mac" != "$host_mac" ] || return 1
 
-	expected_serial=$(sha256sum "$session_id_property")
+	expected_serial=$(sha256sum "$usb_identity_file")
 	expected_serial=${expected_serial%% *}
 	expected_serial=$(printf '%.32s' "$expected_serial")
 	[ "$usb_serial" = "$expected_serial" ]
@@ -311,19 +304,31 @@ on_exit() {
 }
 
 start_gadget() {
+	if autonomous_card_boot; then
+		card_access_provisioned || return 0
+		identity_file=$card_access_dir/device-id
+		network_file=$card_access_dir/usb-network
+		keyboard_enabled=0
+	else
+		identity_file=$session_node/fplinux,session-id
+		network_file=$session_node/fplinux,usb-session
+		keyboard_enabled=1
+	fi
+
 	mkdir -p /run
 	: >"$log"
 	exec >>"$log" 2>&1
 	trap on_exit EXIT
 	trap 'exit 1' HUP INT TERM
-	stage=select_usb_transport
-	usb_transport=$(read_usb_transport /etc/fplinux/usb-transport)
-	report 6 "START transport=$usb_transport kernel=$(uname -r)"
-
-	stage=validate_session_id
-	read_session_id
+	stage=validate_usb_identity
+	if [ ! -f "$identity_file" ] || [ "$(wc -c <"$identity_file")" -ne 32 ]; then
+		return 1
+	fi
 	stage=validate_usb_session
-	parse_usb_session
+	parse_usb_session "$network_file" "$identity_file"
+	stage=select_usb_transport
+	usb_transport=$(read_usb_transport /etc/fplinux/usb-transport "$session_transport")
+	report 6 "START transport=$usb_transport kernel=$(uname -r)"
 
 	if [ ! -d /sys/kernel/config/usb_gadget ]; then
 		stage=configfs_unavailable
@@ -361,16 +366,20 @@ start_gadget() {
 	mkdir "$configuration/strings/0x409"
 
 	stage=create_functions
-	mkdir "$gadget/functions/gser.keyboard"
+	if [ "$keyboard_enabled" -eq 1 ]; then
+		mkdir "$gadget/functions/gser.keyboard"
+	fi
 	create_usb_network_function "$gadget" "$configuration" "$usb_transport" \
-		"$device_mac" "$host_mac"
+		"$device_mac" "$host_mac" "$keyboard_enabled"
 
 	stage=link_functions
-	link_usb_functions "$gadget" "$configuration" "$usb_transport"
+	link_usb_functions "$gadget" "$configuration" "$usb_transport" "$keyboard_enabled"
 
 	stage=verify_prebind
-	if [ ! -c /dev/ttyGS0 ] || [ -e /dev/ttyGS1 ]; then
-		return 1
+	if [ "$keyboard_enabled" -eq 1 ]; then
+		if [ ! -c /dev/ttyGS0 ] || [ -e /dev/ttyGS1 ]; then
+			return 1
+		fi
 	fi
 	stage=verify_forwarding
 	verify_usb_forwarding /proc/sys/net/ipv4/ip_forward
@@ -413,7 +422,11 @@ start_gadget() {
 		/sbin/ifconfig usb0
 		/sbin/route -n
 	} >>"$log"
-	report 6 "READY udc=$udc keyboard=/dev/ttyGS0 network=usb0"
+	if [ "$keyboard_enabled" -eq 1 ]; then
+		report 6 "READY udc=$udc keyboard=/dev/ttyGS0 network=usb0"
+	else
+		report 6 "READY udc=$udc network=usb0"
+	fi
 	created=0
 	runtime_created=0
 	trap - EXIT HUP INT TERM

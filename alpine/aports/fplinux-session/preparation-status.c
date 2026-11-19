@@ -18,6 +18,10 @@ static const char *const stage_names[] = {
 	[FPLINUX_PREPARATION_READY] = "ready",
 	[FPLINUX_PREPARATION_ERROR] = "error",
 	[FPLINUX_PREPARATION_CANCELLED] = "cancelled",
+	[FPLINUX_PREPARATION_CARD_SENDING] = "card-sending",
+	[FPLINUX_PREPARATION_CARD_WRITING] = "card-writing",
+	[FPLINUX_PREPARATION_CARD_VERIFYING] = "card-verifying",
+	[FPLINUX_PREPARATION_CARD_READY] = "card-ready",
 };
 
 bool fplinux_preparation_parse_stage(const char *name,
@@ -36,7 +40,15 @@ bool fplinux_preparation_parse_stage(const char *name,
 bool fplinux_preparation_is_busy(enum fplinux_preparation_stage stage)
 {
 	return stage == FPLINUX_PREPARATION_WAITING ||
-	       stage == FPLINUX_PREPARATION_EXTRACTING;
+	       stage == FPLINUX_PREPARATION_EXTRACTING ||
+	       stage == FPLINUX_PREPARATION_CARD_SENDING;
+}
+
+bool fplinux_preparation_has_counts(enum fplinux_preparation_stage stage)
+{
+	return stage == FPLINUX_PREPARATION_READING ||
+	       stage == FPLINUX_PREPARATION_CARD_WRITING ||
+	       stage == FPLINUX_PREPARATION_CARD_VERIFYING;
 }
 
 static bool read_count(struct json_object *object, const char *name,
@@ -83,7 +95,7 @@ static bool parse_status(const char *text, size_t size,
 	    !fplinux_preparation_parse_stage(json_object_get_string(stage),
 					     &parsed.stage))
 		goto done;
-	if (parsed.stage == FPLINUX_PREPARATION_READING) {
+	if (fplinux_preparation_has_counts(parsed.stage)) {
 		if (!read_count(object, "completed", &parsed.completed) ||
 		    !read_count(object, "total", &parsed.total) ||
 		    !parsed.total || parsed.completed > parsed.total)
@@ -158,7 +170,7 @@ bool fplinux_preparation_write(const char *path,
 	json_object_object_add(
 		object, "stage",
 		json_object_new_string(stage_names[status->stage]));
-	if (status->stage == FPLINUX_PREPARATION_READING) {
+	if (fplinux_preparation_has_counts(status->stage)) {
 		json_object_object_add(
 			object, "completed",
 			json_object_new_uint64(status->completed));
