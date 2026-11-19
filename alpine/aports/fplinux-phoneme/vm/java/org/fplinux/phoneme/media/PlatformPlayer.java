@@ -47,6 +47,7 @@ public final class PlatformPlayer implements Player {
     private int format;
     private int state = UNREALIZED;
     private int handle;
+    private long playback;
     private final int clientId;
     private int loopCount = 1;
     private int loopsLeft = 1;
@@ -117,7 +118,7 @@ public final class PlatformPlayer implements Player {
     }
 
     private static void dispatchEvents() {
-        long[] event = new long[4];
+        long[] event = new long[5];
         while (nextEvent0(event)) {
             PlatformPlayer player = null;
             synchronized (players) {
@@ -132,18 +133,28 @@ public final class PlatformPlayer implements Player {
                 }
             }
             if (player != null) {
-                player.event((int)event[1], event[2], (int)event[3]);
+                player.event((int)event[0], (int)event[1], event[2],
+                    (int)event[3], event[4]);
             }
         }
     }
 
-    private void event(int eventType, long time, int error) {
+    private void event(int eventHandle, int eventType, long time, int error,
+                       long eventPlayback) {
         String name;
         Object data = new Long(time);
         boolean repeat = false;
         boolean closeTone = false;
         synchronized (this) {
+            if (eventHandle != handle && eventHandle != clientId) {
+                return;
+            }
             if (state == CLOSED && eventType != CLOSE_EVENT) {
+                return;
+            }
+            // The broker may have queued completion before a later START.
+            if ((eventType == END_EVENT || eventType == ERROR_EVENT) &&
+                eventPlayback != playback) {
                 return;
             }
             if (eventType == END_EVENT) {
@@ -200,9 +211,10 @@ public final class PlatformPlayer implements Player {
         if (repeat) {
             synchronized (this) {
                 // A listener may stop, close or restart the player itself.
-                if (state == PREFETCHED && restartAllowed) {
+                if (state == PREFETCHED && restartAllowed &&
+                    playback == eventPlayback) {
                     try {
-                        command0(handle, START, 0);
+                        playback = command0(handle, START, 0);
                         state = STARTED;
                     } catch (MediaException failure) {
                         post0(handle, ERROR_EVENT, 0);
@@ -375,7 +387,7 @@ public final class PlatformPlayer implements Player {
             if (handle == 0) {
                 throw new MediaException("Tone sequence is not set");
             }
-            command0(handle, START, 0);
+            playback = command0(handle, START, 0);
             if (!loopActive) {
                 loopsLeft = loopCount;
             }
@@ -625,6 +637,7 @@ public final class PlatformPlayer implements Player {
                         throw failure;
                     }
                     handle = created;
+                    playback = 0;
                     if (previous == 0) {
                         synchronized (players) {
                             players.addElement(PlatformPlayer.this);
