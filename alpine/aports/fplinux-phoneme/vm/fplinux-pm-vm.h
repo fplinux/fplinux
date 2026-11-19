@@ -22,6 +22,8 @@ extern "C" {
 #define FPLINUX_PM_VM_SYSTEM_CLASSES "/usr/share/fplinux-phoneme/classes.zip"
 /* Java heap used when the configuration leaves heap_kib at 0. */
 #define FPLINUX_PM_VM_HEAP_KIB_DEFAULT 4096u
+/* Maximum size of a local JAD passed to the VM. */
+#define FPLINUX_PM_JAD_MAX (64u * 1024u)
 
 /* Results of fplinux_pm_vm_slice() besides a positive delay. */
 #define FPLINUX_PM_VM_SLICE_AGAIN 0 /* more work: call again soon */
@@ -34,6 +36,9 @@ typedef void (*fplinux_pm_vm_wakeup_fn)(void *context);
 struct fplinux_pm_vm_config {
 	/* MIDlet suite JAR; it becomes the classpath after the system classes. */
 	const char *jar_path;
+	/* Optional validated local JAD bytes, copied at start. */
+	const unsigned char *descriptor;
+	size_t descriptor_size;
 	/* MIDlet class from a MIDlet-<n> attribute, e.g. "com.example.Game". */
 	const char *midlet_class;
 	/* NULL selects FPLINUX_PM_VM_SYSTEM_CLASSES (tests pass a build path). */
@@ -156,6 +161,10 @@ struct fplinux_pm_suite {
 	/* MIDlet-1, MIDlet-2, ... up to the first missing number. */
 	size_t midlet_count;
 	struct fplinux_pm_midlet *midlets;
+	/* Local document selection, populated by fplinux_pm_suite_open(). */
+	char *jar_path;
+	unsigned char *descriptor;
+	size_t descriptor_size;
 };
 
 enum fplinux_pm_jar_status {
@@ -166,17 +175,21 @@ enum fplinux_pm_jar_status {
 	FPLINUX_PM_JAR_TOO_LARGE, /* entry larger than the caller's limit */
 	FPLINUX_PM_JAR_NO_MIDLETS, /* no valid MIDlet-1 attribute */
 	FPLINUX_PM_JAR_NO_MEMORY,
+	FPLINUX_PM_JAR_BAD_DESCRIPTOR,
 };
 
+bool fplinux_pm_path_is_descriptor(const char *path);
+
 /*
- * Read the suite attributes and MIDlet list of a JAR. On FPLINUX_PM_JAR_OK
- * the caller owns *suite and releases it with fplinux_pm_suite_cleanup();
- * on any other result *suite is left empty (safe to clean up). A malformed
- * MIDlet-<n> value (fewer than three fields, empty name or class) ends the
- * list as if the number were missing. A manifest containing NUL is rejected.
+ * Read a JAR or a local JAD referencing a sibling JAR. When opening a JAR,
+ * use a matching same-stem JAD if there is one. The suite owns the resolved
+ * JAR path and validated descriptor bytes on success, and is empty on error.
+ * A missing or malformed MIDlet-<n> value ends the numbered list.
+ * If directory is requested, the caller closes its fd after using the suite.
  */
-enum fplinux_pm_jar_status
-fplinux_pm_jar_read_suite(const char *jar_path, struct fplinux_pm_suite *suite);
+enum fplinux_pm_jar_status fplinux_pm_suite_open(const char *path,
+						 struct fplinux_pm_suite *suite,
+						 int *directory);
 
 void fplinux_pm_suite_cleanup(struct fplinux_pm_suite *suite);
 

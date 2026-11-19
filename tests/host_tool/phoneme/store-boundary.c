@@ -13,7 +13,7 @@ int main(int argc, char **argv)
 
 	if (argc != 3)
 		return 2;
-	if (fplinux_pm_jar_read_suite(argv[2], &suite) != FPLINUX_PM_JAR_OK) {
+	if (fplinux_pm_suite_open(argv[2], &suite, NULL) != FPLINUX_PM_JAR_OK) {
 		fputs("invalid suite\n", stderr);
 		return 2;
 	}

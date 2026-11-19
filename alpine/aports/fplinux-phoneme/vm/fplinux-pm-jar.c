@@ -15,9 +15,12 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <fplinux/fplinux-utf8.h>
+#include <limits.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <sys/stat.h>
 #include <unistd.h>
 #include <zlib.h>
@@ -147,20 +150,31 @@ find_end(struct jar *jar, const unsigned char *tail, size_t tail_size)
 	}
 }
 
-static enum fplinux_pm_jar_status jar_open(struct jar *jar, const char *path)
+static enum fplinux_pm_jar_status open_regular(int directory, const char *path,
+					       int *fd, struct stat *file)
+{
+	*fd = openat(directory, path,
+		     O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK);
+	if (*fd < 0 || fstat(*fd, file))
+		return FPLINUX_PM_JAR_IO;
+	if (!S_ISREG(file->st_mode)) {
+		errno = EINVAL;
+		return FPLINUX_PM_JAR_IO;
+	}
+	return FPLINUX_PM_JAR_OK;
+}
+
+static enum fplinux_pm_jar_status jar_open(struct jar *jar, int directory,
+					   const char *path)
 {
 	enum fplinux_pm_jar_status status;
 	struct stat file;
 	unsigned char *tail;
 	size_t tail_size;
 
-	jar->fd = open(path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK);
-	if (jar->fd < 0 || fstat(jar->fd, &file))
-		return FPLINUX_PM_JAR_IO;
-	if (!S_ISREG(file.st_mode)) {
-		errno = EINVAL;
-		return FPLINUX_PM_JAR_IO;
-	}
+	status = open_regular(directory, path, &jar->fd, &file);
+	if (status != FPLINUX_PM_JAR_OK)
+		return status;
 	if (file.st_size < (off_t)ZIP_END_BYTES)
 		return FPLINUX_PM_JAR_FORMAT;
 	jar->file_size = (uint64_t)file.st_size;
@@ -331,34 +345,43 @@ static enum fplinux_pm_jar_status jar_extract(const struct jar *jar,
 	return status;
 }
 
-enum fplinux_pm_jar_status
-fplinux_pm_jar_read_entry(const char *jar_path, const char *entry_path,
-			  size_t max_size, unsigned char **data, size_t *size)
+static enum fplinux_pm_jar_status
+read_named_entry(struct jar *jar, const char *path, size_t max_size,
+		 unsigned char **data, size_t *size)
 {
-	struct jar jar = { .fd = -1 };
-	enum fplinux_pm_jar_status status;
 	struct jar_entry entry;
-	int saved_errno;
+	enum fplinux_pm_jar_status status = jar_find(jar, path, &entry);
 
-	*data = NULL;
-	*size = 0;
-	if (entry_path[0] == '/')
-		++entry_path;
-	status = jar_open(&jar, jar_path);
-	if (status == FPLINUX_PM_JAR_OK)
-		status = jar_find(&jar, entry_path, &entry);
 	if (status == FPLINUX_PM_JAR_OK && entry.size > max_size)
 		status = FPLINUX_PM_JAR_TOO_LARGE;
 	if (status == FPLINUX_PM_JAR_OK)
-		status = jar_extract(&jar, &entry, data);
+		status = jar_extract(jar, &entry, data);
 
-	saved_errno = errno;
 	if (status == FPLINUX_PM_JAR_OK) {
 		*size = entry.size;
 	} else {
 		free(*data);
 		*data = NULL;
 	}
+	return status;
+}
+
+enum fplinux_pm_jar_status
+fplinux_pm_jar_read_entry(const char *jar_path, const char *entry_path,
+			  size_t max_size, unsigned char **data, size_t *size)
+{
+	struct jar jar = { .fd = -1 };
+	enum fplinux_pm_jar_status status = jar_open(&jar, AT_FDCWD, jar_path);
+	int saved_errno;
+
+	*data = NULL;
+	*size = 0;
+	if (entry_path[0] == '/')
+		++entry_path;
+	if (status == FPLINUX_PM_JAR_OK)
+		status = read_named_entry(&jar, entry_path, max_size, data,
+					  size);
+	saved_errno = errno;
 	jar_close(&jar);
 	errno = saved_errno;
 	return status;
@@ -376,6 +399,14 @@ struct manifest_attributes {
 	struct text vendor;
 	struct text version;
 	struct text midlets[FPLINUX_PM_JAR_MIDLETS_MAX + 1]; /* by <n> */
+};
+
+struct descriptor {
+	struct manifest_attributes attributes;
+	struct text url;
+	struct text jar_size;
+	unsigned char *data;
+	size_t size;
 };
 
 struct midlet_fields {
@@ -485,6 +516,18 @@ static bool next_line(const char **cursor, const char *end, struct text *line)
 	return true;
 }
 
+static bool text_is(struct text text, const char *string)
+{
+	return text.length == strlen(string) &&
+	       !memcmp(text.start, string, text.length);
+}
+
+static const char *skip_bom(const char *start, size_t size)
+{
+	return size >= 3 && !memcmp(start, "\xef\xbb\xbf", 3) ? start + 3 :
+								start;
+}
+
 /*
  * Joins continuation lines into scratch, which needs size bytes: every byte
  * written there comes from a different byte of the manifest.
@@ -492,14 +535,12 @@ static bool next_line(const char **cursor, const char *end, struct text *line)
 static void read_main_section(const char *manifest, size_t size, char *scratch,
 			      struct manifest_attributes *attributes)
 {
-	const char *cursor = manifest;
+	const char *cursor = skip_bom(manifest, size);
 	const char *end = manifest + size;
 	struct text logical = { NULL, 0 };
 	struct text line;
 	char *output = scratch;
 
-	if (size >= 3 && !memcmp(manifest, "\xef\xbb\xbf", 3))
-		cursor += 3;
 	while (next_line(&cursor, end, &line)) {
 		if (!line.length) {
 			if (logical.start)
@@ -522,6 +563,176 @@ static void read_main_section(const char *manifest, size_t size, char *scratch,
 	}
 	if (logical.start)
 		store_attribute(attributes, logical);
+}
+
+static struct text *descriptor_field(struct descriptor *descriptor,
+				     struct text name)
+{
+	if (text_is(name, "MIDlet-Name"))
+		return &descriptor->attributes.name;
+	if (text_is(name, "MIDlet-Vendor"))
+		return &descriptor->attributes.vendor;
+	if (text_is(name, "MIDlet-Version"))
+		return &descriptor->attributes.version;
+	if (text_is(name, "MIDlet-Jar-URL"))
+		return &descriptor->url;
+	if (text_is(name, "MIDlet-Jar-Size"))
+		return &descriptor->jar_size;
+	if (name.length > 7 && !memcmp(name.start, "MIDlet-", 7)) {
+		size_t number = midlet_number(name.start, name.length);
+
+		if (number)
+			return &descriptor->attributes.midlets[number];
+	}
+	return NULL;
+}
+
+static bool parse_descriptor(struct descriptor *descriptor)
+{
+	const char *start = (const char *)descriptor->data;
+	const unsigned char *utf8 = descriptor->data;
+	const unsigned char *end = utf8 + descriptor->size;
+	const char *cursor = skip_bom(start, descriptor->size);
+	struct text line;
+
+	while (utf8 < end) {
+		uint32_t code;
+
+		if (!fplinux_utf8_next(&utf8, end, &code) || code == 0x7f ||
+		    (code < ' ' && code != '\t' && code != '\r' &&
+		     code != '\n'))
+			return false;
+	}
+	while (next_line(&cursor, start + descriptor->size, &line)) {
+		const char *colon = memchr(line.start, ':', line.length);
+		struct text *field;
+
+		if (!trim(line.start, line.length).length)
+			continue;
+		if (!colon || colon == line.start)
+			return false;
+		for (const char *p = line.start; p < colon; ++p) {
+			unsigned char c = (unsigned char)*p;
+
+			if (c <= ' ' || c == 0x7f ||
+			    strchr("()<>@,;\"'/[]?={}\\", c))
+				return false;
+		}
+		field = descriptor_field(
+			descriptor,
+			(struct text){ line.start,
+				       (size_t)(colon - line.start) });
+		if (!field)
+			continue;
+		if (field->start)
+			return false;
+		*field = trim(colon + 1,
+			      line.length - (size_t)(colon + 1 - line.start));
+	}
+	return true;
+}
+
+static enum fplinux_pm_jar_status
+read_descriptor(int directory, const char *name, struct descriptor *descriptor)
+{
+	int fd;
+	struct stat file;
+	enum fplinux_pm_jar_status status =
+		open_regular(directory, name, &fd, &file);
+
+	if (status == FPLINUX_PM_JAR_OK) {
+		if (file.st_size <= 0 ||
+		    file.st_size > (off_t)FPLINUX_PM_JAD_MAX) {
+			status = FPLINUX_PM_JAR_BAD_DESCRIPTOR;
+		} else {
+			descriptor->size = (size_t)file.st_size;
+			descriptor->data = malloc(descriptor->size);
+			status = descriptor->data ?
+					 read_at(fd, 0, descriptor->data,
+						 descriptor->size) :
+					 FPLINUX_PM_JAR_NO_MEMORY;
+		}
+	}
+	if (fd >= 0) {
+		int saved_errno = errno;
+
+		close(fd);
+		errno = saved_errno;
+	}
+	if (status == FPLINUX_PM_JAR_OK && !parse_descriptor(descriptor))
+		return FPLINUX_PM_JAR_BAD_DESCRIPTOR;
+	return status;
+}
+
+static bool path_has_suffix(const char *path, const char *suffix)
+{
+	const char *dot = strrchr(path, '.');
+
+	return dot && !strcasecmp(dot, suffix);
+}
+
+bool fplinux_pm_path_is_descriptor(const char *path)
+{
+	return path_has_suffix(path, ".jad");
+}
+
+static int hex_digit(char c)
+{
+	if (c >= '0' && c <= '9')
+		return c - '0';
+	c = ascii_lower(c);
+	return c >= 'a' && c <= 'f' ? c - 'a' + 10 : -1;
+}
+
+/* Resolve a relative URL containing just one local filename. */
+static bool descriptor_jar_name(struct text url, char name[NAME_MAX + 1])
+{
+	size_t length = 0;
+
+	for (size_t i = 0; i < url.length; ++i) {
+		unsigned char c = (unsigned char)url.start[i];
+
+		if (c == '?' || c == '#')
+			return false;
+		if (c == '%') {
+			int hi, lo;
+
+			if (i + 2 >= url.length)
+				return false;
+			hi = hex_digit(url.start[++i]);
+			lo = hex_digit(url.start[++i]);
+			if (hi < 0 || lo < 0)
+				return false;
+			c = (unsigned char)(hi * 16 + lo);
+		}
+		if (length == NAME_MAX || c < ' ' || c == 0x7f || c == '/' ||
+		    c == '\\' || c == ':')
+			return false;
+		name[length++] = (char)c;
+	}
+	name[length] = '\0';
+	return path_has_suffix(name, ".jar");
+}
+
+static bool same_identity(struct text jar, struct text jad)
+{
+	return jar.length && jar.length == jad.length &&
+	       !memcmp(jar.start, jad.start, jar.length);
+}
+
+static bool same_jar_size(uint64_t size, struct text declared)
+{
+	/* ZIP archives cannot be empty. Overflow cannot match the file size. */
+	uint64_t value = 0;
+
+	for (size_t i = 0; i < declared.length; ++i) {
+		char c = declared.start[i];
+
+		if (c < '0' || c > '9' || value > size / 10)
+			return false;
+		value = value * 10 + (unsigned int)(c - '0');
+	}
+	return value == size;
 }
 
 /* "name, icon, class": the icon lies between the first and the last comma. */
@@ -589,36 +800,162 @@ no_memory:
 	return FPLINUX_PM_JAR_NO_MEMORY;
 }
 
-enum fplinux_pm_jar_status
-fplinux_pm_jar_read_suite(const char *jar_path, struct fplinux_pm_suite *suite)
+static enum fplinux_pm_jar_status
+read_suite_at(int directory, const char *jar_name,
+	      const struct descriptor *descriptor,
+	      struct fplinux_pm_suite *suite)
 {
-	struct manifest_attributes attributes;
-	enum fplinux_pm_jar_status status;
-	unsigned char *manifest;
-	char *scratch;
-	size_t size;
+	struct jar jar = { .fd = -1 };
+	struct manifest_attributes attributes = { 0 };
+	enum fplinux_pm_jar_status status = jar_open(&jar, directory, jar_name);
+	unsigned char *manifest = NULL;
+	char *scratch = NULL;
+	size_t size = 0;
 
-	memset(suite, 0, sizeof(*suite));
-	status = fplinux_pm_jar_read_entry(jar_path, "META-INF/MANIFEST.MF",
-					   FPLINUX_PM_JAR_MANIFEST_MAX,
-					   &manifest, &size);
+	if (status == FPLINUX_PM_JAR_OK && descriptor &&
+	    !same_jar_size(jar.file_size, descriptor->jar_size))
+		status = FPLINUX_PM_JAR_BAD_DESCRIPTOR;
+	if (status == FPLINUX_PM_JAR_OK)
+		status = read_named_entry(&jar, "META-INF/MANIFEST.MF",
+					  FPLINUX_PM_JAR_MANIFEST_MAX,
+					  &manifest, &size);
+	int saved_errno = errno;
+
+	jar_close(&jar);
+	errno = saved_errno;
 	if (status != FPLINUX_PM_JAR_OK)
 		return status;
 	/* Attributes are exposed as C strings and must not be truncated. */
 	if (memchr(manifest, '\0', size)) {
-		free(manifest);
-		return FPLINUX_PM_JAR_FORMAT;
+		status = FPLINUX_PM_JAR_FORMAT;
+		goto cleanup;
 	}
 	scratch = malloc(size + 1);
 	if (!scratch) {
-		free(manifest);
-		return FPLINUX_PM_JAR_NO_MEMORY;
+		status = FPLINUX_PM_JAR_NO_MEMORY;
+		goto cleanup;
 	}
-	memset(&attributes, 0, sizeof(attributes));
 	read_main_section((const char *)manifest, size, scratch, &attributes);
+	if (descriptor) {
+		const struct manifest_attributes *jad = &descriptor->attributes;
+
+		if (!same_identity(attributes.name, jad->name) ||
+		    !same_identity(attributes.vendor, jad->vendor) ||
+		    !same_identity(attributes.version, jad->version)) {
+			status = FPLINUX_PM_JAR_BAD_DESCRIPTOR;
+			goto cleanup;
+		}
+		for (size_t i = 1; i <= FPLINUX_PM_JAR_MIDLETS_MAX; ++i)
+			if (jad->midlets[i].start)
+				attributes.midlets[i] = jad->midlets[i];
+	}
 	status = build_suite(&attributes, suite);
+cleanup:
 	free(scratch);
 	free(manifest);
+	return status;
+}
+
+static enum fplinux_pm_jar_status read_companion(int directory,
+						 const char *jar_name,
+						 struct descriptor *descriptor)
+{
+	char name[NAME_MAX + 1];
+	size_t length = strlen(jar_name);
+
+	if (length > NAME_MAX || !path_has_suffix(jar_name, ".jar"))
+		return FPLINUX_PM_JAR_NO_ENTRY;
+	memcpy(name, jar_name, length - 4);
+	memcpy(name + length - 4, ".jad", 5);
+	enum fplinux_pm_jar_status status =
+		read_descriptor(directory, name, descriptor);
+
+	if (status != FPLINUX_PM_JAR_IO || errno != ENOENT)
+		return status;
+	memcpy(name + length - 4, ".JAD", 5);
+	return read_descriptor(directory, name, descriptor);
+}
+
+enum fplinux_pm_jar_status fplinux_pm_suite_open(const char *path,
+						 struct fplinux_pm_suite *suite,
+						 int *directory)
+{
+	const char *slash = strrchr(path, '/');
+	const char *name = slash ? slash + 1 : path;
+	size_t prefix = (size_t)(name - path);
+	bool explicit_jad = fplinux_pm_path_is_descriptor(name);
+	char folder[PATH_MAX];
+	char resolved[NAME_MAX + 1];
+	struct descriptor descriptor = { 0 };
+	const char *jar_name = name;
+	enum fplinux_pm_jar_status status;
+	int parent;
+
+	memset(suite, 0, sizeof(*suite));
+	if (strlen(path) >= sizeof(folder)) {
+		errno = ENAMETOOLONG;
+		return FPLINUX_PM_JAR_IO;
+	}
+	if (!slash) {
+		strcpy(folder, ".");
+	} else {
+		size_t length = slash == path ? 1 : prefix - 1;
+
+		memcpy(folder, path, length);
+		folder[length] = '\0';
+	}
+	parent = open(folder, O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
+	if (parent < 0)
+		return FPLINUX_PM_JAR_IO;
+
+	status = explicit_jad ? read_descriptor(parent, name, &descriptor) :
+				read_companion(parent, name, &descriptor);
+	if (status == FPLINUX_PM_JAR_OK) {
+		if (descriptor_jar_name(descriptor.url, resolved) &&
+		    (explicit_jad || !strcmp(name, resolved))) {
+			jar_name = resolved;
+			status = read_suite_at(parent, jar_name, &descriptor,
+					       suite);
+		} else {
+			status = FPLINUX_PM_JAR_BAD_DESCRIPTOR;
+		}
+	}
+	if (status == FPLINUX_PM_JAR_OK) {
+		suite->descriptor = descriptor.data;
+		suite->descriptor_size = descriptor.size;
+	} else {
+		free(descriptor.data);
+		if (!explicit_jad && status != FPLINUX_PM_JAR_NO_MEMORY) {
+			jar_name = name;
+			status = read_suite_at(parent, jar_name, NULL, suite);
+		}
+	}
+	if (status == FPLINUX_PM_JAR_OK) {
+		size_t bytes = prefix + strlen(jar_name) + 1;
+
+		if (bytes > sizeof(folder)) {
+			errno = ENAMETOOLONG;
+			status = FPLINUX_PM_JAR_IO;
+		} else {
+			suite->jar_path = malloc(bytes);
+			if (suite->jar_path) {
+				memcpy(suite->jar_path, path, prefix);
+				strcpy(suite->jar_path + prefix, jar_name);
+			} else {
+				status = FPLINUX_PM_JAR_NO_MEMORY;
+			}
+		}
+	}
+	if (status == FPLINUX_PM_JAR_OK && directory) {
+		*directory = parent;
+	} else {
+		int saved_errno = errno;
+
+		if (status != FPLINUX_PM_JAR_OK)
+			fplinux_pm_suite_cleanup(suite);
+		close(parent);
+		errno = saved_errno;
+	}
 	return status;
 }
 
@@ -635,5 +972,7 @@ void fplinux_pm_suite_cleanup(struct fplinux_pm_suite *suite)
 	free(suite->name);
 	free(suite->vendor);
 	free(suite->version);
+	free(suite->jar_path);
+	free(suite->descriptor);
 	memset(suite, 0, sizeof(*suite));
 }

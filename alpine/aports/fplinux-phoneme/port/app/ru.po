@@ -85,8 +85,11 @@ msgstr "Авто"
 msgid "Not enough memory."
 msgstr "Недостаточно памяти."
 
-msgid "Open JAR"
-msgstr "Открыть JAR"
+msgid "Open"
+msgstr "Открыть"
+
+msgid "The JAD is invalid or does not match a local JAR."
+msgstr "В JAD есть ошибка или он не подходит к локальному JAR."
 
 msgid "This program"
 msgstr "Эта программа"

@@ -72,7 +72,10 @@ def write_suite(
 ) -> None:
     """Create a normal ZIP with MIDP manifest fields and literal class entries."""
     icon_name = "icon.png" if icon else ""
-    manifest = f"MIDlet-Name: Example suite\r\nMIDlet-1: First, {icon_name}, example.First\r\n"
+    manifest = (
+        "MIDlet-Name: Example suite\r\nMIDlet-Vendor: Example maker\r\nMIDlet-Version: 1.0\r\n"
+        f"MIDlet-1: First, {icon_name}, example.First\r\n"
+    )
     if multiple:
         manifest += "MIDlet-2: Second, , example.Second\r\n"
     with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
@@ -343,3 +346,110 @@ def test_document_rejects_nonregular_file_without_blocking(
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert result.stdout == f"document error {error}; no VM started\n"
+
+
+def write_descriptor(descriptor: Path, jar: Path, **overrides: object) -> None:
+    attributes: dict[str, object] = {
+        "MIDlet-Name": "Example suite",
+        "MIDlet-Vendor": "Example maker",
+        "MIDlet-Version": "1.0",
+        "MIDlet-Jar-URL": jar.name,
+        "MIDlet-Jar-Size": jar.stat().st_size,
+        "MIDlet-1": "Named by JAD, , example.First",
+    }
+    attributes.update(overrides)
+    descriptor.write_text(
+        "".join(f"{name}: {value}\n" for name, value in attributes.items()), encoding="utf-8"
+    )
+
+
+def test_descriptor_opens_named_local_jar_and_is_saved_in_recent(
+    phoneme_app: Path, tmp_path: Path
+) -> None:
+    jar = tmp_path / "a game.JAR"
+    descriptor = tmp_path / "properties.JAD"
+    write_suite(jar)
+    write_descriptor(descriptor, jar, **{"MIDlet-Jar-URL": "a%20game.JAR"})
+
+    result = run_process(
+        [str(phoneme_app)],
+        name="phoneME opens local descriptor",
+        env=os.environ
+        | {
+            "FPLINUX_PM_TEST_SCENARIO": "jad-local",
+            "FPLINUX_PM_TEST_JAR": str(descriptor),
+            "FPLINUX_PM_TEST_ROOT": str(tmp_path),
+        },
+        timeout=10,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.splitlines()[-2:] == [
+        f"JAR {jar}",
+        "first MIDlet screen accepts document; one VM started",
+    ]
+    assert "properties.JAD" in (tmp_path / "preferences").read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("MIDlet-Name", "Other game"),
+        ("MIDlet-Vendor", "Other maker"),
+        ("MIDlet-Version", "1.1"),
+        ("MIDlet-Jar-Size", "0"),
+        ("MIDlet-Jar-URL", "https://example.com/game.jar"),
+        ("MIDlet-Jar-URL", "%2e%2e%2fgame.jar"),
+        ("MIDlet-Jar-URL", "game.jar?later"),
+    ],
+)
+def test_descriptor_rejects_unmatched_identity_size_or_nonlocal_jar(
+    phoneme_app: Path, tmp_path: Path, field: str, value: str
+) -> None:
+    jar = tmp_path / "game.jar"
+    descriptor = tmp_path / "game.jad"
+    write_suite(jar)
+    write_descriptor(descriptor, jar, **{field: value})
+
+    result = run_process(
+        [str(phoneme_app)],
+        name=f"phoneME rejects a mismatched descriptor {field}",
+        env=os.environ
+        | {
+            "FPLINUX_PM_TEST_SCENARIO": "invalid",
+            "FPLINUX_PM_TEST_JAR": str(descriptor),
+            "FPLINUX_PM_TEST_ROOT": str(tmp_path),
+        },
+        timeout=10,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout == f"document error {errno.EBADMSG}; no VM started\n"
+
+
+def test_opening_jar_ignores_a_companion_that_names_another_jar(
+    phoneme_app: Path, tmp_path: Path
+) -> None:
+    jar = tmp_path / "game.jar"
+    other = tmp_path / "other.jar"
+    write_suite(jar)
+    write_suite(other)
+    write_descriptor(tmp_path / "game.jad", other)
+
+    result = run_process(
+        [str(phoneme_app)],
+        name="phoneME retains selected JAR with mismatched companion",
+        env=os.environ
+        | {
+            "FPLINUX_PM_TEST_SCENARIO": "unmatched-companion",
+            "FPLINUX_PM_TEST_JAR": str(jar),
+            "FPLINUX_PM_TEST_ROOT": str(tmp_path),
+        },
+        timeout=10,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.splitlines()[-2:] == [
+        "unmatched companion ignored",
+        "first MIDlet screen accepts document; one VM started",
+    ]

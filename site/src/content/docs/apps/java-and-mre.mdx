@@ -10,10 +10,10 @@ Java and MRE support come as optional packages. Follow [Optional packages](/fpli
 
 | Files | Package | Application |
 | --- | --- | --- |
-| Java MIDlet `.jar` | `fplinux-phoneme.apk` | phoneME |
+| Java MIDlet `.jar` or local `.jad` | `fplinux-phoneme.apk` | phoneME |
 | MRE `.vxp` | `fplinux-mre.apk` | MRE |
 
-After installation, open **phoneME** or **MRE** from the application menu. Choose **Open** to browse My files or a memory card, or choose a previously opened program from **Recent**. You can also select a JAR or VXP directly in [Files](/fplinux/use/files/). A missing file stays in Recent so you can reconnect its card; removing that entry does not delete the program or its saved data.
+After installation, open **phoneME** or **MRE** from the application menu. Choose **Open** to browse My files or a memory card, or choose a previously opened program from **Recent**. You can also select a JAR, JAD or VXP directly in [Files](/fplinux/use/files/). A missing file stays in Recent so you can reconnect its card; removing that entry does not delete the program or its saved data.
 
 Transfer your program to My files or a connected memory card. For uploads to My files, follow the [ownership step](/fplinux/use/connect/#files-for-graphical-applications) before opening it. Keep any companion files beside the program when it expects them there.
 
@@ -33,7 +33,9 @@ If saving fails, the chosen value remains applied and Settings shows **Unsaved**
 
 ## Java programs
 
-Open the JAR itself. When it contains several MIDlets, choose the one to run. Opening another JAR asks to close the current program; cancel to keep it running.
+If a program came with a JAD descriptor, keep it beside the JAR and open the JAD. Its **MIDlet-Jar-URL** must name the JAR in the same folder, its declared size must match the file, and the suite name, vendor and version must match the JAR manifest. Properties in a matching JAD override the corresponding manifest properties. Opening the JAR also uses a matching `.jad` or `.JAD` with the same filename stem when present. A standalone JAR uses its manifest.
+
+When a suite contains several MIDlets, choose the one to run. Opening another suite asks to close the current program. Choose **Cancel** to keep it running.
 
 Java programs using FileConnection access My files as `c:/` and a mounted data card as `e:/`. PhoneME supports listing, reading and writing files in these folders. A program that depends on notifications when a storage root is added or removed may need to be reopened to find the card.
 

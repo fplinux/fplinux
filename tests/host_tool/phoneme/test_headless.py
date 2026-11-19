@@ -37,6 +37,7 @@ def headless(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
                 str(HERE / "headless-boundary.c"),
                 str(PORT / "vm/fplinux-pm-headless.c"),
                 str(PORT / "vm/fplinux-pm-jar.c"),
+                str(ROOT / "lib/fplinux/fplinux-utf8.c"),
                 str(PORT / "port/canvas/fplinux-pm-canvas-core.c"),
                 str(ROOT / "lib/fplinux-shared/fplinux-cli.c"),
                 "-lz",

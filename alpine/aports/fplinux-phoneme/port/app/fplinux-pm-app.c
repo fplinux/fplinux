@@ -19,7 +19,6 @@
 #include "../../vm/fplinux-pm-vm.h"
 
 #include <errno.h>
-#include <fcntl.h>
 #include <fplinux/fplinux-ui-screen.h>
 #include <fplinux/fplinux-ui-session.h>
 #include <fplinux/fplinux-ui-file-picker.h>
@@ -63,8 +62,8 @@ struct pm_app {
 	uint32_t replacement_id;
 	/* Deferred resource reads keep the containing filesystem in use. */
 	int jar_directory;
-	/* The chosen JAR and its suite, for the chooser and the running VM. */
-	char jar_path[PATH_MAX];
+	/* Retain the selected JAD or JAR as the Recent entry. */
+	char document_path[PATH_MAX];
 	struct fplinux_pm_suite suite;
 	const struct fplinux_pm_midlet *midlet;
 	char *storage;
@@ -186,7 +185,7 @@ static void set_busy(struct pm_app *app, const char *title)
 void fplinux_pm_app_loaded(void)
 {
 	if (!app.loaded) {
-		char *path = realpath(app.jar_path, NULL);
+		char *path = realpath(app.document_path, NULL);
 
 		if (path) {
 			bool stored =
@@ -329,8 +328,8 @@ static unsigned char *read_icon(struct pm_app *app, const char *path,
 	size_t size = 0;
 
 	if (!path[0] ||
-	    fplinux_pm_jar_read_entry(app->jar_path, path, ICON_MAX_BYTES, &png,
-				      &size) != FPLINUX_PM_JAR_OK)
+	    fplinux_pm_jar_read_entry(app->suite.jar_path, path, ICON_MAX_BYTES,
+				      &png, &size) != FPLINUX_PM_JAR_OK)
 		return NULL;
 	/* The signature, then IHDR with a width and height below 65536. */
 	if (size < 24 || memcmp(png, signature, sizeof(signature)) ||
@@ -425,7 +424,9 @@ static void vm_finished(struct pm_app *app, bool started)
 static void start_vm(struct pm_app *app)
 {
 	struct fplinux_pm_vm_config config = {
-		.jar_path = app->jar_path,
+		.jar_path = app->suite.jar_path,
+		.descriptor = app->suite.descriptor,
+		.descriptor_size = app->suite.descriptor_size,
 		.midlet_class = app->midlet->class_name,
 		.storage_dir = app->storage,
 		.wakeup = vm_wakeup,
@@ -651,13 +652,13 @@ static int choose_midlet(struct pm_app *app, size_t index)
 	int error;
 
 	set_busy(app, midlet->name);
-	error = check_midlet_class(app->jar_path, midlet);
+	error = check_midlet_class(app->suite.jar_path, midlet);
 	if (!error) {
 		const char *key;
 
 		free(app->storage);
 		app->storage = fplinux_pm_store_open(
-			app->state_root, &app->suite, app->jar_path);
+			app->state_root, &app->suite, app->suite.jar_path);
 		if (!app->storage)
 			return errno ? errno : EIO;
 		key = strrchr(app->storage, '/');
@@ -735,7 +736,7 @@ static bool show_chooser(struct pm_app *app)
 {
 	const char *title = app->suite.name[0] ?
 				    app->suite.name :
-				    strrchr(app->jar_path, '/') + 1;
+				    strrchr(app->suite.jar_path, '/') + 1;
 	struct fplinux_ui_screen *list =
 		fplinux_ui_list_new(app->ui, title, FPLINUX_UI_LIST_IMPLICIT);
 
@@ -757,6 +758,8 @@ static int jar_error(enum fplinux_pm_jar_status status)
 {
 	if (status == FPLINUX_PM_JAR_IO)
 		return errno ? errno : EIO;
+	if (status == FPLINUX_PM_JAR_BAD_DESCRIPTOR)
+		return EBADMSG;
 	return status == FPLINUX_PM_JAR_NO_MEMORY ? ENOMEM : ENOEXEC;
 }
 
@@ -835,8 +838,6 @@ open_document(struct fplinux_ui *ui,
 	};
 	struct fplinux_pm_suite suite = { 0 };
 	enum fplinux_pm_jar_status status;
-	char directory[PATH_MAX];
-	const char *slash;
 	size_t length;
 	int descriptor;
 	int error;
@@ -844,31 +845,20 @@ open_document(struct fplinux_ui *ui,
 	if (!request->path || request->path[0] != '/')
 		return result;
 	length = strlen(request->path);
-	if (length >= sizeof(app->jar_path)) {
+	if (length >= sizeof(app->document_path)) {
 		result.error = ENAMETOOLONG;
 		return result;
 	}
-	memcpy(directory, request->path, length + 1);
-	slash = strrchr(request->path, '/');
-	directory[slash == request->path ? 1 : (size_t)(slash - request->path)] =
-		'\0';
-	descriptor = open(directory,
-			  O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
-	if (descriptor < 0) {
-		result.error = errno;
-		return result;
-	}
-	status = fplinux_pm_jar_read_suite(request->path, &suite);
+	status = fplinux_pm_suite_open(request->path, &suite, &descriptor);
 	if (status != FPLINUX_PM_JAR_OK) {
 		result.error = jar_error(status);
-		close(descriptor);
 		return result;
 	}
 	if (app->lifecycle.phase != FPLINUX_PM_PHASE_PICKING) {
 		int class_error = 0;
 
 		for (size_t i = 0; i < suite.midlet_count; ++i) {
-			error = check_midlet_class(request->path,
+			error = check_midlet_class(suite.jar_path,
 						   &suite.midlets[i]);
 			if (error) {
 				class_error = error;
@@ -904,7 +894,7 @@ open_document(struct fplinux_ui *ui,
 		close(app->jar_directory);
 	app->jar_directory = descriptor;
 	app->suite = suite;
-	memcpy(app->jar_path, request->path, length + 1);
+	memcpy(app->document_path, request->path, length + 1);
 	app->loaded = false;
 	if (suite.midlet_count == 1)
 		error = choose_midlet(app, 0);
@@ -941,7 +931,7 @@ static void open_path(struct pm_app *app, const char *path)
 		return;
 	app->open_request = fplinux_ui_open_file(app->ui, path);
 	if (!app->open_request)
-		show_alert(app, _("Open JAR"), strerror(errno));
+		show_alert(app, _("Open"), strerror(errno));
 }
 
 static void picker_result(struct fplinux_ui_file_picker *picker,
@@ -957,20 +947,20 @@ static void picker_result(struct fplinux_ui_file_picker *picker,
 		if (selected)
 			open_path(app, selected);
 		else
-			show_alert(app, _("Open JAR"), _("Not enough memory."));
+			show_alert(app, _("Open"), _("Not enough memory."));
 	} else if (status == FPLINUX_UI_FILE_PICKER_ERROR) {
-		show_alert(app, _("Open JAR"), strerror(error));
+		show_alert(app, _("Open"), strerror(error));
 	}
 	free(selected);
 }
 
 static void open_picker(struct pm_app *app)
 {
-	static const char *const extensions[] = { "jar", NULL };
+	static const char *const extensions[] = { "jar", "jad", NULL };
 	const struct fplinux_ui_file_picker_options options = {
 		.mode = FPLINUX_UI_FILE_PICKER_FILE,
 		.home = app->home_path,
-		.title = _("Open JAR"),
+		.title = _("Open"),
 		.extensions = extensions,
 	};
 
@@ -982,7 +972,7 @@ static void open_picker(struct pm_app *app)
 	app->picker = fplinux_ui_file_picker_open(app->ui, &options,
 						  picker_result, app);
 	if (!app->picker)
-		show_alert(app, _("Open JAR"), strerror(errno));
+		show_alert(app, _("Open"), strerror(errno));
 }
 
 static void storage_result(struct fplinux_ui *ui,
@@ -1344,7 +1334,7 @@ static void show_home(struct pm_app *app)
 		if (app->midlet)
 			set_midlet_icon(app, screen, 0, app->midlet->icon);
 	}
-	append_home_row(app, screen, _("Open JAR"), "folder");
+	append_home_row(app, screen, _("Open"), "folder");
 	append_home_row(app, screen, _("Recent"), "history");
 	append_home_row(app, screen, _("Settings"), "settings");
 	if (app->prefs_error || app->program_prefs_error)
@@ -1423,8 +1413,12 @@ static void handle_event(struct fplinux_ui *ui,
 			if (event->document_result.status ==
 			    FPLINUX_UI_DOCUMENT_ERROR)
 				show_alert(
-					app, _("Open JAR"),
-					strerror(event->document_result.error));
+					app, _("Open"),
+					event->document_result.error ==
+							EBADMSG ?
+						_("The JAD is invalid or does not match a local JAR.") :
+						strerror(event->document_result
+								 .error));
 		}
 		break;
 	case FPLINUX_UI_EVENT_RESIZE:
@@ -1447,7 +1441,7 @@ int main(int argc, char **argv)
 {
 	struct fplinux_cli cli = {
 		.program = "fplinux-phoneme",
-		.description = "Run a MIDlet JAR.",
+		.description = "Run a MIDlet JAR or a local JAD.",
 	};
 	const char *home;
 	int result;

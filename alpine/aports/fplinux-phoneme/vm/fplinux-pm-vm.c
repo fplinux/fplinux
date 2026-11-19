@@ -51,6 +51,8 @@ static void *vm_wakeup_context;
 static char *vm_classpath;
 static char *vm_main_class;
 static char *vm_arguments[1];
+static unsigned char *vm_descriptor;
+static size_t vm_descriptor_size;
 
 static bool destroy_pending;
 static enum runner_request visibility_pending = REQUEST_NONE;
@@ -73,9 +75,12 @@ static void release_start_strings(void)
 	free(vm_classpath);
 	free(vm_main_class);
 	free(vm_arguments[0]);
+	free(vm_descriptor);
 	vm_classpath = NULL;
 	vm_main_class = NULL;
 	vm_arguments[0] = NULL;
+	vm_descriptor = NULL;
+	vm_descriptor_size = 0;
 }
 
 static void finish(int exit_code)
@@ -94,6 +99,8 @@ static bool config_is_valid(const struct fplinux_pm_vm_config *config)
 	return config != NULL && config->jar_path != NULL &&
 	       config->jar_path[0] != '\0' && config->midlet_class != NULL &&
 	       config->midlet_class[0] != '\0' && config->wakeup != NULL &&
+	       config->descriptor_size <= FPLINUX_PM_JAD_MAX &&
+	       (!config->descriptor_size || config->descriptor) &&
 	       strchr(config->jar_path, ':') == NULL &&
 	       (config->system_classes == NULL ||
 		strchr(config->system_classes, ':') == NULL);
@@ -125,12 +132,17 @@ bool fplinux_pm_vm_start(const struct fplinux_pm_vm_config *config)
 	vm_classpath = malloc(classpath_size);
 	vm_main_class = strdup(RUNNER_CLASS);
 	vm_arguments[0] = strdup(config->midlet_class);
+	vm_descriptor_size = config->descriptor_size;
+	if (vm_descriptor_size)
+		vm_descriptor = malloc(vm_descriptor_size);
 	if (vm_classpath == NULL || vm_main_class == NULL ||
-	    vm_arguments[0] == NULL) {
+	    vm_arguments[0] == NULL || (vm_descriptor_size && !vm_descriptor)) {
 		release_start_strings();
 		fputs("fplinux-phoneme: out of memory\n", stderr);
 		return false;
 	}
+	if (vm_descriptor_size)
+		memcpy(vm_descriptor, config->descriptor, vm_descriptor_size);
 	snprintf(vm_classpath, classpath_size, "%s:%s", system_classes,
 		 config->jar_path);
 
@@ -273,6 +285,23 @@ KNIEXPORT KNI_RETURNTYPE_INT Java_org_fplinux_phoneme_Runner_waitRequest0(void)
 	if (request == REQUEST_NONE)
 		midp_thread_wait(AMS_SIGNAL, REQUEST_DESCRIPTOR, NULL);
 	KNI_ReturnInt(request);
+}
+
+KNIEXPORT KNI_RETURNTYPE_OBJECT Java_org_fplinux_phoneme_Runner_descriptor0(void)
+{
+	KNI_StartHandles(1);
+	KNI_DeclareHandle(array);
+	if (vm_descriptor_size) {
+		jsize size = (jsize)vm_descriptor_size;
+
+		SNI_NewArray(SNI_BYTE_ARRAY, size, array);
+		if (KNI_IsNullHandle(array))
+			KNI_ThrowNew("java/lang/OutOfMemoryError", NULL);
+		else
+			KNI_SetRawArrayRegion(array, 0, size,
+					      (const jbyte *)vm_descriptor);
+	}
+	KNI_EndHandlesAndReturnObject(array);
 }
 
 /* private static native void exit0(int status); */

@@ -167,6 +167,7 @@ struct fplinux_ui_file_picker *fplinux_ui_file_picker_open(
 	(void)ui;
 	assert(options->mode == FPLINUX_UI_FILE_PICKER_FILE);
 	assert(!strcmp(options->extensions[0], "jar"));
+	assert(!strcmp(options->extensions[1], "jad"));
 	picker_callback = callback;
 	picker_context = context;
 	return (struct fplinux_ui_file_picker *)&runtime;
@@ -684,6 +685,13 @@ bool fplinux_pm_vm_start(const struct fplinux_pm_vm_config *config)
 	assert(S_ISDIR(directory.st_mode) &&
 	       (directory.st_mode & 0777) == 0700);
 	printf("storage %s\n", config->storage_dir);
+	if (!strcmp(scenario, "jad-local")) {
+		assert(config->descriptor && config->descriptor_size);
+		printf("JAR %s\n", config->jar_path);
+	} else if (!strcmp(scenario, "unmatched-companion")) {
+		assert(!config->descriptor && !config->descriptor_size);
+		puts("unmatched companion ignored");
+	}
 	if (!strcmp(scenario, "recent-remove-last")) {
 		char path[4096];
 		FILE *file;
@@ -910,7 +918,7 @@ int fplinux_ui_run(struct fplinux_ui *ui)
 	assert(ui->document);
 	if (!scenario || !strcmp(scenario, "startup")) {
 		assert(stack[0]->row_count == 3);
-		assert(!strcmp(stack[0]->rows[0], "Open JAR"));
+		assert(!strcmp(stack[0]->rows[0], "Open"));
 		assert(!strcmp(stack[0]->rows[1], "Recent"));
 		assert(!strcmp(stack[0]->rows[2], "Settings"));
 		puts("home offers JAR, recent and settings; no VM started");
@@ -1037,6 +1045,8 @@ int fplinux_ui_run(struct fplinux_ui *ui)
 	}
 	/* The VM boundary presents a MIDlet screen over the production suite. */
 	suite = stack[0];
+	if (!strcmp(scenario, "jad-local"))
+		assert(!strcmp(suite->title, "Named by JAD"));
 	game = fplinux_ui_form_new(ui, "Running MIDlet");
 	fplinux_ui_form_append_string(game, NULL, "Score: 42");
 	fplinux_ui_replace(ui, game);
@@ -1197,7 +1207,7 @@ int fplinux_ui_run(struct fplinux_ui *ui)
 		runtime.event(ui, &activation, runtime.context);
 		screen = fplinux_ui_current(ui);
 		assert(!strcmp(screen->rows[0], "Continue"));
-		assert(!strcmp(screen->rows[1], "Open JAR"));
+		assert(!strcmp(screen->rows[1], "Open"));
 		if (!strcmp(scenario, "tile-icon"))
 			assert(screen->icons[0]);
 		if (!strcmp(scenario, "tile-resize")) {

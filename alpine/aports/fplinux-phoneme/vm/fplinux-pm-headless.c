@@ -7,8 +7,8 @@
  * usage: fplinux-phoneme-headless [--system-classes PATH] [--heap-kib N]
  *            [--timeout-ms N] [--keys SCRIPT] [--storage-dir PATH]
  *            [--canvas-size SIZE] [--card-dir PATH]
- *            JAR [MIDLET-CLASS]
- * Without MIDLET-CLASS it runs MIDlet-1 of the JAR manifest. --timeout-ms
+ *            SUITE [MIDLET-CLASS]
+ * SUITE is a JAR or local JAD. Without MIDLET-CLASS it runs MIDlet-1. --timeout-ms
  * requests destroyApp(true) after that much time, then gives up 300 ms later.
  * --keys presses MIDP key codes on a schedule: comma-separated T:CODE[:HOLD]
  * items press CODE (e.g. -6 or 53 for '5') T ms after the start and release
@@ -301,8 +301,8 @@ int main(int argc, char **argv)
 		{ .name = "card-dir",
 		  .metavar = "PATH",
 		  .help = "Absolute data directory to expose as the mounted card in file tests" },
-		{ .metavar = "JAR",
-		  .help = "MIDlet suite",
+		{ .metavar = "SUITE",
+		  .help = "MIDlet suite JAR or local JAD",
 		  .flags = FPLINUX_CLI_REQUIRED },
 		{ .metavar = "MIDLET-CLASS",
 		  .help = "MIDlet class; default is MIDlet-1" },
@@ -333,21 +333,21 @@ int main(int argc, char **argv)
 		return fplinux_cli_error(&cli, "invalid Canvas size");
 	if (options[6].value && !use_card_directory(options[6].value))
 		return fplinux_cli_error(&cli, "invalid card directory");
-	const char *jar_path = options[7].value;
+	const char *path = options[7].value;
 	struct fplinux_pm_suite suite = { 0 };
 	const char *midlet_class = options[8].value;
+	enum fplinux_pm_jar_status status =
+		fplinux_pm_suite_open(path, &suite, NULL);
 
+	if (status != FPLINUX_PM_JAR_OK &&
+	    (!midlet_class || fplinux_pm_path_is_descriptor(path))) {
+		fprintf(stderr,
+			"fplinux-phoneme-headless: cannot open suite %s "
+			"(status %d)\n",
+			path, (int)status);
+		return EXIT_USAGE;
+	}
 	if (midlet_class == NULL) {
-		enum fplinux_pm_jar_status status =
-			fplinux_pm_jar_read_suite(jar_path, &suite);
-
-		if (status != FPLINUX_PM_JAR_OK) {
-			fprintf(stderr,
-				"fplinux-phoneme-headless: no MIDlet in %s "
-				"(status %d)\n",
-				jar_path, (int)status);
-			return EXIT_USAGE;
-		}
 		midlet_class = suite.midlets[0].class_name;
 		fprintf(stderr, "fplinux-phoneme-headless: MIDlet-1 %s (%s)\n",
 			midlet_class, suite.midlets[0].name);
@@ -367,7 +367,9 @@ int main(int argc, char **argv)
 	signal(SIGTERM, handle_stop_signal);
 
 	const struct fplinux_pm_vm_config config = {
-		.jar_path = jar_path,
+		.jar_path = suite.jar_path ? suite.jar_path : path,
+		.descriptor = suite.descriptor,
+		.descriptor_size = suite.descriptor_size,
 		.midlet_class = midlet_class,
 		.system_classes = options[0].value,
 		.heap_kib = heap_kib,

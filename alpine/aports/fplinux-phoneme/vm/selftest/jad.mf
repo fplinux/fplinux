@@ -1,0 +1,8 @@
+Manifest-Version: 1.0
+MIDlet-Name: Descriptor fixture
+MIDlet-Vendor: FPLinux
+MIDlet-Version: 1.0
+MIDlet-1: Properties, , fplinux.fixtures.jad.PropertiesMIDlet
+Fixture-Override: manifest
+Fixture-Manifest-Only: fallback
+

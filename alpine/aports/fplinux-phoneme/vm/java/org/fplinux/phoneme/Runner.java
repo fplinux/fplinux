@@ -63,6 +63,9 @@ public final class Runner {
     /** Blocks until the app sends a request; returns REQUEST_*. */
     private static native int waitRequest0();
 
+    /** Local descriptor bytes validated by the suite reader. */
+    private static native byte[] descriptor0();
+
     /** Stops the VM with this status; never returns. */
     private static native void exit0(int status);
 
@@ -92,8 +95,9 @@ public final class Runner {
         JarMIDletSuite suite = new JarMIDletSuite();
         try {
             suite.loadManifest();
+            suite.loadDescriptor(descriptor0());
         } catch (IOException e) {
-            System.err.println("fplinux-phoneme: cannot read the manifest: "
+            System.err.println("fplinux-phoneme: cannot read suite attributes: "
                                + e.getMessage());
             return EXIT_BAD_MANIFEST;
         }

@@ -7,4 +7,4 @@ Icon=org.fplinux.phoneme
 Categories=Game;
 X-FPLinux-Mode=integrated
 X-FPLinux-LightEffects=true
-X-FPLinux-FileExtensions=jar;
+X-FPLinux-FileExtensions=jar;jad;

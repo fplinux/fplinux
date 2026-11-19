@@ -69,6 +69,35 @@ grep -qx 'PM-HELLO start' "${work}/hello.txt" &&
 	grep -qx 'PM-HELLO done' "${work}/hello.txt" ||
 	fail "hello MIDlet output is incomplete (${work}/hello.txt)"
 
+# Query the actual MIDlet API before and after supplying a local descriptor.
+build_jar jad "${here}/jad.mf"
+cp "${work}/jad.jar" "${work}/jad-standalone.jar"
+"${qemu_arm}" -L "${sysroot}" "${headless}" --system-classes "${classes}" \
+	--timeout-ms 30000 "${work}/jad-standalone.jar" >"${work}/jad-standalone.txt"
+grep -qx 'PM-JAD custom=null' "${work}/jad-standalone.txt" &&
+	grep -qx 'PM-JAD override=manifest' "${work}/jad-standalone.txt" ||
+	fail "standalone JAR properties differ (${work}/jad-standalone.txt)"
+
+jar_size=$(stat -c %s "${work}/jad.jar")
+{
+	printf '\357\273\277%s\r\n' 'MIDlet-Name: Descriptor fixture'
+	printf '%s\r\n' 'MIDlet-Vendor: FPLinux' 'MIDlet-Version: 1.0' \
+		'MIDlet-Jar-URL: jad.jar' "MIDlet-Jar-Size: ${jar_size}" '' \
+		'Fixture-Custom: 1:2' 'Fixture-Override: descriptor'
+	printf 'Fixture-UTF8: \320\226\r\n'
+} >"${work}/jad.jad"
+for selection in jad jar; do
+	output="${work}/jad-from-${selection}.txt"
+	"${qemu_arm}" -L "${sysroot}" "${headless}" --system-classes "${classes}" \
+		--timeout-ms 30000 "${work}/jad.${selection}" >"${output}"
+	grep -qx 'PM-JAD custom=1:2' "${output}" &&
+		grep -qx 'PM-JAD override=descriptor' "${output}" &&
+		grep -qx 'PM-JAD manifest=fallback' "${output}" &&
+		grep -qx 'PM-JAD system=MIDP-2.0' "${output}" &&
+		grep -qx 'PM-JAD utf8=true' "${output}" ||
+		fail "local descriptor properties differ (${output})"
+done
+
 # The same file-backed store must survive a complete VM process exit.
 build_jar rms "${here}/rms.mf"
 rms_storage=$(mktemp -d "${work}/rms-storage.XXXXXX")
@@ -204,4 +233,4 @@ build_jar bluetooth "${here}/bluetooth.mf"
 grep -qx 'PM-BLUETOOTH local device unavailable' "${work}/bluetooth.txt" ||
 	fail "Bluetooth availability check differs (${work}/bluetooth.txt)"
 
-echo "phoneME self-test: PASS (vectors, hello, RMS, files, canvas, Form, List/Alert LF, headless media and Bluetooth availability)"
+echo "phoneME self-test: PASS (vectors, hello, local JAD, RMS, files, canvas, Form, List/Alert LF, headless media and Bluetooth availability)"

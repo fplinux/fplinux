@@ -1,9 +1,8 @@
 /*
  * SPDX-License-Identifier: GPL-2.0-only
  *
- * The one MIDlet suite of this VM: attributes come from the JAR manifest,
- * then from system properties. There is no installer, so there is no JAD,
- * no signature and no permission prompt; every permission is granted.
+ * The one MIDlet suite of this VM: attributes come from the local JAD,
+ * the JAR manifest, and system properties in that order.
  */
 package org.fplinux.phoneme;
 
@@ -24,6 +23,7 @@ final class JarMIDletSuite implements MIDletSuite {
 
     /* Main-section attributes keyed by the ASCII lower-case name. */
     private final Hashtable attributes = new Hashtable();
+    private Hashtable descriptor;
 
     /**
      * Reads /META-INF/MANIFEST.MF from the classpath: the MIDlet JAR is the
@@ -47,6 +47,30 @@ final class JarMIDletSuite implements MIDletSuite {
             parse(content.toByteArray());
         } finally {
             in.close();
+        }
+    }
+
+    /* The launcher has checked the descriptor syntax and suite identity. */
+    void loadDescriptor(byte[] bytes) throws IOException {
+        if (bytes == null) {
+            return;
+        }
+        String content = new String(bytes, "UTF-8");
+        descriptor = new Hashtable();
+        int start = content.charAt(0) == '\uFEFF' ? 1 : 0;
+        while (start < content.length()) {
+            int end = start;
+            while (end < content.length() && content.charAt(end) != '\r'
+                   && content.charAt(end) != '\n') {
+                end++;
+            }
+            String line = content.substring(start, end);
+            int colon = line.indexOf(':');
+            if (colon > 0) {
+                descriptor.put(line.substring(0, colon),
+                               line.substring(colon + 1).trim());
+            }
+            start = end + 1;
         }
     }
 
@@ -117,7 +141,10 @@ final class JarMIDletSuite implements MIDletSuite {
     }
 
     public String getProperty(String key) {
-        String value = (String)attributes.get(lowerCase(key));
+        String value = descriptor == null ? null : (String)descriptor.get(key);
+        if (value == null) {
+            value = (String)attributes.get(lowerCase(key));
+        }
         return value != null ? value : System.getProperty(key);
     }
 
