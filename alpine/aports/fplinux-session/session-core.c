@@ -2057,6 +2057,26 @@ static void close_reply(struct fplinux_session *session,
 	changed(session);
 }
 
+static bool owns_document_request(const struct document_request *request,
+				  const struct process *process,
+				  uint32_t serial)
+{
+	return request->request_id && serial && request->serial == serial &&
+	       request->handler_token == process->policy.token &&
+	       !process->policy.closing;
+}
+
+static void set_document_return_origin(struct process *process,
+				       const struct document_request *request)
+{
+	if (request->detached)
+		process->return_origin = 0;
+	else if (request->self_target)
+		process->return_origin = request->self_return_origin;
+	else
+		process->return_origin = request->origin_token;
+}
+
 static void
 handler_document_result(struct fplinux_session *session,
 			struct process *process,
@@ -2067,9 +2087,7 @@ handler_document_result(struct fplinux_session *session,
 			   request->serial == session->launch_generation &&
 			   process == session->app;
 
-	if (!request->request_id || request->serial != message->serial ||
-	    request->handler_token != process->policy.token ||
-	    process->policy.closing)
+	if (!owns_document_request(request, process, message->serial))
 		return;
 	if (message->document_status == FPLINUX_UI_DOCUMENT_RESTART_REQUIRED) {
 		if (request->restarted) {
@@ -2096,12 +2114,7 @@ handler_document_result(struct fplinux_session *session,
 		return;
 	}
 	if (message->document_status == FPLINUX_UI_DOCUMENT_ACCEPTED) {
-		if (request->detached)
-			process->return_origin = 0;
-		else if (request->self_target)
-			process->return_origin = request->self_return_origin;
-		else
-			process->return_origin = request->origin_token;
+		set_document_return_origin(process, request);
 		if (owns_launch) {
 			session->activation_ready = true;
 			finish_activation(session);
@@ -4116,6 +4129,15 @@ static bool receive_message(struct fplinux_session *session, struct peer *peer,
 				process->failed = true;
 			request_close(session, process);
 		} else if (!process->policy.closing) {
+			/* A document can finish before it has a frame to activate. */
+			if (owns_document_request(&session->document, process,
+						  message->serial)) {
+				set_document_return_origin(process,
+							   &session->document);
+				document_result(session,
+						FPLINUX_UI_DOCUMENT_ACCEPTED,
+						0);
+			}
 			prepare_user_close(session, process);
 		}
 		break;

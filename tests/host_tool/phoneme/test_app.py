@@ -185,6 +185,8 @@ def test_picker_waits_for_storage_snapshot(phoneme_app: Path, tmp_path: Path) ->
         ("chooser-start", "first MIDlet screen accepts document; one VM started"),
         ("chooser-cancel", "chooser cancelled; no VM started"),
         ("start-failure", "failed VM start reports error before acceptance"),
+        ("early-exit", "successful MIDlet exit accepts document before the first screen"),
+        ("early-error", "MIDlet startup error reports document failure"),
         ("replace-busy", "refused replace preserves peer and pending document; retry accepts"),
         ("replace-missing", "refused replace preserves peer and pending document; retry accepts"),
         ("push-busy", "refused push preserves peer and pending document; retry accepts"),
@@ -234,7 +236,7 @@ def test_document_lifecycle_preserves_user_decisions_and_vm(
     assert len(storage) == (0 if scenario == "chooser-cancel" else 1)
     assert all(path.is_dir() for path in storage)
     preferences = tmp_path / "preferences"
-    if scenario in {"chooser-cancel", "start-failure"}:
+    if scenario in {"chooser-cancel", "start-failure", "early-exit", "early-error"}:
         assert not preferences.exists()
     else:
         assert "recent-documents=" in preferences.read_text(encoding="utf-8")

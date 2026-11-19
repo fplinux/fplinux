@@ -967,6 +967,18 @@ def test_document_result_waits_for_new_document_frame_and_server_sync(
     assert result.stdout.endswith(f"{scenario}: ok\n")
 
 
+def test_successful_document_can_exit_before_the_document_frame(
+    client_frames: Path, tmp_path: Path
+) -> None:
+    result = run_process(
+        [str(client_frames), "document-exit", str(tmp_path / "session.sock")],
+        name="complete document through ordinary close while both frame buffers are busy",
+        timeout=10,
+        check=True,
+    )
+    assert result.stdout.endswith("document-exit: ok\n")
+
+
 def test_storage_errors_distinguish_capacity_access_and_io_failures(
     client_frames: Path, tmp_path: Path
 ) -> None:

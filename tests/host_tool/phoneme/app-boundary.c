@@ -61,8 +61,10 @@ static struct fplinux_ui_screen *stack[16];
 static size_t depth;
 static lv_timer_t *tick;
 static enum fplinux_pm_vm_state vm_state;
+static bool vm_exits;
+static int vm_exit_status;
 static unsigned int starts, destroys, hide_events, show_events, replies;
-static unsigned int busy_notifications, quit_requests;
+static unsigned int busy_notifications, quit_requests, back_requests;
 static bool busy, fail_file_sync, fail_directory_sync;
 static unsigned int resize_notifications;
 static int navigation_error;
@@ -285,6 +287,13 @@ void fplinux_ui_quit(struct fplinux_ui *ui)
 bool fplinux_ui_back(struct fplinux_ui *ui)
 {
 	(void)ui;
+	return true;
+}
+
+bool fplinux_ui_back_after_document(struct fplinux_ui *ui)
+{
+	(void)ui;
+	++back_requests;
 	return true;
 }
 
@@ -696,7 +705,7 @@ bool fplinux_pm_vm_start(const struct fplinux_pm_vm_config *config)
 
 int fplinux_pm_vm_slice(void)
 {
-	if (vm_state == FPLINUX_PM_VM_DESTROYING) {
+	if (vm_exits || vm_state == FPLINUX_PM_VM_DESTROYING) {
 		vm_state = FPLINUX_PM_VM_EXITED;
 		return FPLINUX_PM_VM_SLICE_EXITED;
 	}
@@ -723,7 +732,7 @@ enum fplinux_pm_vm_state fplinux_pm_vm_get_state(void)
 }
 int fplinux_pm_vm_exit_code(void)
 {
-	return !strcmp(scenario, "start-failure") ? 1 : 0;
+	return vm_exit_status;
 }
 
 void fplinux_pm_keys_cancel(enum fplinux_ui_key_source source)
@@ -972,15 +981,42 @@ int fplinux_ui_run(struct fplinux_ui *ui)
 	}
 	advance();
 	assert(!starts && !replies);
+	if (!strcmp(scenario, "start-failure"))
+		vm_exit_status = 1;
 	advance();
 	assert(starts == 1);
 	if (!strcmp(scenario, "start-failure")) {
 		assert(replies == 1 &&
 		       reply.status == FPLINUX_UI_DOCUMENT_ERROR);
+		assert(reply.request_id == 17 && reply.error == EIO);
+		assert(!busy && !back_requests);
 		puts("failed VM start reports error before acceptance");
 		return 0;
 	}
 	assert(!replies);
+	if (!strcmp(scenario, "early-exit") ||
+	    !strcmp(scenario, "early-error")) {
+		vm_exits = true;
+		vm_exit_status = !strcmp(scenario, "early-error") ? 2 : 0;
+		screen = fplinux_ui_current(ui);
+		advance();
+		assert(replies == 1 && reply.request_id == 17 && !busy &&
+		       !tick);
+		if (vm_exit_status) {
+			assert(reply.status == FPLINUX_UI_DOCUMENT_ERROR &&
+			       reply.error == EIO && !back_requests);
+			screen = fplinux_ui_current(ui);
+			assert(screen->alert &&
+			       !strcmp(screen->title, "MIDlet stopped"));
+			puts("MIDlet startup error reports document failure");
+		} else {
+			assert(reply.status == FPLINUX_UI_DOCUMENT_ACCEPTED &&
+			       !reply.error && back_requests == 1);
+			assert(fplinux_ui_current(ui) == screen);
+			puts("successful MIDlet exit accepts document before the first screen");
+		}
+		return 0;
+	}
 	if (!strncmp(scenario, "replace-", 8) ||
 	    !strncmp(scenario, "push-", 5)) {
 		refused_navigation(ui);

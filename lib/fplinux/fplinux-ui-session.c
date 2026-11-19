@@ -1497,7 +1497,8 @@ bool fplinux_ui_session_send(int fd,
 			object, "repeat",
 			json_object_new_boolean(message->repeat));
 	}
-	if ((message->type == FPLINUX_UI_SESSION_ACTIVE ||
+	if ((message->type == FPLINUX_UI_SESSION_EXIT ||
+	     message->type == FPLINUX_UI_SESSION_ACTIVE ||
 	     message->type == FPLINUX_UI_SESSION_ACTIVATION ||
 	     message->type == FPLINUX_UI_SESSION_ACTIVATION_ACK ||
 	     message->type == FPLINUX_UI_SESSION_ACTIVE_ACK ||

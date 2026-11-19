@@ -6691,6 +6691,36 @@ static void test_document_cold_return(struct fixture *fixture,
 }
 
 static void
+test_document_exit_before_frame_returns_to_origin(struct fixture *fixture)
+{
+	struct peer *launcher = start_launcher(fixture);
+	struct peer *origin = show_app(fixture, launcher, TEST_APP);
+	struct fplinux_ui_session_message document, result, active;
+	struct peer *handler =
+		open_cold_document(fixture, launcher, origin, &document);
+	struct fplinux_ui_session_message exit = {
+		.type = FPLINUX_UI_SESSION_EXIT,
+		.serial = document.serial,
+	};
+
+	answer_document(fixture, handler, document.serial,
+			FPLINUX_UI_DOCUMENT_WAIT, 0);
+	result = wait_message(fixture, origin,
+			      FPLINUX_UI_SESSION_DOCUMENT_RESULT, NULL);
+	CHECK(result.serial == 71 &&
+	      result.document_status == FPLINUX_UI_DOCUMENT_WAIT);
+	issue(fixture, handler, &exit);
+	result = wait_message(fixture, origin,
+			      FPLINUX_UI_SESSION_DOCUMENT_RESULT, NULL);
+	CHECK(result.serial == 71 &&
+	      result.document_status == FPLINUX_UI_DOCUMENT_ACCEPTED);
+	wait_reaped(fixture, handler->pid);
+	active = active_for(fixture, launcher, TEST_APP);
+	acknowledge(fixture, launcher, &active);
+	CHECK(fplinux_session_focused_pid(fixture->session) == origin->pid);
+}
+
+static void
 test_document_closed_origin_returns_catalogue(struct fixture *fixture)
 {
 	const uint16_t handler_scene[] = { 0x1111, 0x2222, 0x3333, 0x4444 };
@@ -7532,6 +7562,8 @@ int main(int argc, char **argv)
 		test_document_launcher_is_unauthorized(fixture);
 	else if (!strcmp(argv[1], "document-cold-return"))
 		test_document_cold_return(fixture, false);
+	else if (!strcmp(argv[1], "document-exit-before-frame"))
+		test_document_exit_before_frame_returns_to_origin(fixture);
 	else if (!strcmp(argv[1], "document-runtime-fullscreen-return"))
 		test_document_cold_return(fixture, true);
 	else if (!strcmp(argv[1], "document-closed-origin-catalogue"))

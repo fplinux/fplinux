@@ -202,6 +202,7 @@ def session_core_harness(tmp_path_factory: pytest.TempPathFactory) -> Path:
         "document-closing-busy",
         "document-launcher-unauthorized",
         "document-cold-return",
+        "document-exit-before-frame",
         "document-runtime-fullscreen-return",
         "document-closed-origin-catalogue",
         "document-nested-return-scenes",

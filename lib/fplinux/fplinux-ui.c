@@ -3372,6 +3372,25 @@ bool fplinux_ui_back(struct fplinux_ui *ui)
 	return fplinux_ui_send(ui, &message);
 }
 
+bool fplinux_ui_back_after_document(struct fplinux_ui *ui)
+{
+	struct frame_ack *document = &ui->frame_acks[FRAME_ACK_DOCUMENT];
+	struct fplinux_ui_session_message message = {
+		.type = FPLINUX_UI_SESSION_EXIT,
+		.serial = document->serial,
+	};
+
+	if (!document->serial)
+		return fplinux_ui_back(ui);
+	/* Back holds the last frame, so carry the queued acceptance with it. */
+	if (!fplinux_ui_send(ui, &message))
+		return false;
+	if (document->sync)
+		wl_callback_destroy(document->sync);
+	*document = (struct frame_ack){ 0 };
+	return true;
+}
+
 bool fplinux_ui_home(struct fplinux_ui *ui)
 {
 	struct fplinux_ui_session_message message = {

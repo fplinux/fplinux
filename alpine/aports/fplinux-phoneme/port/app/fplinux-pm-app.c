@@ -390,17 +390,12 @@ static void vm_wakeup(void *context)
 		      false);
 }
 
-/*
- * The MIDlet has ended. notifyDestroyed() leaves for the catalogue, which
- * then sends CLOSE; a failure stays on screen until it is read.
- */
 static void vm_finished(struct pm_app *app, bool started)
 {
 	char text[MESSAGE_BYTES];
 	int code = fplinux_pm_vm_exit_code();
 
 	set_busy(app, NULL);
-	document_reply(app, FPLINUX_UI_DOCUMENT_ERROR, EIO);
 
 	if (app->tick) {
 		lv_timer_delete(app->tick);
@@ -408,9 +403,11 @@ static void vm_finished(struct pm_app *app, bool started)
 	}
 	fprintf(stderr, "fplinux-phoneme: VM exited with status %d\n", code);
 	if (started && !code) {
-		fplinux_ui_back(app->ui);
+		document_reply(app, FPLINUX_UI_DOCUMENT_ACCEPTED, 0);
+		fplinux_ui_back_after_document(app->ui);
 		return;
 	}
+	document_reply(app, FPLINUX_UI_DOCUMENT_ERROR, EIO);
 	if (!started) {
 		snprintf(text, sizeof(text),
 			 _("“%s” could not start. Open phoneME again."),

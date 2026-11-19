@@ -755,8 +755,9 @@ static void application_input(struct fplinux_ui *ui, int fd, short events,
 		assert(write(fd, "a", 1) == 1);
 		return;
 	}
-	if (command == 'd') {
-		paint(ui, 0x00ff00);
+	if (command == 'd' || command == 'e') {
+		if (command == 'd')
+			paint(ui, 0x00ff00);
 		assert(fplinux_ui_document_reply(
 			ui, application->document_request,
 			FPLINUX_UI_DOCUMENT_ACCEPTED, 0));
@@ -764,7 +765,9 @@ static void application_input(struct fplinux_ui *ui, int fd, short events,
 			       ui, application->document_request,
 			       FPLINUX_UI_DOCUMENT_ACCEPTED, 0) &&
 		       errno == EINVAL);
-		assert(write(fd, "d", 1) == 1);
+		if (command == 'e')
+			assert(fplinux_ui_back_after_document(ui));
+		assert(write(fd, &command, 1) == 1);
 		return;
 	}
 	if (command == 'c' || command == 'r') {
@@ -911,7 +914,8 @@ static int run_application(int control, const char *scenario)
 		fplinux_ui_set_storage_handler(ui, application_storage,
 					       &application);
 	if (!strncmp(scenario, "document-", 9)) {
-		application.document_wait = !strcmp(scenario, "document-wait");
+		application.document_wait =
+			strcmp(scenario, "document-accepted");
 		fplinux_ui_set_document_handler(ui, application_document,
 						&application);
 	}
@@ -3667,6 +3671,9 @@ static void check_ack(struct fplinux_ui_frame_peer *compositor, int session,
 		.serial = 73,
 	};
 	struct fplinux_ui_session_message ack;
+	bool document_exit = !strcmp(scenario, "document-exit");
+	bool document_wait = document_exit ||
+			     !strcmp(scenario, "document-wait");
 	enum fplinux_ui_session_message_type expected =
 		FPLINUX_UI_SESSION_REDRAW_ACK;
 	uint16_t colour = 0x07e0;
@@ -3697,13 +3704,11 @@ static void check_ack(struct fplinux_ui_frame_peer *compositor, int session,
 		expected = FPLINUX_UI_SESSION_ACTIVATION_ACK;
 		if (update.activation == FPLINUX_UI_SESSION_ACTIVATION_RESUME)
 			colour = 0x001f;
-	} else if (!strcmp(scenario, "document-accepted") ||
-		   !strcmp(scenario, "document-wait")) {
+	} else if (!strcmp(scenario, "document-accepted") || document_wait) {
 		update.type = FPLINUX_UI_SESSION_DOCUMENT;
 		strcpy(update.path, "/tmp/Игра one 'quoted'.jar");
-		expected = !strcmp(scenario, "document-wait") ?
-				   FPLINUX_UI_SESSION_ACTIVATION_ACK :
-				   FPLINUX_UI_SESSION_DOCUMENT_RESULT;
+		expected = document_wait ? FPLINUX_UI_SESSION_ACTIVATION_ACK :
+					   FPLINUX_UI_SESSION_DOCUMENT_RESULT;
 		if (expected == FPLINUX_UI_SESSION_ACTIVATION_ACK)
 			colour = 0xffe0;
 	} else if (!strcmp(scenario, "error")) {
@@ -3741,13 +3746,23 @@ static void check_ack(struct fplinux_ui_frame_peer *compositor, int session,
 	    strcmp(scenario, "unapplied-theme"))
 		assert(fplinux_ui_session_send(session, &update));
 	wait_input(compositor, control, 'a');
-	if (!strcmp(scenario, "document-wait")) {
+	if (document_wait) {
 		ack = wait_message(compositor, session,
 				   FPLINUX_UI_SESSION_DOCUMENT_RESULT);
 		assert(ack.serial == 73 &&
 		       ack.document_status == FPLINUX_UI_DOCUMENT_WAIT);
 	}
 	assert_quiet(compositor, session, 2);
+	if (document_exit) {
+		assert(write(control, "e", 1) == 1);
+		wait_input(compositor, control, 'e');
+		ack = wait_message(compositor, session,
+				   FPLINUX_UI_SESSION_EXIT);
+		assert(ack.serial == 73);
+		fplinux_ui_frame_release_buffers(compositor);
+		assert_quiet(compositor, session, 2);
+		return;
+	}
 	fplinux_ui_frame_release_buffers(compositor);
 	{
 		struct pollfd descriptor = { .fd = session, .events = POLLIN };

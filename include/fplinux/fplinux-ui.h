@@ -239,7 +239,8 @@ void fplinux_ui_set_document_handler(struct fplinux_ui *ui,
 				     void *context);
 /*
  * Reply only after the document handler returned WAIT, not from that handler.
- * ACCEPTED follows the new document frame's commit and server sync.
+ * ACCEPTED follows the new document frame's commit and server sync unless
+ * the handler closes with fplinux_ui_back_after_document().
  * A handler calling quit() ends normally and answers ERROR with ECANCELED.
  */
 bool fplinux_ui_document_reply(struct fplinux_ui *ui, uint32_t request_id,
@@ -344,6 +345,12 @@ bool fplinux_ui_softkey_bar_set(struct fplinux_ui *ui, lv_obj_t *bar,
 lv_obj_t *fplinux_ui_header(struct fplinux_ui *ui, const char *title);
 /* Request ordinary close and the catalogue (Back on the first screen). */
 bool fplinux_ui_back(struct fplinux_ui *ui);
+/*
+ * Request ordinary close after completing the document. A queued acceptance
+ * accompanies this request without waiting for another frame. The close
+ * handler should be ready to close when this is called.
+ */
+bool fplinux_ui_back_after_document(struct fplinux_ui *ui);
 /* Background the application for the home view (system Home). */
 bool fplinux_ui_home(struct fplinux_ui *ui);
 /* Keep the display on while this application is visible; false releases. */

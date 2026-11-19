@@ -64,6 +64,7 @@ global:
 	fplinux_ui_light_effects_clear;
 	fplinux_ui_audio_write;
 	fplinux_ui_back;
+	fplinux_ui_back_after_document;
 	fplinux_ui_canvas_new;
 	fplinux_ui_canvas_object;
 	fplinux_ui_screen_set_key_filter;

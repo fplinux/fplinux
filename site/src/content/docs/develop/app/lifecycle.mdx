@@ -55,6 +55,8 @@ Return the handler's initial answer. Call `fplinux_ui_close_reply()` only after 
 
 Document handlers follow the same return-then-reply rule: return the initial result, and use `fplinux_ui_document_reply()` later if it was WAIT. A reply from inside the handler fails with `EINVAL`. Calling `fplinux_ui_quit()` from a document handler answers the request with ERROR and `ECANCELED`, then ends the loop normally. An invalid handler result is reported as a runtime error.
 
+A handler that completes its work and is ready to close can reply ACCEPTED and call `fplinux_ui_back_after_document()`. This reports acceptance to the caller and requests ordinary close without waiting for a new document frame.
+
 ## Final cleanup
 
 `FPLINUX_UI_EVENT_CLOSE` is the final cleanup notification, not a place to open a save dialog or refuse closing. Save important state before reaching it. Connection and rendering failures can also end the event loop. Check `fplinux_ui_run()`'s result: normal closing returns zero; runtime failure returns a negative value.
