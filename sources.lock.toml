@@ -1336,6 +1336,13 @@ url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/community/x86_64/openjdk8-jre
 algorithm = "sha512"
 checksum = "6f929c97c4c263bb73a435bb361da4e9a0efd321d776c3d63118cc97b0a717168118e5077c1294844b3c4fc11b6f7e502e1079c3feb1fb909eb70b2918bb0659"
 
+[phoneme_mascotme]
+version = "6cf53aadbbd5038d17059adef79afb416bd92b31"
+name = "MascotME-6cf53aadbbd5038d17059adef79afb416bd92b31.tar.gz"
+url = "https://codeload.github.com/rmn20/MascotME/tar.gz/6cf53aadbbd5038d17059adef79afb416bd92b31"
+algorithm = "sha512"
+checksum = "8a0cad3984c85ef0120cc4ad48533236b92cba119e853161e466d0368699bc51a6b8968792ec12f69c2a959505dbe1107d78e795962e414794773a14edeb80db"
+
 [phoneme_qemu_arm]
 version = "11.0.3-r0"
 name = "x86_64-qemu-arm-11.0.3-r0.apk"

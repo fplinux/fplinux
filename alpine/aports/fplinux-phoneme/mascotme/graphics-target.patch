@@ -1,0 +1,193 @@
+--- a/src/com/mascotcapsule/micro3d/v3/Graphics3D.java
++++ b/src/com/mascotcapsule/micro3d/v3/Graphics3D.java
+@@ -5,6 +5,7 @@
+ 
+ package com.mascotcapsule.micro3d.v3;
+ 
++import javax.microedition.lcdui.FPLinuxNokiaImage;
+ import javax.microedition.lcdui.Graphics;
+ 
+ public class Graphics3D {
+@@ -88,7 +89,6 @@
+ 	private int fbWidth, fbHeight;
+ 	private int clipX, clipY, clipW, clipH;
+ 	private int fbDrawCounter;
+-	private DummyCanvas dummyCanvas;
+ 
+ 	private long prevStatsCheck;
+ 	private int framesCount, fps, frameTime;
+@@ -175,7 +175,6 @@
+ 
+ 	public Graphics3D() {
+ 		//Prealloc temp buffers
+-		dummyCanvas = new DummyCanvas();
+ 
+ 		efxLight = g3dLight = new Light();
+ 
+@@ -217,7 +216,6 @@
+ 		disposed = true;
+ 		boundGraphics = null;
+ 		frameBuffer = null;
+-		dummyCanvas = null;
+ 
+ 		efxLight = g3dLight = null;
+ 		efxSphereTex = g3dSphereTex = null;
+@@ -312,30 +310,12 @@
+ 
+ 		boundGraphics = graphics;
+ 
+-		//Try to get framebuffer resolution
+-		int clipX = graphics.getClipX();
+-		int clipY = graphics.getClipY();
++		int clipX = graphics.getClipX() + graphics.getTranslateX();
++		int clipY = graphics.getClipY() + graphics.getTranslateY();
+ 		int clipW = graphics.getClipWidth();
+ 		int clipH = graphics.getClipHeight();
+-
+-		if (!MascotME.fbSizeWorkaround) {
+-			fbWidth = Math.max(clipX + clipW, 0);
+-			fbHeight = Math.max(clipY + clipH, 0);
+-		} else {
+-			int dummyW = dummyCanvas.getWidth();
+-			int dummyH = dummyCanvas.getHeight();
+-
+-			int clipX2 = clipW + clipX;
+-			int clipY2 = clipH + clipY;
+-
+-			if (clipX2 == dummyH || clipY2 == dummyW) {
+-				fbWidth = dummyH;
+-				fbHeight = dummyW;
+-			} else {
+-				fbWidth = dummyW;
+-				fbHeight = dummyH;
+-			}
+-		}
++		fbWidth = FPLinuxNokiaImage.width(graphics);
++		fbHeight = FPLinuxNokiaImage.height(graphics);
+ 
+ 		if (frameBuffer == null || frameBuffer.length < fbWidth * fbHeight) {
+ 			frameBuffer = new int[fbWidth * fbHeight];
+@@ -352,7 +332,8 @@
+ 
+ 		fbDrawCounter = 0;
+ 
+-		if (!MascotME.doNotClear) {
++		if (!MascotME.doNotClear &&
++				(MascotME.halfResRender || MascotME.no2DInbetween)) {
+ 			int color = MascotME.fbClearColor;
+ 			if (color == MascotME.CLEAR_WITH_LAST_USED_COLOR) {
+ 				color = graphics.getColor() & 0xffffff;
+@@ -368,7 +349,9 @@
+ 		int[] fb = frameBuffer;
+ 		final int fbLen = fbWidth * fbHeight;
+ 		int cleared = fbLen;
+-		if (MascotME.useArrayCopyClear) cleared >>= 8;
++		if (MascotME.useArrayCopyClear && cleared > 0) {
++			cleared = Math.max(1, cleared >> 8);
++		}
+ 
+ 		int i = 0;
+ 		while (cleared - i >= 16) {
+@@ -453,8 +436,13 @@
+ 			}
+ 
+ 			boundGraphics.drawRGB(frameBuffer, 0, fbWidth, 0, 0, fbWidth, fbHeight * 2, alphaBlending);
++		} else if (!MascotME.no2DInbetween) {
++			FPLinuxNokiaImage.writeComposited(boundGraphics, frameBuffer,
++				clipY * fbWidth + clipX, fbWidth,
++				clipX, clipY, clipW, clipH);
+ 		} else {
+-			boundGraphics.drawRGB(frameBuffer, 0, fbWidth, 0, 0, fbWidth, fbHeight, alphaBlending);
++			boundGraphics.drawRGB(frameBuffer, 0, fbWidth, 0, 0, fbWidth, fbHeight,
++						alphaBlending);
+ 		}
+ 
+ 		fbDrawCounter++;
+@@ -467,13 +455,15 @@
+ 		long startTime = System.currentTimeMillis();
+ 
+ 		if (sortPrimCount > 0) {
+-			//Clear fb alpha when necessary
+-			if (!MascotME.no2DInbetween && fbDrawCounter > 0) {
+-				if (!MascotME.halfResRender) {
+-					clearFBAlpha(clipX, clipY, clipW, clipH);
+-				} else {
+-					clearFBAlpha(clipX, clipY / 2, clipW, clipH / 2);
+-				}
++			if (!MascotME.no2DInbetween && !MascotME.halfResRender &&
++					clipW > 0 && clipH > 0) {
++				FPLinuxNokiaImage.read(boundGraphics, frameBuffer,
++					clipY * fbWidth + clipX, fbWidth,
++					clipX - boundGraphics.getTranslateX(),
++					clipY - boundGraphics.getTranslateY(), clipW, clipH);
++			} else if (!MascotME.no2DInbetween && MascotME.halfResRender &&
++					fbDrawCounter > 0) {
++				clearFBAlpha(clipX, clipY / 2, clipW, clipH / 2);
+ 			}
+ 
+ 			//Render all primitives
+@@ -489,16 +479,16 @@
+ 				int prevClipY = boundGraphics.getClipY();
+ 				int prevClipW = boundGraphics.getClipWidth();
+ 				int prevClipH = boundGraphics.getClipHeight();
+-				boundGraphics.setClip(clipX, clipY, clipW, clipH);
+-
+ 				int prevTx = boundGraphics.getTranslateX();
+ 				int prevTy = boundGraphics.getTranslateY();
+ 				boundGraphics.translate(-prevTx, -prevTy);
+-
+-				drawFB(clipX, clipY, clipW, clipH);
+-
+-				boundGraphics.setClip(prevClipX, prevClipY, prevClipW, prevClipH);
+-				boundGraphics.translate(prevTx, prevTy);
++				try {
++					boundGraphics.setClip(clipX, clipY, clipW, clipH);
++					drawFB(clipX, clipY, clipW, clipH);
++				} finally {
++					boundGraphics.translate(prevTx, prevTy);
++					boundGraphics.setClip(prevClipX, prevClipY, prevClipW, prevClipH);
++				}
+ 			}
+ 		}
+ 
+@@ -981,6 +971,8 @@
+ 	}
+ 
+ 	private final void setCenter(FigureLayout layout, int x, int y) {
++		x += boundGraphics.getTranslateX();
++		y += boundGraphics.getTranslateY();
+ 		if (layout != null) {
+ 			drawCenterX = layout.centerX + x;
+ 			drawCenterY = layout.centerY + y;
+--- a/src/com/mascotcapsule/micro3d/v3/MascotME.java
++++ b/src/com/mascotcapsule/micro3d/v3/MascotME.java
+@@ -39,11 +39,6 @@
+ 	static final int CLEAR_WITH_LAST_USED_COLOR = -1;
+ 	static int fbClearColor = CLEAR_WITH_LAST_USED_COLOR;
+ 
+-	// Compatibility hack, does not affect performance.
+-	// Uses dummy Canvas object to detect framebuffer size.
+-	// Can reduce graphical artifacts in games that use viewport clipping.
+-	static boolean fbSizeWorkaround = false;
+-
+ 	// Performance hack, high performance impact.
+ 	// Reduces framebuffer resolution.
+ 	static boolean halfResRender = false;
+@@ -51,7 +46,7 @@
+ 	// Performance hack, high performance impact.
+ 	// Disables support of 2D graphics inbetween 3D geometry.
+ 	// Framebuffer will be drawn on screen only when Graphics3D is released (by API design 3D graphics should be drawn on each flush).
+-	static boolean no2DInbetween = true;
++	static boolean no2DInbetween = false;
+ 	// Performance hack, low performance impact.
+ 	// Overwrites existing 2D screen content by disabling alpha blending when framebuffer is drawn on the screen for the first time.
+ 	static boolean overwrite2D = false;
+@@ -103,8 +98,6 @@
+ 				horizontalFovFix = Integer.parseInt(value) == 1;
+ 			} else if (key.equals("fbClearColor")) {
+ 				fbClearColor = Integer.parseInt(value, 16);
+-			} else if (key.equals("fbSizeWorkaround")) {
+-				fbSizeWorkaround = Integer.parseInt(value) == 1;
+ 			} else if (key.equals("halfResRender")) {
+ 				halfResRender = Integer.parseInt(value) == 1;
+ 			} else if (key.equals("no2DInbetween")) {

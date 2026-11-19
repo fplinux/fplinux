@@ -6,7 +6,7 @@ pkgrel=0
 pkgdesc="phoneME Feature CLDC-HI VM and MIDP 2.0 for MIDlets"
 url="https://github.com/magicus/phoneME"
 arch="armv7"
-license="GPL-2.0-only"
+license="GPL-2.0-only AND MIT"
 depends="fplinux-ui fplinux-runtime-media libcrypto3"
 makedepends_build="clang22 lld22 llvm22 binutils make patch pkgconf python3 gettext"
 makedepends_host="musl-dev musl-libintl linux-headers gcc zlib-dev openssl-dev fplinux-ui-dev fplinux-runtime-media-dev"
@@ -18,10 +18,12 @@ _gccver=@version:phoneme_host_libstdcpp@
 _llvmver=@version:phoneme_host_compiler_rt@
 _qemuver=@version:phoneme_qemu_i386@
 _jdkver=@version:phoneme_jdk@
+_mascot_commit=@version:phoneme_mascotme@
 source="
 	fplinux-cli.c
 	fplinux-cli.h
 	@source:phoneme@
+	@source:phoneme_mascotme@
 	@source:phoneme_host_musl@
 	@source:phoneme_host_libstdcpp@
 	@source:phoneme_host_compiler_rt@
@@ -52,6 +54,10 @@ prepare() {
 		# Upstream trailing spaces are normalized in the project patches.
 		patch --ignore-whitespace -p1 -i "$patch"
 	done
+
+	local mascot="$srcdir/MascotME-$_mascot_commit"
+	patch --ignore-whitespace -d "$mascot" -p1 -i "$startdir/mascotme/graphics-target.patch"
+	rm "$mascot/src/com/mascotcapsule/micro3d/v3/DummyCanvas.java"
 
 	_unpack_tool x86-musl-dev-$_muslver.apk "$srcdir/i386-root"
 	_unpack_tool x86-libstdc++-dev-$_gccver.apk "$srcdir/i386-root"
@@ -132,6 +138,7 @@ _build_midp_java() {
 		--preverify "$builddir/preverifier/build/linux/preverify" \
 		--natives-table-gen "$cldc/dist/bin/NativesTableGen.jar" \
 		--extra-java "$startdir/vm/java" \
+		--extra-java "$srcdir/MascotME-$_mascot_commit/src" \
 		--lf "$startdir/midp/lf" \
 		--out "$srcdir/midp-build"
 	# MIDP natives read object layouts from ROMStructs.h even without a
@@ -250,6 +257,8 @@ package() {
 		install -Dm644 "$builddir/legal/$notice" \
 			"$pkgdir/usr/share/licenses/$pkgname/$notice"
 	done
+	install -Dm644 "$srcdir/MascotME-$_mascot_commit/LICENSE" \
+		"$pkgdir/usr/share/licenses/$pkgname/mascotme.txt"
 }
 sha512sums="
 60be1ccccf0215ea13bc64fd442a0498e7db203234ce74f92cec502295e8ac703a089438848b9a1850102836855537f561e9bd8313751574a069eb0ec6dcf31a  fplinux-cli.c

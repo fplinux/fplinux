@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: GPL-2.0-only
 package fplinux.fixtures.canvas;
 
+import com.mascotcapsule.micro3d.v3.Effect3D;
+import com.mascotcapsule.micro3d.v3.FigureLayout;
+import com.mascotcapsule.micro3d.v3.Graphics3D;
 import com.nokia.mid.ui.DirectGraphics;
 import com.nokia.mid.ui.DirectUtils;
 import com.nokia.mid.ui.FullCanvas;
@@ -97,6 +100,7 @@ public class CanvasProbeMIDlet extends MIDlet implements Runnable {
         nokiaPixels();
         nokiaDecodedImage();
         nokiaShapes();
+        mascotPixels();
         imageStream();
         font();
     }
@@ -251,6 +255,42 @@ public class CanvasProbeMIDlet extends MIDlet implements Runnable {
             (raw[3] & 0xff808080) == 0xff000080;
         say("nokia pixels short=" + shortPixels + " literal=" + literal +
             " int=" + intPixels + " backwards=" + backwards);
+    }
+
+    private void mascotPixels() {
+        Image image = DirectUtils.createImage(12, 12, 0);
+        Graphics graphics = image.getGraphics();
+        graphics.translate(2, 1);
+        graphics.setClip(1, 1, 8, 8);
+        Graphics3D engine = new Graphics3D();
+        FigureLayout layout = new FigureLayout();
+        layout.setScale(4096, 4096);
+        Effect3D effect = new Effect3D();
+        int command = Graphics3D.PRIMITVE_POINTS | Graphics3D.PDATA_COLOR_PER_FACE;
+        int[] point = { 0, 0, 32 };
+        engine.bind(graphics);
+        engine.renderPrimitives(null, 3, 3, layout, effect, command, 1, point,
+                                null, null, new int[] { 0xff0000 });
+        engine.flush();
+        Image green = Image.createRGBImage(new int[] { 0xff00ff00 }, 1, 1, false);
+        graphics.drawImage(green, 5, 5, Graphics.TOP | Graphics.LEFT);
+        engine.renderPrimitives(null, 4, 4, layout, effect, command, 1, point,
+                                null, null, new int[] { 0x0000ff });
+        engine.flush();
+        engine.release(graphics);
+        engine.dispose();
+
+        int[] pixels = new int[144];
+        image.getRGB(pixels, 0, 12, 0, 0, 12, 12);
+        boolean alpha = (pixels[4 * 12 + 5] & 0xff808080) == 0xff800000 &&
+            (pixels[5 * 12 + 6] & 0xff808080) == 0xff000080 && pixels[0] == 0;
+        boolean overlay = (pixels[6 * 12 + 7] & 0xff808080) == 0xff008000;
+        boolean graphicsRestored = graphics.getTranslateX() == 2 &&
+            graphics.getTranslateY() == 1 && graphics.getClipX() == 1 &&
+            graphics.getClipY() == 1 && graphics.getClipWidth() == 8 &&
+            graphics.getClipHeight() == 8;
+        say("mascot pixels alpha=" + alpha + " overlay=" + overlay +
+            " graphicsRestored=" + graphicsRestored);
     }
 
     private void nokiaDecodedImage() throws IOException {

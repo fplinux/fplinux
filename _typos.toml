@@ -37,6 +37,8 @@ MODULE_PARM_DESC = "MODULE_PARM_DESC"
 # SPDX NoDerivatives license suffix.
 ND = "ND"
 PNGs = "PNGs"
+# The spelling is part of the MascotCapsule Java API.
+PRIMITVE_POINTS = "PRIMITVE_POINTS"
 PnP = "PnP"
 PnPDeviceID = "PnPDeviceID"
 SC2720_AUD_CLK_PN_MASK = "SC2720_AUD_CLK_PN_MASK"
