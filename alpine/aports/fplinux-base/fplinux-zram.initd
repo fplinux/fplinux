@@ -26,6 +26,12 @@ start() {
 		return 1
 	}
 	if [ "$zram_initstate" -eq 0 ]; then
+		if grep -q ' / ext4 ' /proc/mounts; then
+			printf 'lzo-rle\n' >/sys/block/zram0/comp_algorithm || {
+				eend 1 "cannot select the microSD swap compressor"
+				return 1
+			}
+		fi
 		printf '64M\n' >/sys/block/zram0/disksize || {
 			eend 1 "cannot size /dev/zram0"
 			return 1
