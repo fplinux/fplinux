@@ -1,0 +1,48 @@
+--- a/midp/src/highlevelui/lcdui/reference/classes/com/sun/midp/lcdui/DisplayAccess.java
++++ b/midp/src/highlevelui/lcdui/reference/classes/com/sun/midp/lcdui/DisplayAccess.java
+@@ -68,10 +68,11 @@
+     // API's for accessing Display from Games Package
+ 
+     /**
+-     * Called to get key mask of all the keys that were pressed.
+-     * @return keyMask  The key mask of all the keys that were pressed.
++     * Returns game key states for the given visible screen.
++     * @param screen the GameCanvas requesting its key mask
++     * @return the key mask, or zero when the screen is hidden
+      */
+-    int getKeyMask();
++    int getKeyMask(Displayable screen);
+ 
+     /**
+      * Flushes the entire off-screen buffer to the display.
+--- a/midp/src/highlevelui/lcdui/reference/classes/javax/microedition/lcdui/Display.jpp
++++ b/midp/src/highlevelui/lcdui/reference/classes/javax/microedition/lcdui/Display.jpp
+@@ -3015,18 +3015,17 @@
+         }
+ 
+         /**
+-         * Called to get key mask of all the keys that were pressed.
+-         * DisplayAccess I/F method.
+-         *
+-         * @return keyMask  The key mask of all the keys that were pressed.
++         * Returns game key states only for the visible requesting screen.
++         * @param screen the GameCanvas requesting its key mask
++         * @return the key mask, or zero when the screen is hidden
+          */
+-        public int getKeyMask() {
+-            DisplayableLF currentCopy = current;
+-
+-            if (currentCopy instanceof CanvasLF) {
+-                return ((CanvasLF)currentCopy).uGetKeyMask();
+-            } else {
+-                return 0;
++        public int getKeyMask(Displayable screen) {
++            synchronized (LCDUILock) {
++                if (!(current instanceof CanvasLF) ||
++                    !isShown(screen.displayableLF)) {
++                    return 0;
++                }
++                return ((CanvasLF) current).uGetKeyMask();
+             }
+         }
+ 

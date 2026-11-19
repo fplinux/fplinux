@@ -66,6 +66,8 @@ abstract class DisplayableLFImpl implements DisplayableLF {
     /* GameCanvas.getKeyStates() latching (see lfplatform). */
     private int stickyKeyMask;
     private int currentKeyMask;
+    private int[] heldGameKeys;
+    private int heldGameKeyCount;
 
     DisplayableLFImpl(Displayable d) {
         owner = d;
@@ -471,6 +473,7 @@ abstract class DisplayableLFImpl implements DisplayableLF {
 
     boolean lCallShow() {
         sawPointerPress = sawKeyPress = false;
+        heldGameKeyCount = 0;
         if (owner instanceof GameCanvas) {
             GameMap.registerDisplayAccess(owner, currentDisplay.accessor);
             stickyKeyMask = currentKeyMask = 0;
@@ -629,11 +632,17 @@ abstract class DisplayableLFImpl implements DisplayableLF {
                 }
                 break;
             }
-            if (currentKeyMask > -1 && eventType != -1) {
-                if (eventType == 1) {
-                    releaseKeyMask(keyCode);
-                } else {
-                    setKeyMask(keyCode);
+            if (currentKeyMask >= 0) {
+                switch (eventType) {
+                case 0:
+                    pressGameKey(keyCode);
+                    break;
+                case 1:
+                    releaseGameKey(keyCode);
+                    break;
+                case 2:
+                    stickyKeyMask |= gameMask(keyCode);
+                    break;
                 }
             }
         }
@@ -729,13 +738,39 @@ abstract class DisplayableLFImpl implements DisplayableLF {
         }
     }
 
-    private void setKeyMask(int keyCode) {
-        int m = gameMask(keyCode);
-        stickyKeyMask |= m;
-        currentKeyMask |= m;
+    private void pressGameKey(int keyCode) {
+        int mask = gameMask(keyCode);
+        if (mask == 0) {
+            return;
+        }
+        if (heldGameKeys == null) {
+            heldGameKeys = new int[4];
+        } else if (heldGameKeyCount == heldGameKeys.length) {
+            int[] larger = new int[heldGameKeyCount * 2];
+            System.arraycopy(heldGameKeys, 0, larger, 0, heldGameKeyCount);
+            heldGameKeys = larger;
+        }
+        // Separate physical keys can deliver the same MIDP code.
+        heldGameKeys[heldGameKeyCount++] = keyCode;
+        stickyKeyMask |= mask;
+        currentKeyMask |= mask;
     }
 
-    private void releaseKeyMask(int keyCode) {
-        currentKeyMask &= ~gameMask(keyCode);
+    private void releaseGameKey(int keyCode) {
+        int index = 0;
+        while (index < heldGameKeyCount && heldGameKeys[index] != keyCode) {
+            index++;
+        }
+        if (index == heldGameKeyCount) {
+            return;
+        }
+        heldGameKeys[index] = heldGameKeys[--heldGameKeyCount];
+        int mask = gameMask(keyCode);
+        for (int i = 0; i < heldGameKeyCount; i++) {
+            if (gameMask(heldGameKeys[i]) == mask) {
+                return;
+            }
+        }
+        currentKeyMask &= ~mask;
     }
 }

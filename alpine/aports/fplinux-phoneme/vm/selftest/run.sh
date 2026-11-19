@@ -122,8 +122,23 @@ build_jar canvas "${here}/canvas.mf"
 "${qemu_arm}" -L "${sysroot}" "${headless}" --system-classes "${classes}" \
 	--timeout-ms 60000 "${work}/canvas.jar" >"${work}/canvas-log.txt"
 grep '^PM-CANVAS ' "${work}/canvas-log.txt" >"${work}/canvas.txt" || true
-cmp -s "${here}/canvas.expected" "${work}/canvas.txt" ||
-	fail "canvas probe output differs (${work}/canvas.txt)"
+if ! cmp -s "${here}/canvas.expected" "${work}/canvas.txt"; then
+	diff -u "${here}/canvas.expected" "${work}/canvas.txt" >&2 || true
+	fail "canvas probe output differs"
+fi
+
+# The arrow releases before its numeric alias, then a quick fire tap
+# switches to a plain Canvas and back.
+"${qemu_arm}" -L "${sysroot}" "${headless}" --system-classes "${classes}" \
+	--timeout-ms 10000 --keys '1800:-1:260,1910:50:380,2400:53:40' \
+	"${work}/canvas.jar" fplinux.fixtures.canvas.GameCanvasKeysMIDlet \
+	>"${work}/canvas-keys.txt"
+for check in alias released tap hidden reshown; do
+	if ! grep -qx "PM-GAMEKEYS ${check}=true" "${work}/canvas-keys.txt"; then
+		cat "${work}/canvas-keys.txt" >&2
+		fail "GameCanvas key state differs for ${check}"
+	fi
+done
 
 # Each selected virtual size is stable across fullscreen mode changes.
 for size in 128x128 128x160 176x208 176x220 240x320 320x240; do

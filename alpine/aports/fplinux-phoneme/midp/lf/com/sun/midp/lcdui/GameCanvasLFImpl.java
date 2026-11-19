@@ -281,7 +281,7 @@ public class GameCanvasLFImpl {
     public int getKeyStates() {
         DisplayAccess displayAccess = GameMap.getDisplayAccess(owner);
         if (displayAccess != null) {
-            return displayAccess.getKeyMask();
+            return displayAccess.getKeyMask(owner);
         }
         return 0;
     }
