@@ -689,6 +689,11 @@ bool fplinux_pm_vm_start(const struct fplinux_pm_vm_config *config)
 	assert(S_ISDIR(directory.st_mode) &&
 	       (directory.st_mode & 0777) == 0700);
 	printf("storage %s\n", config->storage_dir);
+	if (!strcmp(scenario, "single"))
+		assert(!config->enable_jit);
+	if (!strncmp(scenario, "vm-settings-", 12))
+		printf("VM mode %s\n",
+		       config->enable_jit ? "JIT" : "Interpreter");
 	if (!strcmp(scenario, "jad-local")) {
 		assert(config->descriptor && config->descriptor_size);
 		printf("JAR %s\n", config->jar_path);
@@ -771,13 +776,13 @@ void fplinux_pm_keys_cancel(enum fplinux_ui_key_source source)
 static void advance(void)
 {
 	assert(tick && !tick->paused);
+	/* LVGL records the start of its callback as the timer origin. */
+	tick->last_run_ms = timer_clock_ms;
 	tick->callback(tick);
 }
 
 static void send_event(enum fplinux_ui_event_type type)
 {
-	/* LVGL records the start of its callback as the timer origin. */
-	tick->last_run_ms = timer_clock_ms;
 	struct fplinux_ui_event event = { .type = type };
 
 	runtime.event(&runtime, &event, runtime.context);
@@ -827,6 +832,23 @@ static bool has_remove(const struct fplinux_ui_screen *screen)
 	return false;
 }
 
+static void named_screen_command(const char *label)
+{
+	struct fplinux_ui_screen *screen = fplinux_ui_current(&runtime);
+
+	for (size_t i = 0; i < screen->command_count; ++i) {
+		const struct fplinux_ui_command *item = &screen->commands[i];
+
+		if (item->type == FPLINUX_UI_COMMAND_SCREEN && item->label &&
+		    !strcmp(item->label, label)) {
+			screen->command(&runtime, screen, item->id,
+					screen->context);
+			return;
+		}
+	}
+	abort();
+}
+
 static void attach_peer(struct fplinux_ui_screen *screen, int serial)
 {
 	fplinux_pm_test_parameters[0] = (jint)(intptr_t)screen;
@@ -845,16 +867,39 @@ static void select_row(size_t row)
 			screen->context);
 }
 
-static void choose_setting(size_t row, size_t value)
+static void choose_value(size_t value)
 {
-	struct fplinux_ui_screen *choice;
+	struct fplinux_ui_screen *choice = fplinux_ui_current(&runtime);
 
-	select_row(row);
-	choice = fplinux_ui_current(&runtime);
 	assert(value < choice->row_count);
 	choice->focused = value;
 	assert(choice->change);
 	choice->change(&runtime, choice, value, choice->context);
+}
+
+static void choose_setting(size_t row, size_t value)
+{
+	select_row(row);
+	choose_value(value);
+}
+
+static size_t named_row(const char *label)
+{
+	const struct fplinux_ui_screen *screen = fplinux_ui_current(&runtime);
+
+	for (size_t i = 0; i < screen->row_count; ++i)
+		if (!strcmp(screen->rows[i], label))
+			return i;
+	abort();
+}
+
+static void choose_vm_mode(const char *current, const char *mode)
+{
+	const struct fplinux_ui_screen *screen = fplinux_ui_current(&runtime);
+
+	assert(!strcmp(screen->title, "VM mode"));
+	assert(screen->selected[named_row(current)]);
+	choose_value(named_row(mode));
 }
 
 static void open_global_settings(void)
@@ -969,6 +1014,24 @@ int fplinux_ui_run(struct fplinux_ui *ui)
 				picker_context);
 		assert(!strcmp(requested_path, jar));
 	}
+	if (!strcmp(scenario, "vm-settings-enable")) {
+		select_row(named_row("Settings"));
+		select_row(named_row("JIT"));
+		choose_vm_mode("Interpreter", "JIT (experimental)");
+		assert(!fplinux_ui_current(ui)->alert && !starts);
+		command(FPLINUX_UI_COMMAND_BACK);
+	}
+	if (!strcmp(scenario, "vm-settings-recent-default")) {
+		select_row(named_row("Recent"));
+		screen = fplinux_ui_current(ui);
+		assert(screen->row_count == 1 &&
+		       !strcmp(screen->rows[0], "Example suite"));
+		screen->focused = 0;
+		named_screen_command("VM mode");
+		choose_vm_mode("Interpreter", "Use default");
+		assert(fplinux_ui_current(ui) == screen && !starts);
+		command(FPLINUX_UI_COMMAND_BACK);
+	}
 	result = document(17, jar);
 	if (!strcmp(scenario, "invalid")) {
 		assert(result.status == FPLINUX_UI_DOCUMENT_ERROR &&
@@ -1079,6 +1142,22 @@ int fplinux_ui_run(struct fplinux_ui *ui)
 	}
 	if (!strcmp(scenario, "chooser-start"))
 		assert(!strcmp(running_class, "example.Second"));
+	if (!strcmp(scenario, "vm-settings-override")) {
+		struct fplinux_ui_event activation = {
+			.type = FPLINUX_UI_EVENT_ACTIVATION,
+			.activation = FPLINUX_UI_ACTIVATION_OPEN,
+		};
+
+		runtime.event(ui, &activation, runtime.context);
+		select_row(named_row("Settings"));
+		select_row(named_row("This program"));
+		select_row(named_row("JIT"));
+		choose_vm_mode("Use default", "Interpreter");
+		screen = fplinux_ui_current(ui);
+		assert(screen->alert &&
+		       !strcmp(screen->title, "Restart program"));
+		assert(starts == 1 && !destroys);
+	}
 	if (!strncmp(scenario, "settings-save-", 14)) {
 		struct fplinux_ui_event activation = {
 			.type = FPLINUX_UI_EVENT_ACTIVATION,

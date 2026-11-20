@@ -302,6 +302,50 @@ def test_settings_stay_consistent_after_save_warning_and_recent_save(
     assert "recent-documents=[]\n" in preferences
 
 
+def launched_vm_mode(phoneme_app: Path, jar: Path, root: Path, scenario: str) -> str:
+    result = run_process(
+        [str(phoneme_app)],
+        name=f"phoneME {scenario}",
+        env=os.environ
+        | {
+            "HOME": str(root),
+            "FPLINUX_PM_TEST_SCENARIO": scenario,
+            "FPLINUX_PM_TEST_JAR": str(jar),
+            "FPLINUX_PM_TEST_ROOT": str(root),
+        },
+        timeout=10,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    modes = [
+        line.removeprefix("VM mode ")
+        for line in result.stdout.splitlines()
+        if line.startswith("VM mode ")
+    ]
+    assert len(modes) == 1, result.stdout
+    return modes[0]
+
+
+def test_global_jit_selection_applies_to_new_launches_after_restart(
+    phoneme_app: Path, tmp_path: Path
+) -> None:
+    jar = tmp_path / "game.jar"
+    write_suite(jar)
+
+    assert launched_vm_mode(phoneme_app, jar, tmp_path, "vm-settings-enable") == "JIT"
+    assert launched_vm_mode(phoneme_app, jar, tmp_path, "vm-settings-reopen") == "JIT"
+
+
+def test_program_vm_override_can_be_reset_from_recent(phoneme_app: Path, tmp_path: Path) -> None:
+    jar = tmp_path / "game.jar"
+    write_suite(jar)
+    (tmp_path / "preferences").write_text("jit=1\n", encoding="utf-8")
+
+    assert launched_vm_mode(phoneme_app, jar, tmp_path, "vm-settings-override") == "JIT"
+    assert launched_vm_mode(phoneme_app, jar, tmp_path, "vm-settings-reopen") == "Interpreter"
+    assert launched_vm_mode(phoneme_app, jar, tmp_path, "vm-settings-recent-default") == "JIT"
+    assert "jit=1" in (tmp_path / "preferences").read_text(encoding="utf-8").splitlines()
+
+
 def test_chooser_rms_failure_clears_busy_and_reports_error(
     phoneme_app: Path, tmp_path: Path
 ) -> None:

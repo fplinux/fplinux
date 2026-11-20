@@ -100,21 +100,27 @@ def capture_menu_frames(  # noqa: PLR0913 -- peer, geometry and scenario inputs 
         if locale == "ru"
         else ("Open VXP" if application == "mre" else "Open", "Recent", "Settings")
     )
-    settings_rows = (
+    settings_rows: tuple[str, ...] = (
         ("Масштаб", "Поворот", "Указатель" if application == "mre" else "Размер")
         if locale == "ru"
         else ("Scale", "Rotation", "Pointer" if application == "mre" else "Size")
     )
-    for name, captions in (
+    jit_row_scrolls = application == "phoneme" and screen == (128, 128)
+    if application == "phoneme" and not jit_row_scrolls:
+        settings_rows += ("JIT",)
+    layouts: tuple[tuple[str, tuple[str, ...]], ...] = (
         ("home", home_rows),
         ("home-running", ("Продолжить" if locale == "ru" else "Continue", *home_rows)),
         ("settings-global", settings_rows),
         ("settings-program", settings_rows),
-    ):
+    )
+    if jit_row_scrolls:
+        layouts += (("settings-global-jit", ("JIT",)), ("settings-program-jit", ("JIT",)))
+    for name, captions in layouts:
         entries = json.loads((directory / f"{name}.layout.json").read_text(encoding="utf-8"))
         for caption in captions:
             found = [entry for entry in entries if entry["text"] == caption]
-            # The smallest running menu scrolls; every other screen fits all its rows.
+            # The smallest running menu scrolls to the last row only when focused.
             if screen == (128, 128) and name == "home-running" and caption == home_rows[-1]:
                 continue
             assert len(found) == 1, (name, caption, entries)

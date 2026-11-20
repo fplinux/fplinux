@@ -25,8 +25,9 @@ static int digest_field(EVP_MD_CTX *context, const char *field)
 	       EVP_DigestUpdate(context, field, (size_t)length);
 }
 
-static int suite_key(const struct fplinux_pm_suite *suite, const char *jar_path,
-		     char key[65])
+int fplinux_pm_store_key(const struct fplinux_pm_suite *suite,
+			 const char *jar_path,
+			 char key[FPLINUX_PM_STORE_KEY_SIZE])
 {
 	unsigned char digest[EVP_MAX_MD_SIZE];
 	unsigned int length;
@@ -86,7 +87,7 @@ char *fplinux_pm_store_open(const char *state_root,
 			    const struct fplinux_pm_suite *suite,
 			    const char *jar_path)
 {
-	char key[65];
+	char key[FPLINUX_PM_STORE_KEY_SIZE];
 	char *path = NULL;
 	int root, stores = -1, folder = -1, error;
 
@@ -94,7 +95,7 @@ char *fplinux_pm_store_open(const char *state_root,
 		errno = EINVAL;
 		return NULL;
 	}
-	if (!suite_key(suite, jar_path, key))
+	if (!fplinux_pm_store_key(suite, jar_path, key))
 		return NULL;
 	root = open(state_root,
 		    O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);

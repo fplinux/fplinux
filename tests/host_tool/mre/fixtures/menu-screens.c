@@ -180,15 +180,23 @@ static void save_frame(struct capture *capture, const char *name)
 
 static void settings_frames(struct capture *capture, const char *name)
 {
-	char choice[128];
+	char frame[128];
 
 	wait_label(capture, translated(capture, "Scale", "Масштаб"));
 	save_frame(capture, name);
 	press(capture, KEY_ENTER);
-	assert(snprintf(choice, sizeof(choice), "%s-choice-scale", name) <
-	       (int)sizeof(choice));
-	save_frame(capture, choice);
+	assert(snprintf(frame, sizeof(frame), "%s-choice-scale", name) <
+	       (int)sizeof(frame));
+	save_frame(capture, frame);
 	press(capture, KEY_ESC);
+	if (!capture->mre && capture->width == 128 && capture->height == 128) {
+		for (unsigned int i = 0; i < 3; ++i)
+			press(capture, KEY_DOWN);
+		wait_label(capture, "JIT");
+		assert(snprintf(frame, sizeof(frame), "%s-jit", name) <
+		       (int)sizeof(frame));
+		save_frame(capture, frame);
+	}
 	press(capture, KEY_ESC);
 }
 

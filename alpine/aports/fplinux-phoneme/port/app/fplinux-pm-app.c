@@ -46,9 +46,18 @@ enum command {
 	COMMAND_CONFIRM_REPLACE,
 	COMMAND_REMOVE,
 	COMMAND_RESET,
+	COMMAND_VM_MODE,
 };
 
 enum { AUX_RECENT = 1, AUX_SETTINGS };
+
+enum { SETTING_SIZE = 2, SETTING_VM_MODE };
+
+enum pm_vm_mode {
+	PM_VM_USE_DEFAULT = -1,
+	PM_VM_INTERPRETER,
+	PM_VM_JIT,
+};
 
 struct pm_app {
 	struct fplinux_ui *ui;
@@ -98,6 +107,27 @@ static const struct fplinux_ui_command back_command = {
 static void show_home(struct pm_app *app);
 static void sync_visibility(struct pm_app *app);
 static void show_alert(struct pm_app *app, const char *title, const char *text);
+
+static enum pm_vm_mode vm_mode_setting(const struct pm_app *app, bool program)
+{
+	const struct fplinux_ui_prefs *prefs = program ? app->program_prefs :
+							 app->prefs;
+	long long mode =
+		fplinux_ui_prefs_get_int(prefs, "jit", PM_VM_USE_DEFAULT);
+
+	if (mode == PM_VM_JIT || mode == PM_VM_INTERPRETER)
+		return mode;
+	return program ? PM_VM_USE_DEFAULT : PM_VM_INTERPRETER;
+}
+
+static bool jit_enabled(const struct pm_app *app)
+{
+	enum pm_vm_mode mode = vm_mode_setting(app, true);
+
+	if (mode == PM_VM_USE_DEFAULT)
+		mode = vm_mode_setting(app, false);
+	return mode == PM_VM_JIT;
+}
 
 static bool save_preferences(struct pm_app *app, struct fplinux_ui_prefs *prefs,
 			     bool prepared, bool program)
@@ -428,6 +458,7 @@ static void start_vm(struct pm_app *app)
 		.descriptor = app->suite.descriptor,
 		.descriptor_size = app->suite.descriptor_size,
 		.midlet_class = app->midlet->class_name,
+		.enable_jit = jit_enabled(app),
 		.storage_dir = app->storage,
 		.wakeup = vm_wakeup,
 		.wakeup_context = app,
@@ -445,6 +476,7 @@ static void start_vm(struct pm_app *app)
 
 static void run_slice(struct pm_app *app)
 {
+	uint64_t now_ms = 0;
 	int result;
 
 	app->in_slice = true;
@@ -476,7 +508,6 @@ static void vm_tick(lv_timer_t *timer)
 	case FPLINUX_PM_PHASE_STARTING:
 		start_vm(app);
 		break;
-	uint64_t now_ms = 0;
 	case FPLINUX_PM_PHASE_RUNNING:
 	case FPLINUX_PM_PHASE_HIDING:
 		run_slice(app);
@@ -1015,9 +1046,14 @@ static void show_recent(struct pm_app *app)
 					       entry->path :
 					       _("Unavailable"));
 	}
-	if (app->recent.count)
+	if (app->recent.count) {
+		if (app->lifecycle.phase == FPLINUX_PM_PHASE_PICKING)
+			add_command(app, screen, COMMAND_VM_MODE,
+				    FPLINUX_UI_COMMAND_SCREEN, _("VM mode"),
+				    "settings");
 		add_command(app, screen, COMMAND_REMOVE,
 			    FPLINUX_UI_COMMAND_SCREEN, _("Remove"), "delete");
+	}
 	fplinux_ui_screen_add_command(screen, &back_command);
 	fplinux_ui_screen_set_listener(screen, home_command, NULL, app);
 	app->auxiliary = screen;
@@ -1031,6 +1067,113 @@ static const char *size_label(unsigned int size)
 					     "176x220", "240x320", "320x240" };
 
 	return size ? sizes[size - 1] : _("Auto");
+}
+
+static const char *vm_mode_label(enum pm_vm_mode mode)
+{
+	if (mode == PM_VM_USE_DEFAULT)
+		return _("Use default");
+	return mode == PM_VM_JIT ? _("JIT (experimental)") : _("Interpreter");
+}
+
+static const char *jit_status(enum pm_vm_mode mode)
+{
+	if (mode == PM_VM_USE_DEFAULT)
+		return _("Use default");
+	return mode == PM_VM_JIT ? _("On") : _("Off");
+}
+
+static bool store_vm_mode(struct fplinux_ui_prefs *prefs, bool program,
+			  size_t selected)
+{
+	if (program && selected == 0)
+		return fplinux_ui_prefs_remove(prefs, "jit");
+	return fplinux_ui_prefs_set_int(prefs, "jit", selected - program);
+}
+
+static struct fplinux_ui_screen *vm_mode_choice_new(struct pm_app *app,
+						    bool program)
+{
+	enum pm_vm_mode first = program ? PM_VM_USE_DEFAULT : PM_VM_INTERPRETER;
+	size_t selected = vm_mode_setting(app, program) - first;
+	struct fplinux_ui_screen *list = fplinux_ui_list_new(
+		app->ui, _("VM mode"), FPLINUX_UI_LIST_EXCLUSIVE);
+
+	if (!list)
+		return NULL;
+	for (enum pm_vm_mode mode = first; mode <= PM_VM_JIT; ++mode)
+		fplinux_ui_list_append(list, vm_mode_label(mode), NULL);
+	fplinux_ui_list_set_selected(list, selected, true);
+	fplinux_ui_list_set_focused(list, selected);
+	return list;
+}
+
+static void close_recent_vm_mode(struct pm_app *app)
+{
+	fplinux_ui_prefs_close(app->program_prefs);
+	app->program_prefs = NULL;
+}
+
+static void recent_vm_mode_changed(struct fplinux_ui *ui,
+				   struct fplinux_ui_screen *list,
+				   size_t selected, void *context)
+{
+	struct pm_app *app = context;
+	bool stored;
+
+	if (list != app->settings_choice || selected >= 3)
+		return;
+	stored = store_vm_mode(app->program_prefs, true, selected);
+	app->settings_choice = NULL;
+	fplinux_ui_pop(ui);
+	save_preferences(app, app->program_prefs, stored, true);
+	close_recent_vm_mode(app);
+}
+
+static void open_recent_vm_mode(struct pm_app *app)
+{
+	size_t row = fplinux_ui_list_get_focused(app->auxiliary);
+	struct fplinux_pm_suite suite = { 0 };
+	char key[FPLINUX_PM_STORE_KEY_SIZE];
+	struct fplinux_ui_screen *list;
+	enum fplinux_pm_jar_status status;
+	int fd, error;
+
+	if (app->lifecycle.phase != FPLINUX_PM_PHASE_PICKING ||
+	    row >= app->recent.count)
+		return;
+	status =
+		fplinux_pm_suite_open(app->recent.items[row].path, &suite, &fd);
+	if (status != FPLINUX_PM_JAR_OK) {
+		show_jar_problem(app, status);
+		return;
+	}
+	error = fplinux_pm_store_key(&suite, suite.jar_path, key) ? 0 : errno;
+	fplinux_pm_suite_cleanup(&suite);
+	close(fd);
+	if (!error) {
+		close_recent_vm_mode(app);
+		app->program_prefs =
+			fplinux_ui_program_prefs_open(FPLINUX_PM_APP_ID, key);
+		if (!app->program_prefs)
+			error = errno;
+	}
+	if (error) {
+		show_alert(app, _("VM mode"), strerror(error));
+		return;
+	}
+	list = vm_mode_choice_new(app, true);
+	if (!list) {
+		close_recent_vm_mode(app);
+		return;
+	}
+	fplinux_ui_screen_add_command(list, &back_command);
+	fplinux_ui_screen_set_listener(list, home_command,
+				       recent_vm_mode_changed, app);
+	if (fplinux_ui_push(app->ui, list))
+		app->settings_choice = list;
+	else
+		close_recent_vm_mode(app);
 }
 
 static void show_settings(struct pm_app *app, bool program)
@@ -1055,6 +1198,13 @@ static void show_settings(struct pm_app *app, bool program)
 	fplinux_ui_list_set_trailing_value(
 		screen, row,
 		size_label(program ? app->program_size : app->default_size));
+	row = fplinux_ui_list_append(screen, "JIT", NULL);
+	fplinux_ui_list_set_icon(screen, row,
+				 fplinux_ui_glyph(app->ui, "settings",
+						  FPLINUX_UI_GLYPH_ROW),
+				 FPLINUX_UI_LIST_ICON_IMAGE);
+	fplinux_ui_list_set_trailing_value(
+		screen, row, jit_status(vm_mode_setting(app, program)));
 	if (program)
 		add_command(app, screen, COMMAND_RESET,
 			    FPLINUX_UI_COMMAND_SCREEN, _("Reset"), "refresh");
@@ -1096,6 +1246,8 @@ static void save_settings(struct pm_app *app, bool reset, size_t selected)
 		app->program_settings ? app->program_prefs : app->prefs;
 	unsigned int size = app->program_settings ? app->program_size :
 						    app->default_size;
+	bool jit_before = jit_enabled(app);
+	bool vm_only = !reset && app->setting_row == SETTING_VM_MODE;
 	bool ok = prefs != NULL;
 
 	if (!ok)
@@ -1104,7 +1256,11 @@ static void save_settings(struct pm_app *app, bool reset, size_t selected)
 		settings = app->defaults;
 		size = app->default_size;
 		ok = ok && fplinux_ui_view_settings_reset(prefs) &&
-		     fplinux_ui_prefs_remove(prefs, "canvas-size");
+		     fplinux_ui_prefs_remove(prefs, "canvas-size") &&
+		     fplinux_ui_prefs_remove(prefs, "jit");
+	} else if (vm_only) {
+		ok = ok &&
+		     store_vm_mode(prefs, app->program_settings, selected);
 	} else {
 		if (app->setting_row == FPLINUX_UI_VIEW_SCALE)
 			settings.scale = selected;
@@ -1115,7 +1271,7 @@ static void save_settings(struct pm_app *app, bool reset, size_t selected)
 		ok = ok && fplinux_ui_view_settings_store(&settings, prefs) &&
 		     fplinux_ui_prefs_set_int(prefs, "canvas-size", size);
 	}
-	if (ok) {
+	if (ok && !vm_only) {
 		fplinux_pm_keys_cancel(FPLINUX_UI_KEY_PHONE);
 		fplinux_pm_keys_cancel(FPLINUX_UI_KEY_KEYBOARD);
 		if (app->program_settings) {
@@ -1142,7 +1298,18 @@ static void save_settings(struct pm_app *app, bool reset, size_t selected)
 		fplinux_pm_canvas_view_changed();
 	}
 	show_settings(app, app->program_settings);
-	save_preferences(app, prefs, ok, app->program_settings);
+	if (save_preferences(app, prefs, ok, app->program_settings) &&
+	    app->lifecycle.phase != FPLINUX_PM_PHASE_PICKING &&
+	    app->lifecycle.phase != FPLINUX_PM_PHASE_EXITED &&
+	    jit_before != jit_enabled(app)) {
+		struct fplinux_ui_screen *alert = fplinux_ui_alert_new(
+			app->ui, FPLINUX_UI_ALERT_INFO, _("Restart program"),
+			_("The VM mode takes effect when the program starts again."),
+			0);
+
+		if (alert)
+			fplinux_ui_push(app->ui, alert);
+	}
 }
 
 static void settings_changed(struct fplinux_ui *ui,
@@ -1150,9 +1317,13 @@ static void settings_changed(struct fplinux_ui *ui,
 			     void *context)
 {
 	struct pm_app *app = context;
+	size_t choices = 3;
 
-	if (list != app->settings_choice ||
-	    selected >= (app->setting_row == 2 ? 7U : 3U))
+	if (app->setting_row == SETTING_SIZE)
+		choices = 7;
+	else if (app->setting_row == SETTING_VM_MODE && !app->program_settings)
+		choices = 2;
+	if (list != app->settings_choice || selected >= choices)
 		return;
 	app->settings_choice = NULL;
 	fplinux_ui_pop(ui);
@@ -1166,10 +1337,10 @@ static void open_settings_choice(struct pm_app *app)
 	struct fplinux_ui_screen *list;
 
 	app->setting_row = fplinux_ui_list_get_focused(app->auxiliary);
-	if (app->setting_row < 2)
+	if (app->setting_row < SETTING_SIZE)
 		list = fplinux_ui_view_settings_choice_new(
 			app->ui, app->setting_row, &shown);
-	else if (app->setting_row == 2) {
+	else if (app->setting_row == SETTING_SIZE) {
 		unsigned int size = app->program_settings ? app->program_size :
 							    app->default_size;
 
@@ -1182,7 +1353,9 @@ static void open_settings_choice(struct pm_app *app)
 			fplinux_ui_list_set_selected(list, size, true);
 			fplinux_ui_list_set_focused(list, size);
 		}
-	} else
+	} else if (app->setting_row == SETTING_VM_MODE)
+		list = vm_mode_choice_new(app, app->program_settings);
+	else
 		return;
 	if (!list)
 		return;
@@ -1258,6 +1431,8 @@ static void home_command(struct fplinux_ui *ui,
 	}
 	if (screen == app->settings_choice) {
 		if (command_id == COMMAND_BACK) {
+			if (app->auxiliary_kind == AUX_RECENT)
+				close_recent_vm_mode(app);
 			app->settings_choice = NULL;
 			fplinux_ui_pop(ui);
 		}
@@ -1280,14 +1455,20 @@ static void home_command(struct fplinux_ui *ui,
 			}
 		}
 	} else if (app->auxiliary_kind == AUX_RECENT &&
+		   command_id == COMMAND_VM_MODE) {
+		open_recent_vm_mode(app);
+	} else if (app->auxiliary_kind == AUX_RECENT &&
 		   command_id == COMMAND_REMOVE) {
 		size_t row = fplinux_ui_list_get_focused(screen);
 
 		if (fplinux_ui_recent_remove(&app->recent, row)) {
 			fplinux_ui_list_delete(screen, row);
-			if (!app->recent.count)
+			if (!app->recent.count) {
 				fplinux_ui_screen_remove_command(
 					screen, COMMAND_REMOVE);
+				fplinux_ui_screen_remove_command(
+					screen, COMMAND_VM_MODE);
+			}
 			save_preferences(app, app->prefs,
 					 fplinux_ui_recent_store(&app->recent,
 								 app->prefs),

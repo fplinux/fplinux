@@ -76,6 +76,30 @@ msgstr "Не удалось запустить"
 msgid "Size"
 msgstr "Размер"
 
+msgid "VM mode"
+msgstr "Режим ВМ"
+
+msgid "Use default"
+msgstr "По умолчанию"
+
+msgid "On"
+msgstr "Вкл."
+
+msgid "Off"
+msgstr "Выкл."
+
+msgid "Interpreter"
+msgstr "Интерпретатор"
+
+msgid "JIT (experimental)"
+msgstr "JIT (эксперимент)"
+
+msgid "Restart program"
+msgstr "Перезапуск"
+
+msgid "The VM mode takes effect when the program starts again."
+msgstr "Режим ВМ изменится при следующем запуске программы."
+
 msgid "Continue"
 msgstr "Продолжить"
 

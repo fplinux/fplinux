@@ -4,6 +4,12 @@
 
 struct fplinux_pm_suite;
 
+/* Forms the settings and RMS key from the suite identity or JAR path. */
+#define FPLINUX_PM_STORE_KEY_SIZE 65
+int fplinux_pm_store_key(const struct fplinux_pm_suite *suite,
+			 const char *jar_path,
+			 char key[FPLINUX_PM_STORE_KEY_SIZE]);
+
 /*
  * Creates a private RMS directory under an existing absolute state root.
  * Complete suite identity uses vendor and name; incomplete identity uses the

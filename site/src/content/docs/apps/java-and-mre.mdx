@@ -23,7 +23,7 @@ Choosing the runtime's tile again opens its home screen and pauses the current p
 
 ## Display settings
 
-Open **Settings** on the runtime's home screen. With no program running, this opens the defaults for all programs. With a program running, choose **This program** or **All programs**. Each setting opens a list of values; choosing a value applies and saves it immediately, then returns to Settings. **Reset** in This program removes its overrides and uses the current defaults.
+Open **Settings** on the runtime's home screen. With no program running, this opens the defaults for all programs. With a program running, choose **This program** or **All programs**. Choosing a value saves it and returns to Settings. **Reset** in This program removes its overrides and uses the current defaults.
 
 **Scale → Fit** preserves the image's proportions, **1:1** centres it without scaling and clips any part outside the screen, and **Integer** uses whole-number enlargement or reduction. **Rotation** changes the image and directional controls together. These settings apply to the running image.
 
@@ -32,6 +32,8 @@ phoneME also offers **Size**: **Auto** uses the phone's available area; the othe
 If saving fails, the chosen value remains applied and Settings shows **Unsaved** with an error message. Choose the value again to retry saving. A successful save in another settings scope does not clear the failed scope's marker. Settings follow the [home directory's lifetime](/fplinux/use/files/); a successful save during RAM boot does not preserve them after power-off.
 
 ## Java programs
+
+In phoneME, **Settings → JIT** selects **Interpreter** or **JIT (experimental)**. The default is Interpreter. **This program → JIT** can override the default for the current Java program or restore it with **Use default**. Close and reopen the program to apply a VM mode change. To change a game's mode before opening it again, focus it in **Recent** and choose **Options → VM mode**.
 
 If a program came with a JAD descriptor, keep it beside the JAR and open the JAD. Its **MIDlet-Jar-URL** must name the JAR in the same folder, its declared size must match the file, and the suite name, vendor and version must match the JAR manifest. Properties in a matching JAD override the corresponding manifest properties. Opening the JAR also uses a matching `.jad` or `.JAD` with the same filename stem when present. A standalone JAR uses its manifest.
 
