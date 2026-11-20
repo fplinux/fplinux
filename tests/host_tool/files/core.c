@@ -5,6 +5,7 @@
 #include "fplinux-utf8.h"
 
 #include <assert.h>
+#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <poll.h>
@@ -17,10 +18,41 @@
 static unsigned int fail_directory_sync;
 static bool fail_source_unlink;
 static bool fail_data_write;
+static bool reject_directory_read;
 
+static struct directory_replacement {
+	const char *path;
+	const char *previous;
+	const char *replacement;
+} directory_replacement;
+
+int __real_fclose(FILE *stream);
 int __real_fsync(int descriptor);
+struct dirent *__real_readdir(DIR *stream);
 int __real_unlinkat(int descriptor, const char *name, int flags);
 ssize_t __real_write(int descriptor, const void *buffer, size_t count);
+
+int __wrap_fclose(FILE *stream)
+{
+	int result = __real_fclose(stream);
+
+	/* Replace the path as the worker finishes reading the mount ID. */
+	if (directory_replacement.path) {
+		assert(result == 0);
+		assert(rename(directory_replacement.path,
+			      directory_replacement.previous) == 0);
+		assert(rename(directory_replacement.replacement,
+			      directory_replacement.path) == 0);
+		directory_replacement.path = NULL;
+	}
+	return result;
+}
+
+struct dirent *__wrap_readdir(DIR *stream)
+{
+	assert(!reject_directory_read);
+	return __real_readdir(stream);
+}
 
 ssize_t __wrap_write(int descriptor, const void *buffer, size_t count)
 {
@@ -281,21 +313,29 @@ static void search(void)
 					      "a"));
 }
 
+static struct fplinux_files_job_status
+wait_for_job(struct fplinux_files_job *job)
+{
+	struct pollfd notification = { .fd = job->pipe[0], .events = POLLIN };
+	struct fplinux_files_job_status status;
+
+	do {
+		assert(poll(&notification, 1, 3000) == 1);
+		status = fplinux_files_job_collect(job);
+	} while (!status.done);
+	return status;
+}
+
 static void worker(const char *path)
 {
 	struct fplinux_files_job job;
 	struct fplinux_files_job_status status;
-	struct pollfd descriptor;
 
 	assert(fplinux_files_job_init(&job) == 0);
-	descriptor = (struct pollfd){ .fd = job.pipe[0], .events = POLLIN };
 	assert(fplinux_files_job_read(&job, path, false, 0) == 0);
 	assert(fplinux_files_job_read(&job, path, false, 0) < 0 &&
 	       errno == EBUSY);
-	do {
-		assert(poll(&descriptor, 1, 3000) == 1);
-		status = fplinux_files_job_collect(&job);
-	} while (!status.done);
+	status = wait_for_job(&job);
 	assert(!job.active && !status.error && job.directory.count == 7);
 	assert(job.directory_fd >= 0);
 	assert(!fplinux_files_job_collect(&job).done);
@@ -308,33 +348,49 @@ static void mount_identity(const char *path, uint32_t mount_id)
 {
 	struct fplinux_files_job job;
 	struct fplinux_files_job_status status;
-	struct pollfd notification;
+	uint32_t stale_mount_id = mount_id == 1 ? 2 : 1;
 	int descriptor = fplinux_files_directory_open(path, mount_id);
 
 	assert(descriptor >= 0 && fcntl(descriptor, F_GETFD) >= 0);
 	close(descriptor);
-	assert(fplinux_files_directory_open(path, mount_id + 1) < 0 &&
+	assert(fplinux_files_directory_open(path, stale_mount_id) < 0 &&
 	       errno == ENODEV);
 	assert(fplinux_files_job_init(&job) == 0);
-	notification = (struct pollfd){ .fd = job.pipe[0], .events = POLLIN };
-	assert(fplinux_files_job_read(&job, path, false, mount_id + 1) == 0);
-	do {
-		assert(poll(&notification, 1, 3000) == 1);
-		status = fplinux_files_job_collect(&job);
-	} while (!status.done);
-	assert(status.error == ENODEV && !job.directory.count &&
-	       job.directory_fd == -1);
+	reject_directory_read = true;
+	assert(fplinux_files_job_read(&job, path, false, stale_mount_id) == 0);
+	status = wait_for_job(&job);
+	assert(status.error == ENODEV && !job.directory.entries &&
+	       !job.directory.count && job.directory_fd == -1);
+	reject_directory_read = false;
 	assert(fplinux_files_job_read(&job, path, false, mount_id) == 0);
-	do {
-		assert(poll(&notification, 1, 3000) == 1);
-		status = fplinux_files_job_collect(&job);
-	} while (!status.done);
+	status = wait_for_job(&job);
 	assert(!status.error && job.directory.count == 7 &&
 	       job.directory_fd >= 0);
 	descriptor = job.directory_fd;
 	assert(fcntl(descriptor, F_GETFD) >= 0);
 	fplinux_files_job_close(&job);
 	assert(fcntl(descriptor, F_GETFD) < 0 && errno == EBADF);
+}
+
+static void replace_checked_directory(const char *path, uint32_t mount_id,
+				      const char *previous,
+				      const char *replacement)
+{
+	struct fplinux_files_job job;
+	struct fplinux_files_job_status status;
+
+	assert(fplinux_files_job_init(&job) == 0);
+	directory_replacement = (struct directory_replacement){
+		.path = path,
+		.previous = previous,
+		.replacement = replacement,
+	};
+	assert(fplinux_files_job_read(&job, path, false, mount_id) == 0);
+	status = wait_for_job(&job);
+	assert(!status.error && !directory_replacement.path);
+	assert(job.directory.count == 1);
+	assert(!strcmp(job.directory.entries[0].name, "checked.txt"));
+	fplinux_files_job_close(&job);
 }
 
 int main(int argc, char **argv)
@@ -355,6 +411,11 @@ int main(int argc, char **argv)
 	else if (!strcmp(argv[1], "identity")) {
 		assert(argc == 4);
 		mount_identity(argv[2], (uint32_t)strtoul(argv[3], NULL, 10));
+	} else if (!strcmp(argv[1], "replace_checked_directory")) {
+		assert(argc == 6);
+		replace_checked_directory(argv[2],
+					  (uint32_t)strtoul(argv[3], NULL, 10),
+					  argv[4], argv[5]);
 	} else {
 		assert(argc == 4);
 		if (!strcmp(argv[1], "symlink") ||

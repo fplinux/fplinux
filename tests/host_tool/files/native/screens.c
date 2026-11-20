@@ -1287,6 +1287,23 @@ static void check_directory_menu_actions(const struct capture *capture)
 	}
 }
 
+static void check_folder_details(struct capture *capture)
+{
+	const char *title = word(capture, "Details", "Сведения");
+	char path[1024];
+
+	assert(snprintf(path, sizeof(path), "%s/Files/b-dir",
+			capture->directory) < (int)sizeof(path));
+	option(capture, title);
+	wait_label(capture, title, false);
+	assert(has_label(capture, "b-dir"));
+	/* The path can start below the initial viewport. */
+	if (!has_label(capture, path))
+		press(capture, KEY_DOWN);
+	wait_label(capture, path, false);
+	assert(has_label(capture, word(capture, "Path", "Путь")));
+}
+
 int main(int argc, char **argv)
 {
 	struct capture capture = { 0 };
@@ -1377,8 +1394,7 @@ int main(int argc, char **argv)
 	wait_label(&capture, "a-dir", false);
 	assert(capture.observed.focused == 1 &&
 	       capture.observed.first_visible == first);
-	option(&capture, word(&capture, "Details", "Сведения"));
-	wait_label(&capture, word(&capture, "Path", "Путь"), false);
+	check_folder_details(&capture);
 	press(&capture, KEY_ESC);
 	wait_label(&capture, word(&capture, "Details", "Сведения"), true);
 	assert(capture.observed.menu_glyphs > 0);

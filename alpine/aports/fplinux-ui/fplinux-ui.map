@@ -19,6 +19,7 @@ global:
 	fplinux_files_child_path;
 	fplinux_files_parent_path;
 	fplinux_files_directory_read;
+	fplinux_files_directory_read_fd;
 	fplinux_files_directory_free;
 	fplinux_files_directory_open;
 	fplinux_files_valid_name;

@@ -42,6 +42,13 @@ int fplinux_files_parent_path(const char *path, char *out, size_t capacity);
 int fplinux_files_directory_read(const char *path,
 				 struct fplinux_files_directory *directory,
 				 fplinux_files_cancel_cb cancel, void *context);
+/* Scan from the current offset of a readable directory fd, advancing its
+ * offset. The caller retains ownership of the fd on success and failure.
+ */
+int fplinux_files_directory_read_fd(int directory_fd,
+				    struct fplinux_files_directory *directory,
+				    fplinux_files_cancel_cb cancel,
+				    void *context);
 void fplinux_files_directory_free(struct fplinux_files_directory *directory);
 /* A held directory pins removable storage for ordinary unmount. A nonzero
  * mount_id must match the kernel mount containing the opened directory.

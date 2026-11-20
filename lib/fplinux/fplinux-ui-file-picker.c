@@ -226,8 +226,8 @@ static int read_entries(struct fplinux_ui_file_picker *picker)
 	}
 	if (folder->fd < 0)
 		return -1;
-	if (fplinux_files_directory_read(folder->path, &folder->directory,
-					 read_cancelled, picker) < 0)
+	if (fplinux_files_directory_read_fd(folder->fd, &folder->directory,
+					    read_cancelled, picker) < 0)
 		return -1;
 	folder->rows =
 		calloc(folder->directory.count ? folder->directory.count : 1,

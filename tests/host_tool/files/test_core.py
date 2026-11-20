@@ -45,7 +45,9 @@ def files_core(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
                 str(APORT / "files-job.c"),
                 str(ROOT / "lib/fplinux/fplinux-files-browse.c"),
                 str(ROOT / "lib/fplinux/fplinux-utf8.c"),
+                "-Wl,--wrap=fclose",
                 "-Wl,--wrap=fsync",
+                "-Wl,--wrap=readdir",
                 "-Wl,--wrap=unlinkat",
                 "-Wl,--wrap=write",
             ],
@@ -66,9 +68,9 @@ def directory(tmp_path: Path) -> Path:
     return tmp_path
 
 
-def invoke(executable: Path, scenario: str, *paths: Path) -> None:
+def invoke(executable: Path, scenario: str, *arguments: Path | int) -> None:
     result = run_process(
-        [str(executable), scenario, *(str(path) for path in paths)],
+        [str(executable), scenario, *(str(argument) for argument in arguments)],
         name=f"Files production objects: {scenario}",
         timeout=10,
     )
@@ -87,22 +89,38 @@ def test_directory_limit_discards_the_partial_result(files_core: Path, tmp_path:
     invoke(files_core, "overflow", tmp_path)
 
 
+def directory_mount_id(path: Path) -> int:
+    descriptor = os.open(path, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        fields = Path(f"/proc/self/fdinfo/{descriptor}").read_text().splitlines()
+        return next(int(line.split()[1]) for line in fields if line.startswith("mnt_id:"))
+    finally:
+        os.close(descriptor)
+
+
 def test_stale_mounted_snapshot_rejects_underlying_directory_before_listing(
     files_core: Path, directory: Path
 ) -> None:
-    descriptor = os.open(directory, os.O_RDONLY | os.O_DIRECTORY)
-    try:
-        fields = Path(f"/proc/self/fdinfo/{descriptor}").read_text().splitlines()
-        mount_id = next(int(line.split()[1]) for line in fields if line.startswith("mnt_id:"))
-    finally:
-        os.close(descriptor)
-    result = run_process(
-        [str(files_core), "identity", str(directory), str(mount_id)],
-        name="Files binds an opened directory to the mounted snapshot identity",
-        timeout=10,
+    invoke(files_core, "identity", directory, directory_mount_id(directory))
+
+
+def test_worker_lists_checked_directory_after_path_replacement(
+    files_core: Path, tmp_path: Path
+) -> None:
+    selected = tmp_path / "selected"
+    replacement = tmp_path / "replacement"
+    selected.mkdir()
+    replacement.mkdir()
+    (selected / "checked.txt").touch()
+    (replacement / "replacement.txt").touch()
+    invoke(
+        files_core,
+        "replace_checked_directory",
+        selected,
+        directory_mount_id(selected),
+        tmp_path / "previous",
+        replacement,
     )
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert result.stdout == "files-core: passed\n"
 
 
 @pytest.mark.parametrize("scenario", ["copy", "sync", "cancel", "space", "conflict"])

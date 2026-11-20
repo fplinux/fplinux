@@ -69,11 +69,11 @@ static void *run(void *context)
 		}
 		job->directory_fd = fplinux_files_directory_open(job->source,
 								 job->mount_id);
-		result = job->directory_fd < 0 ?
-				 -1 :
-				 fplinux_files_directory_read(job->source,
-							      &job->directory,
-							      cancelled, job);
+		result = -1;
+		if (job->directory_fd >= 0)
+			result = fplinux_files_directory_read_fd(
+				job->directory_fd, &job->directory, cancelled,
+				job);
 	} else {
 		result = job->retry ? 0 :
 				      fplinux_files_operation_open(

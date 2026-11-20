@@ -287,22 +287,15 @@ void fplinux_files_directory_free(struct fplinux_files_directory *directory)
 	directory->count = 0;
 }
 
-int fplinux_files_directory_read(const char *path,
-				 struct fplinux_files_directory *directory,
-				 fplinux_files_cancel_cb cancel, void *context)
+static int read_directory(int descriptor,
+			  struct fplinux_files_directory *directory,
+			  fplinux_files_cancel_cb cancel, void *context)
 {
 	struct fplinux_files_directory result = { 0 };
 	size_t capacity = 0;
-	int descriptor;
 	DIR *stream;
 	int error;
 
-	if (directory == NULL || directory->entries != NULL ||
-	    directory->count != 0) {
-		errno = EINVAL;
-		return -1;
-	}
-	descriptor = open_directory(path, O_RDONLY);
 	if (descriptor < 0)
 		return -1;
 	stream = fdopendir(descriptor);
@@ -383,4 +376,39 @@ failed:
 	fplinux_files_directory_free(&result);
 	errno = error;
 	return -1;
+}
+
+static bool is_empty_result(const struct fplinux_files_directory *directory)
+{
+	return directory && !directory->entries && !directory->count;
+}
+
+int fplinux_files_directory_read(const char *path,
+				 struct fplinux_files_directory *directory,
+				 fplinux_files_cancel_cb cancel, void *context)
+{
+	int descriptor;
+
+	if (!is_empty_result(directory)) {
+		errno = EINVAL;
+		return -1;
+	}
+	descriptor = open_directory(path, O_RDONLY);
+	return read_directory(descriptor, directory, cancel, context);
+}
+
+int fplinux_files_directory_read_fd(int directory_fd,
+				    struct fplinux_files_directory *directory,
+				    fplinux_files_cancel_cb cancel,
+				    void *context)
+{
+	int descriptor;
+
+	if (!is_empty_result(directory)) {
+		errno = EINVAL;
+		return -1;
+	}
+	/* Give fdopendir ownership without releasing the caller's mount pin. */
+	descriptor = fcntl(directory_fd, F_DUPFD_CLOEXEC, 0);
+	return read_directory(descriptor, directory, cancel, context);
 }
