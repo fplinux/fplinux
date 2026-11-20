@@ -876,6 +876,28 @@ static void application_storage(struct fplinux_ui *ui,
 	assert(write(application->control, "s", 1) == 1);
 }
 
+static const struct fplinux_ui_session_message initial_system_levels = {
+	.type = FPLINUX_UI_SESSION_SYSTEM_LEVELS,
+	.system_levels.level = {
+		[FPLINUX_SYSTEM_LEVEL_MEDIA] = {
+			.availability = FPLINUX_SYSTEM_LEVEL_READY,
+			.maximum = 10,
+			.value = 7,
+			.pending = true,
+		},
+		[FPLINUX_SYSTEM_LEVEL_ALARM] = {
+			.availability = FPLINUX_SYSTEM_LEVEL_READY,
+			.maximum = 10,
+		},
+		[FPLINUX_SYSTEM_LEVEL_BRIGHTNESS] = {
+			.availability = FPLINUX_SYSTEM_LEVEL_READY,
+			.minimum = 1,
+			.maximum = 10,
+			.value = 4,
+		},
+	},
+};
+
 static int run_application(int control, const char *scenario)
 {
 	struct application application = { .control = control };
@@ -887,11 +909,9 @@ static int run_application(int control, const char *scenario)
 	application.ui = ui;
 	if (!strcmp(scenario, "system-levels")) {
 		struct fplinux_system_level_state state = { .value = 42 };
-		struct fplinux_ui_session_message spoof = {
-			.type = FPLINUX_UI_SESSION_SYSTEM_LEVELS,
-		};
 
-		assert(!fplinux_ui_send(ui, &spoof) && errno == EINVAL);
+		assert(!fplinux_ui_send(ui, &initial_system_levels) &&
+		       errno == EINVAL);
 		assert(!fplinux_ui_system_level_get(
 			       NULL, FPLINUX_SYSTEM_LEVEL_MEDIA, &state) &&
 		       errno == EINVAL);
@@ -4821,27 +4841,7 @@ static void check_runtime(struct fplinux_ui_frame_peer *compositor, int session,
 
 static void send_system_levels(int session, unsigned int update)
 {
-	struct fplinux_ui_session_message message = {
-		.type = FPLINUX_UI_SESSION_SYSTEM_LEVELS,
-		.system_levels.level = {
-			[FPLINUX_SYSTEM_LEVEL_MEDIA] = {
-				.availability = FPLINUX_SYSTEM_LEVEL_READY,
-				.maximum = 10,
-				.value = 7,
-				.pending = true,
-			},
-			[FPLINUX_SYSTEM_LEVEL_ALARM] = {
-				.availability = FPLINUX_SYSTEM_LEVEL_READY,
-				.maximum = 10,
-			},
-			[FPLINUX_SYSTEM_LEVEL_BRIGHTNESS] = {
-				.availability = FPLINUX_SYSTEM_LEVEL_READY,
-				.minimum = 1,
-				.maximum = 10,
-				.value = 4,
-			},
-		},
-	};
+	struct fplinux_ui_session_message message = initial_system_levels;
 	struct fplinux_system_level_state *media =
 		&message.system_levels.level[FPLINUX_SYSTEM_LEVEL_MEDIA];
 
@@ -5047,6 +5047,7 @@ int main(int argc, char **argv)
 		close(session);
 		goto cleanup;
 	}
+	/* READY must be next, including after a rejected SYSTEM_LEVELS send. */
 	wait_message(&compositor, session, FPLINUX_UI_SESSION_READY);
 	wait_commits(&compositor, 1);
 	if (!form_boundaries)

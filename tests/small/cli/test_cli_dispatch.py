@@ -668,13 +668,15 @@ class CliCacheLockTests:
                 lifecycle,
                 "cache_lock",
                 side_effect=AssertionError("ambiguous sources must not lock"),
-            ),
-            contextlib.redirect_stderr(io.StringIO()),
+            ) as lock,
+            contextlib.redirect_stderr(io.StringIO()) as diagnostic,
             pytest.raises(SystemExit) as error,
         ):
             cli.main()
 
         assert error.value.code == 2
+        assert "--from-originals: not allowed with argument --from-dump" in diagnostic.getvalue()
+        lock.assert_not_called()
         assert not (dispatch_root / ".data").exists()
 
     def test_format_forwards_only_the_explicit_paths(self, dispatch_root: Path) -> None:
@@ -754,12 +756,13 @@ class CliCacheLockTests:
                 "cache_lock",
                 side_effect=AssertionError("invalid arguments must not lock"),
             ) as lock,
-            contextlib.redirect_stderr(io.StringIO()),
+            contextlib.redirect_stderr(io.StringIO()) as diagnostic,
             pytest.raises(SystemExit) as stopped,
         ):
             cli.main()
 
         assert stopped.value.code == 2
+        assert "--memory-mib: must be a positive integer" in diagnostic.getvalue()
         lock.assert_not_called()
         assert not (dispatch_root / ".data").exists()
 
@@ -1114,12 +1117,13 @@ class CliCacheLockTests:
                 "cache_lock",
                 side_effect=AssertionError("conflicting selectors must not lock"),
             ) as lock,
-            contextlib.redirect_stderr(io.StringIO()),
+            contextlib.redirect_stderr(io.StringIO()) as diagnostic,
             pytest.raises(SystemExit) as stopped,
         ):
             cli.main()
 
         assert (stopped.value.code) == (2)
+        assert "--profile: not allowed with argument --boot" in diagnostic.getvalue()
         lock.assert_not_called()
         assert not ((dispatch_root / ".data").exists())
 

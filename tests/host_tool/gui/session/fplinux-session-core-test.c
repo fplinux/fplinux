@@ -6326,6 +6326,15 @@ static void test_light_effect_battery(struct fixture *fixture)
 	expect_number(fixture->brightness_effective, 7);
 }
 
+static void wait_clock_helper_reaped(struct fixture *fixture, pid_t pid)
+{
+	uint64_t deadline = real_ms() + 2000;
+
+	while (kill(pid, 0) == 0 && real_ms() < deadline)
+		pump(fixture, 2);
+	CHECK(kill(pid, 0) == -1 && errno == ESRCH);
+}
+
 static void test_clock_signal_lifetime(struct fixture *fixture)
 {
 	struct peer *launcher = start_launcher(fixture);
@@ -6340,14 +6349,12 @@ static void test_clock_signal_lifetime(struct fixture *fixture)
 	fixture->now_ms += 1000;
 	pid_t failed_pid = wait_clock_signal(fixture, 1, 0);
 
-	pump(fixture, 20);
+	wait_clock_helper_reaped(fixture, failed_pid);
 	if (fixture->media) {
 		CHECK(audio_count(fixture, "CLOCK", failed_pid) == 1);
 		CHECK(audio_audible(fixture, failed_pid) == 1);
 		CHECK(audio_count(fixture, "GONE", failed_pid) == 1);
 	}
-	errno = 0;
-	CHECK(waitpid(failed_pid, NULL, WNOHANG) == -1 && errno == ECHILD);
 	clock_request(fixture, launcher, "dismiss",
 		      "{\"op\":\"dismiss\",\"event_id\":1}", 3);
 	CHECK(setenv("FPLINUX_TEST_CLOCK_SIGNAL_MODE", "wait", 1) == 0);
@@ -6365,11 +6372,9 @@ static void test_clock_signal_lifetime(struct fixture *fixture)
 	clock_request(fixture, launcher, "dismiss",
 		      "{\"op\":\"dismiss\",\"event_id\":2}", 5);
 	wait_clock_signal(fixture, 2, 1);
-	pump(fixture, 20);
+	wait_clock_helper_reaped(fixture, second_pid);
 	if (fixture->media)
 		CHECK(audio_count(fixture, "GONE", second_pid) == 1);
-	errno = 0;
-	CHECK(waitpid(second_pid, NULL, WNOHANG) == -1 && errno == ECHILD);
 	clock_request(fixture, clocks, "timer-restart",
 		      "{\"op\":\"timer-restart\"}", 6);
 	fixture->now_ms += 1000;
@@ -6384,8 +6389,7 @@ static void test_clock_signal_lifetime(struct fixture *fixture)
 		CHECK(audio_count(fixture, "GONE", clocks->pid) == 1);
 	}
 	wait_clock_signal(fixture, 3, 2);
-	errno = 0;
-	CHECK(waitpid(final_pid, NULL, WNOHANG) == -1 && errno == ECHILD);
+	CHECK(kill(final_pid, 0) == -1 && errno == ESRCH);
 }
 
 static void register_document_handler(struct fixture *fixture, const char *id,
@@ -7309,13 +7313,20 @@ static void test_storage_busy_survives_home_and_discards_dead_origin(
 	CHECK(close(writer) == 0);
 	CHECK(unlink(fixture->storage_mountinfo) == 0);
 	write_file(fixture->storage_mountinfo, mount);
-	pump(fixture, 30);
+	deadline = real_ms() + 2000;
+	for (uint32_t serial = 73;; ++serial) {
+		request_storage(fixture, app, serial, FPLINUX_VOLUME_REFRESH,
+				0);
+		result = wait_message(fixture, app,
+				      FPLINUX_UI_SESSION_STORAGE_RESULT, NULL);
+		CHECK(result.serial == serial);
+		if (!result.volume_result.error)
+			break;
+		CHECK(result.volume_result.error == EBUSY &&
+		      real_ms() < deadline);
+	}
 	CHECK(!take_message(app, FPLINUX_UI_SESSION_STORAGE_RESULT, NULL,
 			    &result));
-	request_storage(fixture, app, 73, FPLINUX_VOLUME_REFRESH, 0);
-	result = wait_message(fixture, app, FPLINUX_UI_SESSION_STORAGE_RESULT,
-			      NULL);
-	CHECK(result.serial == 73 && !result.volume_result.error);
 }
 
 int main(int argc, char **argv)

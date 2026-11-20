@@ -203,6 +203,8 @@ def test_unsupported_filesystem_or_missing_first_partition_cannot_connect(
     storage_peer: Path, storage_tree: Path, filesystem: str, partition: int
 ) -> None:
     add_card(storage_tree, filesystem=filesystem, partition=partition)
+    if partition == 2:
+        (storage_tree / "dev/mmcblk0.probe").write_text("vfat\nWhole card\n")
     initial, connected = invoke(storage_peer, storage_tree, "refresh", "connect")
     assert initial.volumes[0].state == 2
     assert connected.error == errno.EOPNOTSUPP

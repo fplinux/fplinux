@@ -6,9 +6,10 @@ from __future__ import annotations
 import os
 import selectors
 import signal
+import socket
 import subprocess
 import time
-from contextlib import suppress
+from contextlib import ExitStack, suppress
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -81,6 +82,25 @@ def read_process_line(stream: IO[str], *, deadline: float, name: str) -> str:
                     return line.decode("utf-8")
     finally:
         os.set_blocking(fd, blocking)
+
+
+def connect_unix_seqpacket(path: Path, *, timeout: float = 3) -> socket.socket:
+    """Connect to a listening Unix socket and bound subsequent socket operations."""
+    deadline = time.monotonic() + timeout
+    while (remaining := deadline - time.monotonic()) > 0:
+        with ExitStack() as cleanup:
+            client = cleanup.enter_context(socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET))
+            client.settimeout(remaining)
+            try:
+                client.connect(str(path))
+            except FileNotFoundError, ConnectionRefusedError, BlockingIOError:
+                pass
+            else:
+                client.settimeout(timeout)
+                cleanup.pop_all()
+                return client
+        time.sleep(0.005)
+    raise AssertionError(f"{path} did not accept a Unix socket connection")
 
 
 def _terminate_and_reap(process: subprocess.Popen[str]) -> tuple[str, str]:

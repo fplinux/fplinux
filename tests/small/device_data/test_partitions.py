@@ -242,7 +242,6 @@ class PartitionDiscoveryTests:
             pytest.param(2, (0x1000000F, 0x100, 3, 1), id="overlap"),
             pytest.param(2, (0x1000000F, 0x100, 5, 1), id="gap"),
             pytest.param(4, (0x10000003, 1, 8, 25), id="outside-nand"),
-            pytest.param(4, (0x10000003, 1, 8, 24), id="empty-remainder"),
             pytest.param(1, (0x10000001, 0x100, 2, 0xFFFFFFFF), id="early-remainder"),
             pytest.param(5, (8, 1, 11, 0xFFFFFFFF), id="wrong-remainder-start"),
             pytest.param(5, (8, 1, 10, 1), id="missing-remainder"),
@@ -255,6 +254,13 @@ class PartitionDiscoveryTests:
         entries = list(parti_entries())
         entries[index] = replacement
         reader = FakeNandPartitionReader({0x100: parti_table(tuple(entries))}, block_count=32)
+
+        with pytest.raises(ValueError, match="no VBM or PartI partition table found"):
+            discover_partitions(reader, required_partitions())
+
+    def test_parti_remainder_requires_at_least_one_block(self) -> None:
+        """A valid table's remainder cannot start exactly at the end of NAND."""
+        reader = FakeNandPartitionReader({0x100: parti_table(parti_entries())}, block_count=10)
 
         with pytest.raises(ValueError, match="no VBM or PartI partition table found"):
             discover_partitions(reader, required_partitions())

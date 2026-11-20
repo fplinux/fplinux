@@ -165,6 +165,9 @@ static void send_damaged_frame(struct protocol_client *client,
 	if (stale)
 		image[127 * 128 + 127] = 0x07e0;
 	commit_image(client, peer, 128, 128, image, damage, 2);
+	/* An invalid commit must abort in the peer, before checking its output. */
+	if (stale)
+		return;
 	assert(peer->commits == 2);
 	assert(peer->damage.x == 10 && peer->damage.y == 20);
 	assert(peer->damage.width == 94 && peer->damage.height == 76);
@@ -251,6 +254,7 @@ int main(int argc, char **argv)
 	if (!strcmp(scenario, "stale")) {
 		invalid_scenario(scenario);
 		send_damaged_frame(&client, &peer, true);
+		fputs("stale frame commit returned\n", stderr);
 		return 1;
 	}
 	if (!strcmp(scenario, "damage")) {

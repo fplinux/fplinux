@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from tests.c_harness import c_build_directory, compile_c
-from tests.process import run_process
+from tests.process import connect_unix_seqpacket, run_process
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
@@ -83,11 +83,12 @@ class Ring:
 class StreamPeer:
     """Keep SO_PEERCRED tied to a live process without inheriting other clients."""
 
-    def __init__(self, path: Path) -> None:
+    def __init__(self, path: Path, cleanup: contextlib.ExitStack) -> None:
         """Start a live process that supplies each connection's peer credentials."""
         self.requests, child = socket.socketpair(socket.AF_UNIX, socket.SOCK_SEQPACKET)
-        self.requests.settimeout(3)
-        try:
+        with child, contextlib.ExitStack() as failed_start:
+            failed_start.callback(self.requests.close)
+            self.requests.settimeout(3)
             self.process = subprocess.Popen(
                 [sys.executable, "-I", str(FIXTURE / "stream_peer.py"), str(path)],
                 stdin=child.fileno(),
@@ -96,8 +97,8 @@ class StreamPeer:
                 text=True,
                 start_new_session=True,
             )
-        finally:
-            child.close()
+            cleanup.callback(self.close)
+            failed_start.pop_all()
         self.pid = self.process.pid
 
     def connect(self) -> socket.socket:
@@ -124,17 +125,17 @@ class StreamPeer:
 class AudioService:
     """Own one bounded daemon run, its real clients and its fake card files."""
 
-    def __init__(self, executable: Path, work: Path) -> None:
+    def __init__(self, executable: Path, work: Path, cleanup: contextlib.ExitStack) -> None:
         """Record the caller-owned directory for sockets and fake-card evidence."""
         self.executable = executable
         self.work = work
+        self.cleanup = cleanup
         self.events = work / "events"
         self.played = work / "played"
         self.busy = work / "busy"
         self.radio_ready = work / "radio-ready"
         self.sockets: list[socket.socket] = []
         self.rings: list[Ring] = []
-        self.peers: list[StreamPeer] = []
         self.process: subprocess.Popen[str] | None = None
         self.activities: list[tuple[int, int, str]] = []
 
@@ -146,7 +147,6 @@ class AudioService:
         def exercise(process: subprocess.Popen[str], _deadline: float) -> None:
             self.process = process
             try:
-                self.wait((self.work / "stream.sock").exists, "daemon did not start")
                 check()
             finally:
                 process.terminate()
@@ -168,10 +168,8 @@ class AudioService:
         )
 
     def close(self) -> None:
-        """Release every client, mapping and peer even if a cleanup fails."""
+        """Release every client and mapping even if a cleanup fails."""
         with contextlib.ExitStack() as cleanup:
-            for peer in self.peers:
-                cleanup.callback(peer.close)
             for ring in self.rings:
                 cleanup.callback(ring.mapping.close)
             for client in self.sockets:
@@ -203,9 +201,7 @@ class AudioService:
 
     def manager(self, *, sync: bool = True) -> socket.socket:
         """Connect a control socket owned by this fixture."""
-        control = socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET)
-        control.connect(str(self.work / "control.sock"))
-        control.settimeout(3)
+        control = connect_unix_seqpacket(self.work / "control.sock")
         self.sockets.append(control)
         for kind in ("MEDIA", "ALARM"):
             command = f"VOLUME {kind} 10".encode()
@@ -217,18 +213,14 @@ class AudioService:
 
     def status(self) -> dict[str, str]:
         """Request an actual read-only device snapshot from this daemon."""
-        with socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET) as status:
-            status.settimeout(3)
-            status.connect(str(self.work / "status.sock"))
+        with connect_unix_seqpacket(self.work / "status.sock") as status:
             fields = status.recv(512).decode("ascii").split(" ")
         assert fields[0] == "STATE"
         return dict(field.split("=", 1) for field in fields[1:])
 
     def radio(self) -> socket.socket:
         """Acquire one real service FM lease against the tuner boundary."""
-        radio = socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET)
-        radio.settimeout(3)
-        radio.connect(str(self.work / "radio.sock"))
+        radio = connect_unix_seqpacket(self.work / "radio.sock")
         self.sockets.append(radio)
         radio.send(b"PLAY 999")
         assert radio.recv(32) == b"READY"
@@ -264,15 +256,16 @@ class AudioService:
 
     def peer(self) -> StreamPeer:
         """Start and retain a process for real stream peer credentials."""
-        peer = StreamPeer(self.work / "stream.sock")
-        self.peers.append(peer)
-        return peer
+        return StreamPeer(self.work / "stream.sock", self.cleanup)
 
     def connect(self, count: int = 1) -> tuple[list[socket.socket], int]:
         """Open stream sockets sharing one live peer PID."""
         peer = self.peer()
-        clients = [peer.connect() for _ in range(count)]
-        self.sockets.extend(clients)
+        clients = []
+        for _ in range(count):
+            client = peer.connect()
+            self.sockets.append(client)
+            clients.append(client)
         return clients, peer.pid
 
     @staticmethod
@@ -402,8 +395,8 @@ def audiod_executable(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path
 @pytest.fixture
 def audiod(audiod_executable: Path) -> Iterator[AudioService]:
     # Unix socket paths and the daemon's --dir must stay short.
-    with TemporaryDirectory(prefix="fpa-") as scratch:
-        service = AudioService(audiod_executable, Path(scratch))
+    with TemporaryDirectory(prefix="fpa-") as scratch, contextlib.ExitStack() as cleanup:
+        service = AudioService(audiod_executable, Path(scratch), cleanup)
         try:
             yield service
         finally:
@@ -469,10 +462,15 @@ def test_activity_reconnect_waits_for_sync_and_reports_current_output_state(
 
 def test_sockets_have_manager_and_application_permissions(audiod: AudioService) -> None:
     def exercise() -> None:
-        assert (audiod.work / "control.sock").stat().st_mode & 0o777 == 0o600
-        assert (audiod.work / "stream.sock").stat().st_mode & 0o777 == 0o660
-        assert (audiod.work / "status.sock").stat().st_mode & 0o777 == 0o660
-        assert (audiod.work / "radio.sock").stat().st_mode & 0o777 == 0o600
+        for name, mode in (
+            ("control.sock", 0o600),
+            ("stream.sock", 0o660),
+            ("status.sock", 0o660),
+            ("radio.sock", 0o600),
+        ):
+            path = audiod.work / name
+            with connect_unix_seqpacket(path):
+                assert path.stat().st_mode & 0o777 == mode
         assert audiod.count("open ") == 0
 
     audiod.run(exercise)

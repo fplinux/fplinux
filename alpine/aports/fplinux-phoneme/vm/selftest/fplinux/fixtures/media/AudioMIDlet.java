@@ -273,6 +273,10 @@ public final class AudioMIDlet extends MIDlet implements Runnable {
             tone.addPlayerListener(tones);
             tone.start();
             tones.await(2);
+            require(PlayerListener.STARTED.equals(tones.names.elementAt(0)),
+                    "Tone STARTED event");
+            require(PlayerListener.END_OF_MEDIA.equals(tones.names.elementAt(1)),
+                    "Tone END_OF_MEDIA event");
             Manager.playTone(69, 100, 25);
             Thread.sleep(500);
             System.out.println("PM-MEDIA tones");

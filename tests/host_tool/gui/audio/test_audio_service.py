@@ -4,12 +4,11 @@
 from __future__ import annotations
 
 import array
-import contextlib
+import errno
 import os
-import select
-import socket
 import subprocess
 import time
+from contextlib import ExitStack
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING
@@ -18,9 +17,10 @@ import pytest
 
 from tests import ROOT
 from tests.c_harness import compile_c
-from tests.process import run_process
+from tests.process import connect_unix_seqpacket, read_process_line, run_process
 
 if TYPE_CHECKING:
+    import socket
     from collections.abc import Iterator
 
 APORT = ROOT / "alpine/aports/fplinux-audiod"
@@ -58,7 +58,7 @@ def programs(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path, Path]:
 class Stream:
     """Own one authenticated producer process and its command channel."""
 
-    def __init__(self, program: Path, path: Path) -> None:
+    def __init__(self, program: Path, path: Path, cleanup: ExitStack) -> None:
         """Start the producer and receive its actual peer PID."""
         self.process = subprocess.Popen(
             [str(program), str(path)],
@@ -67,9 +67,12 @@ class Stream:
             stderr=subprocess.PIPE,
             text=True,
         )
+        cleanup.callback(self.close)
         assert self.process.stdout is not None
-        assert select.select([self.process.stdout], [], [], 3)[0]
-        self.pid = int(self.process.stdout.readline())
+        line = read_process_line(
+            self.process.stdout, deadline=time.monotonic() + 3, name="audio stream peer PID"
+        )
+        self.pid = int(line)
 
     def command(self, command: str) -> str:
         """Send one producer command and wait for its bounded reply."""
@@ -77,8 +80,9 @@ class Stream:
         assert self.process.stdout is not None
         self.process.stdin.write(command + "\n")
         self.process.stdin.flush()
-        assert select.select([self.process.stdout], [], [], 3)[0], command
-        return self.process.stdout.readline().rstrip("\n")
+        return read_process_line(
+            self.process.stdout, deadline=time.monotonic() + 3, name=f"audio stream peer {command}"
+        ).removesuffix("\n")
 
     def state(self) -> tuple[int, ...]:
         """Read the producer's ring counters and applied policy state."""
@@ -86,28 +90,30 @@ class Stream:
 
     def close(self) -> None:
         """Close the producer channel and reap the process."""
-        assert self.process.stdin is not None
-        self.process.stdin.close()
         try:
-            self.process.wait(timeout=3)
+            _, stderr = self.process.communicate(timeout=3)
         except subprocess.TimeoutExpired:
             self.process.kill()
-            self.process.wait(timeout=3)
+            self.process.communicate(timeout=3)
             raise
-        assert self.process.stderr is not None
-        assert self.process.returncode == 0, self.process.stderr.read()
+        assert self.process.returncode == 0, stderr
 
 
 class Service:
     """Run audiod with real sockets and a paced replacement device."""
 
     def __init__(
-        self, directory: Path, programs: tuple[Path, Path], *, headphones_only: bool = False
+        self,
+        directory: Path,
+        programs: tuple[Path, Path],
+        cleanup: ExitStack,
+        *,
+        headphones_only: bool = False,
     ) -> None:
         """Start the daemon with caller-owned sockets and PCM evidence."""
         self.directory = directory
         self.peer = programs[1]
-        self.streams: list[Stream] = []
+        self.cleanup = cleanup
         self.manager: socket.socket | None = None
         self.activities: list[tuple[int, int, str]] = []
         environment = {
@@ -127,23 +133,17 @@ class Service:
             stderr=subprocess.PIPE,
             text=True,
         )
-        deadline = time.monotonic() + 3
-        while not (directory / "control.sock").exists():
-            assert self.process.poll() is None
-            assert time.monotonic() < deadline
-            time.sleep(0.005)
+        cleanup.callback(self.close)
         self.connect()
 
     def socket(self, name: str) -> socket.socket:
         """Connect a bounded client to one of the service endpoints."""
-        connection = socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET)
-        connection.settimeout(3)
-        connection.connect(str(self.directory / name))
-        return connection
+        return connect_unix_seqpacket(self.directory / name)
 
     def connect(self, *, ready: bool = True) -> None:
         """Connect the manager and optionally commit its initial replay."""
         self.manager = self.socket("control.sock")
+        self.cleanup.callback(self.manager.close)
         self.volume("MEDIA", 10)
         self.volume("ALARM", 10)
         if ready:
@@ -187,8 +187,7 @@ class Service:
 
     def stream(self, *, background: bool = False, clock: bool = False) -> Stream:
         """Open a real producer stream after announcing its credentials."""
-        stream = Stream(self.peer, self.directory / "stream.sock")
-        self.streams.append(stream)
+        stream = Stream(self.peer, self.directory / "stream.sock", self.cleanup)
         self.announce(stream, background=background, clock=clock)
         assert stream.command("OPEN") == "OK"
         return stream
@@ -213,25 +212,37 @@ class Service:
             assert time.monotonic() < deadline, result
             time.sleep(0.005)
 
-    def close(self) -> None:
-        """Reap every producer and the daemon, including partial failures."""
-        try:
-            for stream in self.streams:
-                stream.close()
-        finally:
-            for stream in self.streams:
-                if stream.process.poll() is None:
-                    stream.process.kill()
-                    stream.process.wait(timeout=3)
-            if self.manager is not None:
-                self.manager.close()
-            self.process.terminate()
+    def change_jack(self, change: bytes) -> None:
+        """Send a jack event when the device peer has opened the FIFO."""
+        path = self.directory / "jack"
+        deadline = time.monotonic() + 3
+        while time.monotonic() < deadline:
             try:
-                output = self.process.communicate(timeout=3)
-            except subprocess.TimeoutExpired:
-                self.process.kill()
-                self.process.communicate(timeout=3)
-                raise
+                descriptor = os.open(path, os.O_WRONLY | os.O_NONBLOCK)
+            except OSError as error:
+                if error.errno not in {errno.ENOENT, errno.ENXIO}:
+                    raise
+            else:
+                try:
+                    written = os.write(descriptor, change)
+                finally:
+                    os.close(descriptor)
+                assert written == len(change)
+                return
+            assert self.process.poll() is None, "audio daemon exited before reading jack events"
+            time.sleep(0.005)
+        message = "audio daemon did not open the jack FIFO"
+        raise AssertionError(message)
+
+    def close(self) -> None:
+        """Stop and reap the daemon."""
+        self.process.terminate()
+        try:
+            output = self.process.communicate(timeout=3)
+        except subprocess.TimeoutExpired:
+            self.process.kill()
+            self.process.communicate(timeout=3)
+            raise
         assert self.process.returncode == 0, output
 
 
@@ -244,22 +255,16 @@ def service_directory() -> Iterator[Path]:
 
 @pytest.fixture
 def service(service_directory: Path, programs: tuple[Path, Path]) -> Iterator[Service]:
-    instance = Service(service_directory, programs)
-    try:
-        yield instance
-    finally:
-        instance.close()
+    with ExitStack() as cleanup:
+        yield Service(service_directory, programs, cleanup)
 
 
 @pytest.fixture
 def headphones_only_service(
     service_directory: Path, programs: tuple[Path, Path]
 ) -> Iterator[Service]:
-    instance = Service(service_directory, programs, headphones_only=True)
-    try:
-        yield instance
-    finally:
-        instance.close()
+    with ExitStack() as cleanup:
+        yield Service(service_directory, programs, cleanup, headphones_only=True)
 
 
 def test_foreground_pcm_interrupts_background_and_user_pause_survives_alarm(
@@ -393,8 +398,7 @@ def test_headphone_loss_pauses_media_before_speaker_fallback_and_alarm_still_pla
     media = service.stream(background=True)
     assert media.command("WRITE 12000 10000") == "OK"
     service.wait_read(media, 480)
-    with (service.directory / "jack").open("wb", buffering=0) as jack:
-        jack.write(b"U")
+    service.change_jack(b"U")
     paused = service.wait_state(media, state=1, reason=5)
     events = (service.directory / "events").read_text().splitlines()
     assert events[:3] == ["PCM OPEN", "PCM CLOSE", "ROUTE SPEAKER"]
@@ -437,8 +441,7 @@ def test_selected_missing_headphones_hold_new_media_until_connection_while_alarm
     service.control("OUTPUT HEADPHONES")
     assert service.manager is not None
     service.expect_reply("OUTPUT HEADPHONES")
-    with (service.directory / "jack").open("wb", buffering=0) as jack:
-        jack.write(b"U")
+    service.change_jack(b"U")
     media = service.stream(background=True)
     assert media.command("WRITE 12000 10000") == "OK"
     service.wait_state(media, state=1, reason=5)
@@ -448,8 +451,7 @@ def test_selected_missing_headphones_hold_new_media_until_connection_while_alarm
     assert clock.command("WRITE 2400 18000") == "OK"
     service.wait_read(clock, 2400)
     assert media.state()[0] == 0
-    with (service.directory / "jack").open("wb", buffering=0) as jack:
-        jack.write(b"I")
+    service.change_jack(b"I")
     service.wait_read(media, 12000)
     with service.socket("status.sock") as diagnostic:
         assert b"output=2 applied=2" in diagnostic.recv(512)
@@ -505,15 +507,14 @@ def test_explicit_speaker_keeps_playing_when_unused_headphone_antenna_is_removed
     assert service.manager is not None
     service.expect_reply("OUTPUT SPEAKER")
     media = service.stream(background=True)
-    with contextlib.ExitStack() as cleanup:
+    with ExitStack() as cleanup:
         if radio:
             lease = cleanup.enter_context(service.socket("radio.sock"))
             lease.send(b"PLAY 999")
             assert lease.recv(32) == b"READY"
         assert media.command("WRITE 12000 10000") == "OK"
         previous = media.state()[0]
-        with (service.directory / "jack").open("wb", buffering=0) as jack:
-            jack.write(b"U")
+        service.change_jack(b"U")
         deadline = time.monotonic() + 3
         while True:
             with service.socket("status.sock") as diagnostic:

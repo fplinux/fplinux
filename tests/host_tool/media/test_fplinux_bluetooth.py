@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import os
-import select
 import shutil
 import signal
 import subprocess
@@ -170,9 +169,9 @@ class BluetoothContext:
         self.cleanup.callback(self.stop_process, self.fake)
         deadline = time.monotonic() + 3
         while time.monotonic() < deadline:
-            if ready.exists():
-                assert (ready.read_text(encoding="ascii")) == ("ready\n")
-                return
+            with suppress(FileNotFoundError):
+                if ready.read_bytes() == b"ready\n":
+                    return
             if self.fake.poll() is not None:
                 stdout, stderr = self.fake.communicate()
                 pytest.fail(f"Bluetooth fake exited before readiness:\n{stdout}\n{stderr}")
@@ -241,13 +240,10 @@ def bluetooth_case(bluetooth_tools: BluetoothTools) -> Iterator[BluetoothContext
         cleanup.callback(BluetoothContext.stop_process, bus)
         if bus.stdout is None:
             pytest.fail("private D-Bus daemon stdout is not captured")
-        readable, _, _ = select.select([bus.stdout], [], [], 3)
-        address = bus.stdout.readline().strip() if readable else ""
-        if not address:
-            with suppress(ProcessLookupError):
-                os.killpg(bus.pid, signal.SIGKILL)
-            _, stderr = bus.communicate()
-            pytest.fail(f"private D-Bus daemon did not publish an address:\n{stderr}")
+        address = read_process_line(
+            bus.stdout, deadline=time.monotonic() + 3, name="private D-Bus daemon address"
+        ).strip()
+        assert address, "private D-Bus daemon published an empty address"
         yield BluetoothContext(bluetooth_tools, root, address, cleanup)
 
 

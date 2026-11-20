@@ -235,6 +235,7 @@ class FPLinuxBrightnessServiceTests:
         self, brightness: BrightnessProcesses, config: str | None, maximum: str | None
     ) -> None:
         """Malformed configuration and missing sysfs values block startup."""
+        (brightness.backlight / "brightness").write_text("7\n", encoding="ascii")
         if config is None:
             brightness.config.unlink()
         else:
@@ -244,8 +245,10 @@ class FPLinuxBrightnessServiceTests:
             maximum_path.unlink()
         else:
             maximum_path.write_text(maximum, encoding="ascii")
-        assert brightness.run_once().returncode != 0
-        assert brightness.raw() == "0\n"
+        result = brightness.run_once()
+        assert result.returncode == 1
+        assert "fplinux-brightnessd: invalid or unavailable backlight:" in result.stderr
+        assert brightness.raw() == "7\n"
 
     def test_singleton_rejects_second_daemon_without_changing_brightness(
         self, brightness: BrightnessProcesses

@@ -26,7 +26,7 @@ class BluealsaServiceHookTests:
         (tools / "dbus-send").symlink_to(ENDPOINT)
         environment = os.environ | {
             "PATH": str(tools) + os.pathsep + os.environ["PATH"],
-            "FPLINUX_TEST_POLICY_READY": str(directory / "policy-ready"),
+            "FPLINUX_TEST_RELOAD_ACCEPTED": str(directory / "reload-accepted"),
             "FPLINUX_TEST_RELOAD_FAILURE": "1" if reject_reload else "0",
         }
         return subprocess.run(
@@ -38,15 +38,15 @@ class BluealsaServiceHookTests:
             check=False,
         )
 
-    def test_pre_start_reload_makes_the_installed_policy_available(self) -> None:
-        """The hook must request the canonical system-bus reload before starting."""
+    def test_pre_start_requests_reload_config_on_the_system_bus(self) -> None:
+        """The hook sends a synchronous ReloadConfig to the system bus."""
         with tempfile.TemporaryDirectory() as directory:
             temporary = Path(directory)
 
             result = self.run_hook(temporary, reject_reload=False)
 
             assert (result.returncode) == (0), result.stderr
-            assert ((temporary / "policy-ready").read_text()) == ("ready\n")
+            assert (temporary / "reload-accepted").read_text() == "ReloadConfig\n"
             assert (result.stdout) == ("")
 
     def test_reload_rejection_is_returned_to_the_caller(self) -> None:
@@ -58,4 +58,4 @@ class BluealsaServiceHookTests:
 
             assert (result.returncode) == (42)
             assert ("policy reload rejected") in (result.stderr)
-            assert not ((temporary / "policy-ready").exists())
+            assert not (temporary / "reload-accepted").exists()

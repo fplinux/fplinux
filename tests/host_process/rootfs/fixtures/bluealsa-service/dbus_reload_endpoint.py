@@ -9,7 +9,7 @@ from pathlib import Path
 
 
 def main() -> int:
-    """Model policy availability after a valid reload, or an endpoint rejection."""
+    """Record an accepted system-bus reload or return the configured rejection."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--system", action="store_true")
     parser.add_argument("--type", dest="message_type")
@@ -33,7 +33,7 @@ def main() -> int:
     if os.environ.get("FPLINUX_TEST_RELOAD_FAILURE") == "1":
         print("policy reload rejected", file=sys.stderr)
         return 42
-    Path(os.environ["FPLINUX_TEST_POLICY_READY"]).write_text("ready\n")
+    Path(os.environ["FPLINUX_TEST_RELOAD_ACCEPTED"]).write_text("ReloadConfig\n")
     print("method return")
     return 0
 
