@@ -222,9 +222,14 @@ class KernelLocalInputTests:
         workspace = tmp_path / "captured"
         linux_inputs.platform(workspace, "ums9117", source_lock="linux-captured", arch="arm")
         linux_inputs.platform(workspace, "sc9820e", source_lock="linux-skipped", arch="arm")
-        linux_inputs.target(workspace, "first", platform_name="ums9117")
-        linux_inputs.target(workspace, "second", platform_name="ums9117")
-        linux_inputs.target(workspace, "other-profile", platform_name="sc9820e")
+        for name, platform in (
+            ("first", "ums9117"),
+            ("second", "ums9117"),
+            ("other-profile", "sc9820e"),
+        ):
+            manifest = linux_inputs.target(workspace, name, platform_name=platform)
+            with manifest.open("a", encoding="utf-8") as stream:
+                stream.write("\n[microsd]\n")
         catalog = (
             Path(__file__).parent / "fixtures/kernel-inputs/source-catalog.txt.in"
         ).read_text(encoding="utf-8") % {"checksum": checksum, "size": len(original)}

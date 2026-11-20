@@ -74,7 +74,6 @@ apk_groups = [
     "clang22-dev=22.1.3-r2",
     "clang22-extra-tools=22.1.3-r2",
     "curl-dev=8.23.0-r0",
-    "dtc=1.7.2-r1",
     "elfutils-dev=0.195-r0",
     "eudev-dev=3.2.14-r6",
     "expat-dev=2.10.0-r0",
@@ -95,19 +94,23 @@ apk_groups = [
     "zlib-dev=1.4-r0",
   ],
   [
-    "py3-dt-schema=2025.12-r1",
+    "py3-attrs=26.1.0-r0",
+    "py3-click=8.3.3-r1",
+    "py3-debian=1.1.0-r0",
     "py3-elftools=0.32-r1",
     "py3-fonttools=4.60.1-r1",
+    "py3-jinja2=3.1.6-r1",
+    "py3-jsonschema=4.26.0-r0",
+    "py3-license-expression=30.4.4-r1",
+    "py3-magic=0.4.27-r4",
     "py3-mako=1.3.12-r0",
-    "py3-mypy=1.19.1-r2",
+    "py3-pathspec=1.1.1-r0",
+    "py3-rfc3987=1.3.8-r7",
     "py3-ruamel.yaml=0.19.1-r0",
     "python3-dev=3.14.10-r1",
     "python3=3.14.10-r1",
-    "reuse=6.2.0-r0",
     "shellcheck=0.11.0-r1",
-    "shfmt=3.13.1-r3",
     "taplo=0.10.0-r0",
-    "vale=3.13.0-r8",
     "yamllint=1.38.0-r0",
   ],
   [
@@ -134,11 +137,20 @@ input = "environment:npm"
 [tools.ruff]
 input = "environment:ruff"
 
+[tools.shfmt]
+input = "environment:shfmt"
+
 [tools.sparse]
 input = "environment:sparse"
 
+[tools.dtc]
+input = "environment:dtc"
+
 [tools.typos]
 input = "environment:typos"
+
+[tools.vale]
+input = "environment:vale"
 
 [tools.vale-google]
 input = "environment:vale-google"
@@ -231,6 +243,12 @@ purpose = "environment-source"
 arch = "x86_64"
 
 [[input]]
+key = "environment:shfmt"
+source = "shfmt"
+purpose = "environment-source"
+arch = "x86_64"
+
+[[input]]
 key = "environment:sparse"
 source = "sparse"
 purpose = "environment-source"
@@ -239,6 +257,12 @@ arch = "x86_64"
 [[input]]
 key = "environment:typos"
 source = "typos"
+purpose = "environment-source"
+arch = "x86_64"
+
+[[input]]
+key = "environment:vale"
+source = "vale"
 purpose = "environment-source"
 arch = "x86_64"
 
@@ -813,15 +837,6 @@ purpose = "environment-package"
 arch = "x86_64"
 
 [[input]]
-key = "environment:apk:x86_64:dtc-1.7.2-r1.apk"
-url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/dtc-1.7.2-r1.apk"
-sha256 = "3d029dc73adf7ee083be76c7120a4535ba0a4c5c764c989409a81769d3aca83e"
-bytes = 80855
-destination = "downloads/environment/apk/main/x86_64/dtc-1.7.2-r1.apk"
-purpose = "environment-package"
-arch = "x86_64"
-
-[[input]]
 key = "environment:apk:x86_64:e2fsprogs-1.47.4-r0.apk"
 url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/e2fsprogs-1.47.4-r0.apk"
 sha256 = "c7a99a18206827b09f0cfa2373e6f1db0963845ad8468a378a3b99a7e716a0e8"
@@ -1367,15 +1382,6 @@ url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/libfdisk-2.42.3-r
 sha256 = "9775aae10e103c128e6b8424585f5d2dac6d8e8e386cc8365a46358ccd6aa7d0"
 bytes = 125583
 destination = "downloads/environment/apk/main/x86_64/libfdisk-2.42.3-r1.apk"
-purpose = "environment-package"
-arch = "x86_64"
-
-[[input]]
-key = "environment:apk:x86_64:libfdt-1.7.2-r1.apk"
-url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/libfdt-1.7.2-r1.apk"
-sha256 = "50ce67a6c7e783cac5c492ff305cb777b0abc02f4bbe7d3cdc5de2a908ae3ebe"
-bytes = 18522
-destination = "downloads/environment/apk/main/x86_64/libfdt-1.7.2-r1.apk"
 purpose = "environment-package"
 arch = "x86_64"
 
@@ -2307,24 +2313,6 @@ purpose = "environment-package"
 arch = "x86_64"
 
 [[input]]
-key = "environment:apk:x86_64:py3-binaryornot-0.4.4-r6.apk"
-url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/community/x86_64/py3-binaryornot-0.4.4-r6.apk"
-sha256 = "56f900a074e9948c5909631fce73df892fa418c690a5d21f07f116563c52d2d8"
-bytes = 8297
-destination = "downloads/environment/apk/community/x86_64/py3-binaryornot-0.4.4-r6.apk"
-purpose = "environment-package"
-arch = "x86_64"
-
-[[input]]
-key = "environment:apk:x86_64:py3-binaryornot-pyc-0.4.4-r6.apk"
-url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/community/x86_64/py3-binaryornot-pyc-0.4.4-r6.apk"
-sha256 = "fd3070f2316bb45f63840b06d41953860951a63ad7af50058f5170fef9eb77ea"
-bytes = 5194
-destination = "downloads/environment/apk/community/x86_64/py3-binaryornot-pyc-0.4.4-r6.apk"
-purpose = "environment-package"
-arch = "x86_64"
-
-[[input]]
 key = "environment:apk:x86_64:py3-boolean.py-5.0-r1.apk"
 url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/community/x86_64/py3-boolean.py-5.0-r1.apk"
 sha256 = "4798c8721e7d399c56c17278058f4d5d6a3531c0c694c8ed6b1e70b242d0176d"
@@ -2339,24 +2327,6 @@ url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/community/x86_64/py3-boolean.
 sha256 = "71fc5bb6d271e56031c4996b0e5a99a7bd2c882a97e2f3a1a8c5c6d42e52a967"
 bytes = 48659
 destination = "downloads/environment/apk/community/x86_64/py3-boolean.py-pyc-5.0-r1.apk"
-purpose = "environment-package"
-arch = "x86_64"
-
-[[input]]
-key = "environment:apk:x86_64:py3-chardet-5.2.0-r2.apk"
-url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/py3-chardet-5.2.0-r2.apk"
-sha256 = "93db2067a7cb7933da5f5435aac6e620fcf7b2801988f3e77e9a5e55d1389fd6"
-bytes = 175183
-destination = "downloads/environment/apk/main/x86_64/py3-chardet-5.2.0-r2.apk"
-purpose = "environment-package"
-arch = "x86_64"
-
-[[input]]
-key = "environment:apk:x86_64:py3-chardet-pyc-5.2.0-r2.apk"
-url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/py3-chardet-pyc-5.2.0-r2.apk"
-sha256 = "1a72b4b655685c438b8c5fac79beb926dc180a0d4b4c7e03de188e71216daa7a"
-bytes = 211713
-destination = "downloads/environment/apk/main/x86_64/py3-chardet-pyc-5.2.0-r2.apk"
 purpose = "environment-package"
 arch = "x86_64"
 
@@ -2420,24 +2390,6 @@ url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/community/x86_64/py3-debian-p
 sha256 = "6551eabb204da31135f1aa622997303b6f7a9ec723a68dd72b5ed139f24c233e"
 bytes = 239053
 destination = "downloads/environment/apk/community/x86_64/py3-debian-pyc-1.1.0-r0.apk"
-purpose = "environment-package"
-arch = "x86_64"
-
-[[input]]
-key = "environment:apk:x86_64:py3-dt-schema-2025.12-r1.apk"
-url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/community/x86_64/py3-dt-schema-2025.12-r1.apk"
-sha256 = "186f73ee646111a127593f369d5e5a269acdb68738bd0c84d9d710011df6543b"
-bytes = 87805
-destination = "downloads/environment/apk/community/x86_64/py3-dt-schema-2025.12-r1.apk"
-purpose = "environment-package"
-arch = "x86_64"
-
-[[input]]
-key = "environment:apk:x86_64:py3-dt-schema-pyc-2025.12-r1.apk"
-url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/community/x86_64/py3-dt-schema-pyc-2025.12-r1.apk"
-sha256 = "4cd8f663768f5b29c1be6c975ee68160de0c183afadad96eae6896572f39c8df"
-bytes = 56087
-destination = "downloads/environment/apk/community/x86_64/py3-dt-schema-pyc-2025.12-r1.apk"
 purpose = "environment-package"
 arch = "x86_64"
 
@@ -2523,33 +2475,6 @@ purpose = "environment-package"
 arch = "x86_64"
 
 [[input]]
-key = "environment:apk:x86_64:py3-libfdt-1.7.2-r1.apk"
-url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/py3-libfdt-1.7.2-r1.apk"
-sha256 = "011a65bb1ae3da2760f4c1f8e3f698f72ff9a7458f2a2d93f1c0dc5fc5b4c1bc"
-bytes = 46359
-destination = "downloads/environment/apk/main/x86_64/py3-libfdt-1.7.2-r1.apk"
-purpose = "environment-package"
-arch = "x86_64"
-
-[[input]]
-key = "environment:apk:x86_64:py3-libfdt-pyc-1.7.2-r1.apk"
-url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/py3-libfdt-pyc-1.7.2-r1.apk"
-sha256 = "17daec8d5f21fc2ce57cc5d50dd2574105816a59c6f6c17cc825d0adc8292fa4"
-bytes = 21714
-destination = "downloads/environment/apk/main/x86_64/py3-libfdt-pyc-1.7.2-r1.apk"
-purpose = "environment-package"
-arch = "x86_64"
-
-[[input]]
-key = "environment:apk:x86_64:py3-librt-0.8.1-r1.apk"
-url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/community/x86_64/py3-librt-0.8.1-r1.apk"
-sha256 = "d3a72651f00098663985eddca29a7b39d5f21dacde4f239710f45e76d6061d82"
-bytes = 78254
-destination = "downloads/environment/apk/community/x86_64/py3-librt-0.8.1-r1.apk"
-purpose = "environment-package"
-arch = "x86_64"
-
-[[input]]
 key = "environment:apk:x86_64:py3-license-expression-30.4.4-r1.apk"
 url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/community/x86_64/py3-license-expression-30.4.4-r1.apk"
 sha256 = "9ff0d2e3e50041b5a9baa6d84f81fa9a951a8430bfbe0fd7458c4755c3e30cf1"
@@ -2564,6 +2489,24 @@ url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/community/x86_64/py3-license-
 sha256 = "28b01aa72cef860511f5692c96dc51bd742950e8eabbae06c09c48b8ab95a47f"
 bytes = 39254
 destination = "downloads/environment/apk/community/x86_64/py3-license-expression-pyc-30.4.4-r1.apk"
+purpose = "environment-package"
+arch = "x86_64"
+
+[[input]]
+key = "environment:apk:x86_64:py3-magic-0.4.27-r4.apk"
+url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/community/x86_64/py3-magic-0.4.27-r4.apk"
+sha256 = "a1814a368ecfcd6f867b75e89a063d4314e9ce59589cd0c5522ed08b036cc932"
+bytes = 14162
+destination = "downloads/environment/apk/community/x86_64/py3-magic-0.4.27-r4.apk"
+purpose = "environment-package"
+arch = "x86_64"
+
+[[input]]
+key = "environment:apk:x86_64:py3-magic-pyc-0.4.27-r4.apk"
+url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/community/x86_64/py3-magic-pyc-0.4.27-r4.apk"
+sha256 = "7f999ee6a5f1e5a7efa974142ee57172d075271dc7d37b5d214e60d6d4b11b68"
+bytes = 14262
+destination = "downloads/environment/apk/community/x86_64/py3-magic-pyc-0.4.27-r4.apk"
 purpose = "environment-package"
 arch = "x86_64"
 
@@ -2600,42 +2543,6 @@ url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/py3-markupsafe-py
 sha256 = "bc61f7fa07aa65c807b1c57df93f15ad3b35c44fd9dea2db38f886fcce2f54ea"
 bytes = 11724
 destination = "downloads/environment/apk/main/x86_64/py3-markupsafe-pyc-3.0.3-r1.apk"
-purpose = "environment-package"
-arch = "x86_64"
-
-[[input]]
-key = "environment:apk:x86_64:py3-mypy-1.19.1-r2.apk"
-url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/community/x86_64/py3-mypy-1.19.1-r2.apk"
-sha256 = "385e90380c454c682a387eefeb9b86c33b01e35cd1399f35f96162325c6933e9"
-bytes = 2128165
-destination = "downloads/environment/apk/community/x86_64/py3-mypy-1.19.1-r2.apk"
-purpose = "environment-package"
-arch = "x86_64"
-
-[[input]]
-key = "environment:apk:x86_64:py3-mypy-extensions-1.1.0-r1.apk"
-url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/community/x86_64/py3-mypy-extensions-1.1.0-r1.apk"
-sha256 = "6f191dd81f086825c710e6ffc9a58b30bf0a05889bd750441b7e916772d70b38"
-bytes = 6145
-destination = "downloads/environment/apk/community/x86_64/py3-mypy-extensions-1.1.0-r1.apk"
-purpose = "environment-package"
-arch = "x86_64"
-
-[[input]]
-key = "environment:apk:x86_64:py3-mypy-extensions-pyc-1.1.0-r1.apk"
-url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/community/x86_64/py3-mypy-extensions-pyc-1.1.0-r1.apk"
-sha256 = "23c45c99a0b772aea0d287f591227f8ca313c83ba5ea5193eb69fabfc521c5dc"
-bytes = 6972
-destination = "downloads/environment/apk/community/x86_64/py3-mypy-extensions-pyc-1.1.0-r1.apk"
-purpose = "environment-package"
-arch = "x86_64"
-
-[[input]]
-key = "environment:apk:x86_64:py3-mypy-pyc-1.19.1-r2.apk"
-url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/community/x86_64/py3-mypy-pyc-1.19.1-r2.apk"
-sha256 = "bbb04dbebd9dc7a52d8be8e59a681908b286b05302967756713634354ad800f4"
-bytes = 3080882
-destination = "downloads/environment/apk/community/x86_64/py3-mypy-pyc-1.19.1-r2.apk"
 purpose = "environment-package"
 arch = "x86_64"
 
@@ -2775,24 +2682,6 @@ purpose = "environment-package"
 arch = "x86_64"
 
 [[input]]
-key = "environment:apk:x86_64:py3-tomlkit-0.13.3-r1.apk"
-url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/community/x86_64/py3-tomlkit-0.13.3-r1.apk"
-sha256 = "2289e9c39ab86b298a5c5daa42127938e45a7a928e9872051a6e8d92fca2e62f"
-bytes = 37990
-destination = "downloads/environment/apk/community/x86_64/py3-tomlkit-0.13.3-r1.apk"
-purpose = "environment-package"
-arch = "x86_64"
-
-[[input]]
-key = "environment:apk:x86_64:py3-tomlkit-pyc-0.13.3-r1.apk"
-url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/community/x86_64/py3-tomlkit-pyc-0.13.3-r1.apk"
-sha256 = "73d16ab59cd2722f2550e806dd5f00a2814aea898898e5a57c9241b8436e92d8"
-bytes = 97356
-destination = "downloads/environment/apk/community/x86_64/py3-tomlkit-pyc-0.13.3-r1.apk"
-purpose = "environment-package"
-arch = "x86_64"
-
-[[input]]
 key = "environment:apk:x86_64:py3-typing-extensions-4.15.0-r1.apk"
 url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/py3-typing-extensions-4.15.0-r1.apk"
 sha256 = "c1e358e03b0a3fbdab40ed836a536c1bace757cb86f559849145434c2b048123"
@@ -2883,24 +2772,6 @@ purpose = "environment-package"
 arch = "x86_64"
 
 [[input]]
-key = "environment:apk:x86_64:reuse-6.2.0-r0.apk"
-url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/community/x86_64/reuse-6.2.0-r0.apk"
-sha256 = "5cb68a49a3b1e586cdd0febd611eab9e7db1a0aa1bf27926c5a4ba39e2174fb0"
-bytes = 145463
-destination = "downloads/environment/apk/community/x86_64/reuse-6.2.0-r0.apk"
-purpose = "environment-package"
-arch = "x86_64"
-
-[[input]]
-key = "environment:apk:x86_64:reuse-pyc-6.2.0-r0.apk"
-url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/community/x86_64/reuse-pyc-6.2.0-r0.apk"
-sha256 = "fb38925f3bb340be5c41665f5dbec8d81461607ffbe19520030a6106212caffa"
-bytes = 145060
-destination = "downloads/environment/apk/community/x86_64/reuse-pyc-6.2.0-r0.apk"
-purpose = "environment-package"
-arch = "x86_64"
-
-[[input]]
 key = "environment:apk:x86_64:rhash-libs-1.4.6-r0.apk"
 url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/rhash-libs-1.4.6-r0.apk"
 sha256 = "7d14a70040f83f40ae5ea8829e3eb58d82f06d959478658b81b30033d390651f"
@@ -2960,15 +2831,6 @@ url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/community/x86_64/shellcheck-0
 sha256 = "453a45e3e080a14e2be1d7f5a3df0fa7e9da895ef6975ecad57035b14a3da952"
 bytes = 3990064
 destination = "downloads/environment/apk/community/x86_64/shellcheck-0.11.0-r1.apk"
-purpose = "environment-package"
-arch = "x86_64"
-
-[[input]]
-key = "environment:apk:x86_64:shfmt-3.13.1-r3.apk"
-url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/community/x86_64/shfmt-3.13.1-r3.apk"
-sha256 = "38b82e77b7a56f92b03689e6ab4b8a7218e2755f0cd89b082194af4ba592b2b3"
-bytes = 1401736
-destination = "downloads/environment/apk/community/x86_64/shfmt-3.13.1-r3.apk"
 purpose = "environment-package"
 arch = "x86_64"
 
@@ -3140,15 +3002,6 @@ url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/utmps-libs-0.1.3.
 sha256 = "497f0f1cb51f0e6c1acc338fded0dc7722b1d43ea17bdb749f0d556794f8b2d8"
 bytes = 5206
 destination = "downloads/environment/apk/main/x86_64/utmps-libs-0.1.3.3-r0.apk"
-purpose = "environment-package"
-arch = "x86_64"
-
-[[input]]
-key = "environment:apk:x86_64:vale-3.13.0-r8.apk"
-url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/community/x86_64/vale-3.13.0-r8.apk"
-sha256 = "a272ad85ed19adcb2a387fc89f1a253093919ec1b24a2e9980ec40873e1f0113"
-bytes = 10484331
-destination = "downloads/environment/apk/community/x86_64/vale-3.13.0-r8.apk"
 purpose = "environment-package"
 arch = "x86_64"
 
@@ -3375,6 +3228,12 @@ purpose = "environment-source"
 arch = "x86_64"
 
 [[input]]
+key = "environment:dtc"
+source = "dtc"
+purpose = "environment-source"
+arch = "x86_64"
+
+[[input]]
 key = "environment:dtschema"
 source = "dtschema"
 purpose = "environment-source"
@@ -3413,5 +3272,41 @@ arch = "x86_64"
 [[input]]
 key = "environment:pygments"
 source = "pygments"
+purpose = "environment-source"
+arch = "x86_64"
+
+[[input]]
+key = "environment:mypy"
+source = "mypy"
+purpose = "environment-source"
+arch = "x86_64"
+
+[[input]]
+key = "environment:librt"
+source = "librt"
+purpose = "environment-source"
+arch = "x86_64"
+
+[[input]]
+key = "environment:ast-serialize"
+source = "ast_serialize"
+purpose = "environment-source"
+arch = "x86_64"
+
+[[input]]
+key = "environment:mypy-extensions"
+source = "mypy_extensions"
+purpose = "environment-source"
+arch = "x86_64"
+
+[[input]]
+key = "environment:typing-extensions"
+source = "typing_extensions"
+purpose = "environment-source"
+arch = "x86_64"
+
+[[input]]
+key = "environment:reuse"
+source = "reuse"
 purpose = "environment-source"
 arch = "x86_64"

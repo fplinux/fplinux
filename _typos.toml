@@ -36,9 +36,11 @@ MMIO = "MMIO"
 MODULE_PARM_DESC = "MODULE_PARM_DESC"
 # SPDX NoDerivatives license suffix.
 ND = "ND"
+# The spellings are part of the MascotCapsule Java API.
+PDATA_TEXURE_COORD = "PDATA_TEXURE_COORD"
 PNGs = "PNGs"
-# The spelling is part of the MascotCapsule Java API.
 PRIMITVE_POINTS = "PRIMITVE_POINTS"
+PRIMITVE_TRIANGLES = "PRIMITVE_TRIANGLES"
 PnP = "PnP"
 PnPDeviceID = "PnPDeviceID"
 SC2720_AUD_CLK_PN_MASK = "SC2720_AUD_CLK_PN_MASK"

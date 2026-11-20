@@ -1034,6 +1034,14 @@ repository = "https://github.com/ARM-software/arm-trusted-firmware"
 license = "BSD-3-Clause"
 archive_prefix = "arm-trusted-firmware-da738d5eae93af342fdc4995dd3c05acb4c9d757"
 
+[ast_serialize]
+version = "0.13.1"
+name = "ast_serialize-0.13.1-cp39-abi3-musllinux_1_2_x86_64.whl"
+url = "https://files.pythonhosted.org/packages/1f/bc/523aa1c08bd69b5654621beb3dc1a9035715a4a63762fb8d219d6fb3eb81/ast_serialize-0.13.1-cp39-abi3-musllinux_1_2_x86_64.whl"
+algorithm = "sha256"
+checksum = "ca9acc67f796aa2554fa3037dccc022a4b08b38b2ad153edfac9c9bb7cb1f3c6"
+bytes = 1512140
+
 [bch]
 version = "8d0656ab8f37e734428635501738d360ad80eebd"
 name = "bch.tar.gz"
@@ -1054,6 +1062,14 @@ name = "0004-Avoid-redefined-warnings-when-buiding-with-utmps.patch"
 url = "https://raw.githubusercontent.com/alpinelinux/aports/dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763/main/busybox/0004-Avoid-redefined-warnings-when-buiding-with-utmps.patch"
 algorithm = "sha512"
 checksum = "c6acd1a4cbbc8b7b6c66b20c4cb958c12e887a43edbea35c0c4db3b4139afc5b4246058f503a5aaac0d05badffee93e6bf91111ad0cc856d9f5074baa7194df8"
+
+[dtc]
+version = "1.8.1"
+name = "dtc-1.8.1.tar.xz"
+url = "https://www.kernel.org/pub/software/utils/dtc/dtc-1.8.1.tar.xz"
+algorithm = "sha256"
+checksum = "23526015a6f1550e0541a53fe7acea1b5a11e3697cdf3a3bdc076abc38f6045d"
+bytes = 178152
 
 [dtschema]
 version = "2026.9"
@@ -1102,12 +1118,12 @@ algorithm = "sha256"
 checksum = "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
 
 [iniconfig]
-version = "2.3.0"
-name = "iniconfig-2.3.0-py3-none-any.whl"
-url = "https://files.pythonhosted.org/packages/cb/b1/3846dd7f199d53cb17f49cba7e651e9ce294d8497c8c150530ed11865bb8/iniconfig-2.3.0-py3-none-any.whl"
+version = "2.3.1"
+name = "iniconfig-2.3.1-py3-none-any.whl"
+url = "https://files.pythonhosted.org/packages/56/43/4ca9e49d27a1fcf6bece6f6aec0ea46bb9112489b93d4b688fb415457bdb/iniconfig-2.3.1-py3-none-any.whl"
 algorithm = "sha256"
-checksum = "f631c04d2c48c52b84d0d0549c99ff3859c98df65b3101406327ecc7d53fbf12"
-bytes = 7484
+checksum = "9121e2c1fdb355232495be3194c8dfe87ccc2d5dee45947b78e68f499790d7a7"
+bytes = 7552
 
 [kern]
 version = "0.51.3"
@@ -1116,6 +1132,14 @@ url = "https://github.com/getkern/kern/releases/download/v0.51.3/kern-x86_64-unk
 algorithm = "sha256"
 checksum = "8cfa991c4274cc5a760a5bfaef06b30c2b15d48cb52c0c1674035f0c421ca182"
 bytes = 1637584
+
+[librt]
+version = "0.17.0"
+name = "librt-0.17.0-cp314-cp314-musllinux_1_2_x86_64.whl"
+url = "https://files.pythonhosted.org/packages/65/e6/bd0381728d134b4ee710f5375783c9ec2ae2589e2584f7bab477639c7049/librt-0.17.0-cp314-cp314-musllinux_1_2_x86_64.whl"
+algorithm = "sha256"
+checksum = "28c174fc28a859189c6c4d370029a8d33e24f0147839c8ee35110d111b0b6fc1"
+bytes = 663123
 
 [libtsm]
 version = "4.8.0"
@@ -1266,6 +1290,22 @@ url = "https://raw.githubusercontent.com/pnggroup/libpng/v1.6.59/LICENSE"
 algorithm = "sha512"
 checksum = "6ad87a12db6a012ec2874a960604d85c42fa6210737318d771fc73543bea17de4dcf98212aa41e3d309387341e416418f8e4376fbd7aa658b7d2887de641f943"
 
+[mypy]
+version = "2.4.1"
+name = "mypy-2.4.1-cp314-cp314-musllinux_1_2_x86_64.whl"
+url = "https://files.pythonhosted.org/packages/99/e6/d3b0a7474aa4f696594a47a218b6796d9c4346fc81ed288904278cddd9bd/mypy-2.4.1-cp314-cp314-musllinux_1_2_x86_64.whl"
+algorithm = "sha256"
+checksum = "ec416d5d2ae689e681f5727e328723f18d8b5dc8c903a146b7851dc5727aad8a"
+bytes = 15717227
+
+[mypy_extensions]
+version = "1.2.0"
+name = "mypy_extensions-1.2.0-py3-none-any.whl"
+url = "https://files.pythonhosted.org/packages/b5/99/7b1adac7e97ce7bbda34792dc6e9b2f5cc5cffd1875883f78a818b2a2687/mypy_extensions-1.2.0-py3-none-any.whl"
+algorithm = "sha256"
+checksum = "993e7a20aa5671eb41a7132cf555af30062da99729601601b9a8382b11cae768"
+bytes = 5114
+
 [node]
 version = "26.13.1"
 name = "node-v26.13.1-linux-x64-musl.tar.xz"
@@ -1360,12 +1400,12 @@ algorithm = "sha512"
 checksum = "a8db0e41a14e87ef746e974bab6df7db18aceba33289533d118c1e766d3a77098795630c7f32172c6ff19a8d461db6c4335d0ec30472a254f4c136c2f4e81988"
 
 [pluggy]
-version = "1.6.0"
-name = "pluggy-1.6.0-py3-none-any.whl"
-url = "https://files.pythonhosted.org/packages/54/20/4d324d65cc6d9205fabedc306948156824eb9f0ee1633355a8f7ec5c66bf/pluggy-1.6.0-py3-none-any.whl"
+version = "1.7.0"
+name = "pluggy-1.7.0-py3-none-any.whl"
+url = "https://files.pythonhosted.org/packages/40/9e/2b38731e0fc536806f16490e1a12d7f0dc2a1235aa8cc07bcc75416a7daa/pluggy-1.7.0-py3-none-any.whl"
 algorithm = "sha256"
-checksum = "e920276dd6813095e9377c0bc5566d94c932c33b27a3e3945d8389c374dd4746"
-bytes = 20538
+checksum = "7dd7b0d8832ba3cb632c306926ded123429211b83641b35dc5c41ad2d34f9bec"
+bytes = 27082
 
 [pygments]
 version = "2.21.0"
@@ -1376,12 +1416,12 @@ checksum = "2363c69b61c4a97c838da3b130dcd6468f4848992b21a82f2a63ec34377137d9"
 bytes = 1250147
 
 [pytest]
-version = "9.1.1"
-name = "pytest-9.1.1-py3-none-any.whl"
-url = "https://files.pythonhosted.org/packages/24/25/1de2678b631f5a49215c6c96fff41ba892b0a34df68d6d80292b1b48aa7f/pytest-9.1.1-py3-none-any.whl"
+version = "9.2.0"
+name = "pytest-9.2.0-py3-none-any.whl"
+url = "https://files.pythonhosted.org/packages/51/39/1f5d8c8877a0fa327db959c19341d4be61660de1ab6b7391f9eb805bcd67/pytest-9.2.0-py3-none-any.whl"
 algorithm = "sha256"
-checksum = "37a86b45efb9a47a61a36449063e8e18d0cab3161329fc099eb21783169c4f0c"
-bytes = 386536
+checksum = "07acdcf88ec174f907dc01af70bf52d49b014bbab03faeeade31c96b18c2e588"
+bytes = 411776
 
 [pytest_xdist]
 version = "3.8.0"
@@ -1418,12 +1458,28 @@ checksum = "a92ce289160162d6e68a9ccc9c717184bfa65c1b547de6bd801b248bd98daede"
 bytes = 29633
 license = "MIT"
 
-[ruff]
-version = "0.16.10"
-name = "ruff-x86_64-unknown-linux-musl.tar.gz"
-url = "https://github.com/astral-sh/ruff/releases/download/0.16.10/ruff-x86_64-unknown-linux-musl.tar.gz"
+[reuse]
+version = "6.3.0"
+name = "reuse-6.3.0-py3-none-any.whl"
+url = "https://files.pythonhosted.org/packages/b5/28/2206a2fa719f303b40b2bc2b50ccf06f59d64d22f2106258b2cf141e4db3/reuse-6.3.0-py3-none-any.whl"
 algorithm = "sha256"
-checksum = "ad1b2138407a0c53b936524df99d87211333f7bc40478d6860f42994597f7ff0"
+checksum = "be6b598aa6d5cdf44af0da265572a72f0adcd30033857af874fd8607188259c1"
+bytes = 348530
+
+[ruff]
+version = "0.17.6"
+name = "ruff-x86_64-unknown-linux-musl.tar.gz"
+url = "https://github.com/astral-sh/ruff/releases/download/0.17.6/ruff-x86_64-unknown-linux-musl.tar.gz"
+algorithm = "sha256"
+checksum = "3c8d5a4264558df8b1587ce32409b658069b6a1ef5bfe4d279431eb1db62a183"
+
+[shfmt]
+version = "3.14.1"
+name = "shfmt_v3.14.1_linux_amd64"
+url = "https://github.com/mvdan/sh/releases/download/v3.14.1/shfmt_v3.14.1_linux_amd64"
+algorithm = "sha256"
+checksum = "76e77641faa025814b77f153b29796b8e6fa2fca03e0c76a691608b86c7ea7bf"
+bytes = 3571872
 
 [site-node]
 version = "26.13.1"
@@ -1434,11 +1490,12 @@ checksum = "5c063e46bab0fbc1c17cc445d7ff129cbdcd0471be6ed83b6ab864f8143bc864"
 bytes = 34093052
 
 [sparse]
-version = "37156835e3d725b6d750f000be33ba3814bb2310"
-name = "sparse-37156835e3d725b6d750f000be33ba3814bb2310.tar.gz"
-url = "https://git.kernel.org/pub/scm/devel/sparse/sparse.git/snapshot/sparse-37156835e3d725b6d750f000be33ba3814bb2310.tar.gz"
+version = "84ec0658c81db4ccc4aabc420d3dc118c2c6a310"
+name = "sparse-84ec0658c81db4ccc4aabc420d3dc118c2c6a310.tar.gz"
+url = "https://git.kernel.org/pub/scm/devel/sparse/sparse.git/snapshot/sparse-84ec0658c81db4ccc4aabc420d3dc118c2c6a310.tar.gz"
 algorithm = "sha256"
-checksum = "feca4eb2f0cb61416f4946e0a537d20da8e5eb0d8064fb3f1323a19cb5738ffc"
+checksum = "446cb89c14a5a2d637d922de8c28c3af15c415915c66bea3b7e57f533d891fc8"
+bytes = 490125
 
 [sprd_chipram]
 version = "61fdb1f975457599839d91418706b83dacc41203"
@@ -1485,19 +1542,27 @@ checksum = "062d5e1a298c0e378eeefcc67dddba6fd4d6be10a683511c849ec59c17fb7414"
 license = "Unlicense"
 
 [tomlkit]
-version = "0.15.1"
-name = "tomlkit-0.15.1-py3-none-any.whl"
-url = "https://files.pythonhosted.org/packages/13/bc/8c13eb66537dce1d2bd3a57132902f38d0e7f5bb46fa9f4daed9fe9d76ee/tomlkit-0.15.1-py3-none-any.whl"
+version = "0.15.2"
+name = "tomlkit-0.15.2-py3-none-any.whl"
+url = "https://files.pythonhosted.org/packages/da/46/7d84138a60a8bd796825b2d38ebe92d0d16501ca57d501b7c5d677401bbc/tomlkit-0.15.2-py3-none-any.whl"
 algorithm = "sha256"
-checksum = "177a05aece5a8ca5266fd3c448abb47b8d352f09d477d3ca8332db4d89b24304"
-bytes = 49449
+checksum = "05562412163a3037b94497385fb7f9204c637bc605af7a48199e41cf2272f437"
+bytes = 52225
+
+[typing_extensions]
+version = "4.16.0"
+name = "typing_extensions-4.16.0-py3-none-any.whl"
+url = "https://files.pythonhosted.org/packages/49/d3/b8441a820a491ddfc024b0b0cf0393375b75ea13866d9c66727e54c2fc80/typing_extensions-4.16.0-py3-none-any.whl"
+algorithm = "sha256"
+checksum = "481caa481374e813c1b176ada14e97f1f67a4539ce9cfeb3f350d78d6370c2e8"
+bytes = 45571
 
 [typos]
-version = "1.50.3"
-name = "typos-v1.50.3-x86_64-unknown-linux-musl.tar.gz"
-url = "https://github.com/crate-ci/typos/releases/download/v1.50.3/typos-v1.50.3-x86_64-unknown-linux-musl.tar.gz"
+version = "1.52.2"
+name = "typos-v1.52.2-x86_64-unknown-linux-musl.tar.gz"
+url = "https://github.com/crate-ci/typos/releases/download/v1.52.2/typos-v1.52.2-x86_64-unknown-linux-musl.tar.gz"
 algorithm = "sha256"
-checksum = "aca6b5d546307092b8d0a8e0a89dd80f9da51f2f7617c5e45c5607c1684ffbf2"
+checksum = "3b13d1291281d39d01822e54035636487a7a0f228e70097899b1e33aeb0e7e93"
 
 [u_boot]
 version = "2026.10"
@@ -1507,12 +1572,20 @@ algorithm = "sha256"
 checksum = "3f856da3cbbc93af51ff95fde18588a348b4a26723b01d9841e999d988481015"
 bytes = 35346177
 
-[vale_google]
-version = "0.7.0"
-name = "v0.7.0.tar.gz"
-url = "https://github.com/vale-cli/Google/archive/refs/tags/v0.7.0.tar.gz"
+[vale]
+version = "3.28.1"
+name = "vale_3.28.1_Linux_64-bit.tar.gz"
+url = "https://github.com/vale-cli/vale/releases/download/v3.28.1/vale_3.28.1_Linux_64-bit.tar.gz"
 algorithm = "sha256"
-checksum = "a4d6458fef518d51e5e7e84445a066ce73075ca5b8bb71f0feabb344258a4059"
+checksum = "068954ad869ebec24b8dec6ebcd1cbb1fd5f5a83e966a35baedfae8b2cdc093a"
+bytes = 11990025
+
+[vale_google]
+version = "0.7.2"
+name = "v0.7.2.tar.gz"
+url = "https://github.com/vale-cli/Google/archive/refs/tags/v0.7.2.tar.gz"
+algorithm = "sha256"
+checksum = "20afc689f1f46142332a464e351f3db9718024d47875394c90aac6dc48a7c0b8"
 
 [weston]
 version = "16.0.0"

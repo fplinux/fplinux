@@ -275,11 +275,11 @@ def main() -> None:
             )
     if "licenses" in selected:
         with report_stage(reporter, "licenses"):
-            source_commands.run(["reuse", "lint"])
+            source_commands.run(["python3", "-B", "-m", "reuse", "lint"])
     if "python" in selected:
         with report_stage(reporter, "python"):
             source_commands.run(["ruff", "check", *python_files])
-            source_commands.run(["mypy", *python_files])
+            source_commands.run(["python3", "-B", "-m", "mypy", *python_files])
     if "shell" in selected:
         with report_stage(reporter, "shell"):
             check_shell_sources(formats)

@@ -11,6 +11,7 @@ import sys
 import sysconfig
 import tempfile
 from dataclasses import dataclass
+from importlib.metadata import Distribution
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -20,7 +21,7 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class ToolInput:
-    """An installation archive and the release or commit selected by the lock."""
+    """An installation input and the release or commit selected by the lock."""
 
     archive: Path
     identity: str
@@ -76,6 +77,7 @@ def _prepare_system(declarations: dict[str, Any]) -> None:
 
 
 def _install_python(lock: Path, inputs: Path, resources: Path) -> None:
+    packages = Path("/opt/quality/python")
     subprocess.run(
         [
             sys.executable,
@@ -86,12 +88,12 @@ def _install_python(lock: Path, inputs: Path, resources: Path) -> None:
             "--inputs",
             inputs,
             "--destination",
-            "/opt/quality/python",
+            packages,
         ],
         check=True,
     )
     (Path(sysconfig.get_path("purelib")) / "fplinux-quality.pth").write_text(
-        "import sys; sys.path.insert(0, '/opt/quality/python')\n", encoding="utf-8"
+        f"import sys; sys.path.insert(0, {str(packages)!r})\n", encoding="utf-8"
     )
     subprocess.run(
         [
@@ -105,19 +107,65 @@ def _install_python(lock: Path, inputs: Path, resources: Path) -> None:
         ],
         check=True,
     )
+    _install_dtschema_commands(packages)
+    for module in ("pytest", "mypy", "reuse"):
+        subprocess.run([sys.executable, "-B", "-m", module, "--version"], check=True)
+
+
+def _install_dtschema_commands(packages: Path) -> None:
+    distributions = Distribution.discover(name="dtschema", path=[str(packages)])
+    schema = next(iter(distributions), None)
+    if schema is None:
+        message = "installed Python wheels do not contain dtschema"
+        raise SystemExit(message)
+    binaries = Path("/opt/quality/bin")
+    binaries.mkdir(parents=True, exist_ok=True)
+    for entry in schema.entry_points.select(group="console_scripts"):
+        command = binaries / entry.name
+        command.write_text(
+            f"#!{sys.executable}\n"
+            f"from {entry.module} import {entry.attr}\n"
+            f"raise SystemExit({entry.attr}())\n",
+            encoding="utf-8",
+        )
+        command.chmod(0o755)
+    subprocess.run([binaries / "dt-validate", "--version"], check=True)
+
+
+def _install_dtc(tool: ToolInput, temporary: Path) -> None:
+    source = temporary / "dtc"
+    build = temporary / "dtc-build"
+    _extract_archive(tool.archive, source, strip_components=1)
     subprocess.run(
         [
-            sys.executable,
-            "-B",
-            "-c",
-            (
-                "import dtschema; import importlib.metadata; "
-                'print(importlib.metadata.version("dtschema"))'
-            ),
+            "meson",
+            "setup",
+            build,
+            source,
+            "--wrap-mode=nodownload",
+            "--prefix=/usr",
+            "--libdir=lib",
+            "--buildtype=release",
+            "-Ddefault_library=shared",
+            "-Dpython=enabled",
+            "-Dpython.bytecompile=-1",
+            "-Dtests=false",
+            "-Dvalgrind=disabled",
+            "-Dyaml=disabled",
         ],
         check=True,
     )
-    subprocess.run([sys.executable, "-B", "-m", "pytest", "--version"], check=True)
+    subprocess.run(["meson", "compile", "-C", build], check=True)
+    # Older U-Boot host tools need their own libfdt headers.
+    subprocess.run(
+        ["meson", "install", "-C", build, "--no-rebuild", "--tags", "runtime,python-runtime"],
+        check=True,
+    )
+    _install_file(build / "pylibfdt/libfdt.py", Path(sysconfig.get_path("platlib")) / "libfdt.py")
+    version = subprocess.check_output(["dtc", "--version"], text=True).strip()
+    if version != f"Version: DTC {tool.identity}":
+        message = "installed dtc version does not match the environment lock"
+        raise SystemExit(message)
 
 
 def install_node_runtime(node_archive: Path, npm_archive: Path, destination: Path) -> None:
@@ -227,7 +275,9 @@ def _install_quality_tools(tools: Mapping[str, ToolInput], temporary: Path) -> N
     ruff_root = temporary / "ruff"
     _extract_archive(tools["ruff"].archive, ruff_root)
     _install_file(ruff_root / "ruff-x86_64-unknown-linux-musl/ruff", binaries / "ruff", mode=0o755)
+    _install_file(tools["shfmt"].archive, binaries / "shfmt", mode=0o755)
     _extract_archive(tools["typos"].archive, binaries, "./typos")
+    _extract_archive(tools["vale"].archive, binaries, "vale")
     google = tools["vale-google"]
     _extract_archive(
         google.archive,
@@ -257,7 +307,7 @@ def _install_quality_tools(tools: Mapping[str, ToolInput], temporary: Path) -> N
     ).returncode
     if status != 1:
         raise SystemExit(f"gitleaks detection self-test returned {status}, expected 1")
-    for command in ("sparse", "ruff", "reuse", "typos", "vale"):
+    for command in ("sparse", "ruff", "shfmt", "typos", "vale"):
         subprocess.run([command, "--version"], check=True)
     subprocess.run(["gitleaks", "version"], check=True)
 
@@ -503,9 +553,10 @@ def main() -> None:
     declarations = json.loads(args.lock.read_text())
     tools = _tool_inputs(declarations, args.inputs)
     _prepare_system(declarations)
-    _install_python(args.lock, args.inputs, args.resources)
     with tempfile.TemporaryDirectory(prefix="fplinux-environment-install-") as temporary:
         temporary_root = Path(temporary)
+        _install_dtc(tools["dtc"], temporary_root)
+        _install_python(args.lock, args.inputs, args.resources)
         _install_node(tools, args.resources, temporary_root)
         _install_cross_aliases()
         _install_quality_tools(tools, temporary_root)
