@@ -12,7 +12,6 @@ screens_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 root=$(CDPATH='' cd -- "$screens_dir/../../../../.." && pwd)
 common=$root/tests/host_tool/gui/screens
 launcher=$root/alpine/aports/fplinux-launcher
-clocks=$root/alpine/aports/fplinux-clocks
 work=$1
 # shellcheck source=tests/host_tool/gui/screens/ui-host-build.sh
 . "$common/ui-host-build.sh"
@@ -24,9 +23,9 @@ msgfmt --check --output-file="$work/locale/ru/LC_MESSAGES/fplinux-ui.mo" "$root/
 
 # pkg-config emits compiler and linker arguments for the pinned libraries.
 # shellcheck disable=SC2046
-ui_host_build_application -I"$common" -I"$launcher" -I"$clocks" $(pkg-config --cflags dbus-1) \
+ui_host_build_application -I"$common" -I"$launcher" $(pkg-config --cflags dbus-1) \
 	"$launcher"/*.c "$ui_host_shared/fplinux-clock-model.c" "$ui_host_shared/fplinux-clock-wire.c" \
-	"$clocks/clock-face.c" \
+	"$ui_host_shared/clock-face.c" \
 	"$ui_host_shared/fplinux-desktop-entry.c" \
 	"$ui_host_shared/fplinux-bluez-adapter.c" \
 	"$root/tests/host_tool/gui/launcher/native/launcher-resources.c" \
@@ -42,7 +41,7 @@ ui_host_build_application -I"$common" -I"$launcher" -I"$clocks" $(pkg-config --c
 # pkg-config emits compiler and linker arguments for the pinned peer libraries.
 # shellcheck disable=SC2046
 ui_host_compile -I"$root/tests/host_tool/gui/support" -I"$common" -I"$root/include/fplinux" -I"$ui_host_inputs" -I"$screens_dir" \
-	-I"$clocks" $(pkg-config --cflags wayland-server xkbcommon json-c dbus-1) \
+	$(pkg-config --cflags wayland-server xkbcommon json-c dbus-1) \
 	"$root/tests/host_tool/gui/launcher/native/launcher-screens.c" "$common/ui-frame-peer.c" \
 	"$root/tests/host_tool/gui/support/bluez-fake.c" \
 	"$common/screen-frame.c" "$ui_host_ui/fplinux-ui-session.c" \
@@ -59,7 +58,7 @@ ui_host_compile -pthread -I"$common" -I"$screens_dir" -I"$session" \
 	$(pkg-config --cflags wayland-server xkbcommon json-c) \
 	"$screens_dir/launcher-session-volume.c" "$common/ui-frame-peer.c" \
 	"$session/session-core.c" "$session/session-child.c" \
-	"$session/session-storage.c" "$session/session-audio.c" \
+	"$session/session-storage.c" "$session/session-audio.c" "$session/session-volume.c" \
 	"$session/session-vibration.c" "$session/session-vibrator.c" \
 	"$session/session-power.c" "$session/session-settings.c" \
 	"$session/session-battery.c" "$session/session-clock.c" \

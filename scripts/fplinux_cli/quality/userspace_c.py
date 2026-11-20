@@ -23,19 +23,22 @@ APORT_C_SUFFIXES = frozenset({".c"})
 _PACKAGE_CONFIG_TIMEOUT = 30
 _QUALITY_INCLUDE = "/opt/quality/include"
 _UI_RUNTIME_SOURCE = "lib/fplinux/fplinux-ui.c"
+_UI_SCREEN_SOURCE = "lib/fplinux/screen/fplinux-ui-screen.c"
 _LVGL_RUNTIME_SOURCES = frozenset(
     {
         _UI_RUNTIME_SOURCE,
+        _UI_SCREEN_SOURCE,
         "lib/fplinux/fplinux-ui-file-picker.c",
         "lib/fplinux/fplinux-ui-frame.c",
         "lib/fplinux/fplinux-ui-image.c",
         "lib/fplinux/fplinux-ui-listview.c",
+        "lib/fplinux/fplinux-ui-marquee.c",
         "lib/fplinux/fplinux-ui-menu.c",
-        "lib/fplinux/fplinux-ui-screen.c",
         "lib/fplinux/fplinux-ui-style.c",
         "lib/fplinux/fplinux-ui-symbol-picker.c",
         "lib/fplinux/fplinux-ui-text.c",
         "lib/fplinux/fplinux-ui-view-settings.c",
+        "lib/fplinux/screen/fplinux-ui-form.c",
     }
 )
 
@@ -126,6 +129,7 @@ def userspace_c_include_flags(source: str) -> list[str]:
     if (
         uses_ui
         or source in _LVGL_RUNTIME_SOURCES
+        or source in registration.CLOCK_FACE_SOURCES
         or path.parts[:2] == ("lib", "fplinux-runtime-media")
     ):
         flags.extend(
@@ -239,7 +243,7 @@ def run_userspace_analysis(output: Path, sources: list[tuple[str, bool]]) -> Non
     activity = "lib/fplinux-shared/fplinux-activity.c"
     activity_consumers: tuple[tuple[str, str, tuple[str, ...]], ...] = (
         (activity, "fplinux-activity-masks.h", ()),
-        ("lib/fplinux/fplinux-ui-screen.c", "fplinux-ui-activity.h", ("--lvgl",)),
+        (_UI_SCREEN_SOURCE, "fplinux-ui-activity.h", ("--lvgl",)),
     )
     for consumer, header, options in activity_consumers:
         if not any(source == consumer for source, _libusb in sources):
@@ -280,7 +284,7 @@ def run_userspace_analysis(output: Path, sources: list[tuple[str, bool]]) -> Non
     ]
     for index, (source, requires_libusb) in enumerate(sources):
         flags = [*common_flags, *userspace_c_include_flags(source)]
-        if source in {_UI_RUNTIME_SOURCE, activity, "lib/fplinux/fplinux-ui-screen.c", indicator}:
+        if source in {_UI_RUNTIME_SOURCE, _UI_SCREEN_SOURCE, activity, indicator}:
             flags.extend(("-I", str(output)))
         if requires_libusb:
             flags.extend(libusb_flags)

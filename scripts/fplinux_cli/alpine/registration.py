@@ -113,6 +113,10 @@ CLOCK_SOURCES = (
     "lib/fplinux-shared/fplinux-clock-wire.c",
     "include/fplinux/fplinux-clock-wire.h",
 )
+CLOCK_FACE_SOURCES = (
+    "lib/fplinux-shared/clock-face.c",
+    "include/fplinux/clock-face.h",
+)
 INPUT_SESSION_SOURCES = (
     "lib/fplinux-shared/fplinux-input-session.c",
     "include/fplinux/fplinux-input-session.h",
@@ -134,7 +138,7 @@ SHARED_APORT_SOURCES = {
     ),
     "fplinux-calculator": CLI_SOURCES,
     "fplinux-charge": CLI_SOURCES,
-    "fplinux-clocks": (*CLI_SOURCES, *UTF8_SOURCES, *CLOCK_SOURCES),
+    "fplinux-clocks": (*CLI_SOURCES, *UTF8_SOURCES, *CLOCK_SOURCES, *CLOCK_FACE_SOURCES),
     "fplinux-cpuclock": CLI_SOURCES,
     "fplinux-debug-tools": (*DRM_SESSION_SOURCES, *CLI_SOURCES, *GPU_OUTPUT_SOURCES),
     "fplinux-example-apidemo": CLI_SOURCES,
@@ -151,12 +155,11 @@ SHARED_APORT_SOURCES = {
     "fplinux-launcher": (
         *UTF8_SOURCES,
         *CLOCK_SOURCES,
+        *CLOCK_FACE_SOURCES,
         *CLI_SOURCES,
         *BLUEZ_ADAPTER_SOURCES,
         *DESKTOP_ENTRY_SOURCES,
         *UI_PROFILE_SOURCES,
-        "alpine/aports/fplinux-clocks/clock-face.c",
-        "alpine/aports/fplinux-clocks/clock-face.h",
         "include/fplinux/fplinux-settings-values.h",
     ),
     "fplinux-libweston": (
@@ -303,6 +306,8 @@ SHARED_APORT_SOURCES = {
         *UI_PROFILE_SOURCES,
         *UI_SOFTKEY_LAYOUT_SOURCES,
         "lib/fplinux/fplinux-ui.c",
+        "lib/fplinux/fplinux-ui-marquee.c",
+        "lib/fplinux/fplinux-ui-marquee.h",
         "lib/fplinux/fplinux-ui-style.c",
         "include/fplinux/fplinux-ui.h",
         "include/fplinux/fplinux-gettext.h",
@@ -343,7 +348,9 @@ SHARED_APORT_SOURCES = {
         "lib/fplinux/fplinux-ui-prefs.c",
         "include/fplinux/fplinux-ui-prefs.h",
         "lib/fplinux/fplinux-ui-image.c",
-        "lib/fplinux/fplinux-ui-screen.c",
+        "lib/fplinux/screen/fplinux-ui-screen.c",
+        "lib/fplinux/screen/fplinux-ui-form.c",
+        "lib/fplinux/screen/fplinux-ui-screen-private.h",
         "include/fplinux/fplinux-ui-screen.h",
         "lib/fplinux/fplinux-ui-screen-model.c",
         "include/fplinux/fplinux-ui-screen-model.h",

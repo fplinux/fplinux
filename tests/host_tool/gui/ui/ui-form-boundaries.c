@@ -44,6 +44,10 @@ static const char long_value[] = "Line 01\nLine 02\nLine 03\nLine 04\nLine 05\n"
 
 static const char long_caption[] = "Key\nHeading 2\nHeading 3";
 
+static const char single_line_value[] =
+	"Window settings for messages contacts calls and applications "
+	"are available under the main menu";
+
 static void value_command(struct fplinux_ui *ui, struct fplinux_ui_screen *form,
 			  size_t item, int command, void *context)
 {
@@ -119,7 +123,7 @@ static bool product_input(struct fplinux_ui *ui,
 			  struct form_application *application, char command)
 {
 	struct fplinux_ui_screen *form = application->form;
-	bool created = strchr("phdjemosvntbclfg0", command) != NULL;
+	bool created = strchr("phdjemosvntbclfg0U", command) != NULL;
 
 	if (created)
 		form = new_form(ui, application);
@@ -152,6 +156,10 @@ static bool product_input(struct fplinux_ui *ui,
 	case 's':
 		assert(fplinux_ui_form_append_string(form, "Key", "7") == 0);
 		assert(fplinux_ui_form_append_string(form, "Other", "9") == 1);
+		break;
+	case 'U':
+		assert(fplinux_ui_form_append_value(form, "Key",
+						    single_line_value) == 0);
 		break;
 	case 'c':
 	case 'l':
@@ -538,6 +546,7 @@ static void capture_properties(struct form_capture *capture)
 	capture_form(capture, 'q', "values-action-offscreen");
 	form_key(capture, KEY_ENTER);
 	capture_form(capture, 'q', "values-offscreen-enter");
+	capture_form(capture, 'U', "values-width-wrap");
 }
 
 void fplinux_ui_test_form_boundaries_check(struct fplinux_ui_frame_peer *peer,

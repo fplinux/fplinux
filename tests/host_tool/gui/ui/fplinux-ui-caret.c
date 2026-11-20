@@ -2125,7 +2125,7 @@ static void test_passive_gauge_reflow(void)
 	const char *caption =
 		"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 	struct fplinux_ui_screen *form = fplinux_ui_form_new(&ui, NULL);
-	lv_obj_t *name, *heading, *frame, *bar;
+	lv_obj_t *name, *heading, *frame, *bar, *number;
 	lv_area_t label_area, value_area, bar_area;
 	lv_draw_buf_t *pixels;
 	int width, line;
@@ -2162,8 +2162,17 @@ static void test_passive_gauge_reflow(void)
 	width = lv_obj_get_width(bar);
 	fplinux_ui_form_set_value(form, 0, 100);
 	advance(0);
+	number = label_with_text(heading, "100");
+	assert(number);
+	lv_obj_get_coords(name, &label_area);
+	lv_obj_get_coords(number, &value_area);
+	assert(label_area.x2 < value_area.x1);
 	assert(lv_obj_get_width(bar) == width);
 	assert(lv_obj_get_height(name) > line);
+	pixels = snapshot(bar);
+	for (int x = 0; x < width; ++x)
+		assert(pixel_is(pixels, x, 0, 0x445566));
+	lv_draw_buf_destroy(pixels);
 	assert(fplinux_ui_form_append_gauge(form, "Last", 0, 100, 50, true) ==
 	       1);
 	advance(0);

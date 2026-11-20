@@ -56,6 +56,7 @@ def client_frames(
     executable = directory / "client-frames"
     sources = [
         "fplinux-ui.c",
+        "fplinux-ui-marquee.c",
         "fplinux-ui-style.c",
         "fplinux-audio-client.c",
         "fplinux-ui-frame.c",
@@ -67,7 +68,8 @@ def client_frames(
         "fplinux-ui-symbol-picker.c",
         "fplinux-text-input.c",
         "fplinux-ui-menu.c",
-        "fplinux-ui-screen.c",
+        "screen/fplinux-ui-screen.c",
+        "screen/fplinux-ui-form.c",
         "fplinux-ui-image.c",
         "fplinux-ui-screen-model.c",
         "fplinux-ui-listview.c",
@@ -394,7 +396,7 @@ def test_form_value_commands_preserve_geometry_and_follow_item_lifecycle(
     assert form_property_observation(output, "values-action-deleted").focus == 0
 
 
-def test_form_long_values_wrap_update_and_read_before_focus_moves(
+def test_form_multiline_values_update_and_read_before_focus_moves(
     form_boundary_frames: tuple[FormGeometry, Path],
 ) -> None:
     """A twenty-line action uses the final viewport width and reveals both reading directions."""
@@ -434,6 +436,25 @@ def test_form_long_values_wrap_update_and_read_before_focus_moves(
     assert hidden.focus > 1
     assert hidden.calls == 0
     assert form_property_observation(output, "values-offscreen-enter").calls == 0
+
+
+def test_form_line_wider_than_the_viewport_draws_text_on_a_second_line(
+    form_boundary_frames: tuple[FormGeometry, Path],
+) -> None:
+    geometry, output = form_boundary_frames
+    observation = form_property_observation(output, "values-width-wrap")
+    caption, value = observation.name, observation.value
+    line_height = caption.bottom - caption.top + 1
+    second_line = value.top + line_height
+    assert second_line + line_height - 1 <= min(value.bottom, observation.viewport.bottom)
+
+    pixels = (output / "values-width-wrap.rgb565").read_bytes()
+    assert len(pixels) == geometry.width * geometry.height * 2
+    assert any(
+        struct.unpack_from("<H", pixels, 2 * (y * geometry.width + x))[0] != FORM_BACKGROUND
+        for y in range(second_line, second_line + line_height)
+        for x in range(value.left, value.right + 1)
+    )
 
 
 def test_form_value_omits_empty_caption_or_value_without_blank_lines(

@@ -25,7 +25,7 @@ msgfmt --check --output-file="$work/locale/ru/LC_MESSAGES/fplinux-ui.mo" "$root/
 
 ui_host_build_application -I"$common" -I"$clocks" \
 	"$clocks/fplinux-clocks.c" "$clocks/clock-client.c" \
-	"$clocks/clock-face.c" \
+	"$ui_host_shared/clock-face.c" \
 	"$ui_host_shared/fplinux-clock-model.c" "$ui_host_shared/fplinux-clock-wire.c" \
 	"$clocks/clock-presentation.c" \
 	"$screens_dir/clocks-observer.c" \

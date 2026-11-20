@@ -3753,6 +3753,34 @@ static void test_volume_keys_during_save(struct fixture *fixture)
 	expect_saved_volume(fixture, "5");
 }
 
+static void test_volume_save_after_home(struct fixture *fixture)
+{
+	struct peer *launcher = start_launcher(fixture);
+	struct peer *settings = show_app(fixture, launcher, TEST_SETTINGS);
+	struct fplinux_ui_session_message request = {
+		.type = FPLINUX_UI_SESSION_SETTING,
+		.serial = 92,
+		.name = "volume",
+		.value = "7",
+	};
+	struct fplinux_ui_session_message response;
+	const struct fplinux_session_process *process;
+
+	fixture->hold_audio_ack = true;
+	issue(fixture, settings, &request);
+	CHECK(!strcmp(fixture->held_audio_ack, "VOLUME MEDIA 7"));
+	return_home(fixture, launcher);
+	CHECK(fplinux_session_focused_pid(fixture->session) == launcher->pid);
+	process = fplinux_session_find_process(fixture->session, settings->pid);
+	CHECK(process && !process->shown && !process->closing);
+	acknowledge_audio(fixture);
+	pump(fixture, 10);
+
+	expect_saved_volume(fixture, "7");
+	CHECK(!take_message(settings, FPLINUX_UI_SESSION_SETTING, "volume",
+			    &response));
+}
+
 static void test_volume_keys_repeat(struct fixture *fixture)
 {
 	struct peer *launcher = start_launcher(fixture);
@@ -7447,6 +7475,8 @@ int main(int argc, char **argv)
 		test_volume_keys_preview(fixture);
 	else if (!strcmp(argv[1], "volume-keys-during-save"))
 		test_volume_keys_during_save(fixture);
+	else if (!strcmp(argv[1], "volume-save-after-home"))
+		test_volume_save_after_home(fixture);
 	else if (!strcmp(argv[1], "volume-keys-repeat"))
 		test_volume_keys_repeat(fixture);
 	else if (!strcmp(argv[1], "volume-keys-power"))

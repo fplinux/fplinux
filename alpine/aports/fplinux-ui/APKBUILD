@@ -30,6 +30,8 @@ source="
 	@source:aport_notosanssymbols2_ofl_2_008_txt@
 	@source:aport_notosansmath_ofl_3_000_txt@
 	fplinux-ui.c
+	fplinux-ui-marquee.c
+	fplinux-ui-marquee.h
 	fplinux-ui-style.c
 	fplinux-ui.h
 	fplinux-gettext.h
@@ -75,6 +77,8 @@ source="
 	fplinux-ui-prefs.h
 	fplinux-ui-image.c
 	fplinux-ui-screen.c
+	fplinux-ui-form.c
+	fplinux-ui-screen-private.h
 	fplinux-ui-screen.h
 	fplinux-ui-screen-model.c
 	fplinux-ui-screen-model.h
@@ -141,11 +145,11 @@ build() {
 	done
 	"$CC" $CPPFLAGS $CFLAGS -Os -std=c11 -Wall -Wextra -Werror -fPIC \
 		-I"$srcdir" $(pkg-config --cflags lvgl wayland-client xkbcommon json-c) \
-		-shared fplinux-ui.c fplinux-ui-style.c fplinux-ui-session.c fplinux-ui-text.c \
+		-shared fplinux-ui.c fplinux-ui-marquee.c fplinux-ui-style.c fplinux-ui-session.c fplinux-ui-text.c \
 		fplinux-audio-client.c fplinux-ui-frame.c fplinux-rgb565.c \
 		fplinux-files-browse.c fplinux-ui-file-picker.c \
 		fplinux-ui-recent.c fplinux-ui-view-settings.c \
-		fplinux-ui-menu.c fplinux-ui-prefs.c fplinux-ui-image.c fplinux-ui-screen.c \
+		fplinux-ui-menu.c fplinux-ui-prefs.c fplinux-ui-image.c fplinux-ui-screen.c fplinux-ui-form.c \
 		fplinux-ui-locale.c fplinux-ui-symbol-picker.c \
 		fplinux-ui-listview.o \
 		fplinux-language.o fplinux-multitap.o fplinux-text-input.o fplinux-utf8.c \
@@ -227,7 +231,9 @@ package() {
 }
 
 sha512sums="
-8f35a8b707a26a2a33f9c0d00fecc46f67389fac82fbde667ed08cb7e1930c399bdfbb13b760c5824377dd93b4324c59e11e8f5c41ab36648ae00e78fd5201c4  fplinux-ui.c
+d2720424f187ed317fd43726ff3149c7f70db83fcfab52109f0fd6913f287b63d6eda43bfa7af9bad2a289ab2cd382e7198a0b4d66f93ebe514003a936198709  fplinux-ui.c
+090e0f6f6092840151ef05ca56c6ff81be5efd877d19c3347b73a4637cc9f09f7ef3f9f59dd8afc5c28b3d86e47e4f7f53f791e3a1da0ff3a649e891e4eefae1  fplinux-ui-marquee.c
+a7d5d48ff0c7f60633cc5c3fe6a7d733fa9802bcfb4efc448111edf2f59961189510362fc2192457f64de54de2875a0ec5a7df377bd613f713ee1f8bc2d5a4e9  fplinux-ui-marquee.h
 2ea0f81ea8fdbe2c17bbbd4062a89fe19508572781a54b456286bdc08a295942d34047dc82e0b16a8c0256de6c70f25ec2e029e89d54ef4eda78534aac36d0c6  fplinux-ui-style.c
 1fd6ab0fd8539c5803cd53777470315dc2d85ed6414582ad13c86c735781534ee86d33941f482485c19a3bd2f317a0a3ed32adf09cf2a2597eb6fb77fe9ca5dd  fplinux-ui.h
 483c462166bf90ce3d4b232b27a43e541c76602a9a6f65571fe60b9f9ed72b164ed0cba9ae00457353afa2b48b1b9e83db81dc09cdff00b35ff5ca76411efdf2  fplinux-gettext.h
@@ -272,7 +278,9 @@ f31ac06464a6ee84fc5cc76869af00658bd00b810c1883a0fcd52202a82e3371f586146397fbbb48
 f37be5986cb01f613a4d6e2b590803078a1035939cf7df5f6cf8d135fe6182a96666929accf2377ffe726fa40a8ef2b7b0b2c84b1f253cd37d9b1435bd14c735  fplinux-ui-prefs.c
 7a8b79c8ea64bf50a7018e5d9fbcdc2d5c16c9700ad3c7b5e90900af806c2dcb33a77f55714b77a58465c4c43b9a7c269373bac64047f6c8cdabee8151dca2a7  fplinux-ui-prefs.h
 c342580b9aca919ccadea3d25d0b224f8588cbcb713824fc46da231b32d6ae86c5bf61918c0493b5463a43f416b9ebacd5e03562e560323b10c0b6518bb01e69  fplinux-ui-image.c
-a64724eecb0987b6d8a742564af8447d139254d612a5d460d15c62eca3324cefbaccd28a8a982a3bf74350cca10048aac1ffe26a2a45253d8c7092833e4ca710  fplinux-ui-screen.c
+15897636ea7aa05118c7c4d0face5d4fd322413e4969d30196646521674e90b69d23ca04f6882d3412bde59b0dbf4dc6275f10c50ce82e590317e52a72e3fb72  fplinux-ui-screen.c
+1a217221e24ae1b2470f31d275c3a016dbdfde41f610fcab5aca7030c2fbbe8773bc7104f4ee5329daacff3fa087d847af75fb331f826c513222700b956d05fc  fplinux-ui-form.c
+0f34233472d8ceb24ce6745f3dccbc39873d1c8cb1bff59ffe298fcf1d0b8573de7506ad0d3007e243b8d8e82ee03e7ee64f12a667a18f2f5a5d06dd4909252c  fplinux-ui-screen-private.h
 05d9fb1e8154d7aa289e1f7391e49e2e40f3d00af74e10fbeeefb6b8ea0d9d08ad850aaff609b40dc3402bbb843d774ab201f4cde42ee0d390a3cae99d05c606  fplinux-ui-screen.h
 a609fee235ff01c8baadba39c4694ad80220f3477b03d8fe25fb97eb35728dbee23e207d7a5cf606b33e42e613001ec633637f99c30788b27ec4afd5769753f4  fplinux-ui-screen-model.c
 b2b924897ebb04571f8358a5404bd359cf4b644ec7c2c1e0fce7fe792f49fb1002d4df2802dc210d451d43941c50831e054492437a3b82609bebc4eb7cba5e2d  fplinux-ui-screen-model.h

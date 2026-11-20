@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * The options menu of the high-level screens while the application changes
- * the screen under it. The harness links lib/fplinux/fplinux-ui-screen.c
+ * the screen under it. The harness links the screen and Form implementation
  * with stand-ins for LVGL and the enclosing runtime:
  * LVGL objects retain geometry, text, visibility and title scroll state,
  * a list view keeps only its row count and focus, and the menu

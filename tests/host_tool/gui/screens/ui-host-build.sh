@@ -58,7 +58,8 @@ ui_host_build_application() {
 	# shellcheck disable=SC2046
 	ui_host_compile_lvgl -O2 \
 		$(pkg-config --cflags wayland-client xkbcommon json-c) \
-		"$ui_host_ui/fplinux-ui.c" "$ui_host_ui/fplinux-ui-session.c" \
+		"$ui_host_ui/fplinux-ui.c" "$ui_host_ui/fplinux-ui-marquee.c" \
+		"$ui_host_ui/fplinux-ui-session.c" \
 		"$ui_host_ui/fplinux-ui-style.c" \
 		"$ui_host_ui/fplinux-ui-frame.c" \
 		"$ui_host_ui/fplinux-rgb565.c" \
@@ -70,7 +71,7 @@ ui_host_build_application() {
 		"$ui_host_ui/fplinux-ui-text.c" "$ui_host_ui/fplinux-ui-text-model.c" \
 		"$ui_host_ui/fplinux-ui-symbol-picker.c" "$ui_host_ui/fplinux-text-input.c" \
 		"$ui_host_ui/fplinux-ui-menu.c" "$ui_host_ui/fplinux-ui-image.c" \
-		"$ui_host_ui/fplinux-ui-screen.c" \
+		"$ui_host_ui/screen/fplinux-ui-screen.c" "$ui_host_ui/screen/fplinux-ui-form.c" \
 		"$ui_host_ui/fplinux-ui-prefs.c" "$ui_host_ui/fplinux-ui-screen-model.c" \
 		"$ui_host_ui/fplinux-ui-listview.c" "$ui_host_ui/fplinux-ui-locale.c" \
 		"$ui_host_ui/fplinux-ui-profile.c" "$ui_host_ui/fplinux-ui-softkey-layout.c" \
