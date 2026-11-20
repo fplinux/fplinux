@@ -61,7 +61,7 @@ Run the loader as your regular user, not as root.
 
 4. Only now hold your phone's boot key and connect the USB cable to the powered-off phone, keeping the key pressed. The Nokia example uses <Key>\*</Key>.
 
-5. Keep USB connected while the loader works. It reuses compatible saved phone data when available. Otherwise, UMS9117 phones make a complete read-only NAND backup, while Qin reads selected sound files from eMMC. During preparation, the phone shows its progress instead of Home; the PC keeps the detailed log.
+5. Keep USB connected while the loader works. Targets with required phone data reuse compatible saved inputs when available. On first launch, UMS9117 targets with required groups make a complete read-only NAND backup, while Qin reads selected sound files from eMMC. During preparation, the phone shows progress and the PC keeps the detailed log. Targets with only optional groups start Linux directly.
 
 6. After reading new data from the phone, wait for **`Disconnect USB.`** before disconnecting. If the phone stays on, briefly remove and reinsert its battery. Start again from step 1 with the same command. No rebuild is needed. With compatible saved inputs, the loader prepares data as needed and continues without this restart.
 

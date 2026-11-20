@@ -293,6 +293,44 @@ def test_explicit_prepare_imports_saved_dump_without_booting_or_replacing_the_in
     assert not (generation / "device-data.cpio").exists()
 
 
+def test_archive_boots_with_optional_nand_data_and_reuses_it_after_explicit_preparation(
+    autonomous_archive: AutonomousArchive, tmp_path: Path
+) -> None:
+    archive = autonomous_archive
+    runtime = json.loads((archive.root / "runtime-manifest.json").read_bytes())
+    runtime["device_data"]["required_groups"] = []
+    refresh_archive(archive.root, runtime)
+    loaded = archive.data / "loaded"
+
+    first = archive.run()
+
+    assert first.returncode == 0, first.stderr
+    assert "Opening SSH." in first.stdout
+    assert (archive.data / "session/session.json").is_file()
+    assert not (archive.data / "reader").exists()
+    assert not (loaded / "reader-commands").exists()
+    assert not archive.backup.exists()
+    assert not archive.phone.exists()
+    assert _capsule_files(loaded / "1.cpio", tmp_path / "empty-capsule") == {}
+    (archive.root / "phone-live").unlink()
+
+    prepared = archive.prepared.run_entrypoint(
+        "fplinux.py", "prepare", "--from-dump", str(archive.prepared.dump)
+    )
+    assert prepared.returncode == 0, prepared.stderr
+    assert (archive.phone / "groups/bluetooth/radio.bin").read_bytes() == b"radio"
+
+    second = archive.run()
+
+    assert second.returncode == 0, second.stderr
+    assert not (loaded / "reader-commands").exists()
+    assert _capsule_files(loaded / "2.cpio", tmp_path / "prepared-capsule") == {
+        "lib/firmware/chip/radio.bin": b"radio",
+        "lib/firmware/chip/fm.bin": b"fm",
+        "lib/firmware/fplinux/audio.bin": b"profile",
+    }
+
+
 @pytest.mark.parametrize("failure", ["missing-helper", "io-error"])
 def test_unavailable_phone_progress_warns_once_and_keeps_preparation_successful(
     autonomous_archive: AutonomousArchive,

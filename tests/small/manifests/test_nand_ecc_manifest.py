@@ -25,6 +25,19 @@ def test_declared_bch12_format_preserves_the_chip_expectation() -> None:
     assert config["nand"] == expected
 
 
+@pytest.mark.parametrize("fitted", [False, True], ids=["physical-parser", "fitted-parser"])
+def test_nand_parser_can_make_its_data_optional_for_ram_boot(*, fitted: bool) -> None:
+    raw = common.load_toml(common.ROOT / "targets/nokia-ta1618/target.toml")
+    raw["device_data"]["required_groups"] = []
+    if not fitted:
+        del raw["device_data"]["fitted_prefix"]
+    with mock.patch.object(targets, "load_toml", return_value=raw):
+        config = targets.load_target("nokia-ta1618")
+
+    assert config["device_data"]["required_groups"] == []
+    assert set(config["device_data"]["groups"]) == {"audio-profile", "bluetooth", "fm-radio"}
+
+
 @pytest.mark.parametrize(
     ("fields", "message"),
     [

@@ -21,7 +21,7 @@ Checksums establish that downloaded files match their listed bytes. Packaging an
 
 The ZIP includes the shared system and kernel, each phone's files, Python, OpenSSH and license notices. The launcher assembles the selected model's bundle in the [working data directory](/fplinux/start/build/#working-data-directory) and prints the location of its optional APKs. Prepared phone data is stored separately. The launcher only reads the phone's internal storage.
 
-The archive includes any required extraction tools. It reuses compatible inputs and prepared data from your [personal phone data store](/fplinux/guides/device-data/#where-phone-data-is-stored), including data saved by another archive or checkout. On first use, UMS9117 phones save a read-only NAND backup and Qin saves selected sound files from eMMC. Qin preparation does not make a full storage backup. Targets without required runtime data start Linux and open SSH immediately.
+The archive includes any required extraction tools. It reuses compatible inputs and prepared data from your [personal phone data store](/fplinux/guides/device-data/#where-phone-data-is-stored), including data saved by another archive or checkout. On first use, UMS9117 targets with required runtime data save a read-only NAND backup and Qin saves selected sound files from eMMC. Targets without required runtime data start Linux and open SSH immediately.
 
 USB loading and SSH from Windows are unverified on Xiaomi Qin 1s+.
 
@@ -29,7 +29,7 @@ USB loading and SSH from Windows are unverified on Xiaomi Qin 1s+.
 
 - A Linux x86-64 PC with coreutils, iproute2, udev and a network manager that automatically runs IPv4 DHCP on a new USB network interface, such as NetworkManager; or a Windows 10 or 11 x64 PC with Windows PowerShell.
 - A USB data cable that fits your phone.
-- For UMS9117, enough free space for the full internal-storage backup in your personal phone data store.
+- For a UMS9117 target that requires a backup, enough free space for the full internal-storage backup in your personal phone data store.
 
 Python and OpenSSH are bundled; no separate installation is needed. On Linux, the launcher asks for administrator access once if the included USB access rules need to be installed; this step requires `sudo`. On Windows, it can ask to set up the phone's USB driver: read the described driver and certificate changes, confirm them with the checkbox and approve the administrator prompt. Run the launcher as your regular user.
 

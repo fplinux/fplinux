@@ -399,9 +399,10 @@ def validate_device_data(value: object) -> dict[str, Any] | None:
             relative_name(entry["source"], f"device data {group} source")
             relative_name(entry["destination"], f"device data {group} destination")
     required = descriptor["required_groups"]
+    has_parser = descriptor["parser"] is not None or descriptor["originals_parser"] is not None
     if (
         not isinstance(required, list)
-        or (not required and descriptor["originals_parser"] is None)
+        or (not required and not has_parser)
         or any(
             not isinstance(group, str) or group not in descriptor["groups"] for group in required
         )

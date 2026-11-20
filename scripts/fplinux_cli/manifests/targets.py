@@ -487,13 +487,15 @@ def load_target(
         device_data = config.get("device_data")
         if not isinstance(device_data, dict) or set(device_data) not in (
             {"parser"},
+            {"parser", "required_groups"},
             {"parser", "fitted_prefix"},
+            {"parser", "fitted_prefix", "required_groups"},
             {"originals_parser"},
             {"originals_parser", "required_groups"},
         ):
             fail(
-                "target device_data requires one parser with optional fitted_prefix or "
-                "original-data required_groups"
+                "target device_data requires one parser with optional required_groups "
+                "and fitted_prefix for NAND"
             )
         source_field = "originals_parser" if "originals_parser" in device_data else "parser"
         name = f"target device_data {source_field}"
@@ -518,7 +520,6 @@ def load_target(
         required = device_data.get("required_groups", list(device_data_groups))
         if (
             not isinstance(required, list)
-            or (not required and source_field != "originals_parser")
             or any(
                 not isinstance(group, str) or group not in device_data_groups for group in required
             )

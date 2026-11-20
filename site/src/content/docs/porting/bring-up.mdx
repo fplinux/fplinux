@@ -49,6 +49,8 @@ The new target uses <Key>\*</Key> as the boot key and `exec_distance = 0`, both 
 
 Check that the phone supplies USB from the SC2720 USB33 regulator at 3.3 V before using the template's USB setup. The [platform requirements](/fplinux/porting/ums9117/#headless-targets) describe the options for a board with different wiring.
 
+When adding a NAND parser and firmware groups, set `required_groups = []` in the target's `[device_data]` table to keep normal RAM boot independent of a NAND backup. Omitting the key makes every declared group required. The launcher still loads prepared optional groups from the phone store, and you can [prepare them explicitly](/fplinux/guides/device-data/#prepare-data-from-a-saved-backup) when needed.
+
 ## Boot without a screen
 
 Build the target:
