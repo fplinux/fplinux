@@ -911,6 +911,132 @@ done:
 	KNI_ReturnVoid();
 }
 
+struct directional_lighting {
+	uint32_t emissive, ambient, diffuse;
+	uint32_t ambient_color, directional_color;
+	float ambient_intensity, directional_intensity;
+	bool directional_first;
+};
+
+static bool shade_directional_vertices(jfloat *vertices, int count,
+				       const jshort *normals,
+				       const jfloat *inverse,
+				       const jfloat *direction,
+				       const struct directional_lighting *light,
+				       float alpha)
+{
+	/* Match the Java float operations and light accumulation order. */
+#pragma STDC FP_CONTRACT OFF
+	const unsigned int shifts[] = { 16, 8, 0 };
+	float emissive[3], ambient[3], base[3], diffuse[3], directional[3];
+	float ambient_gain = light->ambient_intensity / 255;
+	float directional_gain = light->directional_intensity / 255;
+
+	for (int axis = 0; axis < 3; ++axis) {
+		if (!isfinite(direction[axis]) || !isfinite(inverse[axis]) ||
+		    !isfinite(inverse[4 + axis]) ||
+		    !isfinite(inverse[8 + axis]))
+			return false;
+		unsigned int shift = shifts[axis];
+
+		emissive[axis] = channel(light->emissive, shift);
+		ambient[axis] =
+			channel(light->ambient_color, shift) *
+			(ambient_gain * channel(light->ambient, shift) + .0f);
+		base[axis] = emissive[axis] + ambient[axis];
+		diffuse[axis] = channel(light->diffuse, shift);
+		directional[axis] = channel(light->directional_color, shift);
+	}
+
+	for (int i = 0; i < count;
+	     ++i, normals += 3, vertices += VERTEX_COMPONENTS) {
+		float normal[3];
+
+		for (int axis = 0; axis < 3; ++axis)
+			normal[axis] = normals[0] * inverse[axis] +
+				       normals[1] * inverse[4 + axis] +
+				       normals[2] * inverse[8 + axis];
+		float length = (float)sqrt(normal[0] * normal[0] +
+					   normal[1] * normal[1] +
+					   normal[2] * normal[2]);
+
+		if (length != 0) {
+			for (int axis = 0; axis < 3; ++axis)
+				normal[axis] /= length;
+		}
+		float facing = normal[0] * direction[0] +
+			       normal[1] * direction[1] +
+			       normal[2] * direction[2];
+		float gain = directional_gain * facing;
+
+		vertices[A] = alpha;
+		for (int axis = 0; axis < 3; ++axis) {
+			float color = base[axis];
+
+			if (!(facing <= 0)) {
+				float reflected = directional[axis] *
+						  (gain * diffuse[axis] + .0f);
+
+				if (light->directional_first)
+					color = (emissive[axis] + reflected) +
+						ambient[axis];
+				else
+					color += reflected;
+			}
+			vertices[R + axis] = color_component(color);
+		}
+	}
+	return true;
+}
+
+KNIEXPORT KNI_RETURNTYPE_BOOLEAN
+KNIDECL(javax_microedition_m3g_Rasterizer_shadeDirectional0)
+{
+	int count = KNI_GetParameterAsInt(2);
+	const struct directional_lighting light = {
+		.emissive = (uint32_t)KNI_GetParameterAsInt(5),
+		.ambient = (uint32_t)KNI_GetParameterAsInt(6),
+		.diffuse = (uint32_t)KNI_GetParameterAsInt(7),
+		.ambient_color = (uint32_t)KNI_GetParameterAsInt(8),
+		.ambient_intensity = KNI_GetParameterAsFloat(9),
+		.directional_color = (uint32_t)KNI_GetParameterAsInt(10),
+		.directional_intensity = KNI_GetParameterAsFloat(11),
+		.directional_first = KNI_GetParameterAsBoolean(13),
+	};
+	float alpha = channel(light.diffuse, 24) * KNI_GetParameterAsFloat(14);
+	jboolean shaded = KNI_FALSE;
+
+	KNI_StartHandles(4);
+	KNI_DeclareHandle(vertices);
+	KNI_DeclareHandle(normals);
+	KNI_DeclareHandle(inverse);
+	KNI_DeclareHandle(direction);
+	KNI_GetParameterAsObject(1, vertices);
+	KNI_GetParameterAsObject(3, normals);
+	KNI_GetParameterAsObject(4, inverse);
+	KNI_GetParameterAsObject(12, direction);
+
+	if (count > 0 && !KNI_IsNullHandle(vertices) &&
+	    count <= KNI_GetArrayLength(vertices) / VERTEX_COMPONENTS &&
+	    !KNI_IsNullHandle(normals) &&
+	    count <= KNI_GetArrayLength(normals) / 3 &&
+	    !KNI_IsNullHandle(inverse) && KNI_GetArrayLength(inverse) >= 16 &&
+	    !KNI_IsNullHandle(direction) &&
+	    KNI_GetArrayLength(direction) >= 3 &&
+	    isfinite(light.ambient_intensity) &&
+	    isfinite(light.directional_intensity)) {
+		SNI_BEGIN_RAW_POINTERS
+		shaded = shade_directional_vertices(
+			SNI_GetRawArrayPointer(vertices), count,
+			SNI_GetRawArrayPointer(normals),
+			SNI_GetRawArrayPointer(inverse),
+			SNI_GetRawArrayPointer(direction), &light, alpha);
+		SNI_END_RAW_POINTERS
+	}
+	KNI_EndHandles();
+	KNI_ReturnBoolean(shaded);
+}
+
 KNIEXPORT KNI_RETURNTYPE_VOID KNIDECL(javax_microedition_m3g_Rasterizer_draw0)
 {
 	struct target target;

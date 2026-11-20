@@ -93,7 +93,8 @@ final class M3gProbe {
             }
         }
         boolean depth = depthAndHints(renderer, graphics, target, pixels);
-        boolean lightingAndFog = lightingAndFog(renderer, graphics, target, pixels);
+        boolean lightingAndFog = lightingAndFog(renderer, graphics, target, pixels) &&
+            directionalLighting(renderer);
         boolean alphaAndHud = alphaAndHud(renderer, pixels);
         return "m3g compressed=" + compressed + " animation=" + animated +
             " clipAndSeams=" + seamAndClip + " depth=" + depth + " lightingAndFog=" + lightingAndFog +
@@ -246,11 +247,16 @@ final class M3gProbe {
     }
 
     private static void renderMesh(Graphics3D renderer, Image target, Mesh mesh, int[] pixels) {
+        renderMesh(renderer, target, mesh, null, pixels);
+    }
+
+    private static void renderMesh(Graphics3D renderer, Image target, Mesh mesh, Transform placement,
+                                   int[] pixels) {
         renderer.bindTarget(target.getGraphics());
         try {
             renderer.clear(null);
             renderer.setCamera(new Camera(), null);
-            renderer.render(mesh, null);
+            renderer.render(mesh, placement);
         } finally {
             renderer.releaseTarget();
         }
@@ -484,6 +490,86 @@ final class M3gProbe {
         }
         target.getRGB(pixels, 0, 10, 0, 0, 10, 10);
         return pixels[45];
+    }
+
+    private static boolean directionalLighting(Graphics3D renderer) {
+        Appearance look = new Appearance();
+        Material material = new Material();
+        material.setColor(Material.AMBIENT, 0x28140a);
+        material.setColor(Material.DIFFUSE, 0xc0b4785a);
+        material.setColor(Material.EMISSIVE, 0x080604);
+        look.setMaterial(material);
+        PolygonMode polygon = new PolygonMode();
+        polygon.setShading(PolygonMode.SHADE_FLAT);
+        look.setPolygonMode(polygon);
+        look.setTexture(0, new Texture2D(new Image2D(Image2D.RGBA,
+            DirectUtils.createImage(1, 1, 0x80ff00ff))));
+
+        Mesh mesh = quad(0xffffffff, look);
+        Transform placement = new Transform();
+        placement.postScale(.5f, 1, 2);
+        KeyframeSequence opacity = new KeyframeSequence(1, 1, KeyframeSequence.STEP);
+        opacity.setKeyframe(0, 0, new float[] { .5f });
+        opacity.setDuration(1);
+        AnimationTrack fade = new AnimationTrack(opacity, AnimationTrack.ALPHA);
+        fade.setController(new AnimationController());
+        mesh.addAnimationTrack(fade);
+        mesh.animate(0);
+        VertexArray normals = new VertexArray(4, 3, 2);
+        normals.set(0, 4, new short[] { 2, 0, 4, 2, 0, 4, 2, 0, 4, 2, 0, 4 });
+        mesh.getVertexBuffer().setNormals(normals);
+
+        Light ambient = new Light();
+        ambient.setMode(Light.AMBIENT);
+        ambient.setIntensity(1.046875f);
+        Light directional = new Light();
+        // The two addition orders round the red channel to 79 and 80, on either side of RGB565's boundary.
+        directional.setIntensity(Float.intBitsToFloat(0x3ebc6d0b));
+        Light extra = new Light();
+        extra.setMode(Light.AMBIENT);
+        extra.setIntensity(0);
+        extra.setRenderingEnable(false);
+        Image target = DirectUtils.createImage(10, 10, 0);
+        int[] pixels = new int[100];
+        int[] javaPixels = new int[100];
+        try {
+            for (int order = 0; order < 2; order++) {
+                renderer.resetLights();
+                renderer.addLight(order == 0 ? ambient : directional, null);
+                renderer.addLight(order == 0 ? directional : ambient, null);
+                renderer.addLight(extra, null);
+                renderMesh(renderer, target, mesh, placement, pixels);
+                // Activating the third light forces Java lighting and adds zero to each color channel.
+                extra.setRenderingEnable(true);
+                renderMesh(renderer, target, mesh, placement, javaPixels);
+                extra.setRenderingEnable(false);
+                int expected = order == 0 ? 0x30480000 : 0x30500000;
+                if ((javaPixels[45] & 0xfff8ff00) != expected) {
+                    System.err.println("M3G directional lighting order " + order +
+                        ", Java center pixel 0x" + Integer.toHexString(javaPixels[45]) +
+                        ", expected masked pixel 0x" + Integer.toHexString(expected));
+                    return false;
+                }
+                for (int i = 0; i < pixels.length; i++) {
+                    if (pixels[i] != javaPixels[i]) {
+                        System.err.println("M3G directional lighting order " + order +
+                            ", pixel " + i + " native 0x" + Integer.toHexString(pixels[i]) +
+                            ", Java 0x" + Integer.toHexString(javaPixels[i]));
+                        return false;
+                    }
+                }
+            }
+            normals.set(0, 4, new short[] { 2, 0, -4, 2, 0, -4, 2, 0, -4, 2, 0, -4 });
+            renderMesh(renderer, target, mesh, placement, pixels);
+            if ((pixels[45] & 0xfff8ff00) != 0x30300000) {
+                System.err.println("M3G directional lighting back-facing center pixel 0x" +
+                    Integer.toHexString(pixels[45]) + ", expected masked pixel 0x30300000");
+                return false;
+            }
+            return true;
+        } finally {
+            renderer.resetLights();
+        }
     }
 
     private static float x(Group group) {

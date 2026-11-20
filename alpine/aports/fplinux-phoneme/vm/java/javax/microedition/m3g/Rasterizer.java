@@ -107,8 +107,8 @@ final class Rasterizer {
             fogTransform.postMultiply(model);
         }
         float[] inverse = null;
-        float[] normal = new float[3];
-        if (buffer.normals != null && look.material != null) {
+        Material material = look.material;
+        if (buffer.normals != null && material != null) {
             Transform normalTransform = new Transform(model);
             try {
                 normalTransform.invert();
@@ -125,7 +125,10 @@ final class Rasterizer {
                          buffer.defaultColor, alpha);
         if (skin != null) skin.prepareSkinning();
         if (morph != null) morph.prepareMorphing();
-        int shadeCount = constantColor && !deformed ? 0 : count;
+        boolean shaded = inverse != null && !deformed && fogPoint == null && !local &&
+            !backLighting && shadeDirectional(buffer, count, inverse, material, lights, scope, alpha);
+        int shadeCount = shaded || (constantColor && !deformed) ? 0 : count;
+        float[] normal = shadeCount == 0 ? null : new float[3];
         for (int i = 0, offset = 0; i < shadeCount; i++, offset += COMPONENTS) {
             if (point != null) buffer.point(i, point);
             float a = 0, b = 0, c = 0;
@@ -311,6 +314,39 @@ final class Rasterizer {
         state[14] = filter;
     }
 
+    private boolean shadeDirectional(VertexBuffer buffer, int count, float[] inverse,
+                                     Material material, Vector lights, int scope, float alpha) {
+        VertexArray normals = buffer.normals;
+        VertexArray colors = buffer.colors;
+        if (material.vertexColorTracking || material.specular != 0 || normals.components != 3 ||
+                (colors != null && (colors.components < 3 || colors.vertices < count))) {
+            return false;
+        }
+
+        Light ambient = null;
+        Graphics3D.SceneLight directional = null;
+        boolean directionalFirst = false;
+        for (int i = 0; i < lights.size(); i++) {
+            Graphics3D.SceneLight source = (Graphics3D.SceneLight) lights.elementAt(i);
+            Light light = source.light;
+            if (!light.rendering || (light.scope & scope) == 0) continue;
+            if (light.mode == Light.AMBIENT && ambient == null) {
+                ambient = light;
+            } else if (light.mode == Light.DIRECTIONAL && directional == null) {
+                directional = source;
+                directionalFirst = ambient == null;
+            } else {
+                return false;
+            }
+        }
+        return ambient != null && directional != null &&
+            shadeDirectional0(vertices, count, normals.data, inverse,
+                              material.emissive, material.ambient, material.diffuse,
+                              ambient.color, ambient.intensity,
+                              directional.light.color, directional.light.intensity,
+                              directional.direction, directionalFirst, alpha);
+    }
+
     private static int light(int color, Material material, float[] normal, float[] eye,
                              Vector lights, int scope, int side) {
         int diffuse = material.vertexColorTracking ? color : material.diffuse;
@@ -372,6 +408,12 @@ final class Rasterizer {
                                                short[] texCoords, int texComponents,
                                                float[] texScaleBias, float[] textureMatrix,
                                                boolean constantColor, int color, float alpha);
+
+    private static native boolean shadeDirectional0(float[] vertices, int count, short[] normals,
+                                                    float[] inverse, int emissive, int ambient,
+                                                    int diffuse, int ambientColor, float ambientIntensity,
+                                                    int directionalColor, float directionalIntensity,
+                                                    float[] direction, boolean directionalFirst, float alpha);
 
     private static native void draw0(int[] pixels, float[] depths, int[] view,
                                     float[] vertices, int vertexCount, int[] strips, int[] indices,
