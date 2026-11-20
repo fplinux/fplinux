@@ -4,35 +4,52 @@
 from __future__ import annotations
 
 import io
-import os
 import stat
 import tarfile
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 from fplinux_cli.environment.rootfs import extract_rootfs
 
+if TYPE_CHECKING:
+    from pathlib import Path
 
-def test_base_extraction_preserves_executable_modes_and_logical_owners(tmp_path: Path) -> None:
-    """The preparation step retains archive metadata instead of the data filter defaults."""
+    import pytest
+
+
+def test_base_extraction_retains_modes_and_passes_logical_owners_to_chown(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Observe the ownership handed to tarfile, independent of test-process privileges."""
+    ownership: dict[str, tuple[int | None, int | None, bool]] = {}
+
+    def record_owner(
+        _bundle: tarfile.TarFile,
+        member: tarfile.TarInfo,
+        _path: str,
+        numeric_owner: bool,  # noqa: FBT001 -- tarfile can pass this positionally.
+    ) -> None:
+        ownership[member.name] = (member.uid, member.gid, numeric_owner)
+
+    monkeypatch.setattr(tarfile.TarFile, "chown", record_owner)
     archive = tmp_path / "base.tar.gz"
     with tarfile.open(archive, "w:gz") as bundle:
         directory = tarfile.TarInfo("usr")
         directory.type = tarfile.DIRTYPE
         directory.mode = 0o755
-        directory.uid = os.getuid()
-        directory.gid = os.getgid()
+        directory.uid = 42
+        directory.gid = 63
         bundle.addfile(directory)
         tool = tarfile.TarInfo("usr/tool")
         tool.mode = 0o4755
-        tool.uid = os.getuid()
-        tool.gid = os.getgid()
+        tool.uid = 81
+        tool.gid = 92
         tool.size = 5
         bundle.addfile(tool, io.BytesIO(b"tool\n"))
         alias = tarfile.TarInfo("tool")
         alias.type = tarfile.SYMTYPE
         alias.linkname = "/usr/tool"
-        alias.uid = os.getuid()
-        alias.gid = os.getgid()
+        alias.uid = 123
+        alias.gid = 456
         bundle.addfile(alias)
     rootfs = tmp_path / "rootfs"
     rootfs.mkdir()
@@ -40,5 +57,10 @@ def test_base_extraction_preserves_executable_modes_and_logical_owners(tmp_path:
     installed = rootfs / "usr/tool"
     assert installed.read_bytes() == b"tool\n"
     assert stat.S_IMODE(installed.stat().st_mode) == 0o4755
-    assert (installed.stat().st_uid, installed.stat().st_gid) == (os.getuid(), os.getgid())
-    assert (rootfs / "tool").readlink() == Path("/usr/tool")
+    assert stat.S_IMODE((rootfs / "usr").stat().st_mode) == 0o755
+    assert (rootfs / "tool").readlink().as_posix() == "/usr/tool"
+    assert ownership == {
+        "usr": (42, 63, True),
+        "usr/tool": (81, 92, True),
+        "tool": (123, 456, True),
+    }

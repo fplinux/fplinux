@@ -19,7 +19,7 @@ import pytest
 
 from tests import ROOT
 from tests.c_harness import c_build_directory, compile_c
-from tests.process import run_process
+from tests.process import read_process_line, run_process
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -619,18 +619,12 @@ class FplinuxBluetoothHostToolTests:
         def observe_connection(process: subprocess.Popen[str], deadline: float) -> None:
             if process.stdout is None:
                 pytest.fail("Bluetooth PAN client stdout is not captured")
-            while time.monotonic() < deadline:
-                if process.poll() is not None:
-                    pytest.fail("Bluetooth PAN client exited before reporting its connection")
-                remaining = max(0, deadline - time.monotonic())
-                readable, _, _ = select.select([process.stdout], [], [], min(0.05, remaining))
-                if readable:
-                    observed.append(process.stdout.readline())
-                    assert (process.poll()) is None
-                    assert bluetooth_case.fake is not None
-                    os.kill(bluetooth_case.fake.pid, signal.SIGUSR1)
-                    return
-            pytest.fail("Bluetooth PAN client did not flush its connection line")
+            observed.append(
+                read_process_line(process.stdout, deadline=deadline, name="Bluetooth PAN client")
+            )
+            assert process.poll() is None
+            assert bluetooth_case.fake is not None
+            os.kill(bluetooth_case.fake.pid, signal.SIGUSR1)
 
         result = run_process(
             [str(bluetooth_case.tools.client), "network", peer],

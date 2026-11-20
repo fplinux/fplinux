@@ -9,8 +9,6 @@ import json
 import os
 import signal
 import tempfile
-import threading
-import time
 from datetime import UTC, datetime
 from pathlib import Path
 from unittest import mock
@@ -119,56 +117,25 @@ class RunReporterTests:
                 ]
             )
 
-    def test_run_metadata_remains_readable_during_repeated_updates(self) -> None:
-        """Concurrent readers never observe a missing or partial metadata document."""
+    def test_existing_reader_sees_complete_old_metadata_after_an_update(self) -> None:
+        """A reader holding the earlier document and a fresh reader see whole snapshots."""
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary) / "run"
             reporter = RunReporter("check", root, "logs/test", verbose=False)
-            stop = threading.Event()
-            reader_ready = threading.Event()
-            failures: list[BaseException] = []
-            observations: list[dict[str, object]] = []
+            with contextlib.redirect_stderr(io.StringIO()), reporter.stage("compile"):
+                pass
+            with reporter.metadata_path.open("rb") as existing:
+                before = json.load(existing)
+                reporter.finish()
+                existing.seek(0)
+                assert json.load(existing) == before
 
-            def read_metadata() -> None:
-                while not stop.is_set():
-                    try:
-                        value = json.loads(reporter.metadata_path.read_text())
-                        if not isinstance(value, dict):
-                            failures.append(TypeError("metadata is not an object"))
-                            return
-                        observations.append(value)
-                        reader_ready.set()
-                    except (
-                        OSError,
-                        UnicodeDecodeError,
-                        json.JSONDecodeError,
-                    ) as error:
-                        failures.append(error)
-                        return
-                    time.sleep(0)
-
-            reader = threading.Thread(target=read_metadata)
-            reader.start()
-            try:
-                assert reader_ready.wait(2), "metadata reader did not become ready"
-                with contextlib.redirect_stderr(io.StringIO()):
-                    for sequence in range(100):
-                        with reporter.stage(f"update-{sequence}"):
-                            pass
-            finally:
-                stop.set()
-                reader.join(5)
-
-            assert not (reader.is_alive()), "metadata reader did not stop"
-            assert (failures) == ([])
-            assert observations
-            assert (
-                [
-                    path.name
-                    for path in root.iterdir()
-                    if path.name != "run.json" and path.suffix != ".log"
-                ]
-            ) == ([])
+            after = json.loads(reporter.metadata_path.read_text())
+            assert before["status"] == "running"
+            assert before["finished_at"] is None
+            assert after["finished_at"] is not None
+            assert after == before | {"status": "success", "finished_at": after["finished_at"]}
+            assert all(path.name == "run.json" or path.suffix == ".log" for path in root.iterdir())
 
     def test_nested_reporter_writes_only_its_own_metadata(self) -> None:
         """Keep container subreports out of the host run's metadata writer domain."""

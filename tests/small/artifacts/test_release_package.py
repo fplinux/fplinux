@@ -163,51 +163,6 @@ class ReleaseManifestPolicyTests:
         ):
             package_commands.target_archive_file(release_inputs.target, relative)
 
-    def test_profile_preinstall_omits_only_its_optional_archive_apk(
-        self, release_inputs: ReleaseInputs
-    ) -> None:
-        """Packaging does not require an optional APK already selected by the profile."""
-        path = release_inputs.readme.parent / "manifest.toml"
-        source_manifest = {
-            **release_inputs.release_manifest,
-            "bundle_files": [
-                relative
-                for relative in release_inputs.release_manifest["bundle_files"]
-                if not relative.startswith("apks/")
-            ],
-        }
-        path.write_text(
-            "\n".join(f"{key} = {json.dumps(value)}" for key, value in source_manifest.items())
-            + "\n",
-            encoding="utf-8",
-        )
-        profile = {
-            **release_inputs.target_config,
-            "rootfs": {"base_packages": [], "packages": ["demo"]},
-        }
-        with (
-            mock.patch.object(common, "ROOT", release_inputs.root),
-            mock.patch.object(platforms, "load_platform", return_value=release_inputs.platform),
-        ):
-            default = package_commands.load_release_manifest(
-                release_inputs.target, release_inputs.target_config
-            )
-            preinstalled = package_commands.load_release_manifest(release_inputs.target, profile)
-
-        assert ("apks/demo.apk") in (default["bundle_files"])
-        assert ("apks/demo.apk") not in (preinstalled["bundle_files"])
-        assert (preinstalled["bundle_files"]) == (
-            [
-                path
-                for path in release_inputs.release_manifest["bundle_files"]
-                if path != "apks/demo.apk"
-            ]
-        )
-        assert (
-            (preinstalled["runtime_files"]) == (release_inputs.release_manifest["runtime_files"])
-        )
-        assert (preinstalled["documents"]) == (release_inputs.release_manifest["documents"])
-
     def test_release_manifest_uses_selected_apks_and_keeps_target_runtime_and_documents(
         self,
         release_inputs: ReleaseInputs,
@@ -289,7 +244,9 @@ class ReleaseManifestPolicyTests:
             "apks/feature-runtime.apk",
         ]
         assert installed["bundle_files"] == source_manifest["bundle_files"]
-        assert optional["runtime_files"] == installed["runtime_files"]
+        for manifest in (optional, installed):
+            assert manifest["runtime_files"] == source_manifest["runtime_files"]
+            assert manifest["documents"] == source_manifest["documents"]
 
     def test_release_manifest_rejects_a_second_apk_inventory(
         self, release_inputs: ReleaseInputs

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import os
+import selectors
 import signal
 import subprocess
 import time
@@ -15,7 +16,7 @@ from fplinux_cli.common import ROOT
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
-    from typing import NoReturn
+    from typing import IO, NoReturn
 
 _TERMINATE_GRACE_SECONDS = 1.0
 _OUTPUT_TAIL_CHARACTERS = 4000
@@ -54,6 +55,32 @@ def process_state(process_id: int) -> str | None:
     except FileNotFoundError:
         return None
     return next(line.split()[1] for line in status.splitlines() if line.startswith("State:"))
+
+
+def read_process_line(stream: IO[str], *, deadline: float, name: str) -> str:
+    """Read one complete readiness line without consuming the following output."""
+    fd = stream.fileno()
+    blocking = os.get_blocking(fd)
+    line = bytearray()
+    os.set_blocking(fd, False)
+    try:
+        with selectors.DefaultSelector() as ready:
+            ready.register(fd, selectors.EVENT_READ)
+            while True:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0 or not ready.select(remaining):
+                    raise AssertionError(f"{name} did not write a complete readiness line")
+                try:
+                    byte = os.read(fd, 1)
+                except BlockingIOError:
+                    continue
+                if not byte:
+                    raise AssertionError(f"{name} closed stdout before readiness")
+                line += byte
+                if byte == b"\n":
+                    return line.decode("utf-8")
+    finally:
+        os.set_blocking(fd, blocking)
 
 
 def _terminate_and_reap(process: subprocess.Popen[str]) -> tuple[str, str]:

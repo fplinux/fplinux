@@ -7,6 +7,7 @@ The fake replaces bluetoothd at its D-Bus boundary; no controller is involved.
 from __future__ import annotations
 
 import subprocess
+import time
 from typing import TYPE_CHECKING
 
 import pytest
@@ -14,7 +15,7 @@ import pytest
 from tests import ROOT
 from tests.c_harness import c_build_directory, compile_c
 from tests.host_tool.gui.support.private_bus import BLUEZ_FAKE, dbus_flags, private_bus
-from tests.process import run_process
+from tests.process import read_process_line, run_process
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -108,6 +109,7 @@ def test_settings_bluez_protocol_behaviors(
 
 def test_lost_bus_leaves_bluetooth_absent_without_busy_wakeups(adapter_test: Path) -> None:
     with private_bus() as bus:
+        deadline = time.monotonic() + 20
         process = subprocess.Popen(
             [str(adapter_test), "bus-loss"],
             stdin=subprocess.PIPE,
@@ -119,9 +121,12 @@ def test_lost_bus_leaves_bluetooth_absent_without_busy_wakeups(adapter_test: Pat
         try:
             assert process.stdout is not None
             assert process.stdin is not None
-            assert process.stdout.readline() == "bluez-adapter: connected\n"
+            connected = read_process_line(process.stdout, deadline=deadline, name="BlueZ adapter")
+            assert connected == "bluez-adapter: connected\n"
             bus.stop()
-            stdout, stderr = process.communicate("go\n", timeout=20)
+            stdout, stderr = process.communicate(
+                "go\n", timeout=max(0, deadline - time.monotonic())
+            )
         finally:
             if process.poll() is None:
                 process.kill()

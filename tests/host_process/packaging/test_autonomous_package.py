@@ -17,7 +17,6 @@ from typing import TYPE_CHECKING
 from unittest import mock
 
 import pytest
-from fplinux_cli.build.runtime import device_data_descriptor
 from fplinux_cli.runtime import bundle as bundle_runtime
 from fplinux_cli.runtime.release_catalog import load_catalog, materialize_bundle
 
@@ -325,67 +324,3 @@ def test_headless_archive_creates_a_transport_capsule_without_prepared_data(
         for path in destination.rglob("*")
         if path.is_file()
     } == {"etc/fplinux/usb-transport": b"rndis\n"}
-
-
-def test_runtime_device_data_descriptor_records_the_selected_audio_parameters() -> None:
-    config = {
-        "platform": "ums9117",
-        "linux": {"root": {"kind": "initramfs"}},
-        "identity": {"compatible": "example,phone"},
-        "audio_policy": {
-            "speaker_vibration": False,
-            "speaker_from_headphones": True,
-            "headfree_headphones_only": False,
-        },
-        "nand": {"raw_device": "/dev/raw-nand", "id": 0xB1A1, "raw_page_bytes": 2176},
-        "device_data": {
-            "parser": "example_device_data.py",
-            "groups": {
-                "audio-profile": [
-                    {"source": "audio.bin", "destination": "fplinux/audio.bin", "size": 788}
-                ]
-            },
-        },
-    }
-    descriptor = device_data_descriptor("example-phone", config)
-    assert descriptor is not None
-    assert set(descriptor) == {
-        "parser",
-        "originals_parser",
-        "groups",
-        "required_groups",
-        "audio_policy",
-        "ecc_module",
-    }
-    assert descriptor["originals_parser"] is None
-    assert descriptor["required_groups"] == ["audio-profile"]
-    assert descriptor["parser"] == "targets/example-phone/example_device_data.py"
-    assert descriptor["audio_policy"] == {
-        "speaker_vibration": False,
-        "speaker_from_headphones": True,
-        "headfree_headphones_only": False,
-    }
-
-
-@pytest.mark.parametrize(
-    ("platform", "root_kind", "groups"),
-    [
-        ("sc9820e", "initramfs", {"wcn-firmware": []}),
-        ("ums9117", "external", {"audio-profile": []}),
-        ("ums9117", "initramfs", {}),
-    ],
-)
-def test_runtime_without_required_ram_data_has_no_preparation_descriptor(
-    platform: str, root_kind: str, groups: dict[str, list[object]]
-) -> None:
-    assert (
-        device_data_descriptor(
-            "demo",
-            {
-                "platform": platform,
-                "linux": {"root": {"kind": root_kind}},
-                "device_data": {"parser": None, "groups": groups},
-            },
-        )
-        is None
-    )

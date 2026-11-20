@@ -350,14 +350,21 @@ def test_show_limits_content_across_stages_and_reports_truncation(logs_cli: Logs
     assert "log content truncated by --max-bytes" in result.stdout
 
 
-def test_show_budget_does_not_emit_partial_utf8_character(logs_cli: LogsCli) -> None:
+@pytest.mark.parametrize(("text", "selected"), [("€", ""), ("€a", "a")])
+def test_show_budget_does_not_emit_partial_utf8_character(
+    logs_cli: LogsCli, text: str, selected: str
+) -> None:
     run = logs_cli.journal("test/example", stages=(("output", "success"),))
-    (run / "01-output.log").write_text("€")
+    (run / "01-output.log").write_text(text, encoding="utf-8")
 
     result = logs_cli.run_logs("show", "test/example", "--max-bytes", "1")
 
     assert result.returncode == 0, result.stderr
-    assert "log content truncated by --max-bytes" in result.stdout
+    _, heading, rest = result.stdout.partition("==> output [success] <==\n")
+    assert heading
+    content, truncation, _ = rest.partition("log content truncated by --max-bytes")
+    assert truncation
+    assert content == selected
 
 
 def test_show_budget_does_not_claim_truncation_for_an_exact_tail(logs_cli: LogsCli) -> None:
