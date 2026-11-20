@@ -1,8 +1,9 @@
 import typescript from "@typescript-eslint/eslint-plugin";
-import astro from "ultracite/eslint/astro";
+import parser from "@typescript-eslint/parser";
+import { configs } from "eslint-plugin-astro";
 
 export default [
-	...astro,
+	...configs["flat/all"],
 	{
 		ignores: [
 			"**/*.json",
@@ -24,6 +25,7 @@ export default [
 		languageOptions: {
 			parserOptions: {
 				extraFileExtensions: [".astro"],
+				parser,
 				project: true,
 				tsconfigRootDir: import.meta.dirname,
 			},
@@ -31,8 +33,15 @@ export default [
 		plugins: { "@typescript-eslint": typescript },
 		rules: {
 			...typescript.configs["recommended-type-checked-only"].rules,
+			// Prettier formats component frontmatter.
+			"astro/semi": "off",
 			"sort-keys": "error",
 		},
+	},
+	{
+		// The processor's client-side scripts do not exist on disk.
+		...typescript.configs["flat/disable-type-checked"],
+		files: ["**/*.astro/*.js", "**/*.astro/*.ts"],
 	},
 	{
 		files: ["src/components/Hero.astro"],

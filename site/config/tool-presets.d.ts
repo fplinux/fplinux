@@ -14,10 +14,3 @@ declare module "ultracite/stylelint" {
 	const config: Config;
 	export default config;
 }
-
-declare module "ultracite/eslint/astro" {
-	import type { Linter } from "eslint";
-
-	const config: Linter.Config[];
-	export default config;
-}

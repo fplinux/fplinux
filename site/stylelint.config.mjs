@@ -13,6 +13,7 @@ export default {
 		"scripts/**",
 	],
 	overrides: [{ customSyntax: "postcss-html", files: ["**/*.astro"] }],
+	plugins: [config.plugins ?? [], "stylelint-prettier"].flat(),
 	rules: {
 		...config.rules,
 		// Keep declaration order, including fallbacks and shorthand overrides.

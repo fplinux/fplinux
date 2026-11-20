@@ -3,18 +3,18 @@
   "private": true,
   "description": "Pinned build and source quality tools for FPLinux.",
   "engines": {
-    "node": "24.21.0",
-    "npm": "12.2.0"
+    "node": "26.13.1",
+    "npm": "12.2.3"
   },
-  "packageManager": "npm@12.2.0",
+  "packageManager": "npm@12.2.3",
   "scripts": {},
   "devDependencies": {
-    "@commitlint/cli": "21.2.3",
-    "@commitlint/config-conventional": "21.2.3",
+    "@commitlint/cli": "21.2.4",
+    "@commitlint/config-conventional": "21.2.4",
     "@resvg/resvg-js": "2.6.2",
     "jsonc-parser": "3.3.1",
     "lv_font_conv": "1.5.3",
-    "markdownlint-cli2": "0.23.3",
-    "prettier": "3.9.9"
+    "markdownlint-cli2": "0.24.1",
+    "prettier": "3.10.1"
   }
 }
