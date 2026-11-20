@@ -60,16 +60,18 @@ ssize_t send(int fd, const void *data, size_t bytes, int flags)
 
 ssize_t recv(int fd, void *data, size_t bytes, int flags)
 {
-	const char *reply = getenv("FM_TEST_SERVICE_ERROR") ? "ERROR 16" :
-							      "READY";
+	const char *reply = getenv("FM_TEST_SERVICE_REPLY");
+	size_t length;
 
 	(void)fd;
-	(void)flags;
-	if (bytes < strlen(reply))
-		return -1;
-	memcpy(data, reply, strlen(reply));
+	if (!reply)
+		reply = "READY";
+	length = strlen(reply);
+	if (bytes > length)
+		bytes = length;
+	memcpy(data, reply, bytes);
 	handshake = true;
-	return (ssize_t)strlen(reply);
+	return (ssize_t)(flags & MSG_TRUNC ? length : bytes);
 }
 
 int poll(struct pollfd *fds, nfds_t count, int timeout)

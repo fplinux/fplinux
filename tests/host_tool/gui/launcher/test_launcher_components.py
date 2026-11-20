@@ -44,6 +44,7 @@ def launcher_logic(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
                 str(APORT / "launcher-text.c"),
                 str(ROOT / "lib/fplinux-shared/fplinux-desktop-entry.c"),
                 str(ROOT / "lib/fplinux/fplinux-ui-profile.c"),
+                str(ROOT / "lib/fplinux/fplinux-utf8.c"),
             ],
             name="compile launcher component harness",
         )
@@ -107,6 +108,37 @@ def test_catalogue_admits_localized_installed_entries(
     run_process(
         [str(launcher_logic), "catalogue", str(tmp_path)],
         name="launcher catalogue metadata component",
+        timeout=10,
+        check=True,
+    )
+
+
+def test_catalogue_orders_localized_names_by_unicode_scalar(
+    launcher_logic: Path, tmp_path: Path
+) -> None:
+    entries = [
+        ("first", b"Alpha"),
+        ("latin", b"beta"),
+        ("malformed", b"\xed\xa0\x80"),
+        ("spruce", "Ель".encode()),
+        ("hedgehog", "Ёж".encode()),
+        ("beetle", "Жук".encode()),
+        ("deseret", "𐐀".encode()),
+    ]
+    entry_header = (
+        f"[Desktop Entry]\nType=Application\nExec={launcher_logic}\n"
+        "X-FPLinux-Mode=integrated\nName=Application\n"
+    ).encode()
+    filenames = []
+    for app_id, name in entries:
+        filename = f"org.test.{app_id}.desktop"
+        path = tmp_path / filename
+        path.write_bytes(entry_header + b"Name[ru]=" + name + b"\n")
+        path.chmod(0o600)
+        filenames.append(filename)
+    run_process(
+        [str(launcher_logic), "catalogue-order", str(tmp_path), *filenames],
+        name="launcher catalogue name ordering",
         timeout=10,
         check=True,
     )

@@ -6,6 +6,7 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <time.h>
 #include <linux/videodev2.h>
 #include <poll.h>
@@ -298,6 +299,8 @@ static int claim_audio(const struct arguments *arguments)
 	char command[32], reply[32];
 	struct pollfd ready;
 	ssize_t length;
+	unsigned int refusal;
+	int error;
 	int fd = socket(AF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC, 0);
 
 	if (fd < 0)
@@ -318,13 +321,23 @@ static int claim_audio(const struct arguments *arguments)
 		goto fail;
 	}
 	length = recv(fd, reply, sizeof(reply), MSG_TRUNC);
-	if (length != 5 || memcmp(reply, "READY", 5)) {
-		errno = EBUSY;
-		goto fail;
+	if (length == 5 && !memcmp(reply, "READY", 5))
+		return fd;
+	if (length > 6 && (size_t)length < sizeof(reply) &&
+	    !memcmp(reply, "ERROR ", 6) &&
+	    !memchr(reply, '\0', (size_t)length)) {
+		reply[length] = '\0';
+		if (reply[6] >= '1' && reply[6] <= '9' &&
+		    fplinux_cli_unsigned(reply + 6, 1, INT_MAX, &refusal)) {
+			errno = (int)refusal;
+			goto fail;
+		}
 	}
-	return fd;
+	errno = EBUSY;
 fail:
+	error = errno;
 	close(fd);
+	errno = error;
 	return -1;
 }
 

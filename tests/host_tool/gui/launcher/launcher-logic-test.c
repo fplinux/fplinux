@@ -454,6 +454,28 @@ static void test_catalogue(const char *directory)
 	      "group-writable metadata cannot enter the catalogue");
 }
 
+static void test_catalogue_order(const char *directory, int count, char **files)
+{
+	struct fplinux_launcher_entry previous;
+
+	for (int i = 0; i < count; ++i) {
+		struct fplinux_launcher_entry next;
+
+		if (!fplinux_launcher_read_entry(directory, files[i], "ru",
+						 getuid(), &next)) {
+			check(false, files[i]);
+			return;
+		}
+		if (i && fplinux_launcher_compare_names(previous.name,
+							next.name) >= 0) {
+			fprintf(stderr, "FAIL: expected %s before %s\n",
+				files[i - 1], files[i]);
+			++failures;
+		}
+		previous = next;
+	}
+}
+
 int main(int argc, char **argv)
 {
 	if (argc == 2 && !strcmp(argv[1], "text"))
@@ -464,6 +486,8 @@ int main(int argc, char **argv)
 		test_geometry();
 	else if (argc == 3 && !strcmp(argv[1], "catalogue"))
 		test_catalogue(argv[2]);
+	else if (argc > 4 && !strcmp(argv[1], "catalogue-order"))
+		test_catalogue_order(argv[2], argc - 3, argv + 3);
 	else
 		return 2;
 	return failures ? 1 : 0;

@@ -112,7 +112,11 @@ int open(const char *path, int flags, ...)
 	return openat(AT_FDCWD, path, flags);
 }
 
+#ifdef __GLIBC__
+int ioctl(int fd, unsigned long request, ...)
+#else
 int ioctl(int fd, int request, ...)
+#endif
 {
 	va_list arguments;
 	void *data;

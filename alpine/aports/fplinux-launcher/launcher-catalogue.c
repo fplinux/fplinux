@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 #include "launcher-catalogue.h"
 #include "fplinux-desktop-entry.h"
+#include "fplinux-utf8.h"
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -117,30 +118,15 @@ fplinux_launcher_group_from_categories(const char *categories)
 }
 
 /* Invalid UTF-8 contributes its bytes one at a time. */
-static uint32_t next_codepoint(const unsigned char **text)
+static uint32_t next_codepoint(const unsigned char **text,
+			       const unsigned char *end)
 {
-	const unsigned char *bytes = *text;
 	uint32_t codepoint;
-	size_t count;
 
-	if (bytes[0] >= 0xc2 && bytes[0] <= 0xdf) {
-		codepoint = bytes[0] & 0x1f;
-		count = 2;
-	} else if (bytes[0] >= 0xe0 && bytes[0] <= 0xef) {
-		codepoint = bytes[0] & 0x0f;
-		count = 3;
-	} else {
-		*text = bytes + 1;
-		return bytes[0];
+	if (!fplinux_utf8_next(text, end, &codepoint)) {
+		codepoint = **text;
+		++*text;
 	}
-	for (size_t i = 1; i < count; ++i) {
-		if ((bytes[i] & 0xc0) != 0x80) {
-			*text = bytes + 1;
-			return bytes[0];
-		}
-		codepoint = codepoint << 6 | (bytes[i] & 0x3f);
-	}
-	*text = bytes + count;
 	return codepoint;
 }
 
@@ -162,15 +148,19 @@ int fplinux_launcher_compare_names(const char *left, const char *right)
 {
 	const unsigned char *first = (const unsigned char *)left;
 	const unsigned char *second = (const unsigned char *)right;
+	const unsigned char *first_end = first + strlen(left);
+	const unsigned char *second_end = second + strlen(right);
 
-	while (*first && *second) {
-		uint32_t first_weight = sort_weight(next_codepoint(&first));
-		uint32_t second_weight = sort_weight(next_codepoint(&second));
+	while (first != first_end && second != second_end) {
+		uint32_t first_weight =
+			sort_weight(next_codepoint(&first, first_end));
+		uint32_t second_weight =
+			sort_weight(next_codepoint(&second, second_end));
 
 		if (first_weight != second_weight)
 			return first_weight < second_weight ? -1 : 1;
 	}
-	if (*first || *second)
-		return *first ? 1 : -1;
+	if (first != first_end || second != second_end)
+		return first != first_end ? 1 : -1;
 	return strcmp(left, right);
 }

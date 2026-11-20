@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import errno
+import os
 from typing import TYPE_CHECKING
 
 import pytest
@@ -104,12 +106,29 @@ def test_signal_releases_service_lease(fm: Path) -> None:
     assert result.stderr.endswith("LEASE_CLOSE\n")
 
 
-def test_service_refusal_does_not_open_tuner(fm: Path) -> None:
-    result = run_fm(fm, ["play", "98.3"], FM_TEST_SERVICE_ERROR="1")
+@pytest.mark.parametrize(
+    ("reply", "error"),
+    [
+        ("ERROR 19", errno.ENODEV),
+        ("ERROR 5", errno.EIO),
+        ("ERROR 16", errno.EBUSY),
+        ("ERROR +19", errno.EBUSY),
+        ("ERROR 19 extra", errno.EBUSY),
+        ("ERROR 0", errno.EBUSY),
+        ("ERROR 2147483648", errno.EBUSY),
+        ("ERROR 19" + " " * 32, errno.EBUSY),
+    ],
+)
+def test_service_refusal_reports_cause_and_closes_lease(fm: Path, reply: str, error: int) -> None:
+    result = run_fm(fm, ["play", "98.3"], FM_TEST_SERVICE_REPLY=reply)
     assert result.returncode == 1
-    assert "audio service:" in result.stderr
-    assert "RADIO_OPEN" not in result.stderr
-    assert "LEASE_CLOSE" in result.stderr
+    assert result.stdout == ""
+    assert result.stderr.splitlines() == [
+        "SERVICE_CONNECT",
+        "REQUEST PLAY 983",
+        "LEASE_CLOSE",
+        f"fplinux-fm: audio service: {os.strerror(error)}",
+    ]
 
 
 def test_lost_service_ends_frontend_and_releases_lease(fm: Path) -> None:

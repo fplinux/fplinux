@@ -627,6 +627,29 @@ def test_class_volume_ack_mute_and_reconnect_for_app_and_clock(audiod: AudioServ
     assert 3556 in played
 
 
+def test_noncanonical_volume_packets_leave_both_levels_unchanged(audiod: AudioService) -> None:
+    def exercise() -> None:
+        control = audiod.manager()
+        control.send(b"VOLUME MEDIA 0")
+        audiod.expect_control(control, b"VOLUME MEDIA 0")
+        for command in (
+            b"VOLUME  MEDIA 7",
+            b"VOLUME MEDIA  7",
+            b"VOLUME ALARM 2 ",
+            b"VOLUME MEDIA +7",
+            b"VOLUME ALARM -2",
+            b"VOLUME MEDIA 07",
+            b"VOLUME ALARM 11",
+        ):
+            control.send(command)
+        control.send(b"OUTPUT AUTO")
+        audiod.expect_control(control, b"OUTPUT AUTO")
+        status = audiod.status()
+        assert (status["media"], status["alarm"]) == ("0", "10")
+
+    audiod.run(exercise)
+
+
 def test_kick_opens_default_pcm_and_idle_releases_after_three_seconds(
     audiod: AudioService,
 ) -> None:

@@ -9,7 +9,7 @@ import { Steps } from '@astrojs/starlight/components';
 import FeatureStatus from '../../../components/FeatureStatus.astro';
 import Key from '../../../components/Key.astro';
 
-Scan for stations and listen with `fplinux-fm` in a shell on the phone. FM uses the same outputs as other [sound](/fplinux/use/audio/). Check [support status](/fplinux/phones/#support-status) and your [phone page](/fplinux/phones/) for FM support, available outputs and boot profiles before following this guide.
+Run `fplinux-fm` from the [USB shell](/fplinux/use/connect/#open-a-shell) so it can access the audio service's administrative socket. FM uses the same outputs as other [sound](/fplinux/use/audio/). Check [support status](/fplinux/phones/#support-status) and your [phone page](/fplinux/phones/) for FM support, available outputs and boot profiles before following this guide.
 
 These procedures apply to supported [UMS9117](/fplinux/platforms/ums9117/) phones. FM radio is unsupported on the [SC9820E Xiaomi Qin 1s+](/fplinux/platforms/sc9820e/).
 
@@ -58,7 +58,7 @@ Run `fplinux-fm --help` for the full syntax.
 
 ## Volume and outputs
 
-The audio service coordinates FM with application playback and alarms. Leave `fplinux-audiod` running when using `fplinux-fm`; the command also works without the graphical interface. Media zero mutes FM; nonzero Media levels leave its ALSA playback level unchanged. For direct level adjustments, follow the ALSA procedure in [Sound](/fplinux/use/audio/#volume).
+The audio service coordinates FM with application playback and alarms. Leave `fplinux-audiod` running when using `fplinux-fm`. The command also works without the graphical interface. FM follows the current [Media level](/fplinux/use/audio/#limitations).
 
 Use **Settings → Sound → Output** to choose a supported speaker or headphones. In Automatic mode, inserting the antenna cable selects headphones where detection is supported. Keep the cable plugged in when selecting the speaker.
 

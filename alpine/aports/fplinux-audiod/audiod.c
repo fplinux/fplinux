@@ -255,6 +255,21 @@ static void accept_manager(struct audio_service *service, uint64_t now)
 	}
 }
 
+static bool parse_volume(const char *value, bool *alarm, unsigned int *level)
+{
+	if (!strncmp(value, "MEDIA ", 6)) {
+		*alarm = false;
+	} else if (!strncmp(value, "ALARM ", 6)) {
+		*alarm = true;
+	} else {
+		return false;
+	}
+	value += 6;
+	if (*value < '0' || *value > '9' || (*value == '0' && value[1]))
+		return false;
+	return fplinux_cli_unsigned(value, 0, FPLINUX_AUDIO_VOLUME_MAX, level);
+}
+
 static void read_manager(struct audio_service *service)
 {
 	char command[FPLINUX_AUDIO_CONTROL_BYTES];
@@ -279,25 +294,13 @@ static void read_manager(struct audio_service *service)
 		command[length] = '\0';
 		if (!strncmp(command, FPLINUX_AUDIO_CONTROL_VOLUME " ",
 			     sizeof(FPLINUX_AUDIO_CONTROL_VOLUME))) {
-			unsigned int level, alarm;
-			char expected[32];
+			const char *value =
+				command + sizeof(FPLINUX_AUDIO_CONTROL_VOLUME);
+			unsigned int level;
+			bool alarm;
 			ssize_t sent;
 
-			for (alarm = 0; alarm < 2; ++alarm) {
-				for (level = 0;
-				     level <= FPLINUX_AUDIO_VOLUME_MAX;
-				     ++level) {
-					snprintf(expected, sizeof(expected),
-						 "VOLUME %s %u",
-						 alarm ? "ALARM" : "MEDIA",
-						 level);
-					if (!strcmp(command, expected))
-						break;
-				}
-				if (level <= FPLINUX_AUDIO_VOLUME_MAX)
-					break;
-			}
-			if (alarm == 2)
+			if (!parse_volume(value, &alarm, &level))
 				continue;
 			if (!alarm && service->device.fm_enabled) {
 				int error = fplinux_audio_device_fm(
@@ -309,14 +312,14 @@ static void read_manager(struct audio_service *service)
 					return;
 				}
 			}
-			fplinux_audio_streams_volume(&service->streams,
-						     alarm != 0, level);
+			fplinux_audio_streams_volume(&service->streams, alarm,
+						     level);
 			do {
 				sent = send(service->manager, command,
-					    strlen(command),
+					    (size_t)length,
 					    MSG_DONTWAIT | MSG_NOSIGNAL);
 			} while (sent < 0 && errno == EINTR);
-			if (sent != (ssize_t)strlen(command)) {
+			if (sent != length) {
 				drop_manager(service);
 				return;
 			}
