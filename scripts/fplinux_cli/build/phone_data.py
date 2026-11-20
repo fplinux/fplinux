@@ -11,7 +11,7 @@ from fplinux_cli.build.device_tree import (
     all_path_properties,
     parse_nul_string_list,
 )
-from fplinux_cli.build.runtime import preparation_source_files
+from fplinux_cli.build.runtime import fitted_parser, preparation_source_files
 from fplinux_cli.common import canonical_json_bytes, fail, sha256_bytes, sha256_file
 
 if TYPE_CHECKING:
@@ -268,13 +268,23 @@ def preparation_recipe(
     config: dict[str, Any],
     *,
     source_root: Path,
-    source_catalog_root: Path | None = None,
+    bundle_root: Path | None = None,
 ) -> str:
     """Identify delivered preparation inputs before selecting the host-native ECC tool."""
     groups = config.get("device_data", {}).get("groups", {})
     if not groups:
         fail("phone-data preparation requires declared device-data groups")
     paths = preparation_source_files(target, config, root=source_root)
+    sources = {
+        relative: sha256_file(source if bundle_root is None else bundle_root / relative)
+        for relative, source in paths.items()
+    }
+    generated_parser = fitted_parser(target, config)
+    if generated_parser is not None:
+        relative, contents = generated_parser
+        sources[relative] = (
+            sha256_bytes(contents) if bundle_root is None else sha256_file(bundle_root / relative)
+        )
     record = {
         "target": target,
         "machine_compatible": config["identity"]["compatible"],
@@ -283,9 +293,8 @@ def preparation_recipe(
         "nand": config.get("nand"),
         "emmc": config.get("emmc"),
         "required_groups": config.get("device_data", {}).get("required_groups", list(groups)),
-        "sources": {relative: sha256_file(source) for relative, source in paths.items()},
+        "sources": sources,
     }
     if config.get("emmc") is not None:
-        catalog_root = source_root if source_catalog_root is None else source_catalog_root
-        record["python_reader"] = _emmc_python_inputs(catalog_root)
+        record["python_reader"] = _emmc_python_inputs(source_root)
     return sha256_bytes(canonical_json_bytes(record))

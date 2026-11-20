@@ -82,7 +82,7 @@ _TARGET_ORDER = {
         "session_name",
         "boot_instructions",
     ),
-    "device_data": ("parser", "originals_parser"),
+    "device_data": ("parser", "originals_parser", "fitted_prefix"),
     "bluetooth": ("firmware",),
     "bluetooth.firmware": _FIRMWARE_FIELDS,
     "audio_profile": (

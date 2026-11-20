@@ -158,7 +158,7 @@ def test_nonempty_lower_remapping_is_rejected_before_logical_selection() -> None
 @pytest.fixture
 def radio_parser() -> ModuleType:
     """Load the target parser normally without any fitted input bytes."""
-    path = ROOT / "targets/bq-2830l-tank-connect-max/bq2830l_device_data.py"
+    path = ROOT / "targets/bq-2830l-tank-connect-max/device-data/bq2830l_device_data.py"
     spec = importlib.util.spec_from_file_location("bq_bluetooth_parser", path)
     if spec is None or spec.loader is None:
         message = "target parser source is unavailable"

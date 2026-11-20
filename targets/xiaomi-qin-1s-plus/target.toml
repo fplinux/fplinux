@@ -157,7 +157,7 @@ session_name = "xiaomi-qin-1s-plus-linux"
 boot_instructions = "Power the phone off, hold the call key, then connect USB while keeping the key pressed."
 
 [device_data]
-originals_parser = "qin1splus_device_data.py"
+originals_parser = "device-data/qin1splus_device_data.py"
 required_groups = ["audio-profile"]
 
 [audio_profile]

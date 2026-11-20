@@ -487,14 +487,32 @@ def load_target(
         device_data = config.get("device_data")
         if not isinstance(device_data, dict) or set(device_data) not in (
             {"parser"},
+            {"parser", "fitted_prefix"},
             {"originals_parser"},
             {"originals_parser", "required_groups"},
         ):
             fail(
-                "target device_data requires one parser and optional original-data required_groups"
+                "target device_data requires one parser with optional fitted_prefix or "
+                "original-data required_groups"
             )
         source_field = "originals_parser" if "originals_parser" in device_data else "parser"
-        parser = basename_value(device_data[source_field], f"target device_data {source_field}")
+        name = f"target device_data {source_field}"
+        if "fitted_prefix" in device_data:
+            parser = basename_value(device_data[source_field], name)
+            prefix = basename_value(
+                device_data["fitted_prefix"], "target device_data fitted_prefix"
+            )
+            if VALUE_NAME.fullmatch(prefix) is None:
+                fail("target device_data fitted_prefix must be a filename prefix")
+            fitted_groups = {"bluetooth", "audio-profile", "fm-radio"}
+            if (
+                backend != "ums9117"
+                or "nand" not in config
+                or set(device_data_groups) != fitted_groups
+            ):
+                fail("target fitted preparation requires UMS9117 NAND and the fitted groups")
+        else:
+            parser = relative_value(device_data[source_field], name)
         if not parser.endswith(".py"):
             fail(f"target device_data {source_field} must be a Python filename")
         required = device_data.get("required_groups", list(device_data_groups))
@@ -510,6 +528,7 @@ def load_target(
         if "emmc" in config and source_field != "originals_parser":
             fail("eMMC preparation requires a named-original parser")
         config["device_data"] = {
+            **device_data,
             source_field: parser,
             "groups": device_data_groups,
             "required_groups": required,

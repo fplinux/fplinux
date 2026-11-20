@@ -45,7 +45,7 @@ NAND_ECC_MODULE = "host/nand_ecc.py"
 
 @dataclass(frozen=True)
 class DeviceDataSpec:
-    """Selected target policy and the exact parser modules supplied by its caller."""
+    """Selected target policy and preparation inputs supplied by its caller."""
 
     target: str
     parser: Path | None
@@ -57,6 +57,7 @@ class DeviceDataSpec:
     ecc_module: Path | None = None
     emmc: Mapping[str, Any] | None = None
     required_groups: tuple[str, ...] | None = None
+    fitted_prefix: str | None = None
 
     @property
     def required_declarations(self) -> Mapping[str, list[dict[str, Any]]]:
@@ -351,11 +352,16 @@ def _extract_original_groups(
 
 def _extract_groups(spec: DeviceDataSpec, nand: PhysicalNand) -> dict[str, PreparedGroup]:
     """Run only the target's declared runtime-data parser."""
-    if spec.parser is None:
+    if spec.fitted_prefix is not None:
+        from .fitted import prepare_fitted_data  # noqa: PLC0415 -- selected fitted parser.
+
+        extract = functools.partial(prepare_fitted_data, prefix=spec.fitted_prefix)
+    elif spec.parser is not None:
+        extract = _load_device_data_parser(spec.target, spec.parser).prepare_device_data
+    else:
         fail(f"target {spec.target} does not declare a physical NAND parser")
-    parser = _load_device_data_parser(spec.target, spec.parser)
     try:
-        result = parser.prepare_device_data(nand, audio=spec.audio)
+        result = extract(nand, audio=spec.audio)
     except ValueError as error:
         fail(f"device-data extraction failed: {error}")
     if not isinstance(result, DeviceDataPreparation):

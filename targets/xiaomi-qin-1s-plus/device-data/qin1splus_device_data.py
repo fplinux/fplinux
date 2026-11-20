@@ -92,7 +92,11 @@ class _Field:
 
 def _load_fields(kind: str) -> dict[str, _Field]:
     """Read the target-owned layout resource for one payload type."""
-    path = Path(__file__).parent / "device-data/rf-fields.tsv"
+    # The target directory owns this resource in both the checkout and the standalone bundle.
+    target = next(
+        parent for parent in Path(__file__).parents if parent.name == "xiaomi-qin-1s-plus"
+    )
+    path = target / "device-data/rf-fields.tsv"
     fields = {}
     with path.open(encoding="ascii", newline="") as source:
         for row in csv.DictReader(source, delimiter="\t"):

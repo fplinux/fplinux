@@ -68,7 +68,7 @@ session_name = "uniwa-v1000-4g-linux"
 boot_instructions = "Power the phone off, hold D-pad Up, then connect USB while keeping the key pressed."
 
 [device_data]
-parser = "uniwa_device_data.py"
+parser = "device-data/uniwa_device_data.py"
 
 [bluetooth]
 firmware = [

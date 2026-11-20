@@ -67,6 +67,7 @@ boot_instructions = "Power the phone off, hold the left soft key, then connect U
 
 [device_data]
 parser = "maxvi_device_data.py"
+fitted_prefix = "maxvi-k15n-4g"
 
 [bluetooth]
 firmware = [

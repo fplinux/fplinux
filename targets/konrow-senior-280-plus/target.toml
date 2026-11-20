@@ -74,7 +74,7 @@ session_name = "konrow-senior-280-plus-linux"
 boot_instructions = "Power the phone off, hold 1, then connect USB while keeping 1 pressed."
 
 [device_data]
-originals_parser = "konrow280plus_device_data.py"
+originals_parser = "device-data/konrow280plus_device_data.py"
 required_groups = []
 
 [audio_profile]

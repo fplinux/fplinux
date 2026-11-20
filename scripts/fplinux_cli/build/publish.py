@@ -24,6 +24,7 @@ from fplinux_cli.build.identity import runtime_identity
 from fplinux_cli.build.phone_data import acquisition_recipe, preparation_recipe
 from fplinux_cli.build.runtime import (
     device_data_descriptor,
+    fitted_parser,
     runtime_host_tools,
     runtime_source_files,
 )
@@ -88,7 +89,7 @@ def runtime_manifest(  # noqa: PLR0913 -- each published artifact role stays exp
     }
     if device_data is not None:
         device_data["preparation_recipe"] = preparation_recipe(
-            target, target_config, source_root=release, source_catalog_root=common.ROOT
+            target, target_config, source_root=common.ROOT, bundle_root=release
         )
     nand = target_config.get("nand")
     if nand is not None:
@@ -129,6 +130,9 @@ def runtime_manifest(  # noqa: PLR0913 -- each published artifact role stays exp
             for relative, source in phone_data_files.items()
         },
     }
+    if device_data is not None and target_config["device_data"].get("fitted_prefix") is not None:
+        relative = device_data["parser"]
+        hashes[relative] = sha256_file(inputs_build.require_file(release / relative))
     hashes.update(
         {
             declared_assets[role]: sha256_file(
@@ -242,6 +246,13 @@ def _publish_staged_bundle(  # noqa: PLR0913 -- artifact and receipt roles stay 
         copy_file(source, release / "host" / name, executable=True)
     for relative, source in runtime_source_files(target, target_config).items():
         copy_file(source, release / relative, executable=relative in {"fplinux.py", "Run.sh"})
+    if device_data_descriptor(target, target_config) is not None:
+        generated_parser = fitted_parser(target, target_config)
+        if generated_parser is not None:
+            relative, contents = generated_parser
+            destination = release / relative
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            replace_file_atomically(destination, contents, 0o644, sync=False)
     phone_data_files: dict[str, Path] = {}
     if target_config.get("emmc") is not None and device_data_descriptor(target, target_config):
         from fplinux_cli.build.host_tools.phone_data import (  # noqa: PLC0415

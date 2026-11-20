@@ -81,7 +81,7 @@ session_name = "bq-2830l-tank-connect-max-linux"
 boot_instructions = "Power the phone off, hold the green call key, then connect USB while keeping the key pressed."
 
 [device_data]
-parser = "bq2830l_device_data.py"
+parser = "device-data/bq2830l_device_data.py"
 
 [audio_profile]
 speaker_from_headphones = true

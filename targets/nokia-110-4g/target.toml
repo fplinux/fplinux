@@ -69,6 +69,7 @@ boot_instructions = "Power the phone off, hold *, then connect USB while keeping
 
 [device_data]
 parser = "nokia110_device_data.py"
+fitted_prefix = "nokia110"
 
 [bluetooth]
 firmware = [

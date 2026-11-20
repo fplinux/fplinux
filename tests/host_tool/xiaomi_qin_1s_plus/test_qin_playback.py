@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
@@ -13,9 +14,8 @@ from tests.process import run_process
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
-    from pathlib import Path
 
-FIXTURES = ROOT / "tests/host_tool/sc9820e"
+FIXTURES = Path(__file__).parent
 
 
 @pytest.fixture(scope="module")

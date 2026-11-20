@@ -3,8 +3,6 @@
 
 from __future__ import annotations
 
-import importlib.util
-
 import pytest
 from fplinux_cli.device_data import (
     fitted as fitted_device_data,
@@ -12,8 +10,8 @@ from fplinux_cli.device_data import (
 from fplinux_cli.device_data import (
     formats as device_data,
 )
+from fplinux_cli.manifests.targets import load_target
 
-from tests import ROOT
 from tests.small.device_data.audio_expected import (
     FITTED_HEADFREE_SECTION,
     FITTED_INOI_PROCESSING_SECTION,
@@ -67,17 +65,19 @@ class PartitionPreparationTests:
         return device_data.PhysicalNand(raw, 2048 + oob_bytes), partitions
 
     @pytest.mark.parametrize(
-        ("target", "filename", "prefix", "oob_bytes"),
+        ("target", "prefix", "oob_bytes"),
         [
-            ("nokia-ta1618", "ta1618_device_data.py", "ta1618", 64),
-            ("inoi-240-modern-4g", "inoi240_device_data.py", "inoi240", 64),
-            ("inoi-244-modern-4g", "inoi244_device_data.py", "inoi244", 64),
-            ("inoi-244-modern-4g", "inoi244_device_data.py", "inoi244", 128),
-            ("maxvi-k15n-4g", "maxvi_device_data.py", "maxvi-k15n-4g", 64),
+            ("nokia-ta1618", "ta1618", 64),
+            ("nokia-110-4g", "nokia110", 64),
+            ("inoi-240-modern-4g", "inoi240", 64),
+            ("inoi-244-modern-4g", "inoi244", 64),
+            ("inoi-244-modern-4g", "inoi244", 128),
+            ("maxvi-k15n-4g", "maxvi-k15n-4g", 64),
+            ("itel-neo-r60-plus", "itel-neo-r60-plus", 128),
         ],
     )
-    def test_target_parser_uses_the_selected_identity_and_speaker_policy(
-        self, target: str, filename: str, prefix: str, oob_bytes: int
+    def test_fitted_preparation_uses_the_declared_prefix_and_discovers_partitions(
+        self, target: str, prefix: str, oob_bytes: int
     ) -> None:
         """Target partition discovery retains the selected profile identity and topology."""
         nand, _partitions = self._inputs(oob_bytes=oob_bytes)
@@ -94,13 +94,7 @@ class PartitionPreparationTests:
             for offset in range(0, len(table), 2048)
         )
         nand = device_data.PhysicalNand(nand.raw + table_raw * 2, 2048 + oob_bytes)
-        spec = importlib.util.spec_from_file_location(
-            f"test_{target.replace('-', '_')}_data", ROOT / "targets" / target / filename
-        )
-        assert spec is not None
-        assert spec.loader is not None
-        parser = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(parser)
+        fitted_prefix = load_target(target)["device_data"]["fitted_prefix"]
         audio = device_data.AudioProfileContext(
             machine_compatible=b"example,phone",
             speaker_vibration=False,
@@ -108,7 +102,7 @@ class PartitionPreparationTests:
             headfree_headphones_only=False,
         )
 
-        result = parser.prepare_device_data(nand, audio=audio)
+        result = fitted_device_data.prepare_fitted_data(nand, audio=audio, prefix=fitted_prefix)
 
         profile = result.groups["audio-profile"].prepared[f"{prefix}-audio-profile.bin"]
         assert profile[:32] == b"FPAUDIO\0example,phone" + b"\0" * 11

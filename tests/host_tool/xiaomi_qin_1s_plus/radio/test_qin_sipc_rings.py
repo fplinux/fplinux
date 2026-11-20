@@ -3,16 +3,13 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from pathlib import Path
 
 from tests import ROOT
 from tests.c_harness import compile_c
 from tests.process import run_process
 
-if TYPE_CHECKING:
-    from pathlib import Path
-
-FIXTURES = ROOT / "tests/host_tool/sc9820e/radio"
+FIXTURES = Path(__file__).parent
 SOURCE = ROOT / "targets/xiaomi-qin-1s-plus/linux/overlay/drivers/remoteproc"
 
 

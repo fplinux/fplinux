@@ -38,7 +38,8 @@ if TYPE_CHECKING:
 def _target_spec(target: str, config: Mapping[str, Any]) -> DeviceDataSpec:
     """Resolve checkout-owned module paths before entering the shared extractor."""
     declaration = config["device_data"]
-    parser = declaration.get("parser")
+    fitted_prefix = declaration.get("fitted_prefix")
+    parser = declaration.get("parser") if fitted_prefix is None else None
     originals_parser = declaration.get("originals_parser")
     nand = config.get("nand")
     return DeviceDataSpec(
@@ -60,6 +61,7 @@ def _target_spec(target: str, config: Mapping[str, Any]) -> DeviceDataSpec:
         nand=nand,
         emmc=config.get("emmc"),
         required_groups=tuple(declaration.get("required_groups", declaration["groups"])),
+        fitted_prefix=fitted_prefix,
         ecc_module=(
             ROOT / "platforms" / str(config["platform"]) / NAND_ECC_MODULE
             if nand is not None and "ecc_format" in nand

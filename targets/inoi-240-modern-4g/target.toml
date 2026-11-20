@@ -69,6 +69,7 @@ boot_instructions = "Power the phone off, hold *, then connect USB while keeping
 
 [device_data]
 parser = "inoi240_device_data.py"
+fitted_prefix = "inoi240"
 
 [bluetooth]
 firmware = [

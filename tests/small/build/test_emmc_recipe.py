@@ -93,8 +93,8 @@ class EmmcInputs:
         return preparation_recipe(
             "phone",
             self.config,
-            source_root=self.root if delivered_root is None else delivered_root,
-            source_catalog_root=self.root,
+            source_root=self.root,
+            bundle_root=delivered_root,
         )
 
 
@@ -116,7 +116,7 @@ def emmc_inputs(tmp_path: Path) -> EmmcInputs:
             ],
         },
         "device_data": {
-            "originals_parser": "phone_data.py",
+            "originals_parser": "device-data/phone_data.py",
             "groups": {
                 "audio-profile": [{"source": "audio.bin", "destination": "audio.bin"}],
                 "wcn-firmware": [{"source": "wcn.bin", "destination": "wcn.bin"}],
@@ -170,7 +170,9 @@ def test_emmc_originals_survive_unrelated_display_and_preparation_changes(
 ) -> None:
     before = emmc_inputs.acquisition()
     emmc_inputs.dtb.write_bytes(emmc_tree(handle=40, display=20))
-    (emmc_inputs.root / "targets/phone/phone_data.py").write_bytes(b"SOURCE = 'new parser'\n")
+    (emmc_inputs.root / "targets/phone/device-data/phone_data.py").write_bytes(
+        b"SOURCE = 'new parser'\n"
+    )
     emmc_inputs.config["audio_policy"]["speaker_vibration"] = True
     assert emmc_inputs.acquisition() == before
 
@@ -220,7 +222,7 @@ def test_emmc_preparation_misses_after_admitted_input_behavior_changes(
 ) -> None:
     before = emmc_inputs.preparation()
     paths = {
-        "parser": "targets/phone/phone_data.py",
+        "parser": "targets/phone/device-data/phone_data.py",
         "resource": "targets/phone/device-data/rf-fields.tsv",
         "reader": "scripts/fplinux_cli/device_data/emmc-files/read_files.py",
         "projection": "scripts/fplinux_cli/build/host_tools/phone_data.py",
@@ -261,7 +263,11 @@ def test_delivered_preparation_uses_explicit_captured_catalog_without_shipping_i
 ) -> None:
     before = emmc_inputs.preparation()
     delivered = tmp_path / "delivered"
-    shutil.copytree(emmc_inputs.root / "targets", delivered / "targets")
-    shutil.copytree(emmc_inputs.root / "scripts/fplinux_cli", delivered / "scripts/fplinux_cli")
+    for relative, source in runtime_source_files(
+        "phone", emmc_inputs.config, root=emmc_inputs.root
+    ).items():
+        destination = delivered / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(source, destination)
     assert not (delivered / "sources.lock.toml").exists()
     assert emmc_inputs.preparation(delivered_root=delivered) == before

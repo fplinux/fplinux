@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+from pathlib import PurePosixPath
+from textwrap import dedent
 from typing import TYPE_CHECKING, Any
 
 from fplinux_cli import common
@@ -99,6 +101,12 @@ _RADIO_MODULES = (
 )
 
 
+def _parser_delivery_path(target: str, filename: object) -> str:
+    """Keep parser entry points at the target level in a standalone bundle."""
+    source = PurePosixPath(relative_value(filename, "device-data parser"))
+    return f"targets/{target}/{source.name}"
+
+
 def device_data_descriptor(target: str, config: dict[str, Any]) -> dict[str, Any] | None:
     """Describe the selected RAM phone's required data without adding preparation policy."""
     declarations = config.get("device_data", {})
@@ -112,7 +120,7 @@ def device_data_descriptor(target: str, config: dict[str, Any]) -> dict[str, Any
     return {
         **{
             role: (
-                f"targets/{target}/{relative_value(declarations[role], 'device-data parser')}"
+                _parser_delivery_path(target, declarations[role])
                 if declarations.get(role) is not None
                 else None
             )
@@ -127,6 +135,26 @@ def device_data_descriptor(target: str, config: dict[str, Any]) -> dict[str, Any
             else None
         ),
     }
+
+
+def fitted_parser(target: str, config: dict[str, Any]) -> tuple[str, bytes] | None:
+    """Bind the manifest's fitted prefix to the standalone runtime parser entry point."""
+    declarations = config.get("device_data", {})
+    prefix = declarations.get("fitted_prefix")
+    if prefix is None:
+        return None
+    relative = _parser_delivery_path(target, declarations["parser"])
+    contents = dedent('''\
+        # SPDX-License-Identifier: GPL-2.0-only
+        """Prepare the declared fitted NAND data."""
+
+        from functools import partial
+
+        from fplinux_cli.device_data.fitted import prepare_fitted_data
+
+        prepare_device_data = partial(prepare_fitted_data, prefix={prefix!r})
+        ''').format(prefix=prefix)
+    return relative, contents.encode("utf-8")
 
 
 def runtime_host_tools(platform: dict[str, Any], *, nand_ecc: bool) -> dict[str, str]:
@@ -182,15 +210,23 @@ def preparation_source_files(
     files = {
         f"scripts/fplinux_cli/{name}": root / "scripts/fplinux_cli" / name for name in selected
     }
+    target_root = root / "targets" / target
+    parser_sources = set()
     for role in ("parser", "originals_parser"):
         parser = declarations.get(role)
-        if parser is not None:
-            relative = f"targets/{target}/{relative_value(parser, 'device-data parser')}"
-            files[relative] = root / relative
-    resources = root / "targets" / target / "device-data"
+        if parser is None or (role == "parser" and declarations.get("fitted_prefix") is not None):
+            continue
+        source = target_root / relative_value(parser, "device-data parser")
+        parser_sources.add(source)
+        files[_parser_delivery_path(target, parser)] = source
+    resources = target_root / "device-data"
     if resources.is_dir():
         for source in sorted(resources.rglob("*")):
-            if source.is_file() and "__pycache__" not in source.parts:
+            if (
+                source not in parser_sources
+                and source.is_file()
+                and "__pycache__" not in source.parts
+            ):
                 files[source.relative_to(root).as_posix()] = source
     if (config.get("nand") or {}).get("ecc_format"):
         relative = f"platforms/{config['platform']}/host/nand_ecc.py"

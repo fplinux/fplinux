@@ -6,6 +6,7 @@ from __future__ import annotations
 import importlib.util
 import struct
 import sys
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
@@ -31,7 +32,7 @@ def qin_audio_context() -> AudioProfileContext:
 @pytest.fixture
 def qin_parser(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
     """Load the target's actual encoder through its normal module boundary."""
-    path = ROOT / "targets/xiaomi-qin-1s-plus/qin1splus_device_data.py"
+    path = ROOT / "targets/xiaomi-qin-1s-plus/device-data/qin1splus_device_data.py"
     name = "test_qin1splus_device_data"
     spec = importlib.util.spec_from_file_location(name, path)
     if spec is None or spec.loader is None:
@@ -171,7 +172,7 @@ def test_preparation_rejects_a_full_partition_or_wrong_image_length(
 @pytest.fixture
 def qin_audio_originals() -> dict[str, bytes]:
     """Supply synthetic route configurations and one independently assembled VBC file."""
-    directory = ROOT / "tests/small/device_data/fixtures/qin-audio"
+    directory = Path(__file__).parent / "fixtures/qin-audio"
     originals = {
         name: (directory / f"{name}.fixture").read_bytes()
         for name in ("audio_para", "audio_hw.xml", "tiny_hw.xml", "codec_pga.xml")

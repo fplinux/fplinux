@@ -10,6 +10,7 @@ from fplinux_cli.device_data.bluetooth_firmware import (
     DOWNLOADED_NV_PARTITION_ID,
     NV_FILES,
     PROTECT_NV_PARTITION_ID,
+    REQUIRED_BLUETOOTH_PARTITIONS,
     prepare_bluetooth_from_records,
 )
 from fplinux_cli.device_data.fm_radio import FM_RECORD_SIZES, prepare_fm_config
@@ -18,9 +19,22 @@ from fplinux_cli.device_data.formats import (
     PhysicalNand,
     fixed_nv_records,
 )
+from fplinux_cli.device_data.partitions import discover_partitions
 
 if TYPE_CHECKING:
     from fplinux_cli.device_data.formats import AudioProfileContext
+
+
+def prepare_fitted_data(
+    nand: PhysicalNand, *, prefix: str, audio: AudioProfileContext
+) -> DeviceDataPreparation:
+    """Discover the required partitions and prepare the declared fitted data."""
+    return prepare_from_partitions(
+        nand,
+        discover_partitions(nand, REQUIRED_BLUETOOTH_PARTITIONS).extents,
+        prefix=prefix,
+        audio=audio,
+    )
 
 
 def prepare_from_partitions(

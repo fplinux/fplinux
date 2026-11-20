@@ -22,7 +22,7 @@ from fplinux_cli.build import workflow
 from fplinux_cli.build.host_tools import linux_host, windows_driver
 from fplinux_cli.build.host_tools import windows as windows_build
 from fplinux_cli.build.identity import runtime_identity
-from fplinux_cli.build.runtime import device_data_descriptor, runtime_source_files
+from fplinux_cli.build.runtime import device_data_descriptor, fitted_parser, runtime_source_files
 from fplinux_cli.common import canonical_json_bytes
 from fplinux_cli.manifests import platforms, releases, targets
 from fplinux_cli.packaging import archive as package
@@ -148,9 +148,6 @@ def build_archive_inputs(
                 "platforms/ums9117/host/nand-ecc/ums9117-nand-ecc.c",
             ]
         )
-        parser = config["device_data"]["parser"]
-        if parser is not None:
-            source_files.append(f"targets/{target}/{parser}")
     for relative in source_files:
         write_archive_file(tmp_path, relative, (source / relative).read_bytes())
     release_document = f"targets/{target}/release/EXTRA.txt"
@@ -187,7 +184,11 @@ def build_archive_inputs(
                 (f"licenses/phone-data/{name}-LICENSE.txt", b"test-only dependency notice\n"),
             ):
                 runtime_sources[relative] = write_archive_file(tmp_path, relative, contents)
-    bundle_files = [*normalized["bundle_files"], *runtime_sources]
+    generated_parser = fitted_parser(target, config)
+    runtime_paths = list(runtime_sources)
+    if generated_parser is not None:
+        runtime_paths.append(generated_parser[0])
+    bundle_files = [*normalized["bundle_files"], *runtime_paths]
     if device_data_descriptor(target, config) is not None and (config.get("nand") or {}).get(
         "ecc_format"
     ):
@@ -219,6 +220,9 @@ def build_archive_inputs(
             source_path.read_bytes(),
             mode=0o755 if relative in {"fplinux.py", "Run.sh"} else 0o644,
         )
+    if generated_parser is not None:
+        relative, contents = generated_parser
+        write_archive_file(bundle, relative, contents)
     image = b"DHTB synthetic built RAM payload\n"
     runtime = runtime_manifest()
     if config["platform"] == "sc9820e":
@@ -274,7 +278,7 @@ def build_archive_inputs(
         for name in (
             "image/ramboot.bin",
             *runtime["assets"].values(),
-            *runtime_sources,
+            *runtime_paths,
             *runtime["host_tools"].values(),
         )
     }

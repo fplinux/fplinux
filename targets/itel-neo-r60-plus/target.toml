@@ -67,6 +67,7 @@ boot_instructions = "Power the phone off, hold the left soft key and call key to
 
 [device_data]
 parser = "itel_device_data.py"
+fitted_prefix = "itel-neo-r60-plus"
 
 [bluetooth]
 firmware = [

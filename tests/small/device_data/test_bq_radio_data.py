@@ -16,7 +16,7 @@ if TYPE_CHECKING:
 @pytest.fixture
 def radio_parser() -> ModuleType:
     """Load the target's normal parser without reading any fitted device data."""
-    path = ROOT / "targets/bq-2830l-tank-connect-max/bq2830l_device_data.py"
+    path = ROOT / "targets/bq-2830l-tank-connect-max/device-data/bq2830l_device_data.py"
     spec = importlib.util.spec_from_file_location("test_bq_radio_parser", path)
     assert spec is not None
     assert spec.loader is not None

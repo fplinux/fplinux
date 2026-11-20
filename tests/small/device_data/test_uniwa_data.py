@@ -30,7 +30,7 @@ def audio_context() -> AudioProfileContext:
 @pytest.fixture
 def uniwa_parser() -> ModuleType:
     """Load the actual target parser through its normal module specification."""
-    path = ROOT / "targets/uniwa-v1000-4g/uniwa_device_data.py"
+    path = ROOT / "targets/uniwa-v1000-4g/device-data/uniwa_device_data.py"
     spec = importlib.util.spec_from_file_location("uniwa_data_parser", path)
     if spec is None or spec.loader is None:
         message = "target parser source is unavailable"
