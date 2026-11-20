@@ -131,20 +131,19 @@ def export_dependencies(directory: Path, output: Path) -> None:
 
 def import_dependencies(directory: Path, output: Path) -> None:
     """Authenticate the release association before restoring its original snapshot."""
-    directory = directory.absolute()
+    directory, output = directory.absolute(), output.absolute()
     distribution = read_dependency_distribution(directory, verify_parts=False)
     release = capture_public_sources().release
     if distribution.release != release:
         fail("dependency transport belongs to another source release")
-    snapshot = restore_transport(
+    with restore_transport(
         directory,
-        output.absolute(),
+        output,
         index_name=distribution.index,
         index_sha256=distribution.index_sha256,
-    )
-    manifest = read_snapshot(snapshot)
-    if manifest["snapshot"] != distribution.snapshot:
-        fail("dependency transport snapshot differs from its release metadata")
-    inputs, context = checkout_declarations()
-    require_checkout(manifest, inputs, context)
-    print(f"Dependency snapshot: {snapshot}")
+    ) as manifest:
+        if manifest["snapshot"] != distribution.snapshot:
+            fail("dependency transport snapshot differs from its release metadata")
+        inputs, context = checkout_declarations()
+        require_checkout(manifest, inputs, context)
+    print(f"Dependency snapshot: {output}")

@@ -88,11 +88,12 @@ def test_transport_is_standard_tar_zstd_and_restores_the_original_snapshot(
     )
     pinned_hash = hashlib.sha256(index.read_bytes()).hexdigest()
 
-    restored = restore_transport(
-        index.parent, tmp_path / "restored", index_name=_INDEX_NAME, index_sha256=pinned_hash
-    )
+    restored = tmp_path / "restored"
+    with restore_transport(
+        index.parent, restored, index_name=_INDEX_NAME, index_sha256=pinned_hash
+    ):
+        assert not restored.exists()
 
-    assert restored == tmp_path / "restored"
     assert (restored / "manifest.json").read_bytes() == original_manifest
     assert (restored / f"objects/sha256/{_ABC_SHA256}").read_bytes() == b"abc"
     assert not (restored / "private-unrelated-file").exists()
@@ -112,10 +113,13 @@ def test_missing_or_modified_listed_part_prevents_snapshot_publication(
     else:
         part.write_bytes(b"modified transport")
 
-    with pytest.raises(SystemExit, match="part is missing or mismatched"):
+    with (
+        pytest.raises(SystemExit, match="part is missing or mismatched"),
         restore_transport(
             index.parent, tmp_path / "restored", index_name=_INDEX_NAME, index_sha256=pinned_hash
-        )
+        ),
+    ):
+        pass
 
     assert not (tmp_path / "restored").exists()
 
@@ -128,10 +132,13 @@ def test_index_mismatch_is_rejected_before_reading_its_filenames(
     pinned_hash = hashlib.sha256(index.read_bytes()).hexdigest()
     index.write_text("untrusted index\n")
 
-    with pytest.raises(SystemExit, match="checksum index is missing or mismatched"):
+    with (
+        pytest.raises(SystemExit, match="checksum index is missing or mismatched"),
         restore_transport(
             index.parent, tmp_path / "restored", index_name=_INDEX_NAME, index_sha256=pinned_hash
-        )
+        ),
+    ):
+        pass
 
     assert not (tmp_path / "restored").exists()
 
@@ -165,10 +172,13 @@ def test_reordered_index_cannot_change_the_archive_part_order(
     index.write_text("\n".join(reversed(lines)) + "\n")
     pinned_hash = hashlib.sha256(index.read_bytes()).hexdigest()
 
-    with pytest.raises(SystemExit, match="part order is invalid"):
+    with (
+        pytest.raises(SystemExit, match="part order is invalid"),
         restore_transport(
             index.parent, tmp_path / "restored", index_name=_INDEX_NAME, index_sha256=pinned_hash
-        )
+        ),
+    ):
+        pass
 
     assert not (tmp_path / "restored").exists()
 
@@ -213,10 +223,13 @@ def test_native_snapshot_verification_rejects_corrupt_archived_originals(
     index.write_text(f"{hashlib.sha256(part.read_bytes()).hexdigest()}  {part.name}\n")
     pinned_hash = hashlib.sha256(index.read_bytes()).hexdigest()
 
-    with pytest.raises(SystemExit, match="object is missing or mismatched"):
+    with (
+        pytest.raises(SystemExit, match="object is missing or mismatched"),
         restore_transport(
             parts, tmp_path / "restored", index_name=_INDEX_NAME, index_sha256=pinned_hash
-        )
+        ),
+    ):
+        pass
 
     assert not (tmp_path / "restored").exists()
 
@@ -233,10 +246,13 @@ def test_zstd_failure_reports_the_codec_cause_without_publishing_a_snapshot(
     index.write_text(f"{hashlib.sha256(part.read_bytes()).hexdigest()}  {part.name}\n")
     pinned_hash = hashlib.sha256(index.read_bytes()).hexdigest()
 
-    with pytest.raises(SystemExit, match=r"dependency transport command failed:.*zstd exit 1"):
+    with (
+        pytest.raises(SystemExit, match=r"dependency transport command failed:.*zstd exit 1"),
         restore_transport(
             parts, tmp_path / "restored", index_name=_INDEX_NAME, index_sha256=pinned_hash
-        )
+        ),
+    ):
+        pass
 
     assert not (tmp_path / "restored").exists()
 

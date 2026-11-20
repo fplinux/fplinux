@@ -9,7 +9,7 @@ import shutil
 import subprocess
 import tarfile
 import tempfile
-from contextlib import contextmanager, suppress
+from contextlib import ExitStack, contextmanager, suppress
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -231,7 +231,7 @@ def verify_transport(directory: Path, *, index_name: str, index_sha256: str) -> 
     return tuple(parts)
 
 
-def _extract_snapshot(paths: Sequence[Path], destination: Path) -> None:
+def _extract_snapshot(paths: Sequence[Path], destination: Path) -> dict[str, Any]:
     extracted = set()
     command = ["cat", "--", *(str(path) for path in paths)]
     with (
@@ -263,22 +263,30 @@ def _extract_snapshot(paths: Sequence[Path], destination: Path) -> None:
     expected.update(f"objects/sha256/{record['sha256']}" for record in manifest["inputs"])
     if extracted != expected:
         fail("dependency transport archive contains objects outside its snapshot")
+    return manifest
 
 
+@contextmanager
 def restore_transport(
     parts: Path, destination: Path, *, index_name: str, index_sha256: str
-) -> Path:
-    """Verify the pinned index and every part before publishing the original snapshot."""
-    try:
-        paths = verify_transport(parts, index_name=index_name, index_sha256=index_sha256)
-        destination = _new_destination(destination)
-        with tempfile.TemporaryDirectory(
-            dir=destination.parent, prefix=".transport-"
-        ) as temporary:
+) -> Iterator[dict[str, Any]]:
+    """Yield the verified manifest for association checks and publish on success."""
+    with ExitStack() as cleanup:
+        try:
+            paths = verify_transport(parts, index_name=index_name, index_sha256=index_sha256)
+            destination = _new_destination(destination)
+            temporary = cleanup.enter_context(
+                tempfile.TemporaryDirectory(dir=destination.parent, prefix=".transport-")
+            )
             candidate = Path(temporary) / "snapshot"
             candidate.mkdir(mode=0o700)
-            _extract_snapshot(paths, candidate)
+            manifest = _extract_snapshot(paths, candidate)
+        except (OSError, tarfile.TarError) as error:
+            fail(f"dependency transport restore failed: {error}")
+
+        yield manifest
+
+        try:
             candidate.rename(destination)
-    except (OSError, tarfile.TarError) as error:
-        fail(f"dependency transport restore failed: {error}")
-    return destination
+        except OSError as error:
+            fail(f"dependency transport restore failed: {error}")
