@@ -195,6 +195,7 @@ def test_picker_waits_for_storage_snapshot(phoneme_app: Path, tmp_path: Path) ->
         ("push-busy", "refused push preserves peer and pending document; retry accepts"),
         ("push-missing", "refused push preserves peer and pending document; retry accepts"),
         ("home-resume", "Home freezes VM; Resume continues same VM"),
+        ("vm-post-slice-delay", "VM timer starts its delay after the completed slice"),
         ("task-close", "confirmed task close needs no second decision"),
         ("tile-continue", "tile opens home; Continue resumes same VM"),
         ("tile-icon", "Continue shows the running MIDlet icon"),

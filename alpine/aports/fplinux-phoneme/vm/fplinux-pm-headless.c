@@ -245,6 +245,7 @@ static bool run_vm(unsigned int timeout_ms)
 	long long started_ms = monotonic_ms();
 	long long destroy_at = timeout_ms != 0 ? started_ms + timeout_ms : -1;
 	long long give_up_at = -1;
+	bool force_early = getenv("FPLINUX_PM_VM_TEST_EARLY") != NULL;
 
 	for (;;) {
 		if (give_up_at < 0 &&
@@ -262,8 +263,24 @@ static bool run_vm(unsigned int timeout_ms)
 			give_up_at < 0 ? post_due_keys(started_ms) : -1;
 
 		wakeup_pending = false;
+		long long slice_started_ms = force_early ? monotonic_ms() : 0;
 		int result = fplinux_pm_vm_slice();
 
+		if (force_early && result >= 50 && result <= 70) {
+			long long ended_ms = monotonic_ms();
+			int original = result;
+			long long maximum_ms, minimum_ms;
+
+			wait_for(ended_ms + 5);
+			maximum_ms = ended_ms + original - monotonic_ms();
+			result = fplinux_pm_vm_slice();
+			minimum_ms =
+				slice_started_ms + original - monotonic_ms();
+			fprintf(stderr,
+				"PM-VM forced-early delay_ms=%d "
+				"remaining_min_ms=%lld remaining_max_ms=%lld result_ms=%d\n",
+				original, minimum_ms, maximum_ms, result);
+		}
 		if (result == FPLINUX_PM_VM_SLICE_EXITED)
 			return true;
 		long long deadline = give_up_at >= 0 ? give_up_at : destroy_at;

@@ -1,0 +1,138 @@
+Return the nearest Java deadline to the slave host without extra delay.
+
+--- a/cldc/src/vm/share/runtime/Scheduler.cpp
++++ b/cldc/src/vm/share/runtime/Scheduler.cpp
+@@ -1063,6 +1063,23 @@
+ #endif
+ }
+ 
++static jlong earliest_waiting_deadline() {
++  Thread::Raw queue;
++  Thread::Raw thread;
++  jlong deadline = 0;
++
++  for (queue = Universe::scheduler_waiting(); !queue.is_null();
++       queue = queue().next_waiting()) {
++    for (thread = queue.obj(); !thread.is_null(); thread = thread().next()) {
++      jlong wakeup = thread().wakeup_time();
++      if (wakeup != 0 && (deadline == 0 || wakeup < deadline)) {
++        deadline = wakeup;
++      }
++    }
++  }
++  return deadline;
++}
++
+ /** Determine which thread should be run next.
+     Setup the cache _next_runnable_thread so that switch_thread()
+     can quickly find the next thread to switch to.
+@@ -1080,38 +1097,23 @@
+       }
+     }
+-    if (is_slave_mode()) {
++    if (is_slave_mode() && _timer_has_ticked) {
+       slave_mode_wait_for_event_or_timer(0);
+     }
+   } else {
+-    Thread::Raw wait_thrd;
+-    Thread::Raw t;
+     if (TraceThreadsExcessive) {
+       TTY_TRACE_CR(("yield: no runnable threads"));
+     }
+     while (*get_next_runnable_thread() == NULL) {
+       // All threads are waiting for something. Let's sleep until one
+       // of them wakes up.
+-      jlong min_wakeup_time = max_jlong;
+-      bool sleeper_found = false;
+-      wait_thrd = Universe::scheduler_waiting();
+-      while (!wait_thrd.is_null()) {
+-        t = wait_thrd.obj();
+-        while (!t.is_null()) {
+-          if (t().wakeup_time() != 0) {
+-            min_wakeup_time = min(min_wakeup_time, t().wakeup_time());
+-            sleeper_found = true;
+-          }
+-          t = t().next();
+-        }
+-        wait_thrd = wait_thrd().next_waiting();
+-      }
++      jlong deadline = earliest_waiting_deadline();
+ 
+       // Must check here before calling wait_for_event... since slave mode
+       // will return 'true' and we'll never resume other threads
+       if (JavaDebugger::is_debugger_option_on()) {
+         JavaDebugger::dispatch(100);
+       }
+-      if (wait_for_event_or_timer(sleeper_found, min_wakeup_time)) {
++      if (wait_for_event_or_timer(deadline != 0, deadline)) {
+         return;
+       }
+ 
+@@ -1137,6 +1139,7 @@
+ // in Scheduler::yield().
+ bool Scheduler::wait_for_event_or_timer(bool sleeper_found,
+                                         jlong min_wakeup_time) {
++  const bool slave_mode = is_slave_mode();
+   jlong sleep_time;
+ 
+   if (!sleeper_found) {
+@@ -1165,17 +1168,21 @@
+ 
+     sleep_time = -1;
+   } else {
+-    sleep_time = (min_wakeup_time - Os::monotonic_time_millis()) + 1;
++    sleep_time = min_wakeup_time - Os::monotonic_time_millis();
++    if (!slave_mode) {
++      sleep_time++;
++    }
+     if (sleep_time < 0) {
+       // Clock has advanced somewhat, but make sure we're not passing
+       // a negative timeout, which means wait forever!
+       sleep_time = 0;
+     }
+   }
+ 
+-  if (!is_slave_mode()) {
++  if (!slave_mode) {
+     master_mode_wait_for_event_or_timer(sleep_time);
+   } else {
++    // A deadline can pass after the last sleeper check.
+     slave_mode_wait_for_event_or_timer(sleep_time);
+     return true;
+   }
+@@ -1209,10 +1216,8 @@
+       sleep_time = 100;
+     }
+   }
+-  if (sleep_time != 0 || _timer_has_ticked) {
+-    _slave_mode_timeout = sleep_time;
+-    _slave_mode_yielding = true;
+-  }
++  _slave_mode_timeout = sleep_time;
++  _slave_mode_yielding = true;
+ }
+ 
+ void Scheduler::sleep_current_thread(jlong millis) {
+@@ -1645,14 +1650,14 @@
+         return 100;
+     }
+ 
+-    // need revisit the program's main loop:
+-    //
+-    // In slave mode, if all thread were blocked (by
+-    // SNI_BlockThread(), or by Thread.sleep(), or by Object.wait())
+-    // when the VM returned control to the master, the master must
+-    // wait for at least one blocked thread to be executable, or for a
+-    // waiting thread to timeout, before it calls JVM_TimeSlice()
+-    // again. Otherwise it's just not good for battery conservation!
++    // The host can enter early while a timed Java wait is still pending.
++    jlong deadline = earliest_waiting_deadline();
++    if (deadline != 0) {
++      jlong remaining = deadline - Os::monotonic_time_millis();
++      if (remaining < 100) {
++        return remaining < 0 ? 0 : remaining;
++      }
++    }
+     return 100;
+   }
+ 

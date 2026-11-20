@@ -275,4 +275,32 @@ build_jar bluetooth "${here}/bluetooth.mf"
 grep -qx 'PM-BLUETOOTH local device unavailable' "${work}/bluetooth.txt" ||
 	fail "Bluetooth availability check differs (${work}/bluetooth.txt)"
 
-echo "phoneME self-test: PASS (vectors, hello, local JAD, RMS, files, canvas, Form, List/Alert LF, headless media and Bluetooth availability)"
+# Model a host wake before the existing Java deadline, with no event that
+# would make another Java thread runnable.
+build_jar scheduler "${here}/scheduler.mf"
+FPLINUX_PHONEME_JIT=1 FPLINUX_PM_VM_TEST_EARLY=1 \
+	"${qemu_arm}" -L "${sysroot}" "${headless}" --system-classes "${classes}" \
+	--timeout-ms 30000 "${work}/scheduler.jar" >"${work}/scheduler-log.txt" 2>&1
+grep -E '^(PM-VM forced-early |PM-SLEEP )' "${work}/scheduler-log.txt"
+awk '
+/^PM-VM forced-early / {
+	split($4, minimum, "=")
+	split($5, maximum, "=")
+	split($6, result, "=")
+	# Both VM clock reads can occur anywhere within their respective calls.
+	if (minimum[2] < 35)
+		next
+	early++
+	if (result[2] < minimum[2] - 2 || result[2] > maximum[2] + 2)
+		wrong++
+}
+/^PM-SLEEP frame=/ { frames++ }
+END {
+	printf "PM-VM deadline check early=%d wrong=%d frames=%d\n",
+		early, wrong, frames
+	exit !(early >= 8 && wrong == 0 && frames == 12)
+}
+' "${work}/scheduler-log.txt" ||
+	fail "early VM slice changed the pending Java deadline"
+
+echo "phoneME self-test: PASS (vectors, hello, local JAD, RMS, files, canvas, Form, List/Alert LF, headless media, Bluetooth availability and Java deadlines)"

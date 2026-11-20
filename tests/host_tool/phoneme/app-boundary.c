@@ -51,6 +51,8 @@ struct fplinux_ui_screen {
 struct lv_timer {
 	lv_timer_cb_t callback;
 	void *context;
+	uint32_t period_ms;
+	uint32_t last_run_ms;
 	bool paused;
 };
 
@@ -61,6 +63,8 @@ static struct fplinux_ui runtime = {
 static struct fplinux_ui_screen *stack[16];
 static size_t depth;
 static lv_timer_t *tick;
+static uint32_t timer_clock_ms, vm_work_ms;
+static int vm_delay_ms = FPLINUX_PM_VM_SLICE_IDLE;
 static enum fplinux_pm_vm_state vm_state;
 static bool vm_exits;
 static int vm_exit_status;
@@ -631,12 +635,13 @@ void StoreMIDPEventInVmThread(MidpEvent event, int isolate)
 lv_timer_t *lv_timer_create(lv_timer_cb_t callback, uint32_t period,
 			    void *context)
 {
-	(void)period;
 	assert(!tick);
 	tick = calloc(1, sizeof(*tick));
 	assert(tick);
 	tick->callback = callback;
 	tick->context = context;
+	tick->period_ms = period;
+	tick->last_run_ms = timer_clock_ms;
 	return tick;
 }
 
@@ -650,16 +655,15 @@ void lv_timer_resume(lv_timer_t *timer)
 }
 void lv_timer_ready(lv_timer_t *timer)
 {
-	(void)timer;
+	timer->last_run_ms = timer_clock_ms - timer->period_ms;
 }
 void lv_timer_reset(lv_timer_t *timer)
 {
-	(void)timer;
+	timer->last_run_ms = timer_clock_ms;
 }
 void lv_timer_set_period(lv_timer_t *timer, uint32_t period)
 {
-	(void)timer;
-	(void)period;
+	timer->period_ms = period;
 }
 void *lv_timer_get_user_data(lv_timer_t *timer)
 {
@@ -717,7 +721,8 @@ int fplinux_pm_vm_slice(void)
 		vm_state = FPLINUX_PM_VM_EXITED;
 		return FPLINUX_PM_VM_SLICE_EXITED;
 	}
-	return FPLINUX_PM_VM_SLICE_IDLE;
+	timer_clock_ms += vm_work_ms;
+	return vm_delay_ms;
 }
 
 void fplinux_pm_vm_request_destroy(void)
@@ -771,6 +776,8 @@ static void advance(void)
 
 static void send_event(enum fplinux_ui_event_type type)
 {
+	/* LVGL records the start of its callback as the timer origin. */
+	tick->last_run_ms = timer_clock_ms;
 	struct fplinux_ui_event event = { .type = type };
 
 	runtime.event(&runtime, &event, runtime.context);
@@ -1175,7 +1182,15 @@ int fplinux_ui_run(struct fplinux_ui *ui)
 		puts("removing last Recent entry removes its action");
 		return 0;
 	}
-	if (!strcmp(scenario, "task-close")) {
+	if (!strcmp(scenario, "vm-post-slice-delay")) {
+		timer_clock_ms = 1000;
+		vm_work_ms = 11;
+		vm_delay_ms = 30;
+		advance();
+		assert(!tick->paused &&
+		       tick->last_run_ms + tick->period_ms == 1041);
+		puts("VM timer starts its delay after the completed slice");
+	} else if (!strcmp(scenario, "task-close")) {
 		enum fplinux_ui_close_response response;
 
 		ui->lifecycle = FPLINUX_UI_BACKGROUND;

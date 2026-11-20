@@ -365,13 +365,13 @@ static void apply(struct pm_app *app, struct fplinux_pm_schedule schedule,
 		lv_timer_pause(app->tick);
 		break;
 	case FPLINUX_PM_TIMER_RUN:
-		/* A tick has just set the timer's start; a period from then. */
 		lv_timer_set_period(app->tick,
 				    schedule.delay_ms ? schedule.delay_ms : 1);
 		lv_timer_resume(app->tick);
 		if (!in_tick && !schedule.delay_ms)
 			lv_timer_ready(app->tick);
-		else if (!in_tick)
+		/* A positive VM delay begins after this slice returns. */
+		else if (schedule.delay_ms)
 			lv_timer_reset(app->tick);
 		break;
 	case FPLINUX_PM_TIMER_KEEP:
@@ -451,9 +451,9 @@ static void run_slice(struct pm_app *app)
 	fplinux_pm_lifecycle_slice_begin(&app->lifecycle);
 	result = fplinux_pm_vm_slice();
 	app->in_slice = false;
-	apply(app,
-	      fplinux_pm_lifecycle_slice(&app->lifecycle, result,
-					 fplinux_ui_now_ms()),
+	if (app->lifecycle.phase == FPLINUX_PM_PHASE_HIDING)
+		now_ms = fplinux_ui_now_ms();
+	apply(app, fplinux_pm_lifecycle_slice(&app->lifecycle, result, now_ms),
 	      true);
 	if (app->lifecycle.phase == FPLINUX_PM_PHASE_EXITED)
 		vm_finished(app, true);
@@ -476,6 +476,7 @@ static void vm_tick(lv_timer_t *timer)
 	case FPLINUX_PM_PHASE_STARTING:
 		start_vm(app);
 		break;
+	uint64_t now_ms = 0;
 	case FPLINUX_PM_PHASE_RUNNING:
 	case FPLINUX_PM_PHASE_HIDING:
 		run_slice(app);
