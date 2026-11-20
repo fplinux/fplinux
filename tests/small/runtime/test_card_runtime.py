@@ -59,6 +59,7 @@ def bundle(tmp_path: Path) -> Path:
             "root.ext4.xz",
             "board.tar",
             "fit.itb",
+            "apk-state.tar",
             "apks/Packages.adb",
             "apks/fplinux-build.rsa.pub",
             "apks/fplinux-notes.apk",
@@ -82,7 +83,13 @@ def bundle(tmp_path: Path) -> Path:
 
 @pytest.mark.parametrize(
     "asset",
-    ["board.tar", "apks/Packages.adb", "apks/fplinux-build.rsa.pub", "apks/fplinux-notes.apk"],
+    [
+        "board.tar",
+        "apk-state.tar",
+        "apks/Packages.adb",
+        "apks/fplinux-build.rsa.pub",
+        "apks/fplinux-notes.apk",
+    ],
 )
 def test_card_kit_damage_fails_before_opening_reader(
     bundle: Path, monkeypatch: pytest.MonkeyPatch, asset: str

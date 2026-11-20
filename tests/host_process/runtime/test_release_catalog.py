@@ -56,6 +56,7 @@ def archive(tmp_path: Path) -> Path:
         }
         if target == "jade":
             contents["card/layout.json"] = b"Selected card layout"
+            contents["card/apk-state.tar"] = b"Selected APK state"
             contents["card/apks/Packages.adb"] = b"Selected APK index"
             contents["card/apks/fplinux-build.rsa.pub"] = b"Selected APK public key"
         records = {
@@ -446,7 +447,9 @@ def test_update_and_rollback_select_the_same_kit_from_command_and_menu(archive: 
     for result in (update, rollback, menu):
         operation = _record(result)
         assert operation["target"] == "jade"
-        assert (Path(operation["bundle"]) / "card/apks/Packages.adb").is_file()
+        bundle = Path(operation["bundle"])
+        assert (bundle / "card/apks/Packages.adb").is_file()
+        assert (bundle / "card/apk-state.tar").read_bytes() == b"Selected APK state"
     assert _record(update)["action"] == "update"
     assert _record(update)["card_cid"] == cid
     assert _record(rollback)["action"] == _record(menu)["action"] == "rollback"

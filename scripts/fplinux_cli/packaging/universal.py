@@ -59,6 +59,9 @@ def _readme(host: str, source_stem: str) -> bytes:
         installs through the same USB RAM session, using the bundled system.
         Choose Start from microSD to boot the installed system over USB.
 
+        Update microSD checks your additional APK selections before writing
+        to the card. For recovery, choose Select a previous microSD build.
+
         Commands for scripts, with the exact model ID from the menu:
           {launcher} run TARGET
           {launcher} run TARGET --boot microsd

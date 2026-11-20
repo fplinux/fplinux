@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Any
 from fplinux_cli.artifacts.card_kit import (
     CARD_APK_INDEX,
     CARD_APK_KEY,
+    CARD_APK_STATE,
     CARD_MEMBERS,
     CardKitError,
     card_package_members,
@@ -322,6 +323,7 @@ def _change_card(  # noqa: PLR0913 -- selected assets, consent and transport sta
                 fit.name: fit,
                 CARD_APK_INDEX: card_dir / CARD_APK_INDEX,
                 CARD_APK_KEY: card_dir / CARD_APK_KEY,
+                CARD_APK_STATE: card_dir / CARD_APK_STATE,
                 **{name.removeprefix("card/"): bundle / name for name in apk_members},
             },
             log=log,

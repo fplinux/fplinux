@@ -16,7 +16,7 @@ from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from fplinux_cli.artifacts.card_kit import CARD_APK_INDEX, CARD_APK_KEY
+from fplinux_cli.artifacts.card_kit import CARD_APK_INDEX, CARD_APK_KEY, CARD_APK_STATE
 from fplinux_cli.artifacts.release_identity import RELEASE_FIELDS, release_context_from_fields
 from fplinux_cli.common import fail, is_sha256, relative_name, sha256_bytes, sha256_file
 from fplinux_cli.data_paths import data_root
@@ -577,7 +577,7 @@ def main(*, archive_root: Path) -> None:
             update_targets = {
                 target
                 for target in card_targets
-                if {f"card/{CARD_APK_INDEX}", f"card/{CARD_APK_KEY}"}
+                if {f"card/{name}" for name in (CARD_APK_INDEX, CARD_APK_KEY, CARD_APK_STATE)}
                 <= catalog.targets[target].files.keys()
             }
             data_override = log_override = None

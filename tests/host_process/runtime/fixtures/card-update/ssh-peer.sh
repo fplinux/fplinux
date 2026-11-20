@@ -8,9 +8,12 @@ work=$3
 printf '%s\n' "$4" >"$work/command"
 case "$scenario" in
 transfer)
+	mkdir "$work/preflight"
+	tar -xf "$work/apk-preflight.tar" -C "$work/preflight"
 	mkdir "$work/received"
 	cd "$work/received"
-	tar -xf -
+	tar -xvf - >../bulk
+	cp ../preflight/Packages.adb ../preflight/fplinux-build.rsa.pub apks/
 	sha256sum -c ../transfer.sha256 >/dev/null
 	printf 'updated 222222222222\n'
 	;;
@@ -21,6 +24,10 @@ disconnect)
 	head -c 4096 >/dev/null
 	printf 'connection lost during input\n' >&2
 	exit 255
+	;;
+preflight-rejected)
+	printf 'card update: third-party: no APK in the new release\n' >&2
+	exit 1
 	;;
 *) exit 1 ;;
 esac

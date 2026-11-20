@@ -33,10 +33,14 @@ $expected
 EOF
 }
 
-[ "$#" = 3 ] || fail "usage: card-apk-world OLD_SLOT CANDIDATE_ROOT APK_DIRECTORY"
-old_slot=$1
-candidate=$2
-apk_directory=$3
+[ "$#" = 4 ] || fail "usage: card-apk-world preflight|restore OLD_SLOT CANDIDATE_ROOT APK_DIRECTORY"
+case "$1" in
+preflight | restore) action=$1 ;;
+*) fail "unknown APK selection action" ;;
+esac
+old_slot=$2
+candidate=$3
+apk_directory=$4
 
 added=$(awk '
 	FILENAME == ARGV[1] { base[$0] = 1; next }
@@ -57,7 +61,8 @@ for key in "$candidate/lib/apk/keys/"*.pub "$candidate/etc/apk/keys/"*.pub; do
 	cp -- "$key" "$restore_keys/"
 done
 cp -- "$release_key" "$restore_keys/"
-offline_apk --root "$candidate" --keys-dir "$restore_keys" verify "$index" ||
+# Only package installation needs chroot setup for lifecycle hooks.
+offline_apk --force-no-chroot --root "$candidate" --keys-dir "$restore_keys" verify "$index" ||
 	fail "cannot verify the release APK index"
 
 # A local APK filename becomes an identity pin in world. The old digest must
@@ -81,14 +86,16 @@ while IFS= read -r selection; do
 		continue
 		;;
 	*'><'*)
-		installed=$(offline_apk --root "$old_slot/root" info --exists -- "$selection") &&
+		installed=$(offline_apk --force-no-chroot --root "$old_slot/root" info --exists -- "$selection") &&
 			[ "$installed" = "$package" ] ||
 			fail "$package: local APK pin does not identify the active installed package"
 		selection=$package
 		;;
 	esac
 
-	coordinate=$(candidate_apk query --from none --match name --summarize package -- "$package") &&
+	coordinate=$(
+		candidate_apk --force-no-chroot query --from none --match name --summarize package -- "$package"
+	) &&
 		[ -n "$coordinate" ] || fail "$package: no APK in the new release"
 	expected="$expected$coordinate $selection
 "
@@ -99,11 +106,17 @@ EOF
 
 # A virtual provider can satisfy the solver while leaving the selected APK
 # absent. Check the real package versions both in the plan and after install.
-planned=$(candidate_apk query --world --summarize package -- "$@") ||
+planned=$(candidate_apk --force-no-chroot query --world --summarize package -- "$@") ||
 	fail "cannot resolve APK selection: $*"
 require_selected_packages "$planned"
 
+if [ "$action" = preflight ]; then
+	# The add solver also checks conflicts that the query solver can ignore.
+	candidate_apk --force-no-chroot --simulate add -- "$@" || fail "cannot resolve APK selection: $*"
+	exit 0
+fi
+
 candidate_apk add -- "$@" || fail "cannot restore APK selection: $*"
-installed=$(offline_apk --root "$candidate" query --installed --summarize package -- '*') ||
+installed=$(offline_apk --force-no-chroot --root "$candidate" query --installed --summarize package -- '*') ||
 	fail "cannot read restored APK selections"
 require_selected_packages "$installed"

@@ -87,9 +87,11 @@ class CardPackages:
     foreign: Path
     release_key: Path
 
-    def restore(self) -> CompletedProcess[str]:
+    def select(self, action: str, *, root: Path | None = None) -> CompletedProcess[str]:
         """Run the deployed entry point against the active and staged slots."""
-        return _run("sh", RESTORE, self.active, self.staged, self.admitted, check=False)
+        return _run(
+            "sh", RESTORE, action, self.active, root or self.staged, self.admitted, check=False
+        )
 
 
 @pytest.fixture
@@ -177,7 +179,7 @@ def test_restore_selection_dependencies_and_removal(
     assert b"fixture-runtime" not in active_world
     assert b"fixture-removed" not in active_world
 
-    restored = card_packages.restore()
+    restored = card_packages.select("restore")
 
     assert restored.returncode == 0, restored.stdout + restored.stderr
     assert _world(active_root).read_bytes() == active_world
@@ -197,6 +199,62 @@ def test_restore_selection_dependencies_and_removal(
     }
 
 
+@pytest.mark.parametrize("conflicting", [False, True], ids=["compatible", "conflicting-base"])
+def test_preflight_resolves_local_apk_on_read_only_database(
+    card_packages: CardPackages, tmp_path: Path, *, conflicting: bool
+) -> None:
+    active = card_packages.active / "root"
+    _apk(
+        active,
+        "--repository",
+        card_packages.previous / "Packages.adb",
+        "add",
+        card_packages.previous / "fixture-app.apk",
+    )
+    assert b"fixture-app><" in _world(active).read_bytes()
+    if conflicting:
+        payload = tmp_path / "conflicting-payload"
+        payload.mkdir()
+        archive = signed_apk_tree(
+            tmp_path,
+            ApkIdentity("fixture-app", "armv7", "2.0-r0", depends=("!fixture-base",)),
+            payload,
+            private_key=tmp_path / "fixture.rsa",
+        )
+        archive.replace(card_packages.admitted / "fixture-app.apk")
+        _index(card_packages.admitted, card_packages.release_key)
+
+    preflight = tmp_path / "preflight-root"
+    files = {
+        "etc/apk/arch",
+        "etc/apk/world",
+        "etc/apk/keys/sysroot-test.rsa.pub",
+        "lib/apk/db/installed",
+    }
+    for name in files:
+        destination = preflight / name
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(card_packages.staged / name, destination)
+    active_state = (_world(active).read_bytes(), _installed(active).read_bytes())
+    preflight_state = {name: (preflight / name).read_bytes() for name in files}
+
+    result = card_packages.select("preflight", root=preflight)
+
+    if conflicting:
+        assert result.returncode == 1, result.stdout + result.stderr
+        assert "cannot resolve APK selection: fixture-app" in result.stderr
+        assert "fixture-base" in result.stderr
+    else:
+        assert result.returncode == 0, result.stdout + result.stderr
+    assert (_world(active).read_bytes(), _installed(active).read_bytes()) == active_state
+    assert {name: (preflight / name).read_bytes() for name in files} == preflight_state
+    actual_files = {
+        path.relative_to(preflight).as_posix() for path in preflight.rglob("*") if path.is_file()
+    }
+    assert actual_files == files
+
+
+@pytest.mark.parametrize("action", ["preflight", "restore"])
 @pytest.mark.parametrize(
     ("scenario", "rejected"),
     [
@@ -207,7 +265,7 @@ def test_restore_selection_dependencies_and_removal(
     ],
 )
 def test_restore_rejects_unavailable_selections_without_installing(
-    card_packages: CardPackages, scenario: str, rejected: str
+    card_packages: CardPackages, scenario: str, rejected: str, action: str
 ) -> None:
     active_root = card_packages.active / "root"
     if scenario == "third-party":
@@ -247,7 +305,7 @@ def test_restore_rejects_unavailable_selections_without_installing(
     staged_world = _world(card_packages.staged).read_bytes()
     staged_installed = _installed(card_packages.staged).read_bytes()
 
-    restored = card_packages.restore()
+    restored = card_packages.select(action)
 
     assert restored.returncode != 0
     assert rejected in restored.stderr

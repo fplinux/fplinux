@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import shlex
+import tarfile
 from pathlib import Path
 from shutil import copyfile
 from subprocess import CompletedProcess as ProcessResult
@@ -66,6 +67,7 @@ def payload(tmp_path: Path) -> dict[str, Path]:
         ("board.tar", b"board archive"),
         ("board.sha256", b"board member checksums"),
         ("fit.itb", b"new system FIT"),
+        ("apk-state.tar", b"target APK database"),
         ("apks/Packages.adb", b"release package inventory"),
         ("apks/fplinux-build.rsa.pub", b"release public key"),
         ("apks/example-1.apk", b"example release package"),
@@ -116,7 +118,7 @@ def remote(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return remote
 
 
-def test_update_sends_only_small_tools_then_streams_the_release_once(
+def test_update_uploads_apk_preflight_then_streams_the_payload_once(
     remote: Path, layout: CardLayout, payload: dict[str, Path], log: RunLog
 ) -> None:
     """One authenticated command receives the actual archive and its remote destination."""
@@ -129,12 +131,29 @@ def test_update_sends_only_small_tools_then_streams_the_release_once(
         "card-apk-world.sh",
         "update-card.sh",
         "transfer.sha256",
+        "apk-preflight.tar",
         "control",
         "command",
+        "preflight",
+        "bulk",
         "received",
     }
-    for name, path in payload.items():
-        assert (remote / "received" / name).read_bytes() == path.read_bytes()
+    preflight = {
+        "apk-state.tar": "apk-state.tar",
+        "Packages.adb": "apks/Packages.adb",
+        "fplinux-build.rsa.pub": "apks/fplinux-build.rsa.pub",
+    }
+    with tarfile.open(remote / "apk-preflight.tar", "r:") as archive:
+        assert set(archive.getnames()) == preflight.keys()
+        for name, original in preflight.items():
+            stream = archive.extractfile(name)
+            assert stream is not None
+            assert stream.read() == payload[original].read_bytes()
+    bulk = set(payload) - set(preflight.values())
+    received = remote / "received"
+    assert set((remote / "bulk").read_text(encoding="ascii").splitlines()) == bulk
+    for name in set(payload) - {"apk-state.tar"}:
+        assert (received / name).read_bytes() == payload[name].read_bytes()
     command = shlex.split((remote / "command").read_text(encoding="ascii"))
     assert command[:12] == [
         "sh",
@@ -176,3 +195,13 @@ def test_update_reports_disconnect_without_a_second_remote_command(
         "mktemp -d /tmp/fplinux-card-update.XXXXXXXX",
     ]
     assert "may still be working on the SD card" in log.path.read_text(encoding="utf-8")
+
+
+def test_update_reports_the_package_rejected_before_bulk_extraction(
+    remote: Path, layout: CardLayout, payload: dict[str, Path], log: RunLog
+) -> None:
+    with pytest.raises(SystemExit, match="third-party: no APK in the new release"):
+        card_update.update_card(
+            (transport, {"scenario": "preflight-rejected"}), _CARD, layout, assets=payload, log=log
+        )
+    assert not (remote / "received").exists()

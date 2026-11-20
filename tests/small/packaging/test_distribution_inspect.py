@@ -84,12 +84,13 @@ def test_universal_archive_rejects_a_nonexecutable_native_runtime(assets: Path) 
         inspect_archive(runtime)
 
 
-def test_runtime_archive_rejects_an_incomplete_card_kit(assets: Path) -> None:
+@pytest.mark.parametrize("member", ["card/layout.json", "card/apk-state.tar"])
+def test_runtime_archive_rejects_an_incomplete_card_kit(assets: Path, member: str) -> None:
     runtime = assets / f"FPLinux-linux-x64-{RELEASE_ID}.zip"
     files, modes = read_zip(runtime)
     files.pop("SHA256SUMS")
     catalog = json.loads(files["targets.json"])
-    del catalog["targets"]["nokia-ta1618"]["files"]["card/layout.json"]
+    del catalog["targets"]["nokia-ta1618"]["files"][member]
     files["targets.json"] = json_bytes(catalog)
     write_zip(runtime, files, {name for name, mode in modes.items() if mode & 0o111})
 

@@ -17,12 +17,14 @@ if TYPE_CHECKING:
 
 CARD_APK_INDEX = "apks/Packages.adb"
 CARD_APK_KEY = "apks/fplinux-build.rsa.pub"
+CARD_APK_STATE = "apk-state.tar"
 CARD_MEMBERS = (
     "card/boot.xz",
     "card/root.ext4.xz",
     "card/board.tar",
     "card/fit.itb",
     "card/layout.json",
+    f"card/{CARD_APK_STATE}",
     f"card/{CARD_APK_INDEX}",
     f"card/{CARD_APK_KEY}",
 )

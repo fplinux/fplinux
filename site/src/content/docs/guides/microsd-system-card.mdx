@@ -54,7 +54,11 @@ Use `./fplinux card inspect inoi-240-modern-4g` to discover the card before pass
 
 Boot a freshly installed card once and wait for the graphical session to become ready. For an update, power off the phone with the card fitted and open the extracted ZIP for the new release. Choose your model and **Update microSD**. Connect when prompted and confirm the displayed CID. The update keeps your files, SSH access and supported additional APK selections.
 
+Before writing to the card, the reader checks that the new release can restore your additional APK selections. It names the selections that prevent the update.
+
 For a rollback, choose **Select a previous microSD build** and enter its confirmed build ID. `verify TARGET --boot microsd` reports the build ID and mounted slot of the running system. Keep the previous build ID before updating so you can select it from the RAM reader even if the new build cannot boot.
+
+If the reader reports that the card journal needs recovery, select the previous confirmed build from the RAM reader before retrying the update.
 
 The same actions are available as commands, for example on Linux:
 

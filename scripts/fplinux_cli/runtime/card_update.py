@@ -14,7 +14,7 @@ from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from fplinux_cli.artifacts.card_kit import CARD_APK_INDEX, CARD_APK_KEY
+from fplinux_cli.artifacts.card_kit import CARD_APK_INDEX, CARD_APK_KEY, CARD_APK_STATE
 from fplinux_cli.common import fail, sha256_file
 
 if TYPE_CHECKING:
@@ -32,13 +32,13 @@ CARD_APK_WORLD = Path(__file__).with_name("card-apk-world.sh")
 CARD_SLOTS = Path(__file__).with_name("card-slots.sh")
 _REMOTE_WORK = re.compile(r"/tmp/fplinux-card-update\.[A-Za-z0-9]+")  # noqa: S108 -- remote mktemp.
 _BUILD_ID = re.compile(r"[a-f0-9]{12}")
+_PREFLIGHT_ASSETS = (CARD_APK_STATE, CARD_APK_INDEX, CARD_APK_KEY)
 _UPDATE_ASSETS = {
     "root.ext4.xz",
     "board.tar",
     "board.sha256",
     "fit.itb",
-    CARD_APK_INDEX,
-    CARD_APK_KEY,
+    *_PREFLIGHT_ASSETS,
 }
 _APK_ASSET = re.compile(r"apks/[a-zA-Z0-9][a-zA-Z0-9._+-]{0,95}\.apk")
 _UNCERTAIN = (
@@ -153,8 +153,9 @@ def update_card(
             fail(f"The system card update asset is not a regular file: {name}")
         digests[name] = sha256_file(path)
         sizes[name] = info.st_size
-    # The stock filesystem image and candidate tree coexist until verification.
-    required = sum(sizes.values()) + 2 * layout.root_size + sizes["board.tar"]
+    # The stock filesystem image and candidate tree coexist. APK state stays in RAM.
+    payload_size = sum(sizes.values()) - sizes[CARD_APK_STATE]
+    required = payload_size + 2 * layout.root_size + sizes["board.tar"]
     arguments.extend(
         (
             str(required),
@@ -165,18 +166,25 @@ def update_card(
         )
     )
     with tempfile.TemporaryDirectory(prefix="card-update-", dir=log.path.parent) as directory:
-        manifest = Path(directory) / "transfer.sha256"
+        work = Path(directory)
+        manifest = work / "transfer.sha256"
         manifest.write_text(
-            "".join(f"{digests[name]}  {name}\n" for name in sorted(digests)),
+            "".join(
+                f"{digests[name]}  {name}\n" for name in sorted(digests) if name != CARD_APK_STATE
+            ),
             encoding="ascii",
             newline="\n",
         )
+        preflight = work / "apk-preflight.tar"
+        with preflight.open("wb") as stream:
+            _write_archive({Path(name).name: assets[name] for name in _PREFLIGHT_ASSETS}, stream)
+        payload = {name: path for name, path in assets.items() if name not in _PREFLIGHT_ASSETS}
         result = _run_reader(
             connection,
             arguments,
             log,
-            files=(CARD_UPDATE_STAGE, CARD_APK_WORLD, manifest),
-            write=partial(_write_archive, assets),
+            files=(CARD_UPDATE_STAGE, CARD_APK_WORLD, manifest, preflight),
+            write=partial(_write_archive, payload),
         )
     if result == f"updated {layout.release_id}":
         log.message(f"System card build {layout.release_id} was written and the card unmounted.")

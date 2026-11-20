@@ -13,6 +13,7 @@ from fplinux_cli.artifacts.release_identity import release_context_from_fields
 from fplinux_cli.ci.commands import run_ci
 from fplinux_cli.cli.inspect import inspect_distribution
 from fplinux_cli.packaging import distribution
+from fplinux_cli.packaging.card_kit import read_card_files
 from fplinux_cli.packaging.universal import HostArchive
 
 from tests.distribution_support import (
@@ -97,9 +98,11 @@ def test_release_contains_the_complete_matrix_sources_and_dependency_transport(
             raw = b"".join(files[part] for part in target_files[name])
             assert json.loads(raw)["release_version"] == "1.0.0"
         assert ("card/layout.json" in target_files) == (record["target"] in CARD_TARGETS)
+        assert ("card/apk-state.tar" in target_files) == (record["target"] in CARD_TARGETS)
         if record["target"] in CARD_TARGETS:
             card_fixture, _ = bundle_fixture(record["target"], record["host"], card=True)
             for name in (
+                "card/apk-state.tar",
                 "card/apks/Packages.adb",
                 "card/apks/fplinux-build.rsa.pub",
                 "card/apks/fplinux-notes.apk",
@@ -139,6 +142,22 @@ def test_release_contains_the_complete_matrix_sources_and_dependency_transport(
     for name, digest in checksums.items():
         assert hashlib.sha256((output / name).read_bytes()).hexdigest() == digest
     inspect_distribution(output)
+
+
+def test_package_reads_apk_state_from_the_verified_card_build(tmp_path: Path) -> None:
+    target = "nokia-ta1618"
+    files, _ = bundle_fixture(target, "windows", card=True)
+    for name, data in files.items():
+        path = tmp_path / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+        path.chmod(0o644)
+    manifest = json.loads(files["build-manifest.json"])
+    release = release_context_from_fields(release_fields())
+
+    card_files = read_card_files(tmp_path, manifest, release)
+
+    assert card_files["card/apk-state.tar"] == b"installed package state for nokia-ta1618\n"
 
 
 def test_ci_rejects_single_model_package_that_passes_intrinsic_verification(

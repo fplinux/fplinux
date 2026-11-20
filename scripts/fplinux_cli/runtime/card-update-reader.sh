@@ -148,6 +148,26 @@ check_staging() {
 	fi
 }
 
+check_update_journal() {
+	# The low byte of s_feature_incompat at 1024 + 96 contains INCOMPAT_RECOVER.
+	# A journal replay could expose different APK state from the read-only check.
+	features=$(busybox od -An -j 1120 -N 1 -tu1 "$root_partition") ||
+		fail "Cannot check the system card ext4 journal"
+	[ -n "$features" ] || fail "Cannot check the system card ext4 journal"
+	[ "$((features & 4))" -eq 0 ] ||
+		fail "The system card journal needs recovery; roll back from the RAM reader before updating"
+}
+
+check_package_selection() {
+	busybox mkdir -p "$preflight/root"
+	busybox tar -xf "$work/apk-preflight.tar" -C "$preflight" &&
+		busybox tar -xf "$preflight/apk-state.tar" -C "$preflight/root" ||
+		fail "Cannot read the release APK preflight data"
+	real_file "$preflight/Packages.adb" && real_file "$preflight/fplinux-build.rsa.pub" ||
+		fail "The release APK preflight data has no index or public key"
+	sh "$work/card-apk-world.sh" preflight "$system/$active" "$preflight/root" "$preflight" >&2
+}
+
 cleanup() {
 	status=$?
 	trap - EXIT
@@ -156,7 +176,9 @@ cleanup() {
 		[ "$status" -ne 0 ] || status=1
 	fi
 	busybox rm -f -- "$work/card-update-reader.sh" "$work/card-slots.sh" \
-		"$work/update-card.sh" "$work/card-apk-world.sh" "$work/transfer.sha256" || :
+		"$work/update-card.sh" "$work/card-apk-world.sh" "$work/transfer.sha256" \
+		"$work/apk-preflight.tar" || :
+	busybox rm -rf -- "${work:?}/apk-preflight" || :
 	busybox rmdir -- "$mount_dir" "$work" 2>/dev/null || :
 	if [ "$status" -eq 0 ]; then
 		printf '%s\n' "$outcome"
@@ -171,6 +193,7 @@ esac
 mount_dir=$work/mount
 system=$mount_dir/system
 staging=$system/.update
+preflight=$work/apk-preflight
 mounted=0
 writable=0
 outcome=
@@ -232,6 +255,7 @@ mount_card ro,noload,noexec
 check_system
 
 if [ "$action" = update ]; then
+	check_update_journal
 	slot_state=$(sh "$work/update-card.sh" inspect "$mount_dir" "$target" "$build" "$fit_hash")
 	case "$slot_state" in
 	'active a' | 'active b')
@@ -250,6 +274,7 @@ if [ "$action" = update ]; then
 		available=$((available + blocks * 1024))
 	fi
 	[ "$available" -ge "$required" ] || fail "The system card does not have enough free space for the update"
+	check_package_selection
 fi
 
 unmount_card
@@ -272,6 +297,8 @@ check_staging
 busybox rm -rf -- "${staging:?}"
 [ "$(free_bytes)" -ge "$required" ] || fail "The system card does not have enough free space for the update"
 busybox mkdir -p "$staging/apks"
+busybox cp -- "$preflight/Packages.adb" "$preflight/fplinux-build.rsa.pub" "$staging/apks/" ||
+	fail "Cannot prepare the release APK index on the system card"
 busybox tar -xf - -C "$staging" || fail "The system card update transfer was interrupted"
 busybox sync -f "$staging" || fail "Cannot sync the transferred system card files"
 (

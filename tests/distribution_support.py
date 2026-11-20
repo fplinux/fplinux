@@ -175,6 +175,7 @@ def bundle_fixture(
                     "card/boot.xz": f"card boot for {target}\n".encode(),
                     "card/root.ext4.xz": b"common card system",
                     "card/board.tar": f"card system files for {target}\n".encode(),
+                    "card/apk-state.tar": f"installed package state for {target}\n".encode(),
                     "card/fit.itb": head + kernel + b"card FIT trailer",
                     "card/apks/Packages.adb": b"admitted card package index",
                     "card/apks/fplinux-build.rsa.pub": b"admitted card package public key",

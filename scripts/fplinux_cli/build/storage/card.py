@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import os
 import shutil
+import stat
+import tarfile
 import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -20,12 +22,15 @@ from fplinux_cli.alpine.signing import _ensure_apk_signing_key
 from fplinux_cli.artifacts.card_kit import (
     CARD_APK_INDEX,
     CARD_APK_KEY,
+    CARD_APK_STATE,
     CardKitError,
     locate_fit_ramdisk,
 )
 from fplinux_cli.artifacts.records import write_canonical_json
 from fplinux_cli.artifacts.release import current_release_context
 from fplinux_cli.build import process as process_build
+from fplinux_cli.build.environment import SOURCE_DATE_EPOCH
+from fplinux_cli.build.inputs import require_file
 from fplinux_cli.common import fail, sha256_file
 from fplinux_cli.manifests.values import sha256_value
 
@@ -39,6 +44,50 @@ if TYPE_CHECKING:
 
 _DATA_DIRECTORIES = "alpine/card-data-directories"
 _SLOT_ROOT = Path("system/a/root")
+_APK_STATE_FILES = ("etc/apk/arch", "etc/apk/world", "lib/apk/db/installed")
+_APK_KEY_DIRECTORIES = ("etc/apk/keys", "lib/apk/keys")
+
+
+def _extract_apk_files(rootfs: Path, work: Path, members: tuple[str, ...]) -> None:
+    process_build.run(
+        [
+            "cpio",
+            "--extract",
+            "--quiet",
+            "--make-directories",
+            "--no-preserve-owner",
+            "--file",
+            str(rootfs),
+            "--directory",
+            str(work),
+            *members,
+        ]
+    )
+
+
+def write_apk_state(rootfs: Path, output: Path) -> None:
+    """Project the installed APK state of the composed board root for the solver."""
+    with tempfile.TemporaryDirectory(dir=output.parent, prefix=".apk-state.") as name:
+        work = Path(name)
+        key_patterns = tuple(f"{directory}/*.pub" for directory in _APK_KEY_DIRECTORIES)
+        _extract_apk_files(rootfs, work, (*_APK_STATE_FILES, *key_patterns))
+        files = [work / path for path in _APK_STATE_FILES]
+        for directory in _APK_KEY_DIRECTORIES:
+            files.extend((work / directory).glob("*.pub"))
+
+        archive = work / output.name
+        with tarfile.open(archive, "w", format=tarfile.USTAR_FORMAT) as payload:
+            for path in sorted(files):
+                require_file(path)
+                metadata = path.stat()
+                member = tarfile.TarInfo(path.relative_to(work).as_posix())
+                member.mode = stat.S_IMODE(metadata.st_mode)
+                member.mtime = int(SOURCE_DATE_EPOCH)
+                member.size = metadata.st_size
+                with path.open("rb") as source:
+                    payload.addfile(member, source)
+        archive.chmod(0o644)
+        archive.replace(output)
 
 
 def _write_package_index(
@@ -52,20 +101,7 @@ def _write_package_index(
     output.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(dir=output.parent, prefix=".index.") as name:
         work = Path(name)
-        process_build.run(
-            [
-                "cpio",
-                "--extract",
-                "--quiet",
-                "--make-directories",
-                "--no-preserve-owner",
-                "--file",
-                str(rootfs),
-                "--directory",
-                str(work),
-                "etc/apk/keys/*",
-            ]
-        )
+        _extract_apk_files(rootfs, work, ("etc/apk/keys/*",))
         keys = work / "etc/apk/keys"
         shutil.copyfile(public_key, keys / public_key.name)
         index = work / "Packages.adb"
@@ -185,7 +221,7 @@ def build(  # noqa: PLR0913 -- each selected source and artifact stay explicit.
     cold_boot: ColdSdBootstrap | None,
     bundle_apks: Mapping[str, Path],
 ) -> dict[str, Path]:
-    """Produce the FIT, boot prefix and board layer for the installed system card."""
+    """Produce boot, system and APK files for the installed system card."""
     if shared_ext4 is None or fit is None or ramdisk is None:
         fail("release card requires a verified ext4 root and FIT")
     if cold_boot is None:
@@ -196,6 +232,7 @@ def build(  # noqa: PLR0913 -- each selected source and artifact stay explicit.
     root = output / "root.ext4.xz"
     board = output / "board.tar"
     layout = output / "layout.json"
+    apk_state = output / CARD_APK_STATE
 
     try:
         ramdisk_payload = ramdisk.read_bytes()
@@ -205,6 +242,7 @@ def build(  # noqa: PLR0913 -- each selected source and artifact stay explicit.
         )
         root_digest = sd.compress_card_region(shared_ext4, root, storage["root_size"])
         write_card_rootfs_layer(board_rootfs, shared_rootfs, board)
+        write_apk_state(board_rootfs, apk_state)
         private_key, public_key, _identity = _ensure_apk_signing_key()
         index = _write_package_index(
             board_rootfs, bundle_apks, output / CARD_APK_INDEX, private_key, public_key
@@ -236,6 +274,7 @@ def build(  # noqa: PLR0913 -- each selected source and artifact stay explicit.
         "card/board.tar": board,
         "card/fit.itb": fit,
         "card/layout.json": layout,
+        f"card/{CARD_APK_STATE}": apk_state,
         f"card/{CARD_APK_INDEX}": index,
         f"card/{CARD_APK_KEY}": public_key,
         **{f"card/apks/{name}.apk": path for name, path in bundle_apks.items()},

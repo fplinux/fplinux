@@ -157,7 +157,7 @@ else
 		fail "The prepared system has no stock package selection"
 	# APK updates world and the package database, which can be supplied by the board layer.
 	verify_board "$pair/root"
-	sh "${0%/*}/card-apk-world.sh" "$card/system/$previous" "$pair/root" "$staging/apks"
+	sh "${0%/*}/card-apk-world.sh" restore "$card/system/$previous" "$pair/root" "$staging/apks"
 	flush_card
 	check_digest "$pair/FPLINUX.ITB" "$fit_sha" || fail "The prepared FIT failed verification"
 	slots activate "$pair"
