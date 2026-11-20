@@ -5,7 +5,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import shlex
 import shutil
+import socket
 import subprocess
 import tempfile
 import time
@@ -19,8 +22,9 @@ from fplinux_cli.runtime.ssh import session as ssh_session
 from fplinux_cli.runtime.ssh import transport as ssh_transport
 from fplinux_cli.runtime.windows.transport import WindowsTransport
 
+from tests.fixtures.ssh_transport.stream_timeout import StreamClock
 from tests.host_tool.runtime.openssh_server import OpenSshServer
-from tests.process import process_state, run_process
+from tests.process import process_state, read_process_line, run_process
 from tests.ssh_transport_support import create_ready_session
 from tests.windows_host_support import (
     StubWindowsHost,
@@ -288,6 +292,31 @@ class SshTransportOpenSshConfigTests:
 
 class OpenSshServerLifecycleTests:
     """Observe ownership of the real daemon across a controlled readiness failure."""
+
+    def test_occupied_port_retries_with_a_new_real_listener(
+        self, tmp_path: Path, request: pytest.FixtureRequest
+    ) -> None:
+        """Keep the competing listener alive while OpenSSH binds a different port."""
+        server = OpenSshServer(tmp_path / "server", tmp_path / "client_ed25519")
+        request.addfinalizer(server.stop)
+        with socket.socket() as occupied:
+            occupied.settimeout(2)
+            occupied.bind(("127.0.0.1", 0))
+            occupied.listen()
+            occupied_port = int(occupied.getsockname()[1])
+            server.port = occupied_port
+
+            server.start()
+
+            assert server.port != occupied_port
+            with (
+                socket.create_connection(("127.0.0.1", server.port), timeout=2) as client,
+                client.makefile("rb") as banner,
+            ):
+                assert banner.readline().startswith(b"SSH-2.0-")
+            with socket.create_connection(("127.0.0.1", occupied_port), timeout=2):
+                peer, _ = occupied.accept()
+                peer.close()
 
     def test_readiness_failure_stops_and_reaps_launched_daemon(
         self, request: pytest.FixtureRequest
@@ -591,19 +620,31 @@ class SshTransportOpenSshDirectTests:
         server.wait_for_connections(1)
         loopback_ssh_argv = self._loopback_ssh_argv(server)
         producer_pid = ssh_base / "stream-producer.pid"
+        stream_timeout = 5
+        clock = StreamClock(stream_timeout)
+        stream_prefix = b"stream-data\n"
 
         adjacent = subprocess.Popen(
             self._ssh_command(
                 config,
                 server,
-                'sleep 0.6; printf "neighbor\\n%s\\n" "$SSH_CONNECTION"',
+                'printf "neighbor ready\\n"; IFS= read -r release && '
+                'test "$release" = finish && printf "neighbor\\n%s\\n" "$SSH_CONNECTION"',
             ),
+            stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
             start_new_session=True,
         )
         try:
+            assert adjacent.stdout is not None
+            ready = read_process_line(
+                adjacent.stdout,
+                deadline=time.monotonic() + _SSH_CONFIG_TIMEOUT_SECONDS,
+                name="adjacent SSH channel",
+            )
+            assert ready == "neighbor ready\n"
             with (
                 tempfile.TemporaryFile(mode="w+b") as destination,
                 mock.patch.object(
@@ -611,24 +652,33 @@ class SshTransportOpenSshDirectTests:
                     "ssh_argv",
                     side_effect=loopback_ssh_argv,
                 ),
+                mock.patch.object(ssh_transport, "time", clock),
             ):
-                with pytest.raises(SystemExit, match=r"timed out after 0.3s"):
+
+                def expire_after_partial_read(count: int) -> None:
+                    if count >= len(stream_prefix) and not clock.expired_after_progress:
+                        received = os.pread(destination.fileno(), len(stream_prefix), 0)
+                        assert received == stream_prefix
+                        assert adjacent.poll() is None
+                        clock.expire_after_progress()
+
+                with pytest.raises(SystemExit, match="timed out after 5s"):
                     ssh_transport.stream_remote(
                         session,
-                        f"printf '%s\\n' \"$$\" > '{producer_pid}'; "
+                        f"printf '%s\\n' \"$$\" > {shlex.quote(str(producer_pid))}; "
                         "while :; do printf 'stream-data\\n'; sleep 0.01; done",
                         destination,
-                        timeout=0.3,
+                        timeout=stream_timeout,
+                        progress=expire_after_partial_read,
                     )
-                destination.seek(0)
-                assert destination.read().startswith(b"stream-data\n")
+                assert clock.expired_after_progress
             process_id = int(producer_pid.read_text(encoding="ascii").strip())
             self._wait_until_process_absent(process_id)
-            adjacent_stdout, adjacent_stderr = adjacent.communicate(timeout=3)
+            adjacent_stdout, adjacent_stderr = adjacent.communicate(input="finish\n", timeout=3)
         finally:
             if adjacent.poll() is None:
                 adjacent.kill()
-                adjacent.communicate()
+                adjacent.communicate(timeout=3)
         assert (adjacent.returncode) == (0), adjacent_stderr
         assert (adjacent_stdout.splitlines()[0]) == ("neighbor")
         assert (adjacent_stdout.splitlines()[1]) != (established.stdout.strip())

@@ -27,6 +27,9 @@ nonzero)
 	exit 8
 	;;
 timeout)
+	exec sleep 60
+	;;
+interrupt)
 	printf '%s' "$$" >"${FPLINUX_STREAM_PID:?}"
 	exec sleep 60
 	;;

@@ -13,6 +13,7 @@ import socket
 import struct
 import subprocess
 import sys
+import termios
 import time
 from array import array
 from pathlib import Path
@@ -512,8 +513,14 @@ def test_hello_waits_for_manager_announcement_and_starts_paused(
         control = audiod.manager()
         (client,), pid = audiod.connect()
         audiod.hello(client)
+        # The sender queue empties when the daemon consumes the HELLO packet.
+        audiod.wait(
+            lambda: fcntl.ioctl(client, termios.TIOCOUTQ, bytes(4)) == bytes(4),
+            "daemon did not consume HELLO",
+        )
         audiod.send(client, OPEN, rate=22050, channels=2)
-        time.sleep(0.1)
+        readable, _, _ = select.select([client], [], [], 0.1)
+        assert not readable, "stream replied before the manager identified its peer"
         command = (
             f"CLOCK {pid} {os.geteuid()}"
             if clock
@@ -661,22 +668,25 @@ def test_kick_opens_default_pcm_and_idle_releases_after_three_seconds(
         assert ring.field(READ) == 0
         assert audiod.count("open") == 0
         audiod.send(client, KICK, stream=stream)
-        heard = audiod.wait(lambda: ring.field(HEARD) == 2400, "frames were not heard")
-        closed = audiod.wait(lambda: audiod.count("close") == 1, "PCM stayed open", 5)
-        assert 2.5 < closed - heard < 3.6
+        audiod.wait(lambda: ring.field(HEARD) == 2400, "frames were not heard")
+        audiod.wait(lambda: audiod.count("close") == 1, "PCM stayed open", 5)
+        events = audiod.card_events()
+        signals = [stamp for stamp, event in events if event == "pcm signal"]
+        (closed,) = [stamp for stamp, event in events if event == "close"]
+        assert signals
+        assert 2.5 < closed - signals[-1] < 3.6
         assert (ring.field(STATE), ring.field(SLEEPING)) == (PLAYING, 1)
-        assert [event for _, event in audiod.card_events() if event.startswith("open")] == [
-            "open default"
-        ]
-        assert "hw 48000 2 480 1440" in [event for _, event in audiod.card_events()]
+        assert [event for _, event in events if event.startswith("open")] == ["open default"]
+        assert "hw 48000 2 480 1440" in [event for _, event in events]
         control.send(f"ELIGIBLE {pid} 0".encode())
+        audiod.wait(lambda: ring.field(STATE) == PAUSED, "stream did not pause")
         audiod.write(client, stream, ring, 2400, 2400)
         audiod.send(client, KICK, stream=stream)
         time.sleep(0.1)
         assert audiod.count("open") == 1
         assert ring.field(READ) == 2400
 
-    result = audiod.run(exercise)
+    result = audiod.run(exercise, FPLINUX_AUDIOD_FAKE_SIGNAL_EVENTS="1")
     assert "closed after 3000 ms of silence" in result.stdout
 
 

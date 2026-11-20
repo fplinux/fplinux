@@ -25,6 +25,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
 
 from tests import ROOT
+from tests.fixtures.ssh_transport.stream_timeout import capture_stream_children
 from tests.ssh_transport_support import create_ready_session
 
 SSH_FIXTURES = ROOT / "tests" / "fixtures" / "ssh_transport"
@@ -196,16 +197,13 @@ class NandBackupSshStreamTests:
     ) -> None:
         """A stuck transfer terminates within its deadline without leaving its SSH child alive."""
         destination = nand_ssh_case.directory / "nand.raw"
-        pid_file = nand_ssh_case.directory / "ssh.pid"
-        with (
-            mock.patch.dict(os.environ, {"FPLINUX_STREAM_PID": str(pid_file)}),
-            pytest.raises(SystemExit, match=r"timed out after 0.2s"),
-        ):
-            nand_ssh_case.stream("timeout", destination, timeout=0.2)
+        with capture_stream_children() as children:
+            with pytest.raises(SystemExit, match=r"timed out after 0\.2s"):
+                nand_ssh_case.stream("timeout", destination, timeout=0.2)
 
-        process_id = int(pid_file.read_text(encoding="ascii"))
-        with pytest.raises(ProcessLookupError):
-            os.kill(process_id, 0)
+            (child,) = children
+            with pytest.raises(ProcessLookupError):
+                os.kill(child.pid, 0)
 
     def test_interrupt_forwards_to_an_isolated_stream_helper_and_reaps_ssh(
         self, nand_ssh_case: NandSshContext
@@ -221,7 +219,7 @@ class NandBackupSshStreamTests:
         shutil.copyfile(SSH_FIXTURES / "stream_helper.py", helper)
         environment = {
             **os.environ,
-            "FPLINUX_STREAM_MODE": "timeout",
+            "FPLINUX_STREAM_MODE": "interrupt",
             "FPLINUX_STREAM_PID": str(child_pid),
             "PATH": f"{nand_ssh_case.tools}:{os.environ['PATH']}",
             "PYTHONDONTWRITEBYTECODE": "1",

@@ -20,6 +20,11 @@ if TYPE_CHECKING:
 
 _PROCESS_TIMEOUT_SECONDS = 10
 _SERVER_START_TIMEOUT_SECONDS = 5
+_LOOPBACK_BIND_ATTEMPTS = 3
+
+
+class _LoopbackBindConflictError(RuntimeError):
+    """SSHD reported that another listener owns the chosen port."""
 
 
 class OpenSshServer:
@@ -87,7 +92,6 @@ class OpenSshServer:
                 (
                     "AddressFamily inet\n",
                     "ListenAddress 127.0.0.1\n",
-                    f"Port {self.port}\n",
                     f"HostKey {self.host_key}\n",
                     f"PidFile {self.directory / 'sshd.pid'}\n",
                     f"AuthorizedKeysFile {self.authorized_keys}\n",
@@ -113,29 +117,47 @@ class OpenSshServer:
         )
         if checked.returncode:
             raise RuntimeError(checked.stderr.strip())
-        self.process = subprocess.Popen(
-            [sshd, "-D", "-E", str(self.log), "-f", str(self.config)],
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            start_new_session=True,
-        )
-        try:
-            self._wait_until_listening()
-        except BaseException:
-            self.stop()
-            raise
+        for attempt in range(_LOOPBACK_BIND_ATTEMPTS):
+            self.log.unlink(missing_ok=True)
+            self.process = subprocess.Popen(
+                [sshd, "-D", "-E", str(self.log), "-f", str(self.config), "-p", str(self.port)],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                env=os.environ | {"LC_ALL": "C"},
+                start_new_session=True,
+            )
+            try:
+                self._wait_until_listening()
+            except _LoopbackBindConflictError:
+                self.stop()
+                if attempt + 1 == _LOOPBACK_BIND_ATTEMPTS:
+                    raise
+                self.port = self._unused_loopback_port()
+            except BaseException:
+                self.stop()
+                raise
+            else:
+                return
 
     def _wait_until_listening(self) -> None:
         deadline = time.monotonic() + _SERVER_START_TIMEOUT_SECONDS
+        listener = f"Server listening on 127.0.0.1 port {self.port}."
+        conflict = f"Bind to port {self.port} on 127.0.0.1 failed:"
         while time.monotonic() < deadline:
-            if self.process is not None and self.process.poll() is not None:
-                detail = self.log.read_text(encoding="utf-8", errors="replace")
+            exited = self.process is not None and self.process.poll() is not None
+            detail = (
+                self.log.read_text(encoding="utf-8", errors="replace") if self.log.exists() else ""
+            )
+            if exited:
                 message = f"loopback sshd exited before listening:\n{detail}"
+                if any(
+                    f"{conflict} {reason}." in detail
+                    for reason in ("Address in use", "Address already in use")
+                ):
+                    raise _LoopbackBindConflictError(message)
                 raise RuntimeError(message)
-            if self.log.exists() and "Server listening on 127.0.0.1" in self.log.read_text(
-                encoding="utf-8", errors="replace"
-            ):
+            if listener in detail:
                 return
             time.sleep(0.02)
         message = "loopback sshd did not start before the test deadline"

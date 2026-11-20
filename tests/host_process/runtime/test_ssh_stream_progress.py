@@ -12,6 +12,7 @@ import pytest
 from fplinux_cli.runtime.ssh import transport as ssh_transport
 
 from tests import ROOT
+from tests.fixtures.ssh_transport.stream_timeout import StreamClock
 from tests.ssh_transport_support import create_ready_session
 
 if TYPE_CHECKING:
@@ -89,30 +90,37 @@ def test_stream_reports_written_bytes_before_completion_and_excludes_existing_co
 
 
 @pytest.mark.parametrize(
-    ("mode", "timeout", "message", "expected", "final_count"),
+    ("mode", "message", "expected", "final_count"),
     [
-        ("failure", 5, "(?s)exit status 8:.*stream diagnostic", b"\x00\xffpart\x80end\n", 11),
-        ("stall", 0.75, "timed out after 0.75s", b"\x00\xffpart", 6),
+        ("failure", "(?s)exit status 8:.*stream diagnostic", b"\x00\xffpart\x80end\n", 11),
+        ("stall", "timed out after 5s", b"\x00\xffpart", 6),
     ],
+    ids=["ordinary-failure", "timeout-after-partial-read"],
 )
 # Separate case inputs keep the expected bytes and diagnostic independent.
 def test_stream_progress_preserves_partial_bytes_and_reaps_failed_or_timed_out_child(  # noqa: PLR0913
     *,
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
     local_stream: Callable[[str, BinaryIO, float, Callable[[int], None]], None],
     mode: str,
-    timeout: float,
     message: str,
     expected: bytes,
     final_count: int,
 ) -> None:
     """Diagnostics stay separate and a failed stream leaves no owned process running."""
     counts: list[int] = []
+    timeout = 5
+    clock = StreamClock(timeout)
+    if mode == "stall":
+        monkeypatch.setattr(ssh_transport, "time", clock)
 
     def progress(count: int) -> None:
         counts.append(count)
         if count == 6:
             (tmp_path / "release").touch()
+            if mode == "stall":
+                clock.expire_after_progress()
 
     destination_path = tmp_path / "download"
     previous_handlers = {
@@ -124,6 +132,7 @@ def test_stream_progress_preserves_partial_bytes_and_reaps_failed_or_timed_out_c
     ):
         local_stream(mode, destination, timeout, progress)
 
+    assert clock.expired_after_progress is (mode == "stall")
     assert counts[-1] == final_count
     assert destination_path.read_bytes() == expected
     for signum, handler in previous_handlers.items():

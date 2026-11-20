@@ -40,6 +40,7 @@ from tests.boot_identity import IDENTITY_12
 from tests.fdt import binary_tree
 from tests.fixtures.executables import install_python_script
 from tests.fixtures.portable_archive import capsule_files, refresh_archive
+from tests.fixtures.ssh_transport.stream_timeout import capture_stream_children
 from tests.process import python_environment
 from tests.windows_host_support import (
     StubWindowsHost,
@@ -807,13 +808,16 @@ def test_failed_reader_reports_stderr_and_keeps_partial_bytes(tmp_path: Path) ->
 def test_stream_timeout_reaps_the_owned_reader(tmp_path: Path) -> None:
     transport = native_process_transport(tmp_path)
     session = endpoint_session(tmp_path / "session")
-    pid_file = tmp_path / "reader.pid"
     with (
         (tmp_path / "partial.bin").open("w+b") as destination,
-        pytest.raises(SystemExit, match="timed out"),
+        capture_stream_children() as children,
     ):
-        transport.stream_remote(session, f"sleep:{pid_file}", destination, timeout=0.5)
-    assert not (Path("/proc") / pid_file.read_text()).exists()
+        with pytest.raises(SystemExit, match=r"timed out after 0\.5s"):
+            transport.stream_remote(session, "stall", destination, timeout=0.5)
+
+        (child,) = children
+        with pytest.raises(ProcessLookupError):
+            os.kill(child.pid, 0)
 
 
 @pytest.mark.parametrize("identity", ["correct", "wrong-session", "wrong-kernel"])

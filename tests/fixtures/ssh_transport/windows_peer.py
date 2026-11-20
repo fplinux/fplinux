@@ -40,8 +40,7 @@ def main() -> int:  # noqa: PLR0911 -- each branch supplies a distinct external 
         sys.stdout.buffer.write(b"partial")
         print("reader failed", file=sys.stderr)
         return 7
-    if command.startswith("sleep:"):
-        Path(command.removeprefix("sleep:")).write_text(str(os.getpid()))
+    if command == "stall":
         time.sleep(60)
         return 0
     if command.startswith("set -eu\n"):

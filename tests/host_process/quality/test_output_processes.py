@@ -282,8 +282,13 @@ class StageProcessTests:
             ]
             assert ("[31m") not in (output)
             assert ("\x1b") not in (output)
-            log = (root / "01-tail.log").read_bytes()
-            assert (b"\x1b[31mred\x1b[0m invalid=\xff") in (log)
+            _command, separator, payload = (root / "01-tail.log").read_bytes().partition(b"\n")
+            assert separator == b"\n"
+            assert payload == (
+                b"".join(f"line-{number:03d}\n".encode("ascii") for number in range(100))
+                + b"\x1b[31mred\x1b[0m invalid=\xff\n"
+                + "utf8=проверка\n".encode()
+            )
 
     def test_timeout_kills_child_group_and_records_named_failure(self) -> None:
         """Bound a hung stage, kill its group, and retain a useful diagnostic."""

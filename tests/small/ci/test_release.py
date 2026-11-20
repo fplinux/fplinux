@@ -70,14 +70,7 @@ def commit(checkout: Path) -> str:
 
 
 @pytest.fixture
-def assets(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, commit: str) -> Path:
-    for name, value in {
-        "GITHUB_REPOSITORY": "fplinux/fplinux",
-        "GITHUB_EVENT_NAME": "push",
-        "GITHUB_REF": "refs/heads/main",
-        "GITHUB_SHA": commit,
-    }.items():
-        monkeypatch.setenv(name, value)
+def assets(tmp_path: Path, commit: str) -> Path:
     return _write_assets(tmp_path, commit)
 
 
@@ -91,11 +84,20 @@ def _write_assets(directory: Path, commit: str) -> Path:
     return output
 
 
+@dataclass(frozen=True)
+class UploadedAsset:
+    """Snapshot of the file supplied to the upload command."""
+
+    path: Path
+    contents: bytes
+    size: int
+    digest: str
+
+
 @dataclass
 class GitHubProcess:
     """The release API's durable draft state, observed at the subprocess boundary."""
 
-    assets: Path
     checkout: Path
     commit: str
     real_run: Callable[..., subprocess.CompletedProcess[str]]
@@ -103,7 +105,7 @@ class GitHubProcess:
     prerelease: bool = True
     records: list[dict[str, Any]] = field(default_factory=list)
     operations: list[str] = field(default_factory=list)
-    uploaded: list[tuple[str, bytes]] = field(default_factory=list)
+    uploaded: list[UploadedAsset] = field(default_factory=list)
     damage: str | None = None
     body: str = ""
     publication: dict[str, object] | None = None
@@ -111,18 +113,27 @@ class GitHubProcess:
 
     def upload(self, paths: Iterable[Path]) -> None:
         """Retain the bytes from each transferred path at the upload boundary."""
-        self.uploaded.extend((path.name, path.read_bytes()) for path in paths)
+        for path in paths:
+            contents = path.read_bytes()
+            self.uploaded.append(
+                UploadedAsset(
+                    path=path,
+                    contents=contents,
+                    size=len(contents),
+                    digest="sha256:" + hashlib.sha256(contents).hexdigest(),
+                )
+            )
 
     def remote_assets(self) -> list[dict[str, Any]]:
         """Expose uploaded assets as the remote API's independent file records."""
         return [
             {
-                "name": name,
-                "size": len(contents),
-                "digest": "sha256:" + hashlib.sha256(contents).hexdigest(),
+                "name": asset.path.name,
+                "size": asset.size,
+                "digest": asset.digest,
                 "state": "uploaded",
             }
-            for name, contents in self.uploaded
+            for asset in self.uploaded
         ]
 
     def run(self, command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
@@ -251,10 +262,15 @@ class GitHubProcess:
 
 
 @pytest.fixture
-def github(
-    assets: Path, checkout: Path, commit: str, monkeypatch: pytest.MonkeyPatch
-) -> GitHubProcess:
-    process = GitHubProcess(assets, checkout, commit, subprocess.run, f"build-{commit[:12]}")
+def github(checkout: Path, commit: str, monkeypatch: pytest.MonkeyPatch) -> GitHubProcess:
+    for name, value in {
+        "GITHUB_REPOSITORY": "fplinux/fplinux",
+        "GITHUB_EVENT_NAME": "push",
+        "GITHUB_REF": "refs/heads/main",
+        "GITHUB_SHA": commit,
+    }.items():
+        monkeypatch.setenv(name, value)
+    process = GitHubProcess(checkout, commit, subprocess.run, f"build-{commit[:12]}")
     monkeypatch.setattr(subprocess, "run", process.run)
     return process
 
@@ -288,6 +304,7 @@ def stable(github: GitHubProcess, monkeypatch: pytest.MonkeyPatch) -> GitHubProc
 def test_initial_release_publishes_only_after_all_remote_assets_match(
     assets: Path, github: GitHubProcess, commit: str
 ) -> None:
+    expected_uploads = {path: path.read_bytes() for path in assets.iterdir()}
     release.publish_distribution(assets, commit=commit)
     assert github.operations == [
         "list",
@@ -299,15 +316,22 @@ def test_initial_release_publishes_only_after_all_remote_assets_match(
     ]
     assert github.publication == {"draft": False, "prerelease": True, "make_latest": "false"}
     assert github.body.startswith("Initial release.")
-    assert {name for name, _ in github.uploaded} == {path.name for path in assets.iterdir()}
+    assert {asset.path: asset.contents for asset in github.uploaded} == expected_uploads
 
 
-@pytest.mark.parametrize("damage", ["upload-failure", "missing-remote", "wrong-digest"])
+@pytest.mark.parametrize(
+    ("damage", "message"),
+    [
+        ("upload-failure", "GitHub release operation failed"),
+        ("missing-remote", "release has an incomplete asset inventory"),
+        ("wrong-digest", "release asset size or SHA-256 differs"),
+    ],
+)
 def test_remote_failure_keeps_the_release_private(
-    assets: Path, github: GitHubProcess, damage: str, commit: str
+    assets: Path, github: GitHubProcess, damage: str, message: str, commit: str
 ) -> None:
     github.damage = damage
-    with pytest.raises(SystemExit):
+    with pytest.raises(SystemExit, match=message):
         release.publish_distribution(assets, commit=commit)
     assert "create-draft" in github.operations
     assert "publish" not in github.operations
@@ -316,7 +340,7 @@ def test_remote_failure_keeps_the_release_private(
 def test_retry_of_a_complete_published_release_only_verifies_bytes(
     assets: Path, github: GitHubProcess, commit: str
 ) -> None:
-    github.upload(sorted(github.assets.iterdir()))
+    github.upload(sorted(assets.iterdir()))
     github.records.append(
         {
             "id": 7,
@@ -335,8 +359,8 @@ def test_retry_fills_only_missing_matching_draft_assets(
     assets: Path, stable: GitHubProcess, commit: str
 ) -> None:
     github = stable
-    github.upload(sorted(github.assets.iterdir())[:-1])
-    missing = {path.name for path in assets.iterdir()} - {name for name, _ in github.uploaded}
+    *existing, missing = sorted(assets.iterdir())
+    github.upload(existing)
     github.records.append(
         {
             "id": 7,
@@ -357,8 +381,7 @@ def test_retry_fills_only_missing_matching_draft_assets(
         "resolve-tag",
         "publish",
     ]
-    assert {name for name, _ in github.uploaded} >= missing
-    assert len(github.uploaded) == len(list(assets.iterdir()))
+    assert [asset.path for asset in github.uploaded[len(existing) :]] == [missing]
 
 
 def test_stable_tag_publishes_with_notes_from_the_previous_stable_version(

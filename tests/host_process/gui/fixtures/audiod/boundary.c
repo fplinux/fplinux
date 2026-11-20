@@ -726,6 +726,16 @@ snd_pcm_sframes_t snd_pcm_writei(snd_pcm_t *pcm, const void *frames,
 		return -EAGAIN;
 	if (count > (snd_pcm_uframes_t)room)
 		count = (snd_pcm_uframes_t)room;
+	if (getenv("FPLINUX_AUDIOD_FAKE_SIGNAL_EVENTS")) {
+		const int16_t *samples = frames;
+
+		for (size_t i = 0; i < count * pcm->hardware.channels; i++) {
+			if (samples[i]) {
+				event("pcm signal");
+				break;
+			}
+		}
+	}
 	if (pcm->played) {
 		fwrite(frames, 4, count, pcm->played);
 		fflush(pcm->played);

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import os
 import signal
+import subprocess
 import time
 from itertools import pairwise
 from pathlib import Path
@@ -16,10 +17,9 @@ import pytest
 from tests import ROOT
 from tests.c_harness import c_build_directory, compile_c
 from tests.host_tool.gui.clock.clock_audio import ClockAudioService
-from tests.process import run_process
+from tests.process import read_process_line, run_process
 
 if TYPE_CHECKING:
-    import subprocess
     from collections.abc import Iterator
 
 HERE = ROOT / "tests/host_tool/gui/clock"
@@ -145,21 +145,31 @@ def test_help_and_errors_do_not_open_devices(
 def test_unavailable_outputs_retry_without_log_flood_and_return_failure(
     clock_signal: Path, audio_work: Path
 ) -> None:
-    def stop_after_retries(process: subprocess.Popen[str], _deadline: float) -> None:
-        time.sleep(2.15)
-        assert process.poll() is None, "Clock signal stopped before the service could recover"
+    events: list[str] = []
+
+    def stop_after_retries(process: subprocess.Popen[str], deadline: float) -> None:
+        assert process.stdout is not None
+        while "audio-connect\n" not in events:
+            events.append(
+                read_process_line(process.stdout, deadline=deadline, name="Clock signal")
+            )
+        observation_seconds = 2.15
+        assert time.monotonic() + observation_seconds < deadline
+        with pytest.raises(subprocess.TimeoutExpired):
+            process.wait(timeout=observation_seconds)
         stop_signal(process, status=1)
 
     result = run_process(
         [str(clock_signal)],
         name="retry an absent Clock audio service and report no available output",
-        timeout=4,
+        timeout=6,
         env=audio_environment(audio_work),
         while_running=stop_after_retries,
     )
     assert result.returncode == 1
-    assert result.stdout.count("input-open\n") == 1
-    assert 2 <= result.stdout.count("audio-connect\n") <= 4
+    events.extend(result.stdout.splitlines(keepends=True))
+    assert events.count("input-open\n") == 1
+    assert 2 <= events.count("audio-connect\n") <= 4
     assert result.stderr.count("clock-signal: audio unavailable:") == 1
     assert result.stderr.count("clock-signal: vibration unavailable:") == 1
 
