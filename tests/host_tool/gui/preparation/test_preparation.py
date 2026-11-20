@@ -8,7 +8,6 @@ import os
 import select
 import shlex
 import signal
-import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -17,7 +16,7 @@ import pytest
 from tests import ROOT
 from tests.c_harness import c_build_directory, compile_c
 from tests.host_tool.display.status_resources import generate
-from tests.process import run_process
+from tests.process import read_process_line, run_process
 
 if TYPE_CHECKING:
     import subprocess
@@ -294,31 +293,35 @@ def test_missing_status_means_waiting(preparation: PreparationBinaries, tmp_path
 
 def next_event(process: subprocess.Popen[str], deadline: float) -> str:
     assert process.stdout is not None
-    value = bytearray()
-    while True:
-        readable, _, _ = select.select(
-            [process.stdout.fileno()], [], [], max(0, deadline - time.monotonic())
-        )
-        assert readable, "preparation did not report its next event"
-        byte = os.read(process.stdout.fileno(), 1)
-        assert byte
-        if byte == b"\n":
-            return value.decode("ascii")
-        value.extend(byte)
+    return read_process_line(
+        process.stdout, deadline=deadline, name="preparation display"
+    ).removesuffix("\n")
 
 
 def next_frame(process: subprocess.Popen[str], deadline: float, path: Path) -> bytes:
-    assert next_event(process, deadline).startswith("frame ")
-    return path.read_bytes()
+    event, _, sequence = next_event(process, deadline).partition(" ")
+    assert event == "frame"
+    assert sequence.isdecimal()
+    return path.with_name(f"{path.name}.{sequence}").read_bytes()
 
 
-def terminal_frame(process: subprocess.Popen[str], deadline: float, path: Path) -> bytes:
-    assert process.stdout is not None
-    image = next_frame(process, deadline, path)
-    while select.select([process.stdout.fileno()], [], [], 0.3)[0]:
-        assert time.monotonic() < deadline
-        image = next_frame(process, deadline, path)
-    return image
+def wait_for_frame(
+    process: subprocess.Popen[str], deadline: float, path: Path, expected: bytes
+) -> None:
+    while next_frame(process, deadline, path) != expected:
+        pass
+
+
+def expected_frame(
+    preparation: PreparationBinaries, width: int, height: int, stage: str, output: Path
+) -> bytes:
+    run_process(
+        [str(preparation.renderer), str(width), str(height), stage, str(output)],
+        name=f"build the fixture frame for {stage}",
+        timeout=5,
+        check=True,
+    )
+    return output.read_bytes()
 
 
 @pytest.mark.parametrize(
@@ -331,6 +334,10 @@ def test_busy_reading_terminal_and_vt(
     output = tmp_path / "frame"
     vt = tmp_path / "vt"
     os.mkfifo(vt)
+    expected = {
+        stage: expected_frame(preparation, width, height, stage, tmp_path / f"expected-{stage}")
+        for stage in ("reading-half", "ready", "error", "cancelled")
+    }
     environment = os.environ | {
         "FPLINUX_TEST_GEOMETRY": f"{width}x{height}",
         "FPLINUX_TEST_VT": str(vt),
@@ -341,19 +348,18 @@ def test_busy_reading_terminal_and_vt(
         assert next_event(process, deadline) == "opened"
         busy = next_frame(process, deadline, output)
         assert next_frame(process, deadline, output) != busy
-        update(preparation, status, "reading", "--completed", "33554432", "--total", "67108864")
-        reading = terminal_frame(process, deadline, output)
-        assert reading != busy
+        update(preparation, status, "reading", "--completed", "69206016", "--total", "138412032")
+        wait_for_frame(process, deadline, output, expected["reading-half"])
         for stage in ("ready", "error", "cancelled"):
             update(preparation, status, stage)
-            terminal = terminal_frame(process, deadline, output)
-            assert terminal != reading
+            assert json.loads(status.read_bytes()) == {"stage": stage}
+            wait_for_frame(process, deadline, output, expected[stage])
         with vt.open("wb", buffering=0) as channel:
             channel.write(b"0")
             assert next_event(process, deadline) == "inactive"
             channel.write(b"1")
             assert next_event(process, deadline) == "active"
-            assert next_frame(process, deadline, output) == terminal
+            assert next_frame(process, deadline, output) == expected["cancelled"]
         process.send_signal(signal.SIGTERM)
 
     result = run_process(
@@ -374,6 +380,15 @@ def test_card_install_display_animates_then_updates_and_stops(
     output = tmp_path / "frame"
     vt = tmp_path / "vt"
     os.mkfifo(vt)
+    expected = {
+        stage: expected_frame(preparation, 128, 160, stage, tmp_path / f"expected-{stage}")
+        for stage in (
+            "card-writing-zero-large",
+            "card-writing-half-large",
+            "card-verifying-half-large",
+            "card-ready",
+        )
+    }
     environment = os.environ | {
         "FPLINUX_TEST_GEOMETRY": "128x160",
         "FPLINUX_TEST_VT": str(vt),
@@ -387,8 +402,7 @@ def test_card_install_display_animates_then_updates_and_stops(
         assert next_frame(process, deadline, output) != sending
 
         update(preparation, status, "card-writing", "--completed", "0", "--total", "6442450944")
-        writing = terminal_frame(process, deadline, output)
-        assert writing != sending
+        wait_for_frame(process, deadline, output, expected["card-writing-zero-large"])
 
         progress = ("--completed", "3221225472", "--total", "6442450944")
         update(preparation, status, "card-writing", *progress)
@@ -397,15 +411,16 @@ def test_card_install_display_animates_then_updates_and_stops(
             "completed": 3221225472,
             "total": 6442450944,
         }
-        written = terminal_frame(process, deadline, output)
-        assert written != writing
+        wait_for_frame(process, deadline, output, expected["card-writing-half-large"])
 
         update(preparation, status, "card-verifying", *progress)
-        verifying = terminal_frame(process, deadline, output)
-        assert verifying != written
+        wait_for_frame(process, deadline, output, expected["card-verifying-half-large"])
 
         update(preparation, status, "card-ready")
-        assert terminal_frame(process, deadline, output) != verifying
+        assert json.loads(status.read_bytes()) == {"stage": "card-ready"}
+        wait_for_frame(process, deadline, output, expected["card-ready"])
+        assert process.stdout is not None
+        assert not select.select([process.stdout], [], [], 0.3)[0], "card-ready kept presenting"
         process.send_signal(signal.SIGTERM)
 
     result = run_process(

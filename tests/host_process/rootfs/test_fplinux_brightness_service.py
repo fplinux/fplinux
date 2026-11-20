@@ -113,6 +113,7 @@ class FPLinuxBrightnessServiceTests:
         assert (brightness.exchange(lease, "CLAIM")) == ("OK")
         assert (brightness.exchange(lease, "SHOW 0")) == ("OK")
         assert (brightness.run_cli("set", "8").returncode) == (0)
+        assert brightness.raw() == "0\n"
         lease.close()
         other = brightness.client()
         deadline = time.monotonic() + 3

@@ -33,6 +33,8 @@ struct capture {
 	bool initial_media_unknown;
 	struct fplinux_system_levels system_levels;
 	char close_value[16];
+	uint32_t close_serial;
+	unsigned int close_replies;
 	bool keep_screen_on;
 	bool has_request;
 	char left[128];
@@ -148,6 +150,8 @@ static void read_messages(struct capture *capture)
 			capture->redraw_ack = message.serial;
 		} else if (message.type == FPLINUX_UI_SESSION_CLOSE_REPLY) {
 			strcpy(capture->close_value, message.value);
+			capture->close_serial = message.serial;
+			++capture->close_replies;
 		} else if (message.type == FPLINUX_UI_SESSION_KEEP_SCREEN_ON) {
 			capture->keep_screen_on = message.enabled;
 		} else if (message.type == FPLINUX_UI_SESSION_STORAGE_REQUEST) {
@@ -935,7 +939,7 @@ static void about_reading_edges(struct capture *capture)
 	puts("settings-about: last text line is whole on every downward step");
 }
 
-static void sound_frames(struct capture *capture)
+static void sound_values_outputs_and_editors(struct capture *capture)
 {
 	bool russian = !strcmp(capture->observed.locale, "ru");
 	const char *height = getenv("FPLINUX_SETTINGS_TEST_HEIGHT");
@@ -986,7 +990,7 @@ static void sound_frames(struct capture *capture)
 		     russian ? "Отмена" : "Cancel");
 	wait_label(capture, alarm);
 	save_frame(capture, "settings-sound-alarm");
-	puts("settings-sound: separate class gauges and supported output choices fit actual frames");
+	puts("settings-sound: Media and Alarm values, supported outputs and both volume editors are visible");
 }
 
 static bool shows_bluetooth(const struct capture *capture, const char *value)
@@ -1285,22 +1289,30 @@ static void bluetooth_devices(struct capture *capture)
 	assert(bluez_fake_requests(capture->bluez) == requests);
 	press(capture, KEY_F14);
 	press(capture, KEY_F14);
-	press(capture, KEY_F14);
-	wait_label(capture, "Nearby devices");
-	pump_for(capture, 150);
-	assert(bluez_fake_discovery_requests(capture->bluez) == 2);
-	assert(bluez_fake_discovering(capture->bluez, HCI0));
-	bluez_fake_set_external_discovery(capture->bluez, HCI0, false);
+	wait_label(capture,
+		   capture->peer.width <= 128 ? "Search" : "Searching…");
+	assert(bluez_fake_discovery_owned(capture->bluez, HCI0));
+	assert(bluez_fake_agent_registered(capture->bluez));
 
-	/* Hide releases Agent1 and any local scan while retaining radio power. */
+	/* Hide releases the local scan and agent while the external scan stays active. */
 	assert(fplinux_ui_session_send(capture->session, &lifecycle));
-	pump_for(capture, 150);
+	deadline = fplinux_ui_frame_now_ms() + 3000;
+	while ((bluez_fake_discovery_owned(capture->bluez, HCI0) ||
+		bluez_fake_agent_registered(capture->bluez)) &&
+	       fplinux_ui_frame_now_ms() < deadline)
+		pump(capture);
+	assert(!bluez_fake_discovery_owned(capture->bluez, HCI0));
 	assert(!bluez_fake_agent_registered(capture->bluez));
+	assert(bluez_fake_discovering(capture->bluez, HCI0));
 	assert(bluez_fake_powered(capture->bluez, HCI0));
+	bluez_fake_set_external_discovery(capture->bluez, HCI0, false);
 	lifecycle.lifecycle = FPLINUX_UI_SESSION_FOREGROUND;
 	assert(fplinux_ui_session_send(capture->session, &lifecycle));
 	pump_for(capture, 150);
 	assert(bluez_fake_agent_registered(capture->bluez));
+	press(capture, KEY_F14);
+	wait_label(capture, "Bluetooth");
+	wait_legends(capture, "", "Open", "Back");
 	bluez_fake_request_agent(capture->bluez, BLUEZ_FAKE_AGENT_AUTHORIZATION,
 				 VISITOR, 0, 0, NULL);
 	wait_label(capture, "Allow pairing with Visitor?");
@@ -1373,23 +1385,68 @@ static void choose_transfer_folder(struct capture *capture)
 	press(capture, KEY_F13);
 }
 
-static void request_user_close(struct capture *capture)
+static void send_prepare_close(struct capture *capture, uint32_t serial)
 {
 	struct fplinux_ui_session_message close = {
 		.type = FPLINUX_UI_SESSION_PREPARE_CLOSE,
-		.serial = ++capture->serial,
+		.serial = serial,
 	};
 	uint64_t deadline = fplinux_ui_frame_now_ms() + 3000;
+	unsigned int previous_replies = capture->close_replies;
 
-	capture->close_value[0] = '\0';
 	strcpy(close.reason, "user-close");
 	assert(fplinux_ui_session_send(capture->session, &close));
-	while (strcmp(capture->close_value, "wait") &&
+	while (capture->close_replies == previous_replies &&
 	       fplinux_ui_frame_now_ms() < deadline)
 		pump(capture);
+	assert(capture->close_replies > previous_replies);
+	assert(capture->close_serial == serial);
+}
+
+static void request_user_close(struct capture *capture)
+{
+	send_prepare_close(capture, ++capture->serial);
 	assert(!strcmp(capture->close_value, "wait"));
 	wait_label(capture,
 		   "Cancel the current file transfer and close Settings?");
+}
+
+static void wait_for_cancelled_receive(struct capture *capture)
+{
+	char cancel_requested[PATH_MAX];
+	char release_cancel[PATH_MAX];
+	char cancelled[PATH_MAX];
+	FILE *release;
+	uint64_t deadline;
+
+	assert(snprintf(cancel_requested, sizeof(cancel_requested),
+			"%s/obex-cancel/cancel-requested",
+			capture->directory) < (int)sizeof(cancel_requested));
+	assert(snprintf(release_cancel, sizeof(release_cancel),
+			"%s/obex-cancel/release-cancel",
+			capture->directory) < (int)sizeof(release_cancel));
+	assert(snprintf(cancelled, sizeof(cancelled),
+			"%s/obex-cancel/cancelled",
+			capture->directory) < (int)sizeof(cancelled));
+	deadline = fplinux_ui_frame_now_ms() + 3000;
+	while (access(cancel_requested, F_OK) < 0 &&
+	       fplinux_ui_frame_now_ms() < deadline)
+		pump(capture);
+	assert(access(cancel_requested, F_OK) == 0);
+	assert(access(cancelled, F_OK) < 0 && errno == ENOENT);
+
+	/* Replaying the same serial observes the close decision with Cancel held. */
+	send_prepare_close(capture, capture->serial);
+	assert(!strcmp(capture->close_value, "wait"));
+	release = fopen(release_cancel, "wx");
+	assert(release && fclose(release) == 0);
+	deadline = fplinux_ui_frame_now_ms() + 3000;
+	while (strcmp(capture->close_value, "ready") &&
+	       fplinux_ui_frame_now_ms() < deadline)
+		pump(capture);
+	assert(!strcmp(capture->close_value, "ready"));
+	assert(capture->close_serial == capture->serial);
+	assert(access(cancelled, F_OK) == 0);
 }
 
 static void bluetooth_transfers(struct capture *capture)
@@ -1485,7 +1542,7 @@ static void bluetooth_transfers(struct capture *capture)
 	press(capture, KEY_UP);
 
 	capture->stage = "cancel receive: choose peer";
-	obex = start_obex(capture, "receive-slow", "cancel");
+	obex = start_obex(capture, "receive-cancel-held", "cancel");
 	press(capture, KEY_OK);
 	wait_label(capture, "Test peer");
 	wait_legends(capture, "Stop search", "Select", "Back");
@@ -1510,16 +1567,9 @@ static void bluetooth_transfers(struct capture *capture)
 	capture->stage = "cancel receive: cancel and close";
 	request_user_close(capture);
 	press(capture, KEY_OK);
-	/* The ordinary close reply waits for the cancelled worker to finish. */
-	deadline = fplinux_ui_frame_now_ms() + 3000;
-	while (strcmp(capture->close_value, "ready") &&
-	       fplinux_ui_frame_now_ms() < deadline)
-		pump(capture);
-	assert(!strcmp(capture->close_value, "ready"));
+	wait_for_cancelled_receive(capture);
+	reap_obex(capture, obex);
 	close_and_reap(capture);
-	int status;
-	assert(waitpid(obex, &status, 0) == obex);
-	assert(WIFEXITED(status) && WEXITSTATUS(status) == 0);
 	puts("settings-bluetooth-transfers: shared pickers send bytes, consent publishes received files, document results return, and close waits for cancellation");
 }
 
@@ -1568,7 +1618,7 @@ int main(int argc, char **argv)
 		else if (!strcmp(argv[6], "about-edges"))
 			about_reading_edges(&capture);
 		else if (!strcmp(argv[6], "sound"))
-			sound_frames(&capture);
+			sound_values_outputs_and_editors(&capture);
 		else if (!strcmp(argv[6], "root-sound"))
 			root_sound_summary(&capture);
 		else

@@ -316,11 +316,12 @@ static void expect_sent(const struct fplinux_ui *ui, size_t index,
 	assert(!strcmp(ui->sent[index].value, value));
 }
 
-static bool has_sent(const struct fplinux_ui *ui, const char *name,
-		     const char *value)
+static bool has_sent(const struct fplinux_ui *ui, size_t first,
+		     const char *name, const char *value)
 {
-	for (size_t i = 0; i < ui->sent_count; i++)
-		if (!strcmp(ui->sent[i].name, name) &&
+	for (size_t i = first; i < ui->sent_count; i++)
+		if (ui->sent[i].type == FPLINUX_UI_SESSION_SETTING &&
+		    !strcmp(ui->sent[i].name, name) &&
 		    !strcmp(ui->sent[i].value, value))
 			return true;
 	return false;
@@ -663,15 +664,16 @@ static void test_sound_controls(struct fplinux_ui *ui, bool headphones)
 	struct fplinux_ui_screen *form;
 
 	open_row(ui, "Sound");
-	expect_sent(ui, sent, "audio_output", "");
-	expect_sent(ui, sent + 1, "audio_outputs", "");
+	assert(has_sent(ui, sent, "audio_output", ""));
+	assert(has_sent(ui, sent, "audio_outputs", ""));
 	reply(ui, FPLINUX_UI_SESSION_SETTING, "volume", "0", "");
 	reply(ui, FPLINUX_UI_SESSION_SETTING, "alarm_volume", "8", "");
-	reply(ui, FPLINUX_UI_SESSION_SETTING, "audio_output", "AUTO", "");
 	reply(ui, FPLINUX_UI_SESSION_SETTING, "audio_outputs",
 	      headphones ? "AUTO,HEADPHONES" : "AUTO,SPEAKER", "");
+	reply(ui, FPLINUX_UI_SESSION_SETTING, "audio_output", "AUTO", "");
 	assert(!strcmp(detail(ui, "Sound", "Media volume"), "0"));
 	assert(!strcmp(detail(ui, "Sound", "Alarm volume"), "8"));
+	assert(!strcmp(detail(ui, "Sound", "Output"), "Automatic"));
 	open_row(ui, "Media volume");
 	form = current(ui, "Media volume");
 	assert(form->rows[0].value == 0);
@@ -697,6 +699,7 @@ static void test_sound_controls(struct fplinux_ui *ui, bool headphones)
 	open_row(ui, "Output");
 	form = current(ui, "Output");
 	assert(form->count == 2 && has_row(form, "Automatic"));
+	assert(form->rows[row_named(form, "Automatic")].selected);
 	assert(has_row(form, headphones ? "Headphones" : "Speaker"));
 	assert(!has_row(form, headphones ? "Speaker" : "Headphones"));
 	select_row(ui, headphones ? "Headphones" : "Speaker");
@@ -704,7 +707,8 @@ static void test_sound_controls(struct fplinux_ui *ui, bool headphones)
 		    headphones ? "HEADPHONES" : "SPEAKER");
 	reply(ui, FPLINUX_UI_SESSION_SETTING, "audio_output",
 	      headphones ? "HEADPHONES" : "SPEAKER", "");
-	current(ui, "Sound");
+	assert(!strcmp(detail(ui, "Sound", "Output"),
+		       headphones ? "Headphones" : "Speaker"));
 }
 
 static void
@@ -944,7 +948,7 @@ static void test_input_language(struct fplinux_ui *ui)
 	struct fplinux_ui_screen *list;
 	size_t sent = ui->sent_count;
 
-	assert(has_sent(ui, "input_locale", ""));
+	assert(has_sent(ui, 0, "input_locale", ""));
 	open_row(ui, "Input");
 	assert(!strcmp(detail(ui, "Input", "Input language"), "Русский"));
 	open_row(ui, "Input language");

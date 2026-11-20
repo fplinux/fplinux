@@ -5,6 +5,7 @@
 #include <assert.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -76,8 +77,14 @@ bool fplinux_drm_session_wait_present(struct fplinux_drm_session *session)
 bool fplinux_drm_session_present(struct fplinux_drm_session *session,
 				 unsigned int page)
 {
-	FILE *frame = fopen(getenv("FPLINUX_TEST_FRAME"), "wb");
+	char path[PATH_MAX];
+	unsigned int sequence = ++frames;
+	int length = snprintf(path, sizeof(path), "%s.%u",
+			      getenv("FPLINUX_TEST_FRAME"), sequence);
 	unsigned char *pixels = session->mapping + page * session->page_bytes;
+
+	assert(length > 0 && (size_t)length < sizeof(path));
+	FILE *frame = fopen(path, "wb");
 
 	assert(frame && session->active && page < session->pages);
 	for (unsigned int row = 0; row < session->height; ++row) {
@@ -91,7 +98,7 @@ bool fplinux_drm_session_present(struct fplinux_drm_session *session,
 	for (size_t byte = session->size; byte < session->size + 32; ++byte)
 		assert(session->mapping[byte] == 0xa5);
 	session->shown_page = page;
-	printf("frame %u\n", ++frames);
+	printf("frame %u\n", sequence);
 	fflush(stdout);
 	return true;
 }

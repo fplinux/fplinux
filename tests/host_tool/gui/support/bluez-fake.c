@@ -858,6 +858,14 @@ bool bluez_fake_discovering(struct bluez_fake *fake, const char *path)
 	return adapter->external_discovery || adapter->discovery_owner[0];
 }
 
+bool bluez_fake_discovery_owned(struct bluez_fake *fake, const char *path)
+{
+	struct fake_adapter *adapter = find(fake, path);
+
+	assert(adapter);
+	return adapter->discovery_owner[0] != '\0';
+}
+
 void bluez_fake_set_external_discovery(struct bluez_fake *fake,
 				       const char *path, bool discovering)
 {

@@ -67,6 +67,7 @@ bool bluez_fake_device_paired(struct bluez_fake *fake, const char *path);
 bool bluez_fake_device_trusted(struct bluez_fake *fake, const char *path);
 bool bluez_fake_device_connected(struct bluez_fake *fake, const char *path);
 bool bluez_fake_discovering(struct bluez_fake *fake, const char *path);
+bool bluez_fake_discovery_owned(struct bluez_fake *fake, const char *path);
 void bluez_fake_set_external_discovery(struct bluez_fake *fake,
 				       const char *path, bool discovering);
 unsigned int bluez_fake_discovery_requests(const struct bluez_fake *fake);

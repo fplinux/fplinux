@@ -76,14 +76,15 @@ static void test_invalid_frames(void)
 {
 	struct fplinux_launch_frame frame = { 0 };
 	const int invalid[][2] = {
-		{ 0, 128 },   { 128, 0 },   { -128, 128 }, { 128, -128 },
-		{ 242, 320 }, { 240, 321 }, { 239, 320 },  { 321, 240 },
-		{ 320, 241 }, { 320, 320 },
+		{ 0, 128 },    { 128, 0 },   { -128, 128 },
+		{ 128, -128 }, { 242, 320 }, { 240, 321 },
+		{ 321, 240 },  { 320, 241 }, { 320, 320 },
 	};
 	size_t index;
 	int fd = make_frame(128 * 128 * 2);
 	int short_fd = make_frame(128 * 128 * 2 - 2);
 	int extra_fd = make_frame(128 * 128 * 2 + 2);
+	int wrong_width_fd = make_frame(239 * 320 * 2);
 	int oversized_fd = make_frame(320 * 241 * 2);
 	int pipe_fds[2];
 
@@ -101,6 +102,9 @@ static void test_invalid_frames(void)
 	      "a truncated snapshot rejects and releases the previous card");
 	check(!fplinux_launch_frame_copy(&frame, extra_fd, 128, 128),
 	      "snapshot metadata must match its exact byte size");
+	check(!fplinux_launch_frame_copy(&frame, wrong_width_fd, 239, 320) &&
+		      !frame.pixels && !frame.bytes,
+	      "a correctly sized buffer for an unsupported width is rejected");
 	check(!fplinux_launch_frame_copy(&frame, oversized_fd, 320, 241) &&
 		      !frame.pixels && !frame.bytes,
 	      "a landscape file exceeding the pixel budget is rejected");
@@ -115,6 +119,7 @@ static void test_invalid_frames(void)
 	close(fd);
 	close(short_fd);
 	close(extra_fd);
+	close(wrong_width_fd);
 	close(oversized_fd);
 }
 

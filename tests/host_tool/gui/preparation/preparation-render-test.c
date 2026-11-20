@@ -89,6 +89,32 @@ static const struct scenario scenarios[] = {
 	    .total = 536870912,
 	    .progress_percent = "75%",
 	    .progress_bytes = "384.0 / 512.0 MiB" } },
+	{ "card-writing-zero-large",
+	  { FPLINUX_PREPARATION_CARD_WRITING, 0, 6442450944 },
+	  { .heading = "Writing microSD",
+	    .detail = "Keep USB connected.",
+	    .indicator = FPLINUX_STATUS_PROGRESS,
+	    .total = 6442450944,
+	    .progress_percent = "0%",
+	    .progress_bytes = "0.0 / 6144.0 MiB" } },
+	{ "card-writing-half-large",
+	  { FPLINUX_PREPARATION_CARD_WRITING, 3221225472, 6442450944 },
+	  { .heading = "Writing microSD",
+	    .detail = "Keep USB connected.",
+	    .indicator = FPLINUX_STATUS_PROGRESS,
+	    .completed = 3221225472,
+	    .total = 6442450944,
+	    .progress_percent = "50%",
+	    .progress_bytes = "3072.0 / 6144.0 MiB" } },
+	{ "card-verifying-half-large",
+	  { FPLINUX_PREPARATION_CARD_VERIFYING, 3221225472, 6442450944 },
+	  { .heading = "Verifying microSD",
+	    .detail = "Keep USB connected.",
+	    .indicator = FPLINUX_STATUS_PROGRESS,
+	    .completed = 3221225472,
+	    .total = 6442450944,
+	    .progress_percent = "50%",
+	    .progress_bytes = "3072.0 / 6144.0 MiB" } },
 	{ "card-ready",
 	  { FPLINUX_PREPARATION_CARD_READY, 0, 0 },
 	  { .heading = "microSD ready",
@@ -108,7 +134,7 @@ int main(int argc, char **argv)
 	unsigned int width, height;
 	size_t bytes;
 
-	assert(argc == 4);
+	assert(argc == 4 || argc == 5);
 	assert(sscanf(argv[1], "%u", &width) == 1);
 	assert(sscanf(argv[2], "%u", &height) == 1);
 	for (size_t i = 0; i < sizeof(scenarios) / sizeof(scenarios[0]); ++i)
@@ -157,6 +183,13 @@ int main(int argc, char **argv)
 			free(actual.pixels);
 			return 1;
 		}
+	if (argc == 5) {
+		FILE *frame = fopen(argv[4], "wb");
+
+		assert(frame);
+		assert(fwrite(expected.pixels, 1, bytes, frame) == bytes);
+		assert(!fclose(frame));
+	}
 	free(expected.pixels);
 	free(actual.pixels);
 	return 0;

@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * Small D-Bus service used only by test_fplinux_bluetooth.py.  It replaces
- * BlueZ and obexd at their public D-Bus boundary; it does not model either
- * daemon beyond the client-visible cases exercised there.
+ * D-Bus peer for the Bluetooth client and native Settings tests.
  */
 #define _POSIX_C_SOURCE 200809L
 
@@ -29,6 +27,7 @@ enum mode {
 	SEND_STALL,
 	RECEIVE,
 	RECEIVE_SLOW,
+	RECEIVE_CANCEL_HELD,
 	RECEIVE_OWNER_LOSS,
 	RECEIVE_AGENT_CANCEL,
 	NETWORK_EARLY,
@@ -42,6 +41,7 @@ struct service {
 	char *agent_owner;
 	char *agent_path;
 	DBusPendingCall *agent_call;
+	DBusMessage *cancel_call;
 	bool agent_started;
 	bool interrupted_authorization;
 	long long authorization_started_ms;
@@ -68,6 +68,18 @@ static void fail(const char *message)
 {
 	fprintf(stderr, "fplinux Bluetooth test service: %s\n", message);
 	exit(2);
+}
+
+static void publish_marker(const char *path, const char *contents)
+{
+	size_t length = strlen(contents);
+	int file = open(path, O_WRONLY | O_CREAT | O_EXCL, 0600);
+
+	if (file < 0 || write(file, contents, length) != (ssize_t)length ||
+	    close(file) < 0) {
+		perror(path);
+		fail("cannot publish marker");
+	}
 }
 
 static void send_reply(DBusConnection *connection, DBusMessage *reply)
@@ -236,7 +248,9 @@ static void finish_authorization(struct service *service)
 		return;
 	}
 	int file = open(target, O_WRONLY | O_CREAT | O_TRUNC, 0600);
-	size_t length = service->mode == RECEIVE_SLOW ? 3 : 7;
+	bool partial = service->mode == RECEIVE_SLOW ||
+		       service->mode == RECEIVE_CANCEL_HELD;
+	size_t length = partial ? 3 : 7;
 	if (file < 0 || write(file, "fixture", length) != (ssize_t)length ||
 	    close(file) < 0) {
 		if (file >= 0)
@@ -251,7 +265,7 @@ static void finish_authorization(struct service *service)
 	emit_property(service->connection, TRANSFER_PATH,
 		      "org.bluez.obex.Transfer1", "Transferred",
 		      DBUS_TYPE_UINT64, &transferred);
-	if (service->mode == RECEIVE_SLOW)
+	if (partial)
 		return;
 	const char *complete = "complete";
 	emit_property(service->connection, TRANSFER_PATH,
@@ -353,6 +367,12 @@ static bool copy_sent_file(DBusConnection *connection, DBusMessage *message,
 	return true;
 }
 
+static void complete_cancel(DBusConnection *connection, DBusMessage *message)
+{
+	publish_marker("cancelled", "cancelled\n");
+	reply_empty(connection, message);
+}
+
 static DBusHandlerResult handle(DBusConnection *connection,
 				DBusMessage *message, void *data)
 {
@@ -390,11 +410,13 @@ static DBusHandlerResult handle(DBusConnection *connection,
 	}
 	if (dbus_message_is_method_call(message, "org.bluez.obex.Transfer1",
 					"Cancel")) {
-		int file = open("cancelled", O_WRONLY | O_CREAT | O_EXCL, 0600);
-		if (file < 0 || write(file, "cancelled\n", 10) != 10 ||
-		    close(file) < 0)
-			fail("cannot record transfer cancellation");
-		reply_empty(connection, message);
+		if (service->mode == RECEIVE_CANCEL_HELD) {
+			publish_marker("cancel-requested",
+				       "cancel-requested\n");
+			service->cancel_call = dbus_message_ref(message);
+		} else {
+			complete_cancel(connection, message);
+		}
 		return DBUS_HANDLER_RESULT_HANDLED;
 	}
 	if (dbus_message_is_method_call(message, "org.bluez.obex.AgentManager1",
@@ -464,6 +486,8 @@ static enum mode parse_mode(const char *argument)
 		return RECEIVE;
 	if (strcmp(argument, "receive-slow") == 0)
 		return RECEIVE_SLOW;
+	if (strcmp(argument, "receive-cancel-held") == 0)
+		return RECEIVE_CANCEL_HELD;
 	if (strcmp(argument, "receive-owner-loss") == 0)
 		return RECEIVE_OWNER_LOSS;
 	if (strcmp(argument, "receive-agent-cancel") == 0)
@@ -476,16 +500,6 @@ static enum mode parse_mode(const char *argument)
 		return NETWORK_SNAPSHOT_MISSING;
 	fail("unknown mode");
 	return SEND_FAST;
-}
-
-static void publish_ready(const char *path)
-{
-	int file = open(path, O_WRONLY | O_CREAT | O_EXCL, 0600);
-	if (file < 0 || write(file, "ready\n", 6) != 6 || close(file) < 0) {
-		if (file >= 0)
-			close(file);
-		fail("cannot publish readiness marker");
-	}
 }
 
 int main(int argc, char **argv)
@@ -525,7 +539,7 @@ int main(int argc, char **argv)
 					NULL))
 		fail("cannot register D-Bus handler");
 	dbus_connection_flush(service.connection);
-	publish_ready(argv[2]);
+	publish_marker(argv[2], "ready\n");
 	long long deadline = milliseconds() + 8000;
 	while ((service.stop_at == 0 || milliseconds() < service.stop_at) &&
 	       milliseconds() < deadline) {
@@ -534,6 +548,13 @@ int main(int argc, char **argv)
 		if (service.agent_call != NULL &&
 		    dbus_pending_call_get_completed(service.agent_call))
 			finish_authorization(&service);
+		if (service.cancel_call &&
+		    access("release-cancel", F_OK) == 0) {
+			complete_cancel(service.connection,
+					service.cancel_call);
+			dbus_message_unref(service.cancel_call);
+			service.cancel_call = NULL;
+		}
 		if (service.agent_started &&
 		    !service.interrupted_authorization &&
 		    milliseconds() - service.authorization_started_ms >= 150 &&
@@ -574,6 +595,10 @@ int main(int argc, char **argv)
 	if (service.agent_call != NULL) {
 		dbus_pending_call_cancel(service.agent_call);
 		dbus_pending_call_unref(service.agent_call);
+	}
+	if (service.cancel_call != NULL) {
+		dbus_message_unref(service.cancel_call);
+		fail("cancel reply was never released");
 	}
 	return service.stop_at == 0 ? 2 : 0;
 }

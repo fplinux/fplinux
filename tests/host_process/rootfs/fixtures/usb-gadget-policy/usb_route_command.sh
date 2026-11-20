@@ -4,7 +4,7 @@
 # Replace the external route query; filters deliberately do not affect output.
 set -eu
 
-if [ "${1-}" != route ] || [ "${2-}" != show ]; then
+if [ "$#" -ne 2 ] || [ "$1" != route ] || [ "$2" != show ]; then
 	printf '%s\n' 'expected ip route show' >&2
 	exit 2
 fi

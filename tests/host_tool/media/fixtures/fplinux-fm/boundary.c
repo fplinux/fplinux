@@ -165,8 +165,8 @@ int ioctl(int fd, unsigned long request, ...)
 		((struct v4l2_frequency *)data)->frequency = frequency;
 	} else {
 		/* The frontend may seek, but must never change audio controls. */
-		errno = EPERM;
-		return -1;
+		fprintf(stderr, "unexpected radio ioctl: %#lx\n", request);
+		abort();
 	}
 	return 0;
 }

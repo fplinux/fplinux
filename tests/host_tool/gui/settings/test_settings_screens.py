@@ -77,10 +77,10 @@ def test_actual_settings_root_sound_summary_follows_live_media_level(
 
 @pytest.mark.parametrize("screen", list(ROOT_ROWS))
 @pytest.mark.parametrize("locale", ["en", "ru"])
-def test_actual_settings_sound_uses_separate_class_gauges_and_supported_outputs(
+def test_actual_settings_sound_shows_media_alarm_values_output_choices_and_editors(
     settings_native: Path, tmp_path: Path, screen: tuple[int, int], locale: str
 ) -> None:
-    """Real Sound lists, class gauges and truthful choices fit every shipped profile."""
+    """Real Sound shows the current Media and Alarm values and opens both editors."""
     width, height = screen
     result = run_process(
         [
@@ -112,7 +112,8 @@ def test_actual_settings_sound_uses_separate_class_gauges_and_supported_outputs(
         )
     assert result.returncode == 0, result.stdout + result.stderr
     assert result.stdout == (
-        "settings-sound: separate class gauges and supported output choices fit actual frames\n"
+        "settings-sound: Media and Alarm values, supported outputs and both volume editors "
+        "are visible\n"
     )
 
 
@@ -542,5 +543,5 @@ def test_actual_settings_bluetooth_file_pickers_and_worker_complete_and_cancel_t
     )
     assert (tmp_path / "obex-send/sent-bytes").read_bytes() == b"settings payload\n"
     assert (files / "incoming.txt").read_bytes() == b"fixture"
-    assert (tmp_path / "obex-cancel/cancelled").read_text(encoding="ascii") == "cancelled\n"
+    assert (tmp_path / "obex-cancel/cancelled").read_bytes() == b"cancelled\n"
     assert {path.name for path in files.iterdir()} == {"payload.txt", "incoming.txt"}

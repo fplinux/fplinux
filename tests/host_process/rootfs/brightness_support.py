@@ -72,21 +72,20 @@ class BrightnessProcesses:
             env=env,
         )
         deadline = time.monotonic() + 3
-        while time.monotonic() < deadline:
+        while (remaining := deadline - time.monotonic()) > 0:
             if self.process.poll() is not None:
                 _, error = self.process.communicate(timeout=1)
                 pytest.fail(f"brightness daemon exited early: {error}")
-            if self.socket_path.exists():
-                with socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET) as probe:
-                    try:
-                        probe.connect(str(self.socket_path))
-                    except ConnectionRefusedError:
-                        pass
-                    else:
-                        probe.settimeout(3)
-                        probe.sendall(b"GET")
-                        if probe.recv(32).startswith(b"LEVEL "):
-                            return
+            with socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET) as probe:
+                probe.settimeout(remaining)
+                try:
+                    probe.connect(str(self.socket_path))
+                except FileNotFoundError, ConnectionRefusedError:
+                    pass
+                else:
+                    probe.sendall(b"GET")
+                    if probe.recv(32).startswith(b"LEVEL "):
+                        return
             time.sleep(0.01)
         pytest.fail("brightness daemon did not listen")
 
