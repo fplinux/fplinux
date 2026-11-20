@@ -130,9 +130,11 @@ class StageProcessTests:
                     ],
                     timeout=_STAGE_TIMEOUT,
                 )
-            data = (root / "01-volume.log").read_bytes()
-            assert (b"o" * 1000) in (data)
-            assert (b"e" * 1000) in (data)
+            _command, separator, payload = (root / "01-volume.log").read_bytes().partition(b"\n")
+            assert separator == b"\n"
+            assert len(payload) == 400_000
+            assert payload.count(b"o") == 200_000
+            assert payload.count(b"e") == 200_000
             assert (stdout.getvalue()) == ("")
             assert ("eee") not in (stderr.getvalue())
             assert ("check: volume OK") in (stderr.getvalue())

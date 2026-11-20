@@ -12,6 +12,8 @@ import sys
 import tarfile
 from pathlib import Path
 
+OPENSSH_CLIENT_COMMANDS = ("ssh", "ssh-keygen", "ssh-keyscan", "sftp")
+
 
 def _build_python(version: str, jobs: int) -> Path:
     work = Path("/work")
@@ -146,7 +148,7 @@ def export_runtime(version: str, jobs: int) -> None:
     """Build the archive interpreter and export it with the APK-provided runtime files."""
     installation = _build_python(version, jobs)
     files = _python_files(installation, version.rsplit(".", 1)[0])
-    for name in ("ssh", "ssh-keygen", "ssh-keyscan"):
+    for name in OPENSSH_CLIENT_COMMANDS:
         files[f"runtime/bin/{name}"] = Path("/usr/bin") / name
     files["runtime/lib/ld-musl-x86_64.so.1"] = Path("/lib/ld-musl-x86_64.so.1")
     _add_libraries(files)

@@ -268,11 +268,54 @@ def test_explicit_card_commands_require_a_supported_model_and_install_consent(
 
     inspected = _launch(archive, "card", "inspect", "--target", "jade")
     assert inspected.returncode == 23
-    assert _record(inspected)["inspect_only"] is True
+    assert f"SD card {'c' * 32} (6 MiB) at /dev/mmcblk0" in inspected.stdout
     installed = _launch(archive, "card", "install", "--target", "jade", "--erase-card", "a" * 32)
     assert installed.returncode == 23
     assert _record(installed)["erase_card"] == "a" * 32
     assert _record(installed)["confirm"] is None
+
+
+def test_card_inspect_materializes_ram_without_the_system_card_objects(archive: Path) -> None:
+    catalog = json.loads((archive / "targets.json").read_bytes())
+    files = catalog["targets"]["jade"]["files"]
+    card_objects = {}
+    for relative, parts in files.items():
+        if relative.startswith("card/"):
+            for part in parts:
+                path = archive / part
+                card_objects[path] = path.read_bytes()
+                path.unlink()
+
+    inspected = _launch(archive, "card", "inspect", "--target", "jade")
+
+    assert inspected.returncode == 23, (inspected.stdout, inspected.stderr)
+    assert f"SD card {'c' * 32} (6 MiB) at /dev/mmcblk0" in inspected.stdout
+    action = _record(inspected)
+    bundle = Path(action["bundle"])
+    assert action["target"] == "jade"
+    assert action["profile"] is None
+    assert (bundle / "ramboot.bin").read_bytes() == b"Jade shared"
+    manifest = (archive / files["build-manifest.json"][0]).read_bytes()
+    assert (bundle / "build-manifest.json").read_bytes() == manifest
+    assert not (bundle / "card").exists()
+
+    installed = _launch(archive, "card", "install", "--target", "jade", "--erase-card", "a" * 32)
+
+    assert installed.returncode == 1
+    assert "the extracted release is missing archive member" in installed.stderr
+    assert "RUNTIME ACTION" not in installed.stdout
+
+    for path, contents in card_objects.items():
+        path.write_bytes(contents)
+    retried = _launch(archive, "card", "install", "--target", "jade", "--erase-card", "a" * 32)
+
+    assert retried.returncode == 23, (retried.stdout, retried.stderr)
+    install_action = _record(retried)
+    assert install_action["data"] == action["data"]
+    assert install_action["logs"] == action["logs"]
+    install_bundle = Path(install_action["bundle"])
+    assert (install_bundle / "build-manifest.json").read_bytes() == manifest
+    assert (install_bundle / "card/layout.json").read_bytes() == b"Selected card layout"
 
 
 def test_prepare_passes_phone_data_and_dump_options_to_the_selected_model(archive: Path) -> None:

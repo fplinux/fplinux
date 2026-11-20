@@ -13,7 +13,7 @@ import pytest
 from fplinux_cli.ci import release
 from fplinux_cli.packaging.distribution import attach_inputs
 
-from tests.distribution_support import COMMIT, write_release, write_transport
+from tests.distribution_support import COMMIT, SELECTIONS, write_release, write_transport
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -26,7 +26,7 @@ def assets(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     transport = tmp_path / "transport"
     write_transport(transport)
     output = tmp_path / "release"
-    attach_inputs(packages, transport, output)
+    attach_inputs(packages, transport, output, expected_matrix=SELECTIONS)
     for name, value in {
         "GITHUB_REPOSITORY": "fplinux/fplinux",
         "GITHUB_EVENT_NAME": "push",

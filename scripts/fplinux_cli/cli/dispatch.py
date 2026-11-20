@@ -335,10 +335,10 @@ def command_action(
             allow_other_build=args.allow_other_build,
         )
     elif args.command == "card":
-        from fplinux_cli.cli.card import install_target_card  # noqa: PLC0415 -- selected backend.
+        from fplinux_cli.cli.card import run_target_card  # noqa: PLC0415 -- selected backend.
 
         action = partial(
-            install_target_card,
+            run_target_card,
             args.target,
             jobs=args.jobs,
             build_type=args.build_type,

@@ -106,11 +106,21 @@ def _stop_launcher(process: subprocess.Popen[bytes], host: str) -> None:
         fail("native launcher did not stop after the no-phone smoke")
 
 
+def _smoke_environment(root: Path) -> dict[str, str]:
+    user_data = str(root.parent / "user-data")
+    return {
+        **os.environ,
+        DATA_ENV: str(data_root(root, environment={})),
+        "LOCALAPPDATA": user_data,
+        "XDG_DATA_HOME": user_data,
+    }
+
+
 def _check_menu(root: Path, host: str, catalog: ReleaseCatalog) -> None:
     result = subprocess.run(
         _native_launcher(host),
         cwd=root,
-        env={**os.environ, DATA_ENV: str(data_root(root, environment={}))},
+        env=_smoke_environment(root),
         input=b"0\n",
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
@@ -134,8 +144,7 @@ def _launch_to_invitation(  # noqa: PLR0913 -- host, model, action and attempt i
     events = scope / f"smoke-events-{attempt}.jsonl"
     output = scope / f"smoke-output-{attempt}.txt"
     command = [*_native_launcher(host), *action, "--target", target, "--events", str(events)]
-    environment = os.environ.copy()
-    environment[DATA_ENV] = str(data_root(root, environment={}))
+    environment = _smoke_environment(root)
     environment.update(TMP=str(scope / "temp"), TEMP=str(scope / "temp"))
     creation_flags = 0
     if sys.platform == "win32":
@@ -202,6 +211,7 @@ def _smoke_target(root: Path, host: str, catalog: ReleaseCatalog, target: str) -
                 *(str(path) for path in storage_paths),
             ],
             cwd=root,
+            env=_smoke_environment(root),
             check=False,
             timeout=60,
         )

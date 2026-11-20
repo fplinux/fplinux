@@ -14,6 +14,9 @@ fi
 target=$3
 [ "$4" = --events ]
 events=$5
+if [ "$target" = nokia-ta1618 ]; then
+	"${FPLINUX_TEST_PYTHON:?fixture Python is required}" -B phone-store.py "$target"
+fi
 launch=${events##*/}
 launch=${launch%.jsonl}
 scope=${events%/*}

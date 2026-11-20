@@ -14,7 +14,12 @@ from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
 import pytest
-from fplinux_cli.runtime import card, card_access
+from fplinux_cli.cli import card as checkout_card
+from fplinux_cli.cli.dispatch import command_action
+from fplinux_cli.cli.parser import create_parser
+from fplinux_cli.device_data import inputs
+from fplinux_cli.runtime import boot, card, card_access, phone_data, workflow
+from fplinux_cli.runtime.bundle import ValidatedBundle
 from fplinux_cli.runtime.ssh import commands
 
 if TYPE_CHECKING:
@@ -65,20 +70,79 @@ def bundle(tmp_path: Path) -> Path:
 def test_card_kit_damage_fails_before_opening_reader(
     bundle: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    (bundle / "card/board.tar").write_bytes(b"bad package bytes")
+    board = bundle / "card/board.tar"
+    board.write_bytes(board.read_bytes().replace(b"staged", b"broken"))
     monkeypatch.setattr(card, "run_phone", lambda *_args, **_kwargs: pytest.fail("started reader"))
 
     with pytest.raises(SystemExit, match=r"differs from its build manifest: board\.tar"):
         card.run_card(bundle, bundle / "data", bundle / "logs", erase_card=CID)
 
 
+def test_checkout_card_inspect_builds_and_resolves_only_the_ram_profile(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    parser, check_parser = create_parser((TARGET,))
+    args = parser.parse_args(
+        [
+            "card",
+            "inspect",
+            TARGET,
+            "--build-type",
+            "debug",
+            "--jobs",
+            "2",
+            "--from-dump",
+            str(tmp_path / "nand.bin"),
+            "--phone-data",
+            str(tmp_path / "phone"),
+        ]
+    )
+    ram = tmp_path / "ram"
+    calls: list[str] = []
+
+    def build(target: str, jobs: int, *, profile: str | None = None, **options: object) -> None:
+        assert profile is None, "card inspect requested a system-card build"
+        assert (target, jobs) == (TARGET, 2)
+        assert options == {"build_type": "debug", "include_device_data": False}
+        calls.append("build")
+
+    def resolve(
+        target: str, profile: str | None = None, *, build_type: str
+    ) -> tuple[SimpleNamespace, dict[str, str]]:
+        assert (target, profile, build_type) == (TARGET, None, "debug")
+        calls.append("resolve")
+        return SimpleNamespace(path=ram), {}
+
+    def inspect(bundle: Path, data: Path, logs: Path, **options: object) -> int:
+        assert bundle == ram
+        assert data.is_relative_to(tmp_path)
+        assert logs == tmp_path / "logs/run" / TARGET
+        assert options["inspect_only"] is True
+        assert options.get("card_bundle") is None
+        assert options["from_dump"] == tmp_path / "nand.bin"
+        assert options["phone_data"] == tmp_path / "phone"
+        calls.append("inspect")
+        return 0
+
+    monkeypatch.setattr(checkout_card, "data_root", lambda _root: tmp_path)
+    monkeypatch.setattr(checkout_card, "build", build)
+    monkeypatch.setattr(checkout_card, "resolve_target_bundle", resolve)
+    monkeypatch.setattr(checkout_card, "run_card", inspect)
+    command_action(args, check_parser)()
+
+    assert calls == ["build", "resolve", "inspect"]
+
+
 @pytest.mark.parametrize("inspect_only", [True, False])
-def test_card_actions_use_one_reader_and_require_the_confirmed_cid(
+def test_card_actions_report_capacity_and_only_install_calls_writer(
     bundle: Path, monkeypatch: pytest.MonkeyPatch, *, inspect_only: bool
 ) -> None:
+    if inspect_only:
+        (bundle / "card/boot.xz").unlink()
     session = {"session": "authenticated reader"}
     listing = SimpleNamespace(returncode=0, stdout=f"/dev/mmcblk0 {CID} 8192\n")
-    log = SimpleNamespace(message=lambda _message: None, capture=nullcontext)
+    messages: list[str] = []
+    log = SimpleNamespace(message=messages.append, capture=nullcontext)
     progress_commands: list[str] = []
 
     def remote(_session: object, command: str, **_kwargs: object) -> SimpleNamespace:
@@ -87,8 +151,7 @@ def test_card_actions_use_one_reader_and_require_the_confirmed_cid(
         return listing
 
     transport = SimpleNamespace(run_remote=remote)
-    firmware: dict[str, tuple[bytes, ...]] = {"audio-profile": (b"captured data",)}
-    visits = []
+    visits: list[str] = []
 
     def write(
         connection: tuple[object, object], selected: card.SdCard, *_args: object, **_kwargs: object
@@ -98,8 +161,12 @@ def test_card_actions_use_one_reader_and_require_the_confirmed_cid(
         assert selected.device == "/dev/mmcblk0"
 
     def start_reader(*_args: Any, **options: Any) -> int:  # noqa: ANN401 -- workflow peer.
-        result = options["install_card"]((transport, session), firmware, log)
-        assert result is not inspect_only
+        if inspect_only:
+            assert "install_card" not in options
+            options["inspect_card"]((transport, session), log)
+        else:
+            assert "inspect_card" not in options
+            options["install_card"]((transport, session), {}, log)
         return 0
 
     monkeypatch.setattr(card, "_write_card", write)
@@ -113,6 +180,7 @@ def test_card_actions_use_one_reader_and_require_the_confirmed_cid(
     )
 
     assert result == 0
+    assert messages == [f"SD card {CID} (4 MiB) at /dev/mmcblk0"]
     assert visits == ([] if inspect_only else [CID])
     assert progress_commands == (
         []
@@ -121,6 +189,134 @@ def test_card_actions_use_one_reader_and_require_the_confirmed_cid(
             "/usr/libexec/fplinux/preparation --stage card-sending /run/fplinux-preparation-status"
         ]
     )
+
+
+@pytest.mark.parametrize("reader_present", [True, False], ids=["same-reader", "reader-lost"])
+def test_card_inspect_requires_the_retained_authenticated_reader(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    *,
+    reader_present: bool,
+) -> None:
+    ram = tmp_path / "ram"
+    data = tmp_path / "runtime data"
+    store = tmp_path / "phone originals"
+    admitted = ValidatedBundle(
+        ram,
+        {
+            "target": TARGET,
+            "identity": {"target": {"display_name": "Fixture phone"}},
+            "profile": None,
+            "build_type": "release",
+        },
+        "a" * 64,
+        "b" * 64,
+        None,
+    )
+    session = {"session": "authenticated reader"}
+    calls: list[str] = []
+
+    def prepare(*_args: object, **options: object) -> bool:
+        assert options["store"] == store
+        assert options["retain_reader"] is True
+        calls.append("prepare")
+        return True
+
+    def remote(actual: object, command: str, **_kwargs: object) -> SimpleNamespace:
+        assert actual is session
+        assert "/sys/block/mmcblk" in command
+        calls.append("list")
+        return SimpleNamespace(returncode=0, stdout=f"/dev/mmcblk0 {CID} 8192\n")
+
+    def reconnect(
+        actual: ValidatedBundle, **options: object
+    ) -> tuple[SimpleNamespace, dict[str, str]] | None:
+        assert actual is admitted
+        assert options["session_root"] == data / "reader/session"
+        assert options["required"] is True
+        calls.append("authenticate")
+        return (SimpleNamespace(run_remote=remote), session) if reader_present else None
+
+    monkeypatch.setattr(workflow, "host_preflight", lambda: None)
+    monkeypatch.setattr(workflow, "admit_bundle", lambda _path: admitted)
+    monkeypatch.setattr(
+        phone_data, "device_data_spec", lambda *_args: SimpleNamespace(required_declarations=())
+    )
+    monkeypatch.setattr(phone_data, "prepare_phone_data", prepare)
+    monkeypatch.setattr(boot, "reconnect_live_bundle", reconnect)
+    monkeypatch.setattr(
+        inputs, "capture_phone_data", lambda *_args, **_kwargs: pytest.fail("read card firmware")
+    )
+    monkeypatch.setattr(
+        phone_data, "finish_reader", lambda *_args, **_kwargs: pytest.fail("finished reader")
+    )
+
+    status = card.run_card(ram, data, tmp_path / "logs", inspect_only=True, phone_data=store)
+
+    output = capsys.readouterr()
+    if reader_present:
+        assert status == 0
+        assert calls == ["prepare", "authenticate", "list"]
+        assert f"SD card {CID} (4 MiB) at /dev/mmcblk0" in output.out
+    else:
+        assert status == 1
+        assert calls == ["prepare", "authenticate"]
+        assert "The phone left its RAM preparation session" in output.err
+
+
+@pytest.mark.parametrize(
+    ("listing", "erase_card", "expected_error"),
+    [
+        (f"/dev/mmcblk0 {CID} 8192\n", "a" * 32, "must match exactly one SD card"),
+        (
+            f"/dev/mmcblk0 {CID} 8192\n/dev/mmcblk1 {'a' * 32} 8192\n",
+            None,
+            "Select the card to erase with --erase-card CID",
+        ),
+        ("", CID, "No microSD card was found"),
+        (f"/dev/mmcblk0 {CID} 8192\n", None, "Card installation cancelled"),
+        (f"/dev/mmcblk0 {CID} 4096\n", CID, "The selected SD card is too small"),
+    ],
+    ids=["mismatched-cid", "multiple-unselected", "no-card", "declined", "too-small"],
+)
+def test_card_install_rejects_before_sending_or_writing_to_the_card(
+    bundle: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    listing: str,
+    erase_card: str | None,
+    expected_error: str,
+) -> None:
+    session = {"session": "authenticated reader"}
+    log = SimpleNamespace(message=lambda _message: None, capture=nullcontext)
+    confirmations: list[str] = []
+    remote_commands: list[str] = []
+
+    def confirm(selected: card.SdCard) -> bool:
+        confirmations.append(selected.cid)
+        return False
+
+    def remote(_session: object, command: str, **_kwargs: object) -> SimpleNamespace:
+        remote_commands.append(command)
+        assert "/sys/block/mmcblk" in command
+        return SimpleNamespace(returncode=0, stdout=listing)
+
+    def start_reader(*_args: Any, **options: Any) -> int:  # noqa: ANN401 -- workflow peer.
+        options["install_card"]((SimpleNamespace(run_remote=remote), session), {}, log)
+        return 0
+
+    monkeypatch.setattr(card, "run_phone", start_reader)
+    monkeypatch.setattr(
+        card, "_write_card", lambda *_args, **_kwargs: pytest.fail("started writer")
+    )
+
+    with pytest.raises(SystemExit, match=expected_error):
+        card.run_card(
+            bundle, bundle / "data", bundle / "logs", erase_card=erase_card, confirm=confirm
+        )
+
+    assert confirmations == ([CID] if expected_error == "Card installation cancelled" else [])
+    assert len(remote_commands) == 1
 
 
 @pytest.mark.parametrize("outcome", ["invalid-host-key", "interrupted", "verified"])
@@ -226,7 +422,7 @@ def test_card_enrollment_uses_reader_pin_and_preserves_keys_once_writing_starts(
     )
 
     def start_reader(*_args: Any, **options: Any) -> int:  # noqa: ANN401 -- workflow peer.
-        assert options["install_card"]((transport, session), {}, log)
+        options["install_card"]((transport, session), {}, log)
         return 0
 
     monkeypatch.setattr(card, "prepare_card_media", media)

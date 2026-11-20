@@ -351,7 +351,12 @@ def build_archive_inputs(
         relative: write_archive_file(
             tmp_path / "prepared-linux", relative, b"prepared Linux runtime", mode=0o755
         )
-        for relative in ("runtime/bin/python3.15", "runtime/lib/ld-musl-x86_64.so.1")
+        for relative in (
+            "runtime/bin/python3.15",
+            "runtime/bin/sftp",
+            "runtime/lib/ld-musl-x86_64.so.1",
+            "tools/linux/sftp",
+        )
     }
 
     def prepared_native(**_options: object) -> dict[str, Path]:

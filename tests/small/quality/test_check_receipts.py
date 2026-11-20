@@ -23,14 +23,13 @@ from fplinux_cli.quality.receipts import (
 from tests import ROOT
 
 
-def recipe(profile: str | None = None) -> CheckReceiptRecipe:
+def recipe() -> CheckReceiptRecipe:
     """Return a fixed recipe with visibly distinct digest fields."""
     return CheckReceiptRecipe(
         scope="python",
         closure_digest="a" * 64,
         orchestration_recipe="b" * 64,
         environment_generation="c" * 64,
-        profile=profile,
     )
 
 
@@ -98,20 +97,17 @@ class CheckReceiptTests:
             assert not (receipt_matches(cache, first))
             assert receipt_matches(cache, second)
 
-    def test_profile_receipt_does_not_replace_the_default_slot(self) -> None:
-        """A named profile owns a separate fixed receipt path."""
+    def test_named_kernel_profile_keeps_its_own_receipt(self) -> None:
+        """A kernel check for a named profile starts with no cached success."""
         with tempfile.TemporaryDirectory() as temporary:
             cache = Path(temporary) / ".cache"
-            default = recipe()
-            profile = recipe("usb-host-lab")
+            default = replace(recipe(), scope="kernel", build_type="release")
+            profile = replace(default, profile="microsd-uboot")
 
             publish_success_receipt(cache, default)
+            assert not receipt_matches(cache, profile)
             publish_success_receipt(cache, profile)
 
-            assert (receipt_path(cache, default)) == (cache / "check-results/python/success.json")
-            assert (receipt_path(cache, profile)) == (
-                cache / "check-results/profiles/usb-host-lab/python/success.json"
-            )
             assert receipt_matches(cache, default)
             assert receipt_matches(cache, profile)
 

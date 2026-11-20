@@ -56,6 +56,18 @@ def distribution_matrix() -> tuple[tuple[str, str], ...]:
     )
 
 
+def print_distribution_report(metadata: dict[str, Any]) -> None:
+    """Report the host and model pairings of a verified distribution."""
+    records = metadata["runtimes"]
+    archives = {record["archive"] for record in records}
+    for name in sorted(archives):
+        print(f"runtime: {name}; pairing: OK")
+    print(
+        f"distribution: {len(archives)} host archives, "
+        f"{len(records)} selections; corresponding sources and checksums: OK"
+    )
+
+
 def _asset_size(path: Path) -> None:
     if path.stat().st_size >= _MAX_ASSET_BYTES:
         fail(f"distribution asset must be smaller than 2 GiB: {path.name}")
@@ -177,8 +189,9 @@ def _write_distribution(
     identities: dict[tuple[str, str], str],
     sources: SourcePayload,
 ) -> None:
-    from fplinux_cli.cli.inspect import inspect_distribution  # noqa: PLC0415
     from fplinux_cli.packaging.archive import _write_archive, finalize_checksums  # noqa: PLC0415
+
+    from .verification import verify_distribution  # noqa: PLC0415
 
     output.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(dir=output.parent, prefix=".fplinux-package-") as temporary:
@@ -222,7 +235,7 @@ def _write_distribution(
                 "dependencies": None,
             },
         )
-        inspect_distribution(staging)
+        print_distribution_report(verify_distribution(staging))
         _publish_directory(staging, output)
 
 
@@ -341,12 +354,20 @@ def package_release(
     print(f"FPLinux packages: {common.display_text(output)}")
 
 
-def attach_inputs(directory: Path, inputs: Path, output: Path) -> None:
+def attach_inputs(
+    directory: Path,
+    inputs: Path,
+    output: Path,
+    *,
+    expected_matrix: Collection[tuple[str, str]],
+) -> None:
     """Add the release's dependency transport without changing its archive bytes."""
-    from fplinux_cli.cli.inspect import inspect_distribution  # noqa: PLC0415
     from fplinux_cli.dependencies.distribution import read_dependency_distribution  # noqa: PLC0415
 
-    metadata = inspect_distribution(directory, complete=True)
+    from .verification import verify_distribution  # noqa: PLC0415
+
+    metadata = verify_distribution(directory, expected_matrix=expected_matrix)
+    print_distribution_report(metadata)
     if metadata["dependencies"] is not None:
         fail("package already includes a dependency transport")
     dependency = read_dependency_distribution(inputs)
@@ -362,5 +383,8 @@ def attach_inputs(directory: Path, inputs: Path, output: Path) -> None:
         for name in dependency.files:
             shutil.copyfile(inputs / name, staging / name)
         _write_metadata(staging, {**metadata, "dependencies": "DEPENDENCIES.json"})
-        inspect_distribution(staging, complete=True, require_inputs=True)
+        verified = verify_distribution(
+            staging, expected_matrix=expected_matrix, require_inputs=True
+        )
+        print_distribution_report(verified)
         _publish_directory(staging, output)

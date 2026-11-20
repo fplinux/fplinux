@@ -32,9 +32,17 @@ def run_ci(args: argparse.Namespace) -> None:
 
         install_site()
     elif args.ci_command == "attach-inputs":
-        from fplinux_cli.packaging.distribution import attach_inputs  # noqa: PLC0415
+        from fplinux_cli.packaging.distribution import (  # noqa: PLC0415
+            attach_inputs,
+            distribution_matrix,
+        )
 
-        attach_inputs(args.directory, args.inputs_dir, args.output_directory)
+        attach_inputs(
+            args.directory,
+            args.inputs_dir,
+            args.output_directory,
+            expected_matrix=distribution_matrix(),
+        )
     elif args.ci_command == "smoke":
         from .smoke import smoke_distribution  # noqa: PLC0415 -- native runtime backend.
 

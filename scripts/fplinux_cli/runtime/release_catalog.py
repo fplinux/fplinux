@@ -222,7 +222,12 @@ def _copy_bundle_file(archive_root: Path, parts: tuple[str, ...], output: Binary
 
 
 def _stage_bundle_files(
-    archive_root: Path, destination: Path, recipe: BundleRecipe, records: dict[str, Any]
+    archive_root: Path,
+    destination: Path,
+    recipe: BundleRecipe,
+    records: dict[str, Any],
+    *,
+    omitted: set[str],
 ) -> None:
     for relative, record in records.items():
         mode = 0o755 if relative in recipe.executables else 0o644
@@ -233,6 +238,8 @@ def _stage_bundle_files(
             or type(record.get("size")) is not int
         ):
             fail(f"invalid build manifest file record for {relative}")
+        if relative in omitted:
+            continue
         path = destination / relative
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("xb") as stream:
@@ -243,12 +250,16 @@ def _stage_bundle_files(
 
 
 def _verify_live_host_files(
-    archive_root: Path, recipe: BundleRecipe, records: dict[str, Any]
+    archive_root: Path, recipe: BundleRecipe, records: dict[str, Any], *, omitted: set[str]
 ) -> None:
     """Check the outer files still used directly when a board bundle is cached."""
     for relative, parts in recipe.files.items():
         part = parts[0]
-        if len(parts) != 1 or not part.startswith(("common/", "runtime/", "scripts/", "tools/")):
+        if (
+            relative in omitted
+            or len(parts) != 1
+            or not part.startswith(("common/", "runtime/", "scripts/", "tools/"))
+        ):
             continue
         path = _part_path(archive_root, part)
         record = records[relative]
@@ -256,13 +267,14 @@ def _verify_live_host_files(
             fail(f"{part} SHA256 differs from the selected build manifest")
 
 
-def materialize_bundle(
+def materialize_bundle(  # noqa: PLR0913 -- boot selection and card assets are independent inputs.
     archive_root: Path,
     managed_root: Path,
     catalog: ReleaseCatalog,
     target: str,
     *,
     microsd: bool = False,
+    include_card: bool = True,
 ) -> Path:
     """Publish the selected bundle atomically under its original inventory's digest."""
     recipe = target_recipe(catalog, target, microsd=microsd)
@@ -286,17 +298,20 @@ def materialize_bundle(
     checksum_object = recipe.files[_CHECKSUMS][0]
     checksum_data = _read_object(archive_root, checksum_object)
     inventory = sha256_bytes(f"{manifest_object}\n{checksum_object}".encode())
+    omitted = set() if include_card else {name for name in records if name.startswith("card/")}
     bundles = managed_root / "runtime/archive-bundles"
-    bundle = bundles / inventory
+    # Keep the original build generation for reader reuse, with a separate cache entry
+    # so an install always requires the complete bundle.
+    bundle = bundles / (f"{inventory}-reader" if omitted else inventory)
     if bundle.is_dir():
-        _verify_live_host_files(archive_root, recipe, records)
+        _verify_live_host_files(archive_root, recipe, records, omitted=omitted)
         return bundle
 
     bundles.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(dir=bundles, prefix=".stage-") as temporary:
         staged = Path(temporary) / "bundle"
         staged.mkdir()
-        _stage_bundle_files(archive_root, staged, recipe, records)
+        _stage_bundle_files(archive_root, staged, recipe, records, omitted=omitted)
         _read_manifest(
             (staged / _RUNTIME_MANIFEST).read_bytes(),
             _RUNTIME_MANIFEST,
@@ -403,12 +418,18 @@ def main(*, archive_root: Path) -> None:
                 options.phone_data is not None or getattr(options, "from_dump", None) is not None
             ):
                 parser.error("system microSD boot uses the phone data already on the card")
+            inspect_card = options.command == "card" and options.card_action == "inspect"
             managed_root = data_root(archive_root)
             scope = target_runtime_root(managed_root, archive_root, options.target)
             data = options.data_root.resolve() if options.data_root is not None else scope
             logs = options.log_root.resolve() if options.log_root is not None else scope / "logs"
             bundle = materialize_bundle(
-                archive_root, managed_root, catalog, options.target, microsd=microsd
+                archive_root,
+                managed_root,
+                catalog,
+                options.target,
+                microsd=microsd,
+                include_card=not inspect_card,
             )
     except EOFError:
         print("FPLinux: No model selected. Use run --target MODEL to start.", file=sys.stderr)

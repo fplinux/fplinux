@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-2.0-only
-"""Install release card assets using the authenticated NAND reader session."""
+"""Inspect and install SD cards through the authenticated RAM reader session."""
 
 from __future__ import annotations
 
@@ -226,31 +226,35 @@ def _write_card(  # noqa: PLR0913 -- admitted inputs and selected transport stay
                     )
 
 
-def _use_reader(  # noqa: PLR0913 -- inspector and writer share the selected session.
+def _list_cards(connection: tuple[Any, dict[str, Any]], log: RunLog) -> list[SdCard]:
+    transport, session = connection
+    listing = transport.run_remote(session, _LIST_CARDS, capture_output=True, shared=True)
+    if listing.returncode:
+        detail = listing.stderr.strip().splitlines()
+        fail("Cannot inspect the SD card" + (f": {detail[-1]}" if detail else ""))
+    return _read_cards(listing.stdout, log)
+
+
+def _inspect_card(connection: tuple[Any, dict[str, Any]], log: RunLog) -> None:
+    _list_cards(connection, log)
+
+
+def _install_card(  # noqa: PLR0913 -- the kit and consent inputs stay explicit.
     connection: tuple[Any, dict[str, Any]],
     firmware: dict[str, tuple[FirmwareInput, ...]],
     log: RunLog,
     *,
     card_dir: Path,
     layout: CardLayout,
-    inspect_only: bool,
     erase_card: str | None,
     confirm: Callable[[SdCard], bool] | None,
-) -> bool:
-    transport, session = connection
-    listing = transport.run_remote(session, _LIST_CARDS, capture_output=True, shared=True)
-    if listing.returncode:
-        detail = listing.stderr.strip().splitlines()
-        fail("Cannot inspect the SD card" + (f": {detail[-1]}" if detail else ""))
-    cards = _read_cards(listing.stdout, log)
-    if inspect_only:
-        return False
+) -> None:
+    cards = _list_cards(connection, log)
     card = _select_card(cards, erase_card, confirm)
     if card.bytes < layout.capacity_bytes:
         fail("The selected SD card is too small")
     with preparation_progress(connection, log, initial="card-sending"):
         _write_card(connection, card, card_dir, layout=layout, firmware=firmware, log=log)
-    return True
 
 
 def run_card(  # noqa: PLR0913 -- input selection, session and consent are independent.
@@ -268,9 +272,20 @@ def run_card(  # noqa: PLR0913 -- input selection, session and consent are indep
     loader_trace: bool = False,
 ) -> int:
     """Start or reuse one RAM reader for card discovery, preparation and writing."""
+    if inspect_only:
+        return run_phone(
+            bundle,
+            data,
+            logs,
+            phone_data=phone_data,
+            from_dump=from_dump,
+            events=events,
+            loader_trace=loader_trace,
+            inspect_card=_inspect_card,
+        )
     if erase_card is not None and CARD_CID.fullmatch(erase_card) is None:
         fail("--erase-card must be a 32-digit lowercase SD card CID")
-    if not inspect_only and erase_card is None and confirm is None:
+    if erase_card is None and confirm is None:
         fail("card install requires --erase-card CID")
     assets = bundle if card_bundle is None else card_bundle
     try:
@@ -286,10 +301,9 @@ def run_card(  # noqa: PLR0913 -- input selection, session and consent are indep
         events=events,
         loader_trace=loader_trace,
         install_card=partial(
-            _use_reader,
+            _install_card,
             card_dir=assets / "card",
             layout=layout,
-            inspect_only=inspect_only,
             erase_card=erase_card,
             confirm=confirm,
         ),

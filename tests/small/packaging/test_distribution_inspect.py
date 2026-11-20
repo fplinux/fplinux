@@ -4,14 +4,17 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from typing import TYPE_CHECKING
 
 import pytest
 from fplinux_cli.cli.inspect import inspect_archive, inspect_distribution
-from fplinux_cli.packaging import distribution
+from fplinux_cli.packaging import card_kit, distribution
 
 from tests.distribution_support import (
     RELEASE_ID,
+    SELECTIONS,
+    json_bytes,
     read_zip,
     write_release,
     write_transport,
@@ -29,7 +32,7 @@ def assets(tmp_path: Path) -> Path:
     transport = tmp_path / "transport"
     write_transport(transport)
     output = tmp_path / "final"
-    distribution.attach_inputs(packages, transport, output)
+    distribution.attach_inputs(packages, transport, output, expected_matrix=SELECTIONS)
     return output
 
 
@@ -42,6 +45,15 @@ def test_source_and_final_release_inspection_verify_pairing(
     assert "2 host archives, 18 selections; corresponding sources and checksums: OK" in (
         capsys.readouterr().out
     )
+
+
+def test_release_card_validation_uses_the_archived_catalog(
+    assets: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    original = inspect_distribution(assets)
+    monkeypatch.setattr(card_kit, "discover_profiles", lambda _target: ("default",))
+
+    assert inspect_distribution(assets) == original
 
 
 def test_release_rejects_changed_runtime_even_after_outer_checksums_are_replaced(
@@ -69,6 +81,21 @@ def test_universal_archive_rejects_a_nonexecutable_native_runtime(assets: Path) 
     write_zip(runtime, files, executables)
 
     with pytest.raises(SystemExit, match=r"wrong executable mode: runtime/bin/python3\.15"):
+        inspect_archive(runtime)
+
+
+def test_runtime_archive_rejects_an_incomplete_card_kit(assets: Path) -> None:
+    runtime = assets / f"FPLinux-linux-x64-{RELEASE_ID}.zip"
+    files, modes = read_zip(runtime)
+    files.pop("SHA256SUMS")
+    catalog = json.loads(files["targets.json"])
+    del catalog["targets"]["nokia-ta1618"]["files"]["card/layout.json"]
+    files["targets.json"] = json_bytes(catalog)
+    write_zip(runtime, files, {name for name, mode in modes.items() if mode & 0o111})
+
+    with pytest.raises(
+        SystemExit, match="release board has incomplete card installation files: nokia-ta1618"
+    ):
         inspect_archive(runtime)
 
 

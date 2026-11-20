@@ -7,10 +7,12 @@ import hashlib
 import json
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 from fplinux_cli.ci import smoke
+from fplinux_cli.device_data.store import locked_phone_store
 from fplinux_cli.runtime.data_paths import archive_runtime_root
 
 from tests.distribution_support import (
@@ -20,6 +22,7 @@ from tests.distribution_support import (
     release_fields,
     write_zip,
 )
+from tests.process import python_environment
 
 _PREPARATION_TARGET = "nokia-ta1618"
 
@@ -124,12 +127,16 @@ def test_native_smoke_extracts_under_prepared_permissions_and_cleans_up(
         launched_roots.append(root)
 
     def run_storage(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[bytes]:
+        root = kwargs["cwd"]
+        assert isinstance(root, Path)
+        environment = kwargs["env"]
+        assert isinstance(environment, dict)
+        assert Path(environment["LOCALAPPDATA"]).is_relative_to(root.parent)
+        assert Path(environment["XDG_DATA_HOME"]).is_relative_to(root.parent)
         if command == ["cmd.exe", "/d", "/c", "Run.cmd"]:
-            root = kwargs["cwd"]
-            assert isinstance(root, Path)
             assert kwargs["input"] == b"0\n"
             return subprocess.CompletedProcess(command, 0, stdout=(root / "menu.txt").read_bytes())
-        assert kwargs["cwd"] == launched_roots[-1]
+        assert root == launched_roots[-1]
         return subprocess.CompletedProcess(command, storage_status)
 
     monkeypatch.setattr(smoke, "_require_ordinary_account", lambda _host: None)
@@ -152,12 +159,18 @@ def test_native_smoke_extracts_under_prepared_permissions_and_cleans_up(
 
 
 @pytest.mark.skipif(os.name != "posix", reason="the launcher peer uses POSIX shell")
-def test_native_smoke_runs_each_board_twice_from_one_archive_with_separate_state(
+def test_native_smoke_reaches_two_invitations_with_personal_phone_store_locked(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    launcher = Path(__file__).parent / "fixtures/native-smoke/launcher.sh"
-    directory = _write_distribution(tmp_path / "distribution", {"Run.sh": launcher.read_bytes()})
+    fixtures = Path(__file__).parent / "fixtures/native-smoke"
+    directory = _write_distribution(
+        tmp_path / "distribution",
+        {
+            "Run.sh": (fixtures / "launcher.sh").read_bytes(),
+            "phone-store.py": (fixtures / "phone-store.py").read_bytes(),
+        },
+    )
     original_files = set(directory.iterdir())
     storage_visits: dict[Path, int] = {}
 
@@ -167,9 +180,12 @@ def test_native_smoke_runs_each_board_twice_from_one_archive_with_separate_state
         if command == ["sh", "Run.sh"]:
             menu_input = kwargs["input"]
             assert isinstance(menu_input, bytes)
+            environment = kwargs["env"]
+            assert isinstance(environment, dict)
             return run_process(
                 command,
                 cwd=root,
+                env=environment,
                 input=menu_input,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
@@ -182,6 +198,9 @@ def test_native_smoke_runs_each_board_twice_from_one_archive_with_separate_state
         storage_paths: tuple[str, ...] = (".", "logs", "session", "temp")
         if target == _PREPARATION_TARGET:
             storage_paths = (*storage_paths, "reader/session")
+            markers = list(root.parent.rglob("smoke-marker.txt"))
+            assert len(markers) == 1
+            assert markers[0].read_bytes() == b"launcher phone store\n"
         for relative in storage_paths:
             assert (scope / relative).is_dir()
         assert (scope / "reader").exists() == ("reader/session" in storage_paths)
@@ -207,10 +226,28 @@ def test_native_smoke_runs_each_board_twice_from_one_archive_with_separate_state
 
     run_process = subprocess.run
     monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "personal-linux"))
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "personal-windows"))
+    monkeypatch.setenv("PYTHONPATH", python_environment()["PYTHONPATH"])
+    monkeypatch.setenv("FPLINUX_TEST_PYTHON", sys.executable)
     monkeypatch.setattr(smoke, "_require_ordinary_account", lambda _host: None)
     monkeypatch.setattr(subprocess, "run", run_storage)
 
-    smoke.smoke_distribution(Path("distribution"), host="linux")
+    with locked_phone_store(_PREPARATION_TARGET) as personal_store:
+        marker = personal_store / "smoke-marker.txt"
+        marker.write_bytes(b"personal store sentinel\n")
+        lock = personal_store / ".store.lock"
+        lock.write_bytes(b"personal lock sentinel\n")
+        lock_stat = lock.stat()
+        personal_store.chmod(0o750)
+
+        smoke.smoke_distribution(Path("distribution"), host="linux")
+
+        assert marker.read_bytes() == b"personal store sentinel\n"
+        assert lock.read_bytes() == b"personal lock sentinel\n"
+        assert lock.stat().st_ino == lock_stat.st_ino
+        assert lock.stat().st_mtime_ns == lock_stat.st_mtime_ns
+        assert personal_store.stat().st_mode & 0o777 == 0o750
 
     assert {scope.name: attempts for scope, attempts in storage_visits.items()} == {
         target: 2 for target, host in SELECTIONS if host == "linux"

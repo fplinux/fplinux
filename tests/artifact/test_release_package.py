@@ -56,7 +56,9 @@ def test_release_preserves_optional_apps_documents_and_native_file_modes(
             "host/libc_server",
             "host/spd_dump",
             "runtime/bin/python3.15",
+            "runtime/bin/sftp",
             "runtime/lib/ld-musl-x86_64.so.1",
+            "tools/linux/sftp",
         ]
         assert modes["Run.sh"] == 0o100755
         assert modes["runtime/bin/python3.15"] == 0o100755
@@ -77,6 +79,23 @@ def test_release_preserves_optional_apps_documents_and_native_file_modes(
         ]
         assert modes["Run.cmd"] == 0o100644
         assert modes["runtime/python.exe"] == 0o100755
+
+
+def test_linux_release_includes_sftp_in_the_shared_runtime_and_manifests(
+    archive_inputs: ArchiveInputs,
+) -> None:
+    files, modes = read_zip(archive_inputs.package("linux"))
+    board = json.loads(files["targets.json"])["targets"][archive_inputs.target]
+    build = json.loads(files[board["files"]["build-manifest.json"][0]])
+    runtime = json.loads(files[board["files"]["runtime-manifest.json"][0]])
+    for relative in ("runtime/bin/sftp", "tools/linux/sftp"):
+        data = archive_inputs.linux_files[relative].read_bytes()
+        digest = hashlib.sha256(data).hexdigest()
+        assert board["files"][relative] == [relative]
+        assert files[relative] == data
+        assert modes[relative] == 0o100755
+        assert build["files"][relative] == {"mode": 0o755, "sha256": digest, "size": len(data)}
+        assert runtime["sha256"][relative] == digest
 
 
 def test_release_uses_the_runtime_from_the_admitted_build(archive_inputs: ArchiveInputs) -> None:

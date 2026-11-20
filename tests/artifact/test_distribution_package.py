@@ -3,11 +3,13 @@
 
 from __future__ import annotations
 
+import argparse
 import hashlib
 import json
 from typing import TYPE_CHECKING
 
 import pytest
+from fplinux_cli.ci.commands import run_ci
 from fplinux_cli.cli.inspect import inspect_distribution
 from fplinux_cli.packaging import distribution
 from fplinux_cli.packaging.universal import HostArchive
@@ -43,7 +45,7 @@ def test_release_contains_the_complete_matrix_sources_and_dependency_transport(
     packages, transport = inputs
     output = tmp_path / "final"
 
-    distribution.attach_inputs(packages, transport, output)
+    distribution.attach_inputs(packages, transport, output, expected_matrix=SELECTIONS)
     source = output / f"FPLinux-{RELEASE_ID}-sources.zip"
 
     assert source.name == f"FPLinux-{RELEASE_ID}-sources.zip"
@@ -121,7 +123,7 @@ def test_release_contains_the_complete_matrix_sources_and_dependency_transport(
     inspect_distribution(output)
 
 
-def test_single_model_package_has_the_same_format_and_is_ineligible_to_publish(
+def test_ci_rejects_single_model_package_that_passes_intrinsic_verification(
     tmp_path: Path,
 ) -> None:
     packages = tmp_path / "packages"
@@ -136,7 +138,14 @@ def test_single_model_package_has_the_same_format_and_is_ineligible_to_publish(
         ("konrow-senior-280-plus", "linux"),
     ]
     with pytest.raises(SystemExit, match="complete supported target/host matrix"):
-        distribution.attach_inputs(packages, transport, output)
+        run_ci(
+            argparse.Namespace(
+                ci_command="attach-inputs",
+                directory=packages,
+                inputs_dir=transport,
+                output_directory=output,
+            )
+        )
     assert not output.exists()
 
 

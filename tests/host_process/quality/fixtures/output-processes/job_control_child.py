@@ -21,8 +21,10 @@ def main() -> None:
         sys.exit(0)
 
     signal.signal(signal.SIGCONT, continue_and_exit)
-    (root / "child.pgid").write_text(str(os.getpgrp()))
-    (root / "child.pid").write_text(str(os.getpid()))
+    for name, value in (("child.pgid", os.getpgrp()), ("child.pid", os.getpid())):
+        pending = root / f"{name}.tmp"
+        pending.write_text(str(value))
+        pending.replace(root / name)
     time.sleep(30)
 
 

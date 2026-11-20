@@ -32,8 +32,9 @@ if TYPE_CHECKING:
 
     from .bundle import ValidatedBundle
 
+    CardInspector = Callable[[tuple[Any, dict[str, Any]], RunLog], None]
     CardInstaller = Callable[
-        [tuple[Any, dict[str, Any]], dict[str, tuple[FirmwareInput, ...]], RunLog], bool
+        [tuple[Any, dict[str, Any]], dict[str, tuple[FirmwareInput, ...]], RunLog], None
     ]
 
 
@@ -117,6 +118,7 @@ def _run_phone(  # noqa: PLR0913 -- runtime actions and explicit paths preserve 
     prepare_only: bool,
     replace: bool,
     loader_trace: bool,
+    inspect_card: CardInspector | None = None,
     install_card: CardInstaller | None = None,
 ) -> None:
     bundle, runtime = admitted.root, admitted.runtime
@@ -124,11 +126,13 @@ def _run_phone(  # noqa: PLR0913 -- runtime actions and explicit paths preserve 
     system_card = boots_system_card(runtime)
     spec = phone_data_runtime.device_data_spec(bundle, runtime)
     selected = None
+    card_action = inspect_card is not None or install_card is not None
+    firmware = {}
     if spec is not None:
         from fplinux_cli.device_data.store import locked_phone_store  # noqa: PLC0415
 
         with locked_phone_store(runtime["target"], root=phone_data) as store:
-            if spec.required_declarations or prepare_only or from_dump is not None or install_card:
+            if spec.required_declarations or prepare_only or from_dump is not None or card_action:
                 reader_used = phone_data_runtime.prepare_phone_data(
                     admitted,
                     data,
@@ -138,21 +142,21 @@ def _run_phone(  # noqa: PLR0913 -- runtime actions and explicit paths preserve 
                     from_dump=from_dump,
                     replace=replace,
                     loader_trace=loader_trace,
-                    retain_reader=install_card is not None,
+                    retain_reader=card_action,
                 )
-                if install_card is None and (prepare_only or reader_used):
+                if not card_action and (prepare_only or reader_used):
                     return
-            if install_card is None:
+            if not card_action:
                 selected = phone_data_runtime.selected_phone_data(spec, store / "phone")
-            else:
+            elif install_card is not None:
                 from fplinux_cli.device_data.inputs import (  # noqa: PLC0415 -- card only.
                     capture_phone_data,
                 )
 
                 firmware = capture_phone_data(spec.groups, store / "phone", require_all=False)
-    elif prepare_only or from_dump is not None or install_card is not None:
+    elif prepare_only or from_dump is not None or card_action:
         fail("This bundle boots directly and does not require phone-data preparation")
-    if install_card is not None:
+    if card_action:
         with log.capture():
             reader_connection = boot.reconnect_live_bundle(
                 admitted,
@@ -164,7 +168,10 @@ def _run_phone(  # noqa: PLR0913 -- runtime actions and explicit paths preserve 
             )
         if reader_connection is None:
             fail("The phone left its RAM preparation session")
-        if install_card(reader_connection, firmware, log):
+        if inspect_card is not None:
+            inspect_card(reader_connection, log)
+        elif install_card is not None:
+            install_card(reader_connection, firmware, log)
             phone_data_runtime.finish_reader(
                 reader_connection, data, log, progress=None, restart=False
             )
@@ -237,6 +244,7 @@ def run_phone(  # noqa: PLR0913 -- explicit CLI policies keep preparation and re
     loader_trace: bool = False,
     nand_action: str | None = None,
     nand_output: Path | None = None,
+    inspect_card: CardInspector | None = None,
     install_card: CardInstaller | None = None,
 ) -> int:
     """Run the shared workflow with diagnostics and one state lock through SSH exit."""
@@ -296,6 +304,7 @@ def run_phone(  # noqa: PLR0913 -- explicit CLI policies keep preparation and re
                         prepare_only=prepare_only,
                         replace=replace,
                         loader_trace=loader_trace,
+                        inspect_card=inspect_card,
                         install_card=install_card,
                     )
             status = "success"

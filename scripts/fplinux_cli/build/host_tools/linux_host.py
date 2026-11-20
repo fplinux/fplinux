@@ -14,6 +14,7 @@ from fplinux_cli import common
 from fplinux_cli.build import DEFAULT_BUILD_MEMORY_MIB
 from fplinux_cli.build.environment import SOURCE_DATE_EPOCH
 from fplinux_cli.build.host_tools.host_package import publish_host_package
+from fplinux_cli.build.host_tools.linux_export import OPENSSH_CLIENT_COMMANDS
 from fplinux_cli.common import canonical_json_bytes, fail
 from fplinux_cli.environment.kern import kern_box_name, kern_environment
 from fplinux_cli.environment.runtime import environment_arguments, require_environment
@@ -53,7 +54,7 @@ def _write_launchers(package: Path) -> None:
     directory = package / "tools/linux"
     directory.mkdir(parents=True)
     template = Path(__file__).with_name("linux-launcher.sh.in").read_text(encoding="utf-8")
-    for name in ("ssh", "ssh-keygen", "ssh-keyscan"):
+    for name in OPENSSH_CLIENT_COMMANDS:
         launcher = directory / name
         launcher.write_text(
             substitute_template(template, {"COMMAND": name}),

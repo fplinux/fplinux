@@ -177,6 +177,6 @@ def check_scope_receipt_recipe(  # noqa: PLR0913 -- source, environment and kern
         closure_digest=closure_digest,
         orchestration_recipe=orchestration_recipe,
         environment_generation=environment_generation,
-        profile=profile,
+        profile=profile if scope == "kernel" else None,
         build_type=build_type if scope == "kernel" else None,
     )

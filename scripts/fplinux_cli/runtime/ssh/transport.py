@@ -524,6 +524,8 @@ def _sftp_quote(value: str) -> str:
 def _sftp(session: dict[str, Any], command: str) -> subprocess.CompletedProcess[str]:
     argv = [
         require_tool("sftp"),
+        "-S",
+        require_tool("ssh"),
         "-q",
         "-b",
         "-",

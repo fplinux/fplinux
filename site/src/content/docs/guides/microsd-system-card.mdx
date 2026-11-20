@@ -30,7 +30,7 @@ FPLinux prepares the phone data on the PC and reuses a compatible saved backup. 
 
 The installer also sets up SSH for your user account on the installing PC. Save the connection command it prints. The private client key and the card's SSH host key pin are saved together with `ssh_config` under `$XDG_DATA_HOME/fplinux/cards/` on Linux (`~/.local/share/fplinux/cards/` by default) or `%LOCALAPPDATA%\FPLinux\cards\` on Windows. Each installation has its own directory under the target ID and card CID. The files stay available after you close the launcher or reboot the computer.
 
-For commands without the menu, first inspect the card with the exact target ID. Keep the phone powered and connected while running the install command. Replace `CID` with the identifier printed by `inspect`.
+For commands without the menu, first inspect the card with the exact target ID. `inspect` reports the card's CID and capacity from the RAM reader. Keep the phone powered and connected while running the install command. Replace `CID` with the identifier printed by `inspect`.
 
 ```bat title="Windows PC"
 Run.cmd card inspect --target inoi-240-modern-4g
@@ -48,7 +48,7 @@ Add `--from-dump FILE` to import a backup for this handset. The source checkout 
 ./fplinux card install inoi-240-modern-4g
 ```
 
-Use `./fplinux card inspect inoi-240-modern-4g` to discover the card before passing `--erase-card CID` in a non-interactive checkout session.
+Use `./fplinux card inspect inoi-240-modern-4g` to discover the card before passing `--erase-card CID` in a non-interactive checkout session. Inspection builds only the RAM profile.
 
 ## Boot from the card
 

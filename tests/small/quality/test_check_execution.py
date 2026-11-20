@@ -19,6 +19,7 @@ from fplinux_cli.environment.state import EnvironmentState, publish_environment_
 from fplinux_cli.manifests.source_catalog import resolve_source, source_build_metadata
 from fplinux_cli.quality import checks
 from fplinux_cli.quality import runtime as quality_runtime
+from fplinux_cli.quality.inputs import check_scope_closure_digest
 from fplinux_cli.quality.receipts import (
     check_scope_receipt_recipe,
     publish_success_receipt,
@@ -26,7 +27,7 @@ from fplinux_cli.quality.receipts import (
 )
 from fplinux_cli.quality.scopes import resolve_check_scopes
 from fplinux_cli.reporting.run import RunReporter, Stage
-from fplinux_cli.workspace.capture import workspace_snapshot
+from fplinux_cli.workspace.capture import WorkspaceFile, WorkspaceSnapshot, workspace_snapshot
 
 from tests.fixtures import linux_inputs
 from tests.small.quality.check_fixtures import _RecordingReporter
@@ -44,6 +45,52 @@ class CheckScopeSelectionTests:
 
 class AnalyzerAndTestExecutionTests:
     """Exercise scope routing and receipts with controlled external container processes."""
+
+    @pytest.mark.parametrize("scope", ["c", "tests"])
+    def test_named_profile_reuses_the_unprofiled_check_result(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str], scope: str
+    ) -> None:
+        """Reuse an identical workload across profiles unless the caller bypasses the cache."""
+        cache = tmp_path / "cache"
+        state = EnvironmentState("a" * 64, "b" * 64, "c" * 64)
+        orchestration = "d" * 64
+        snapshot = WorkspaceSnapshot(
+            (WorkspaceFile("alpine/aports/consumer/probe.c", b"int probe;\n", 0o644),), "e" * 64
+        )
+        recipe = check_scope_receipt_recipe(
+            scope,
+            check_scope_closure_digest(scope, snapshot),
+            environment_generation=state.generation,
+            orchestration_recipe=orchestration,
+        )
+        publish_environment_state(cache, state)
+        publish_success_receipt(cache, recipe)
+        workspace = tmp_path / "workspace"
+
+        with (
+            mock.patch.object(checks, "data_root", return_value=cache),
+            mock.patch.object(checks, "quality_workspace_snapshot", return_value=snapshot),
+            mock.patch.object(checks, "environment_recipe_digest", return_value=state.recipe),
+            mock.patch.object(
+                checks, "check_orchestration_recipe_digest", return_value=orchestration
+            ),
+            mock.patch.object(
+                checks, "require_environment", return_value=("kern", tmp_path / "rootfs", state)
+            ) as require_environment,
+            mock.patch.object(checks, "stage_quality_workspace_snapshot", return_value=workspace),
+            mock.patch.object(checks, "discard_staged_quality_workspace_snapshot"),
+            mock.patch.object(checks, "_run_missing_checks") as run_checks,
+        ):
+            checks.check([scope], profile="microsd-uboot")
+            assert f"check cache: hit ({scope})" in capsys.readouterr().out
+            require_environment.assert_not_called()
+            run_checks.assert_not_called()
+
+            checks.check([scope], profile="microsd-uboot", no_cache=True)
+            assert "check cache: hit" not in capsys.readouterr().out
+            require_environment.assert_called_once_with(cache=cache)
+            run_checks.assert_called_once()
+            assert run_checks.call_args.kwargs["missing"] == (scope,)
 
     @pytest.mark.parametrize(
         ("selected", "source_scopes", "test_tiers"),

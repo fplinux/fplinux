@@ -11,8 +11,9 @@ from typing import TYPE_CHECKING, Any, cast
 
 from fplinux_cli import common
 from fplinux_cli.artifacts.release import release_context_from_fields
-from fplinux_cli.cli.inspect import inspect_distribution
 from fplinux_cli.common import fail
+from fplinux_cli.packaging.distribution import distribution_matrix, print_distribution_report
+from fplinux_cli.packaging.verification import verify_distribution
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -166,8 +167,11 @@ def _release_notes(endpoint: str, releases: list[dict[str, Any]], commit: str) -
 def publish_distribution(directory: Path, *, commit: str) -> None:
     """Publish after the complete local and remote asset inventories match."""
     _require_publisher(commit)
-    inspect_distribution(directory, complete=True, require_inputs=True)
-    context = release_context_from_fields(json.loads((directory / "RELEASE.json").read_bytes()))
+    metadata = verify_distribution(
+        directory, expected_matrix=distribution_matrix(), require_inputs=True
+    )
+    print_distribution_report(metadata)
+    context = release_context_from_fields(metadata)
     if context.source_commit != commit or context.release_id != commit[:12]:
         fail("publication source association differs from the exact event commit")
     files = sorted(directory.iterdir())
