@@ -13,8 +13,9 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 KERNEL = ROOT / "platforms/ums9117/linux/overlay/drivers/media/i2c"
-COMPAT = ROOT / "tests/fixtures/ums9117-kernel/sensor-compat"
-HARNESS = ROOT / "tests/host_tool/media/fixed-sensor-format.c"
+MEDIA = ROOT / "tests/host_tool/ums9117/media"
+COMPAT = MEDIA / "sensor-compat"
+HARNESS = MEDIA / "fixed-sensor-format.c"
 
 
 def test_fixed_sensor_format_callbacks_preserve_state_and_validation(tmp_path: Path) -> None:

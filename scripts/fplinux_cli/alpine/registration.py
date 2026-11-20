@@ -226,8 +226,8 @@ SHARED_APORT_SOURCES = {
         *CLI_SOURCES,
     ),
     "fplinux-qin1splus-config": (
-        "targets/xiaomi-qin-1s-plus/rootfs/drirc",
-        "targets/xiaomi-qin-1s-plus/rootfs/alsa.conf",
+        "targets/xiaomi-qin-1s-plus/package-config/drirc",
+        "targets/xiaomi-qin-1s-plus/package-config/alsa.conf",
     ),
     "fplinux-rotate": (*DRM_SESSION_SOURCES, *CLI_SOURCES),
     "fplinux-session": (

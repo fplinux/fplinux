@@ -16,9 +16,10 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 KERNEL = ROOT / "platforms/ums9117/linux/overlay/drivers/media/platform/ums9117"
-HARNESS = ROOT / "tests/host_tool/media/jpeg-codec.c"
-STANDARD_TABLES = ROOT / "tests/host_tool/media/jpeg-codec-standard-tables.c"
-COMPAT = ROOT / "tests/host_tool/media/jpeg-codec-compat"
+MEDIA = ROOT / "tests/host_tool/ums9117/media"
+HARNESS = MEDIA / "jpeg-codec.c"
+STANDARD_TABLES = MEDIA / "jpeg-codec-standard-tables.c"
+COMPAT = MEDIA / "jpeg-codec-compat"
 
 # Pillow/libjpeg quality=85, subsampling=1 output, converted to natural DCT order.
 STANDARD_Q85_NATURAL = bytes.fromhex(

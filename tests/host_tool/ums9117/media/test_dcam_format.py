@@ -15,9 +15,10 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 KERNEL = ROOT / "platforms/ums9117/linux/overlay/drivers/media/platform/ums9117"
-HARNESS = ROOT / "tests/host_tool/media/dcam-format.c"
-COMPAT = ROOT / "tests/host_tool/media/jpeg-codec-compat"
-KCONFIG_COMPAT = ROOT / "tests/host_tool/media/dcam-format-compat"
+MEDIA = ROOT / "tests/host_tool/ums9117/media"
+HARNESS = MEDIA / "dcam-format.c"
+COMPAT = MEDIA / "jpeg-codec-compat"
+KCONFIG_COMPAT = MEDIA / "dcam-format-compat"
 SERIAL = "CONFIG_VIDEO_UMS9117_DCAM_SERIAL_G0"
 ONE_BIT = "CONFIG_VIDEO_UMS9117_DCAM_SERIAL_G0_ONE_BIT"
 TWO_BIT = "CONFIG_VIDEO_UMS9117_DCAM_SERIAL_G0_TWO_BIT"

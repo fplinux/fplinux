@@ -18,7 +18,7 @@ def test_default_pcm_uses_the_card_playback_rate_and_keeps_capture_at_48000(
 ) -> None:
     """Use real ALSA expansion, replacing only the external control-device query."""
     source = ROOT / "tests/host_tool/sc9820e/audio"
-    qin_fragment = ROOT / "targets/xiaomi-qin-1s-plus/rootfs/alsa.conf"
+    qin_fragment = ROOT / "targets/xiaomi-qin-1s-plus/package-config/alsa.conf"
     with c_build_directory(tmp_path_factory, "qin_alsa_config") as directory:
         card_driver = directory / "card-driver.so"
         executable = directory / "alsa-config"

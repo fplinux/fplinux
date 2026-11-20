@@ -13,7 +13,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 DRIVER = ROOT / "platforms/ums9117/linux/overlay/drivers/media/platform/ums9117"
-MEDIA = ROOT / "tests/host_tool/media"
+MEDIA = ROOT / "tests/host_tool/ums9117/media"
 FIXTURES = ROOT / "tests/fixtures/ums9117-kernel"
 
 
