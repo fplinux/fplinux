@@ -270,7 +270,7 @@ def package_release(
     }
     sources = project_source_files(snapshot)
     identities = {}
-    native = HostPayloads(cache)
+    native = HostPayloads(cache, jobs)
     for name, choices in groupby(sorted(selections), key=lambda selection: selection[0]):
         configuration = targets.load_target(name)
         bundle, manifest = build(name, jobs, include_device_data=False, release_context=release)

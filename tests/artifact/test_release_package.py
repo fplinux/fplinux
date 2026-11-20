@@ -55,11 +55,11 @@ def test_release_preserves_optional_apps_documents_and_native_file_modes(
             "fplinux.py",
             "host/libc_server",
             "host/spd_dump",
-            "runtime/bin/python3.14",
+            "runtime/bin/python3.15",
             "runtime/lib/ld-musl-x86_64.so.1",
         ]
         assert modes["Run.sh"] == 0o100755
-        assert modes["runtime/bin/python3.14"] == 0o100755
+        assert modes["runtime/bin/python3.15"] == 0o100755
         assert (
             payload["licenses/host-tools/Unlicense.txt"]
             == (inputs.root / "LICENSES/Unlicense.txt").read_bytes()
@@ -105,7 +105,7 @@ def test_release_preserves_existing_archive_when_native_bytes_change(
 ) -> None:
     archive = archive_inputs.package("linux")
     original = archive.read_bytes()
-    archive_inputs.linux_files["runtime/bin/python3.14"].write_bytes(b"changed dependency")
+    archive_inputs.linux_files["runtime/bin/python3.15"].write_bytes(b"changed dependency")
 
     with pytest.raises(SystemExit, match="output directory contains a different release"):
         archive_inputs.package("linux")

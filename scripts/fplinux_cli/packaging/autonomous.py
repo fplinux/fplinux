@@ -75,6 +75,7 @@ class HostPayloads:
     """Prepare each native tool set once while constructing a release."""
 
     cache: Path
+    jobs: int
     linux: AutonomousPayload | None = None
     driver: AutonomousPayload | None = None
     windows: dict[tuple[str, bool], AutonomousPayload] = field(default_factory=dict)
@@ -84,7 +85,9 @@ class HostPayloads:
         from fplinux_cli.build.host_tools.linux_host import prepare_linux_host  # noqa: PLC0415
 
         if self.linux is None:
-            self.linux = _read_tools(prepare_linux_host(cache=self.cache), host="linux")
+            self.linux = _read_tools(
+                prepare_linux_host(cache=self.cache, jobs=self.jobs), host="linux"
+            )
         files = dict(self.linux.files)
         if platform == "ums9117":
             notice = common.ROOT / "LICENSES/Unlicense.txt"

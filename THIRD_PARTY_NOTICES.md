@@ -75,8 +75,8 @@ The corresponding source snapshot records exact versions, URLs, commits and hash
 | U-Boot 2026.10                                    | RAM second stage and FIT tooling                                     | GPL-2.0-only; upstream release archive; target binary is embedded in `ramboot.bin`                                              |
 | Spreadtrum chipram                                | Qin first-stage RAM loader                                           | NOASSERTION for the source tree as a whole; individual copyright and license notices retained in the source companion           |
 | Spreadtrum U-Boot 2015                            | Qin early board initialization                                       | GPL-2.0; individual file notices and the upstream `Licenses` directory retained                                                 |
-| Trusted Firmware-A 2.15.0                         | Qin secure monitor and CPU power interface                           | BSD-3-Clause; upstream `docs/license.rst` retained                                                                               |
-| libusb                                            | Host USB access                                                      | LGPL-2.1-or-later; static Linux host tools and the bundled Windows DLL                                                          |
+| Trusted Firmware-A 2.15.0                         | Qin secure monitor and CPU power interface                           | BSD-3-Clause; upstream `docs/license.rst` retained                                                                              |
+| libusb 1.0.30                                     | Host USB access                                                      | LGPL-2.1-or-later; static Linux host tools and the bundled Windows DLL                                                          |
 | `spreadtrum_flash` / `spd_dump`                   | Spreadtrum loader transport                                          | The Unlicense; pinned upstream source                                                                                           |
 | `fphelper_t117`                                   | Stock firmware table reader for board reports                        | The Unlicense; pinned spreadtrum_flash source                                                                                   |
 | BCH library                                       | Host correction of selected NAND main data                           | GPL-2.0-only; Copyright 2011 Parrot S.A.; pinned python-bchlib source                                                           |
@@ -88,9 +88,9 @@ The website's Noto Sans font retains its copyright and Open Font License
 notice in `site/public/fonts/OFL.txt`. The generated offline site carries the
 font and its notice.
 
-Linux archives include Python 3.14.8 and OpenSSH 10.3p1; Windows archives include Python 3.14.7 and Win32-OpenSSH 10.0.0.0p2-Preview. Their included license directories retain the notices for these runtimes and their libraries. The Windows driver helper uses libwdi 1.5.1 under LGPL-3.0-or-later and includes its GNU GPL and LGPL license texts. It installs the WinUSB driver included with Windows 10 and 11.
+Linux and Windows archives include Python 3.15.2. Linux archives include OpenSSH 10.3p1 and Windows archives include Win32-OpenSSH 10.4.0.0p1-Preview. Their included license directories retain the notices for these runtimes and their libraries. The Windows driver helper uses libwdi 1.5.1 under LGPL-3.0-or-later and includes its GNU GPL and LGPL license texts. It installs the WinUSB driver included with Windows 10 and 11.
 
-Qin runtime archives include ext4 1.4.1, cachetools 7.1.1 and crcmod 1.7 for reading selected files from a saved eMMC image. These packages use the MIT license; their original notices are included under `licenses/phone-data/`, and their pinned originals are included in the matching source companion.
+Qin runtime archives include ext4 1.4.1, cachetools 8.0.2 and crcmod 1.7 for reading selected files from a saved eMMC image. These packages use the MIT license; their original notices are included under `licenses/phone-data/`, and their pinned originals are included in the matching source companion.
 
 The Git tree does not contain `spreadtrum_flash` source, `spd_dump`, `fphelper_t117` or `t117_fdl1.bin`. Setup downloads and verifies exact locked inputs under the selected working data directory (`.data/` by default). Builds use the prepared inputs without downloading them.
 

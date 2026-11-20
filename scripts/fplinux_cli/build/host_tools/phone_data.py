@@ -15,6 +15,8 @@ if TYPE_CHECKING:
 
     from fplinux_cli.manifests.source_catalog import ResolvedSource
 
+# The archive reader loads the pinned modules directly. The eMMC extraction
+# tests exercise this pairing independently of ext4's installer metadata.
 _SOURCES = ("python_ext4", "python_cachetools", "python_crcmod")
 
 

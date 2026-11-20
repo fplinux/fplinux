@@ -1190,6 +1190,7 @@ name = "libusb-1.0.30.tar.bz2"
 url = "https://github.com/libusb/libusb/releases/download/v1.0.30/libusb-1.0.30.tar.bz2"
 algorithm = "sha256"
 checksum = "fea36f34f9156400209595e300840767ab1a385ede1dc7ee893015aea9c6dbaf"
+bytes = 656112
 
 [linux_host_mpdecimal]
 version = "4.0.1"
@@ -1227,11 +1228,12 @@ algorithm = "sha256"
 checksum = "603f5602e2eef00d77fbd429d34dcd5822bb301757a1bc9cdb24c670f1eb859a"
 
 [linux_host_python3]
-version = "3.14.10"
-name = "Python-3.14.10.tar.xz"
-url = "https://www.python.org/ftp/python/3.14.10/Python-3.14.10.tar.xz"
+version = "3.15.2"
+name = "Python-3.15.2.tar.xz"
+url = "https://www.python.org/ftp/python/3.15.2/Python-3.15.2.tar.xz"
 algorithm = "sha256"
-checksum = "de414a57119abef52784d8993e341d53aed635fc2b05c2607d9f98a2c5b72032"
+checksum = "8b5536d280142ecf6cdfe15d12a21ba1c65e300bbf7b28a8d0cdb849575797de"
+bytes = 27960396
 
 [linux_host_xz]
 version = "5.8.4"
@@ -1246,6 +1248,14 @@ name = "zlib-1.4.tar.gz"
 url = "https://github.com/madler/zlib/releases/download/v1.4/zlib-1.4.tar.gz"
 algorithm = "sha256"
 checksum = "02dd159783677a749c04adbdd02b55b8a2bcc7e054f51b76b549199a916ad584"
+
+[linux_host_zstd]
+version = "1.5.7"
+name = "zstd-1.5.7.tar.gz"
+url = "https://github.com/facebook/zstd/archive/v1.5.7.tar.gz"
+algorithm = "sha256"
+checksum = "37d7284556b20954e56e1ca85b80226768902e2edabd3b649e9e72c0c9012ee3"
+bytes = 2451884
 
 [lvgl]
 version = "9.6.0"
@@ -1418,12 +1428,12 @@ checksum = "202ca578cfeb7370784a8c33d6d05bc6e13b4f25b5053c30a152269fd10f0b88"
 bytes = 46396
 
 [python_cachetools]
-version = "7.1.1"
-name = "cachetools-7.1.1-py3-none-any.whl"
-url = "https://files.pythonhosted.org/packages/bf/0f/f897abe4ea0a8c408ae65c8c83bffab4936ad65d6032d4fb4cd35bbdc3ee/cachetools-7.1.1-py3-none-any.whl"
+version = "8.0.2"
+name = "cachetools-8.0.2-py3-none-any.whl"
+url = "https://files.pythonhosted.org/packages/f6/35/0dca79b22cd3ad3fc4bfbd91ea85f259903e7ce5fe956647916df8f691f4/cachetools-8.0.2-py3-none-any.whl"
 algorithm = "sha256"
-checksum = "0335cd7a0952d2b22327441fb0628139e234c565559eeb91a8a4ac7551c5353d"
-bytes = 16775
+checksum = "502bf3c17c6e35d78ccdaa70da8c7001b28634541f5cde0dee33c93bb252277d"
+bytes = 19334
 license = "MIT"
 
 [python_crcmod]
@@ -1589,41 +1599,33 @@ checksum = "a695e93db0977dfdc5c6a99a4ea91b22f9027547d0177b2a0f3075078643c929"
 bytes = 289593
 
 [windows_host_libusb]
-version = "1.0.29"
-name = "libusb-1.0.29.7z"
-url = "https://github.com/libusb/libusb/releases/download/v1.0.29/libusb-1.0.29.7z"
+version = "1.0.30"
+name = "libusb-1.0.30.7z"
+url = "https://github.com/libusb/libusb/releases/download/v1.0.30/libusb-1.0.30.7z"
 algorithm = "sha256"
-checksum = "964a38152ca9a104cd00ec8d2f0617b89cd814f9b635e29763c68563d951521d"
-bytes = 4908465
-
-[windows_host_libusb_source]
-version = "1.0.29"
-name = "libusb-1.0.29.tar.bz2"
-url = "https://github.com/libusb/libusb/releases/download/v1.0.29/libusb-1.0.29.tar.bz2"
-algorithm = "sha256"
-checksum = "5977fc950f8d1395ccea9bd48c06b3f808fd3c2c961b44b0c2e6e29fc3a70a85"
-bytes = 645381
+checksum = "7fb1dfec805b97983763d7d0ae244320da12add1003d4249c96cc4d586398c79"
+bytes = 7484182
 
 [windows_host_llvm_mingw]
-version = "20260908"
-name = "llvm-mingw-20260908-ucrt-ubuntu-22.04-x86_64.tar.xz"
-url = "https://github.com/mstorsjo/llvm-mingw/releases/download/20260908/llvm-mingw-20260908-ucrt-ubuntu-22.04-x86_64.tar.xz"
+version = "20261117"
+name = "llvm-mingw-20261117-ucrt-ubuntu-22.04-x86_64.tar.xz"
+url = "https://github.com/mstorsjo/llvm-mingw/releases/download/20261117/llvm-mingw-20261117-ucrt-ubuntu-22.04-x86_64.tar.xz"
 algorithm = "sha256"
-checksum = "2258c745e3155870c80793f3e8c80b28fbde11b9ff73c4c78783635b3440b092"
-bytes = 83887116
+checksum = "e7a15a49a2ea95e9f3d8a9d0cfabe5052a4b10fb4777cc54de5a8c27b64bb701"
+bytes = 84103316
 
 [windows_host_openssh]
-version = "10.0.0.0p2-Preview"
-name = "OpenSSH-Win64-10.0.0.0p2-Preview.zip"
-url = "https://github.com/PowerShell/Win32-OpenSSH/releases/download/10.0.0.0p2-Preview/OpenSSH-Win64.zip"
+version = "10.4.0.0p1-Preview"
+name = "OpenSSH-Win64-10.4.0.0p1-Preview.zip"
+url = "https://github.com/PowerShell/Win32-OpenSSH/releases/download/10.4.0.0p1-Preview/OpenSSH-Win64.zip"
 algorithm = "sha256"
-checksum = "23f50f3458c4c5d0b12217c6a5ddfde0137210a30fa870e98b29827f7b43aba5"
-bytes = 5704583
+checksum = "b67ff8becd203502190ec42ac7787c24c2cd3325ed7700485fe7a1c83d2a7957"
+bytes = 6021393
 
 [windows_host_python]
-version = "3.14.7"
-name = "python-3.14.7-embed-amd64.zip"
-url = "https://www.python.org/ftp/python/3.14.7/python-3.14.7-embed-amd64.zip"
+version = "3.15.2"
+name = "python-3.15.2-embed-amd64.zip"
+url = "https://www.python.org/ftp/python/3.15.2/python-3.15.2-embed-amd64.zip"
 algorithm = "sha256"
-checksum = "d297e5ff019966817ad8502465176139f2d3d840fa4ed84b13bed399a6ab1f15"
-bytes = 12673227
+checksum = "d012f3aa29cf07436dae8aea1fec0fd195c2612a0b059b1f915ae0afb9ad1f62"
+bytes = 13740486

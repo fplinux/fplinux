@@ -173,8 +173,8 @@ def bundle_fixture(
             )
     modes: set[str] = set()
     if host == "linux":
-        files["runtime/bin/python3.14"] = b"bundled executable\n"
-        modes.add("runtime/bin/python3.14")
+        files["runtime/bin/python3.15"] = b"bundled executable\n"
+        modes.add("runtime/bin/python3.15")
     files["build-manifest.json"] = _manifest(files, modes, target, profile)
     files["SHA256SUMS"] = "".join(
         f"{hashlib.sha256(data).hexdigest()}  {name}\n" for name, data in sorted(files.items())

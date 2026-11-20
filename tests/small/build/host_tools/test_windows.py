@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import io
 import subprocess
+import tarfile
 import zipfile
 from typing import TYPE_CHECKING
 from unittest import mock
@@ -12,6 +13,8 @@ from unittest import mock
 import pytest
 from fplinux_cli import common
 from fplinux_cli.build.host_tools.windows import (
+    _copy_licenses,
+    _extract_python,
     _extract_zip,
     _native_tool_recipes,
     verify_windows_dependencies,
@@ -125,6 +128,38 @@ def test_openssh_projection_keeps_selected_client_and_notice(tmp_path: Path) -> 
     assert (destination / "LICENSE.txt").read_bytes() == b"license"
     assert not (destination / "sshd.exe").exists()
     assert not (destination / "other").exists()
+
+
+def test_embedded_python_replaces_the_search_path_used_by_its_dll(tmp_path: Path) -> None:
+    source = tmp_path / "embed.zip"
+    with zipfile.ZipFile(source, "w") as archive:
+        archive.writestr("python315._pth", b"python315.zip\r\n.\r\n")
+        archive.writestr("python315.zip", b"example stdlib")
+    destination = tmp_path / "runtime"
+
+    _extract_python(source, destination, version="3.15.2")
+
+    assert (destination / "python315._pth").read_bytes() == (
+        b"python315.zip\n.\n..\\common\n..\\scripts\n..\n"
+    )
+    assert (destination / "python315.zip").read_bytes() == b"example stdlib"
+
+
+def test_windows_libusb_redistribution_keeps_the_selected_release_license(tmp_path: Path) -> None:
+    source = tmp_path / "libusb-1.0.42.tar.bz2"
+    notice = b"Example libusb license\n"
+    with tarfile.open(source, "w:bz2") as archive:
+        member = tarfile.TarInfo("libusb-1.0.42/COPYING")
+        member.size = len(notice)
+        archive.addfile(member, io.BytesIO(notice))
+    package = tmp_path / "package"
+    (package / "sources").mkdir(parents=True)
+
+    with mock.patch("fplinux_cli.build.host_tools.windows.copy_mingw_licenses"):
+        _copy_licenses(tmp_path / "toolchain", source, package, libusb_version="1.0.42")
+
+    assert (package / "licenses/windows-host/libusb-COPYING.txt").read_bytes() == notice
+    assert (package / "sources" / source.name).read_bytes() == source.read_bytes()
 
 
 @pytest.mark.parametrize("dll_directory", ["tools", "runtime"])

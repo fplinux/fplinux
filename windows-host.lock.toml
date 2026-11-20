@@ -1,13 +1,13 @@
 # SPDX-License-Identifier: GPL-2.0-only
 [llvm_mingw]
 source = "windows_host_llvm_mingw"
-directory = "llvm-mingw-20260908-ucrt-ubuntu-22.04-x86_64"
+directory = "llvm-mingw-20261117-ucrt-ubuntu-22.04-x86_64"
 
 [libusb]
 source = "windows_host_libusb"
 
 [libusb_source]
-source = "windows_host_libusb_source"
+source = "linux_host_libusb"
 
 [python]
 source = "windows_host_python"

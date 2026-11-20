@@ -204,8 +204,8 @@ class WindowsHost:
             fail("Use this archive on Windows 10 or 11 x64")
         if sys.getwindowsversion().major < 10:
             fail("Windows 10 or 11 is required")
-        if sys.version_info[:2] != (3, 14) or struct.calcsize("P") != 8:
-            fail("Use the bundled Python 3.14 x64 runtime")
+        if sys.version_info[:2] != (3, 15) or struct.calcsize("P") != 8:
+            fail("Use the bundled Python 3.15 x64 runtime")
         system = Path(os.environ["SYSTEMROOT"]) / "System32"
         self.powershell = system / "WindowsPowerShell/v1.0/powershell.exe"
         self.icacls = system / "icacls.exe"

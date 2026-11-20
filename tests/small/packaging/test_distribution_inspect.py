@@ -65,10 +65,10 @@ def test_universal_archive_rejects_a_nonexecutable_native_runtime(assets: Path) 
     files, modes = read_zip(runtime)
     files.pop("SHA256SUMS")
     executables = {name for name, mode in modes.items() if mode & 0o111}
-    executables.remove("runtime/bin/python3.14")
+    executables.remove("runtime/bin/python3.15")
     write_zip(runtime, files, executables)
 
-    with pytest.raises(SystemExit, match=r"wrong executable mode: runtime/bin/python3\.14"):
+    with pytest.raises(SystemExit, match=r"wrong executable mode: runtime/bin/python3\.15"):
         inspect_archive(runtime)
 
 

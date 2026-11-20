@@ -11,6 +11,8 @@ import tempfile
 from pathlib import Path
 
 from fplinux_cli import common
+from fplinux_cli.build import DEFAULT_BUILD_MEMORY_MIB
+from fplinux_cli.build.environment import SOURCE_DATE_EPOCH
 from fplinux_cli.build.host_tools.host_package import publish_host_package
 from fplinux_cli.common import canonical_json_bytes, fail
 from fplinux_cli.environment.kern import kern_box_name, kern_environment
@@ -60,18 +62,19 @@ def _write_launchers(package: Path) -> None:
         launcher.chmod(0o755)
 
 
-def _verify_python(package: Path) -> None:
+def _verify_python(package: Path, *, version: str) -> None:
     runtime = package / "runtime"
     result = subprocess.run(
         [
             str(runtime / "lib/ld-musl-x86_64.so.1"),
             "--library-path",
             str(runtime / "lib"),
-            str(runtime / "bin/python3.14"),
+            str(runtime / f"bin/python{version.rsplit('.', 1)[0]}"),
             "-B",
             "-I",
             "-S",
             str(Path(__file__).with_name("linux_runtime_probe.py")),
+            version,
         ],
         cwd=package.parent,
         env={"PATH": "/usr/bin:/bin", "LC_ALL": "C"},
@@ -83,11 +86,15 @@ def _verify_python(package: Path) -> None:
         fail(result.stderr.strip() or "bundled Linux Python runtime verification failed")
 
 
-def prepare_linux_host(*, cache: Path) -> dict[str, Path]:
+def prepare_linux_host(*, cache: Path, jobs: int) -> dict[str, Path]:
     """Collect runtime files while the caller owns the project cache lock."""
     cache = cache.resolve()
-    for entry in load_host_sources(common.ROOT, "linux-host.lock.toml").values():
-        resolve_source(common.ROOT, entry["source_id"]).acquire(cache, offline=True)
+    lock = load_host_sources(common.ROOT, "linux-host.lock.toml")
+    originals = {
+        name: resolve_source(common.ROOT, entry["source_id"]).acquire(cache, offline=True)
+        for name, entry in lock.items()
+    }
+    python_version = lock["python3"]["version"]
     kern, rootfs, _state = require_environment()
     root = cache / "linux-host"
     root.mkdir(parents=True, exist_ok=True)
@@ -102,15 +109,27 @@ def prepare_linux_host(*, cache: Path) -> dict[str, Path]:
             *environment_arguments(rootfs),
             "--read-only",
             "--uid-range",
+            "--memory",
+            f"{DEFAULT_BUILD_MEMORY_MIB}m",
             "--network",
             "none",
+            "--tmpfs",
+            "/tmp:128m",  # noqa: S108 -- compiler scratch space in the read-only box.
             "--volume",
             f"{exporter}:/export.py:ro",
+            "--volume",
+            f"{originals['python3']}:/inputs/python.tar.xz:ro",
+            "--volume",
+            f"{work}:/work",
+            "--env",
+            f"SOURCE_DATE_EPOCH={SOURCE_DATE_EPOCH}",
             "--quiet",
             "--",
             "python3",
             "-B",
             "/export.py",
+            python_version,
+            str(jobs),
         ]
         with archive.open("wb") as output:
             subprocess.run(
@@ -128,7 +147,7 @@ def prepare_linux_host(*, cache: Path) -> dict[str, Path]:
             if path.is_file()
         }
         verify_linux_dependencies(files)
-        _verify_python(package)
+        _verify_python(package, version=python_version)
         return publish_host_package(package, root / "package", relative_paths=files)
 
 

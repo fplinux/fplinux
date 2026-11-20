@@ -26,7 +26,7 @@ if TYPE_CHECKING:
 IDENTITY_PATH = "scripts/fplinux_cli/manifests/identity.py"
 SSH_HELPER_PATH = "scripts/fplinux_cli/runtime/ssh/transport.py"
 EVENTS_HELPER_PATH = "scripts/fplinux_cli/runtime/events.py"
-REQUIRED_PYTHON = (3, 14)
+SUPPORTED_PYTHON = ((3, 14), (3, 15))
 MICROSD_BOOT_MODE = "microsd"
 MICROSD_BOOT_PROFILE = "microsd-uboot"
 
@@ -534,9 +534,9 @@ def require_file(path: Path, *, executable: bool = False) -> None:
 def host_preflight() -> None:
     """Reject an unsupported host runtime before any phone operation."""
     version_info = (sys.version_info.major, sys.version_info.minor)
-    if version_info != REQUIRED_PYTHON:
+    if version_info not in SUPPORTED_PYTHON:
         version = f"{version_info[0]}.{version_info[1]}"
-        fail(f"Python 3.14 is required (found {version})")
+        fail(f"Python 3.14 or 3.15 is required (found {version})")
 
 
 def load_module(path: Path, name: str) -> ModuleType:

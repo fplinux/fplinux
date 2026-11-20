@@ -34,16 +34,17 @@ class BundleReadErrorTests:
 
 
 class PythonRuntimeTests:
-    """Keep the standalone runner on its single supported Python series."""
+    """Admit the two Python series used by the checkout and standalone runners."""
 
-    def test_accepts_python_314(self) -> None:
-        """Python 3.14 satisfies the standalone preflight."""
-        with mock.patch.object(sys, "version_info", mock.Mock(major=3, minor=14)):
+    @pytest.mark.parametrize("minor", [14, 15], ids=["python-3.14", "python-3.15"])
+    def test_accepts_checkout_and_archive_python(self, minor: int) -> None:
+        """Admit each interpreter the runtime currently uses."""
+        with mock.patch.object(sys, "version_info", mock.Mock(major=3, minor=minor)):
             RUNNER.host_preflight()
 
     @pytest.mark.parametrize(
         ("major", "minor"),
-        [pytest.param(3, 13, id="python-3.13"), pytest.param(3, 15, id="python-3.15")],
+        [pytest.param(3, 13, id="python-3.13"), pytest.param(3, 16, id="python-3.16")],
     )
     def test_rejects_other_python_series(self, major: int, minor: int) -> None:
         """Older and unsupported newer interpreters fail before phone access."""
@@ -54,7 +55,7 @@ class PythonRuntimeTests:
                 mock.Mock(major=major, minor=minor),
             ),
             pytest.raises(
-                SystemExit, match=rf"Python 3\.14 is required \(found {major}\.{minor}\)"
+                SystemExit, match=rf"Python 3\.14 or 3\.15 is required \(found {major}\.{minor}\)"
             ),
         ):
             RUNNER.host_preflight()

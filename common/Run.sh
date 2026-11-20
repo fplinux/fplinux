@@ -9,4 +9,4 @@ run | console | verify | prepare | nand) ;;
 esac
 exec "$fplinux_archive/runtime/lib/ld-musl-x86_64.so.1" \
 	--library-path "$fplinux_archive/runtime/lib" \
-	"$fplinux_archive/runtime/bin/python3.14" -B -I "$fplinux_archive/fplinux.py" "$@"
+	"$fplinux_archive/runtime/bin/python3.15" -B -I "$fplinux_archive/fplinux.py" "$@"

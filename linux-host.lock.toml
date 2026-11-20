@@ -51,12 +51,11 @@ version = "3.5.9-r1"
 
 [python3]
 source = "linux_host_python3"
-licenses = ["Python-3.14.10/LICENSE", "Python-3.14.10/Doc/license.rst"]
+licenses = ["Python-3.15.2/LICENSE", "Python-3.15.2/Doc/license.rst"]
 license_headers = [
-  "Python-3.14.10/Modules/_hacl/Hacl_Hash_SHA2.c",
-  "Python-3.14.10/Modules/_hacl/include/krml/internal/compat.h",
+  "Python-3.15.2/Modules/_hacl/Hacl_Hash_SHA2.c",
+  "Python-3.15.2/Modules/_hacl/include/krml/internal/compat.h",
 ]
-version = "3.14.10-r1"
 
 [xz]
 source = "linux_host_xz"
@@ -73,3 +72,8 @@ version = "5.8.4-r0"
 source = "linux_host_zlib"
 licenses = ["zlib-1.4/LICENSE"]
 version = "1.4-r0"
+
+[zstd]
+source = "linux_host_zstd"
+licenses = ["zstd-1.5.7/LICENSE", "zstd-1.5.7/COPYING"]
+version = "1.5.7-r2"

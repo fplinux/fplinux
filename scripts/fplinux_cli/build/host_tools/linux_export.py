@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import re
 import subprocess
 import sys
@@ -12,16 +13,58 @@ import tarfile
 from pathlib import Path
 
 
-def export_runtime() -> None:
-    """Write regular runtime files and their installed package identities to stdout."""
-    files = {"runtime/bin/python3.14": Path("/usr/bin/python3.14")}
-    for name in ("ssh", "ssh-keygen", "ssh-keyscan"):
-        files[f"runtime/bin/{name}"] = Path("/usr/bin") / name
-    standard_library = Path("/usr/lib/python3.14")
+def _build_python(version: str, jobs: int) -> Path:
+    work = Path("/work")
+    with tarfile.open("/inputs/python.tar.xz") as source:
+        source.extractall(work, filter="data")
+    source_directory = work / f"Python-{version}"
+    installation = work / "python"
+    subprocess.run(
+        [
+            "./configure",
+            "--quiet",
+            "--prefix=/usr",
+            "--enable-shared",
+            "--with-system-expat",
+            "--with-system-libmpdec",
+            "--disable-test-modules",
+            "--without-ensurepip",
+        ],
+        cwd=source_directory,
+        # Use musl locale routines without linking the build environment's GNU gettext.
+        env={
+            **os.environ,
+            "CFLAGS": "-O2 -g0",
+            "ac_cv_header_libintl_h": "no",
+            "ac_cv_lib_intl_textdomain": "no",
+        },
+        stdout=sys.stderr,
+        check=True,
+    )
+    subprocess.run(
+        ["make", "-s", f"-j{jobs}"], cwd=source_directory, stdout=sys.stderr, check=True
+    )
+    subprocess.run(
+        ["make", "-s", f"DESTDIR={installation}", f"COMPILEALL_OPTS=-j{jobs} -q", "install"],
+        cwd=source_directory,
+        stdout=sys.stderr,
+        check=True,
+    )
+    return installation / "usr"
+
+
+def _python_files(installation: Path, abi: str) -> dict[str, Path]:
+    interpreter = f"python{abi}"
+    library = f"libpython{abi}.so.1.0"
+    files = {
+        f"runtime/bin/{interpreter}": installation / "bin" / interpreter,
+        f"runtime/lib/{library}": installation / "lib" / library,
+    }
+    standard_library = installation / "lib" / interpreter
     for path in sorted(standard_library.rglob("*")):
         standard_relative = path.relative_to(standard_library)
         if any(
-            part in {"site-packages", "__pycache__", "config-3.14-x86_64-linux-musl"}
+            part in {"site-packages", "__pycache__"} or part.startswith("config-")
             for part in standard_relative.parts
         ):
             continue
@@ -34,10 +77,14 @@ def export_runtime() -> None:
                 "_curses.",
                 "_curses_panel.",
                 "_sqlite3.",
+                "_uuid.",
             )
         ):
-            files[f"runtime/lib/python3.14/{standard_relative.as_posix()}"] = path
-    files["runtime/lib/ld-musl-x86_64.so.1"] = Path("/lib/ld-musl-x86_64.so.1")
+            files[f"runtime/lib/{interpreter}/{standard_relative.as_posix()}"] = path
+    return files
+
+
+def _add_libraries(files: dict[str, Path]) -> None:
     pending = list(files.values())
     inspected: set[Path] = set()
     while pending:
@@ -62,12 +109,11 @@ def export_runtime() -> None:
                 raise RuntimeError(f"missing Linux runtime library: {name}")
             files[relative] = library
             pending.append(library)
-    owned_paths = [
-        str(path.resolve()) for path in files.values() if "python3.14/" not in str(path)
-    ]
-    owned_paths.append("/usr/bin/python3.14")
+
+
+def _apk_packages(owned_paths: set[str]) -> list[dict[str, str]]:
     owners = subprocess.run(
-        ["apk", "info", "--no-network", "--who-owns", *sorted(set(owned_paths))],
+        ["apk", "info", "--no-network", "--who-owns", *sorted(owned_paths)],
         capture_output=True,
         text=True,
         check=True,
@@ -93,6 +139,20 @@ def export_runtime() -> None:
                     "commit": fields.get("c", ""),
                 }
             )
+    return sorted(packages, key=lambda package: package["name"])
+
+
+def export_runtime(version: str, jobs: int) -> None:
+    """Build the archive interpreter and export it with the APK-provided runtime files."""
+    installation = _build_python(version, jobs)
+    files = _python_files(installation, version.rsplit(".", 1)[0])
+    for name in ("ssh", "ssh-keygen", "ssh-keyscan"):
+        files[f"runtime/bin/{name}"] = Path("/usr/bin") / name
+    files["runtime/lib/ld-musl-x86_64.so.1"] = Path("/lib/ld-musl-x86_64.so.1")
+    _add_libraries(files)
+    packages = _apk_packages(
+        {str(path.resolve()) for path in files.values() if not path.is_relative_to(installation)}
+    )
     with tarfile.open(fileobj=sys.stdout.buffer, mode="w|") as archive:
         for relative, path in sorted(files.items()):
             contents = path.read_bytes()
@@ -100,10 +160,7 @@ def export_runtime() -> None:
             member.size = len(contents)
             member.mode = 0o755 if path.stat().st_mode & 0o111 else 0o644
             archive.addfile(member, io.BytesIO(contents))
-        contents = (
-            json.dumps(sorted(packages, key=lambda package: package["name"]), sort_keys=True)
-            + "\n"
-        ).encode()
+        contents = (json.dumps(packages, sort_keys=True) + "\n").encode()
         member = tarfile.TarInfo("sources/linux-host-packages.json")
         member.size = len(contents)
         member.mode = 0o644
@@ -111,4 +168,4 @@ def export_runtime() -> None:
 
 
 if __name__ == "__main__":
-    export_runtime()
+    export_runtime(sys.argv[1], int(sys.argv[2]))

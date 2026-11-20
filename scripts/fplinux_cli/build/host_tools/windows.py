@@ -86,6 +86,20 @@ def _extract_zip(
             path.write_bytes(source.read(member))
 
 
+def _extract_python(archive: Path, destination: Path, *, version: str) -> None:
+    _extract_zip(archive, destination)
+    major, minor, _patch = version.split(".")
+    stem = f"python{major}{minor}"
+    library = f"{stem}.zip"
+    search_path = destination / f"{stem}._pth"
+    if not search_path.is_file() or not (destination / library).is_file():
+        fail(f"embedded Python {version} is missing its search path or standard library")
+    search_path.write_text(
+        f"{library}\n.\n..\\common\n..\\scripts\n..\n",
+        encoding="utf-8",
+    )
+
+
 def verify_windows_dependencies(
     files: dict[str, Path],
     *,
@@ -226,13 +240,15 @@ def _build_tools(  # noqa: PLR0913 -- source cache and compile paths are distinc
             source_zip.writestr(member, path.read_bytes())
 
 
-def _copy_licenses(toolchain: Path, libusb_source: Path, package: Path) -> None:
+def _copy_licenses(
+    toolchain: Path, libusb_source: Path, package: Path, *, libusb_version: str
+) -> None:
     licenses = package / "licenses/windows-host"
     licenses.mkdir(parents=True, exist_ok=True)
     copy_mingw_licenses(toolchain, licenses)
     shutil.copyfile(common.ROOT / "LICENSES/Unlicense.txt", licenses / "Unlicense.txt")
     with tarfile.open(libusb_source) as archive:
-        stream = archive.extractfile("libusb-1.0.29/COPYING")
+        stream = archive.extractfile(f"libusb-{libusb_version}/COPYING")
         if stream is None:
             fail("libusb license is missing")
         (licenses / "libusb-COPYING.txt").write_bytes(stream.read())
@@ -299,11 +315,7 @@ def prepare_windows_host(*, cache: Path, platform: str, nand_ecc: bool = False) 
             recipes=recipes,
         )
         shutil.copyfile(libusb / "MinGW64/dll/libusb-1.0.dll", package / "tools/libusb-1.0.dll")
-        _extract_zip(archives["python"], package / "runtime")
-        (package / "runtime/python314._pth").write_text(
-            "python314.zip\n.\n..\\common\n..\\scripts\n..\n",
-            encoding="utf-8",
-        )
+        _extract_python(archives["python"], package / "runtime", version=lock["python"]["version"])
         _extract_zip(
             archives["openssh"],
             package / "tools/openssh",
@@ -317,7 +329,12 @@ def prepare_windows_host(*, cache: Path, platform: str, nand_ecc: bool = False) 
                 "NOTICE.txt",
             },
         )
-        _copy_licenses(toolchain, archives["libusb_source"], package)
+        _copy_licenses(
+            toolchain,
+            archives["libusb_source"],
+            package,
+            libusb_version=lock["libusb_source"]["version"],
+        )
         notice = {
             name: {key: entry[key] for key in ("url", "sha256", "size")}
             for name, entry in lock.items()

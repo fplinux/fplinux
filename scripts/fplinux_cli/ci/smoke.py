@@ -82,7 +82,7 @@ def _native_python(root: Path, host: str) -> list[str]:
         str(root / "runtime/lib/ld-musl-x86_64.so.1"),
         "--library-path",
         str(root / "runtime/lib"),
-        str(root / "runtime/bin/python3.14"),
+        str(root / "runtime/bin/python3.15"),
     ]
 
 
