@@ -407,6 +407,8 @@ static void settings_inventory(void)
 	assert(fplinux_bluez_adapter_connect_profile(driver.adapter, DEVICE,
 						     uuids[1], 1000));
 	expect_answer(&driver, true, 2000);
+	assert(bluez_fake_device_connection_requested(
+		driver.fake, DEVICE, "ConnectProfile", uuids[1]));
 	assert(bluez_fake_device_connected(driver.fake, DEVICE));
 	assert(fplinux_bluez_adapter_remove_device(driver.adapter, DEVICE,
 						   1000));

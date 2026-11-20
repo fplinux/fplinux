@@ -1,11 +1,16 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
+#define _POSIX_C_SOURCE 200809L
+
 #include <assert.h>
 #include <errno.h>
+#include <semaphore.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
+#include <fplinux/fplinux-media.h>
 #include <fplinux/fplinux-runtime-media.h>
 #include "fixtures/runtime-media/ui-boundary.h"
 
@@ -71,6 +76,84 @@ static const unsigned char midi[] = {
 	0,   96,  'M', 'T',  'r', 'k', 0, 0,	0,    12, 0, 0x90,
 	69,  100, 96,  0x80, 69,  0,   0, 0xff, 0x2f, 0,
 };
+
+static struct {
+	bool hold_open;
+	struct fplinux_media *decoder;
+	sem_t entered;
+	sem_t proceed;
+} canceled_prepare;
+
+struct fplinux_media *__real_fplinux_media_open_bytes(const void *bytes,
+						      size_t count);
+void __real_fplinux_media_close(struct fplinux_media *media);
+
+static void wait_decoder(sem_t *event)
+{
+	struct timespec deadline;
+	int result;
+
+	assert(clock_gettime(CLOCK_REALTIME, &deadline) == 0);
+	deadline.tv_sec += 3;
+	do {
+		result = sem_timedwait(event, &deadline);
+	} while (result < 0 && errno == EINTR);
+	assert(result == 0);
+}
+
+static void hold_decoder(void)
+{
+	assert(sem_post(&canceled_prepare.entered) == 0);
+	wait_decoder(&canceled_prepare.proceed);
+}
+
+struct fplinux_media *__wrap_fplinux_media_open_bytes(const void *bytes,
+						      size_t count)
+{
+	if (!canceled_prepare.hold_open)
+		return __real_fplinux_media_open_bytes(bytes, count);
+
+	canceled_prepare.hold_open = false;
+	hold_decoder();
+	canceled_prepare.decoder =
+		__real_fplinux_media_open_bytes(bytes, count);
+	assert(canceled_prepare.decoder);
+	return canceled_prepare.decoder;
+}
+
+void __wrap_fplinux_media_close(struct fplinux_media *media)
+{
+	if (media && media == canceled_prepare.decoder) {
+		hold_decoder();
+		canceled_prepare.decoder = NULL;
+	}
+	__real_fplinux_media_close(media);
+}
+
+static void test_destroy_during_prepare(struct fplinux_runtime_media *broker)
+{
+	struct fplinux_runtime_media_info info;
+	uint32_t handle;
+
+	assert(sem_init(&canceled_prepare.entered, 0, 0) == 0);
+	assert(sem_init(&canceled_prepare.proceed, 0, 0) == 0);
+	canceled_prepare.hold_open = true;
+	handle = fplinux_runtime_media_create(broker, FPLINUX_RUNTIME_MEDIA_WAV,
+					      wav, sizeof(wav), 0, 0);
+	assert(handle);
+	wait_decoder(&canceled_prepare.entered);
+	fplinux_runtime_media_destroy(broker, handle);
+	assert(!fplinux_runtime_media_info(broker, handle, &info));
+	assert(sem_post(&canceled_prepare.proceed) == 0);
+
+	/* Let the UI dispatch after PREPARE, before decoder cleanup returns. */
+	wait_decoder(&canceled_prepare.entered);
+	runtime_media_test_tick();
+	assert(event_count == 0);
+	assert(runtime_media_test_opened() == 0);
+	assert(runtime_media_test_accepted() == 0);
+	assert(sem_post(&canceled_prepare.proceed) == 0);
+}
 
 static void wait_samples(unsigned int stream, size_t frames)
 {
@@ -219,6 +302,7 @@ int main(int argc, char **argv)
 		fplinux_runtime_media_open(ui, record_event, NULL);
 
 	assert(broker);
+	test_destroy_during_prepare(broker);
 	uint32_t player = fplinux_runtime_media_create(
 		broker, FPLINUX_RUNTIME_MEDIA_WAV, wav, sizeof(wav), 0, 0);
 
@@ -228,6 +312,7 @@ int main(int argc, char **argv)
 			   FPLINUX_RUNTIME_MEDIA_PREPARE);
 
 	assert(!prepared.error && prepared.info.rate == 8000);
+	assert(event_count == 0);
 	assert(prepared.info.channels == 1 &&
 	       prepared.info.duration_us == 1000);
 	command(broker, player, FPLINUX_RUNTIME_MEDIA_GAIN, 50);
@@ -498,17 +583,10 @@ int main(int argc, char **argv)
 	for (size_t i = 0; i < 10; i++)
 		fplinux_runtime_media_destroy(broker, additional[i]);
 
-	uint32_t stale = fplinux_runtime_media_create(
-		broker, FPLINUX_RUNTIME_MEDIA_WAV, wav, sizeof(wav), 0, 0);
-
-	assert(stale);
-	fplinux_runtime_media_destroy(broker, stale);
-	for (unsigned int i = 0; i < 3; i++)
-		runtime_media_test_tick();
-	for (size_t i = 0; i < event_count; i++)
-		assert(events[i].handle != stale);
 	test_amr_nb_format(broker);
 	fplinux_runtime_media_close(broker);
+	assert(sem_destroy(&canceled_prepare.proceed) == 0);
+	assert(sem_destroy(&canceled_prepare.entered) == 0);
 	runtime_media_test_ui_close();
 	puts("runtime media: ok");
 	return 0;

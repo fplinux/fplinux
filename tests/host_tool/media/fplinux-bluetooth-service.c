@@ -379,8 +379,16 @@ static DBusHandlerResult handle(DBusConnection *connection,
 	struct service *service = data;
 	if (dbus_message_is_method_call(message, "org.bluez.obex.Client1",
 					"CreateSession")) {
-		if (service->mode == SEND_STALL)
+		if (service->mode == SEND_STALL) {
+			char recorded[32];
+
+			snprintf(recorded, sizeof(recorded), "%lld\n",
+				 milliseconds());
+			publish_marker(".session-requested", recorded);
+			if (rename(".session-requested", "session-requested") < 0)
+				fail("cannot publish session request timestamp");
 			return DBUS_HANDLER_RESULT_HANDLED;
+		}
 		const char *session = SESSION_PATH;
 		reply_object(connection, message, session);
 		return DBUS_HANDLER_RESULT_HANDLED;

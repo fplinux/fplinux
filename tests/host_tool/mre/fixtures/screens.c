@@ -20,6 +20,7 @@ struct capture {
 	int session, listener, width, height;
 	pid_t application;
 	struct fplinux_ui_session_message result;
+	uint32_t close_serial;
 	unsigned int results, close_waits, close_cancels, close_ready, homes,
 		exits;
 	unsigned int accepted;
@@ -137,7 +138,9 @@ static void pump(struct capture *capture)
 			capture->close_waits += !strcmp(message.value, "wait");
 			capture->close_cancels +=
 				!strcmp(message.value, "cancel");
-			capture->close_ready += !strcmp(message.value, "ready");
+			if (message.serial == capture->close_serial &&
+			    !strcmp(message.value, "ready"))
+				capture->close_ready++;
 		}
 	}
 	assert(received == 0);
@@ -554,6 +557,26 @@ static void failed_start(struct capture *capture, const char *directory)
 	end_recording(capture, 2, 2);
 }
 
+static void prepare_close(struct capture *capture, uint32_t serial)
+{
+	struct fplinux_ui_session_message message = {
+		.type = FPLINUX_UI_SESSION_PREPARE_CLOSE,
+		.serial = serial,
+		.reason = "user",
+	};
+	uint64_t until = fplinux_ui_frame_now_ms() + 5000;
+
+	capture->close_serial = serial;
+	assert(fplinux_ui_session_send(capture->session, &message));
+	do {
+		pump(capture);
+		if (capture->close_ready)
+			return;
+	} while (fplinux_ui_frame_now_ms() < until);
+	fprintf(stderr, "no ready close reply for serial %u\n", serial);
+	assert(false);
+}
+
 static void close_application(struct capture *capture, const char *session_path)
 {
 	struct fplinux_ui_session_message message = {
@@ -612,6 +635,33 @@ static void assert_idle_tick(struct capture *capture)
 	assert(tick_count(&last) == ticks && last == 'P');
 }
 
+static pid_t read_idle_guest_pid(void)
+{
+	FILE *input = fopen(getenv("FPLINUX_MRE_ENGINE_RECORD"), "r");
+	long pid;
+
+	assert(input);
+	assert(fscanf(input, "S P %ld", &pid) == 1 && pid > 0);
+	assert(fclose(input) == 0);
+	return (pid_t)pid;
+}
+
+static void wait_guest_reaped(struct capture *capture, pid_t pid)
+{
+	uint64_t until = fplinux_ui_frame_now_ms() + 5000;
+
+	do {
+		pump(capture);
+		/* Signal 0 still finds an exited child until it is reaped. */
+		if (kill(pid, 0) < 0) {
+			assert(errno == ESRCH);
+			return;
+		}
+	} while (fplinux_ui_frame_now_ms() < until);
+	fprintf(stderr, "hidden guest %ld still present\n", (long)pid);
+	assert(false);
+}
+
 static void idle_and_background_completion(struct capture *capture,
 					   const char *directory)
 {
@@ -619,6 +669,7 @@ static void idle_and_background_completion(struct capture *capture,
 		.type = FPLINUX_UI_SESSION_LIFECYCLE,
 		.lifecycle = FPLINUX_UI_SESSION_BACKGROUND,
 	};
+	pid_t guest;
 
 	assert_idle_tick(capture);
 	document(capture, directory, "invalid.vxp", 1);
@@ -630,14 +681,16 @@ static void idle_and_background_completion(struct capture *capture,
 	assert_frame(capture, 0x001f);
 	press(capture, KEY_HOME);
 	assert(capture->homes == 1);
+	guest = read_idle_guest_pid();
+	assert(kill(guest, 0) == 0);
 	assert(fplinux_ui_session_send(capture->session, &message));
 	message = (struct fplinux_ui_session_message){
 		.type = FPLINUX_UI_SESSION_VISIBILITY,
 		.visible = false,
 	};
 	assert(fplinux_ui_session_send(capture->session, &message));
-	/* The execution peer exits on hide. The real frontend must reap it and
-	 * retain the requested picture while its surface is hidden. */
+	/* The execution peer exits on hide and asks to retain its picture. */
+	wait_guest_reaped(capture, guest);
 	assert_idle_tick(capture);
 	message = (struct fplinux_ui_session_message){
 		.type = FPLINUX_UI_SESSION_LIFECYCLE,
@@ -657,13 +710,7 @@ static void idle_and_background_completion(struct capture *capture,
 	assert(fplinux_ui_session_send(capture->session, &message));
 	assert_frame(capture, 0x001f);
 	assert_idle_tick(capture);
-	message = (struct fplinux_ui_session_message){
-		.type = FPLINUX_UI_SESSION_PREPARE_CLOSE,
-		.serial = 90,
-	};
-	strcpy(message.reason, "user");
-	assert(fplinux_ui_session_send(capture->session, &message));
-	pump_for(capture, 60);
+	prepare_close(capture, 90);
 	assert(capture->close_ready == 1 && !capture->close_waits);
 }
 
@@ -891,13 +938,7 @@ int main(int argc, char **argv)
 	wait_result(&capture, 4, FPLINUX_UI_DOCUMENT_ACCEPTED);
 	assert_frame(&capture, 0x001f);
 	end_recording(&capture, 1, 1);
-	message = (struct fplinux_ui_session_message){
-		.type = FPLINUX_UI_SESSION_PREPARE_CLOSE,
-		.serial = 90,
-	};
-	strcpy(message.reason, "user");
-	assert(fplinux_ui_session_send(capture.session, &message));
-	pump_for(&capture, 60);
+	prepare_close(&capture, 90);
 	assert(capture.close_ready == 1 && !capture.close_waits &&
 	       !capture.close_cancels);
 	assert_frame(&capture, 0x001f);

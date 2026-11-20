@@ -40,6 +40,7 @@ def test_guest_worker_short_writes_heard_eof_pause_seek_and_midi_resources(
             "-Wextra",
             "-Werror",
             "-pthread",
+            "-Wl,--wrap=fplinux_media_open_bytes,--wrap=fplinux_media_close",
             f"-I{ROOT / 'include'}",
             f"-I{ROOT / 'include/fplinux'}",
             "-isystem",

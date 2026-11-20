@@ -189,14 +189,17 @@ class BluetoothContext:
         )
 
     def run_transfer(
-        self, command: str, path: Path, policy: str
+        self, command: str, path: Path, policy: str, *, cancel_on: Path | None = None
     ) -> subprocess.CompletedProcess[str]:
         """Invoke the shared blocking API with test-owned consent callbacks."""
+        environment = self.child_environment()
+        if cancel_on is not None:
+            environment["FPLINUX_TEST_OBEX_SESSION_REQUEST"] = str(cancel_on)
         return run_process(
             [str(self.tools.transfer), command, str(path), policy],
             name="run FPLinux Bluetooth transfer callbacks client",
             timeout=5,
-            env=self.child_environment(),
+            env=environment,
             cwd=self.root,
         )
 
@@ -493,14 +496,14 @@ class FplinuxBluetoothHostToolTests:
         payload.write_bytes(b"1234567")
         bluetooth_case.start_service("send-stall")
 
-        started = time.monotonic()
-        result = bluetooth_case.run_transfer("send", payload, "cancel-wait")
-        elapsed = time.monotonic() - started
+        requested = bluetooth_case.service_directory / "session-requested"
+        result = bluetooth_case.run_transfer("send", payload, "cancel-wait", cancel_on=requested)
+        completed = time.monotonic()
 
         assert result.returncode == 1
         assert "result 1 " in result.stdout
         assert "message interrupted\n" in result.stdout
-        assert elapsed < 1.5
+        assert 0 <= completed - int(requested.read_bytes()) / 1000 < 1.5
         assert not (bluetooth_case.service_directory / "sent-bytes").exists()
 
     @pytest.mark.parametrize("policy", ["reject", "cancel-offer"])

@@ -404,6 +404,8 @@ def audiod(audiod_executable: Path) -> Iterator[AudioService]:
 
 
 def test_activity_tracks_real_queued_playback_pause_focus_and_close(audiod: AudioService) -> None:
+    hold_pcm = audiod.work / "hold-pcm"
+
     def exercise() -> None:
         control = audiod.manager(sync=False)
         (media,), pid = audiod.connect()
@@ -418,19 +420,42 @@ def test_activity_tracks_real_queued_playback_pause_focus_and_close(audiod: Audi
         audiod.expect_activity(control, pid, "playing")
         audiod.send(media, PAUSE, stream=stream, flags=1)
         audiod.expect_activity(control, pid, "paused")
+        hold_pcm.touch()
+        audiod.wait(lambda: audiod.count("pcm hold") == 1, "PCM did not acknowledge the hold")
+        media_read = ring.field(READ)
+        audiod.write(media, stream, ring, 9600, 4800)
         (clock,), clock_pid = audiod.connect()
         audiod.announce(control, clock_pid, clock=True)
         audiod.hello(clock)
         clock_stream, clock_ring = audiod.open_stream(clock)
         audiod.write(clock, clock_stream, clock_ring, 0, 9600)
+        audiod.wait(lambda: audiod.status()["clock"] == "1", "Clock did not take focus")
+        assert ring.field(WRITE) == 14400
+        assert ring.field(READ) == media_read < 14400
+        assert (clock_ring.field(WRITE), clock_ring.field(READ)) == (9600, 0)
+
         audiod.send(media, PAUSE, stream=stream, flags=0)
-        audiod.expect_activity(control, pid, "held")
+        assert audiod.activity(control.recv(256)) == (pid, os.geteuid(), "held")
+        assert (ring.field(STATE), ring.field(READ)) == (PAUSED, media_read)
+        assert (clock_ring.field(READ), clock_ring.field(HEARD)) == (0, 0)
+        hold_pcm.unlink()
+        assert audiod.activity(control.recv(256)) == (pid, os.geteuid(), "playing")
+        assert clock_ring.field(HEARD) == 9600
+        audiod.expect_activity(control, pid, "none")
+        assert ring.field(HEARD) == 14400
+
+        # Keep the new batch queued so only CLOSE can clear its activity.
+        hold_pcm.touch()
+        audiod.wait(lambda: audiod.count("pcm hold") == 2, "PCM did not acknowledge the hold")
+        audiod.write(media, stream, ring, 14400, 480)
         audiod.expect_activity(control, pid, "playing")
+        assert (ring.field(READ), ring.field(WRITE)) == (14400, 14880)
         audiod.send(media, CLOSE, stream=stream)
         audiod.expect_activity(control, pid, "none")
+        assert ring.field(STATE) == ENDED
         assert all(owner != clock_pid for owner, _, _ in audiod.activities)
 
-    audiod.run(exercise)
+    audiod.run(exercise, FPLINUX_AUDIOD_FAKE_HOLD_PCM=str(hold_pcm))
 
 
 def test_activity_reconnect_waits_for_sync_and_reports_current_output_state(

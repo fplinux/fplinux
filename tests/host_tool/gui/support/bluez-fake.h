@@ -66,6 +66,10 @@ const char *bluez_fake_device_alias(struct bluez_fake *fake, const char *path);
 bool bluez_fake_device_paired(struct bluez_fake *fake, const char *path);
 bool bluez_fake_device_trusted(struct bluez_fake *fake, const char *path);
 bool bluez_fake_device_connected(struct bluez_fake *fake, const char *path);
+bool bluez_fake_device_connection_requested(struct bluez_fake *fake,
+					    const char *path,
+					    const char *method,
+					    const char *uuid);
 bool bluez_fake_discovering(struct bluez_fake *fake, const char *path);
 bool bluez_fake_discovery_owned(struct bluez_fake *fake, const char *path);
 void bluez_fake_set_external_discovery(struct bluez_fake *fake,

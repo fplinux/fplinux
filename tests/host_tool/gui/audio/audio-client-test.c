@@ -31,7 +31,21 @@ struct peer {
 	size_t bytes[4];
 	pthread_mutex_t mutex;
 	pthread_cond_t changed;
+	bool first_open_timed_out;
 };
+
+static void wait_open_timeout(struct peer *peer)
+{
+	struct timespec deadline;
+
+	assert(clock_gettime(CLOCK_REALTIME, &deadline) == 0);
+	deadline.tv_sec += 2;
+	pthread_mutex_lock(&peer->mutex);
+	while (!peer->first_open_timed_out)
+		assert(pthread_cond_timedwait(&peer->changed, &peer->mutex,
+					      &deadline) == 0);
+	pthread_mutex_unlock(&peer->mutex);
+}
 
 static void answer_open(struct peer *peer,
 			const struct fplinux_audio_message *request)
@@ -117,16 +131,14 @@ static void *serve(void *data)
 				break;
 			}
 			if (!strcmp(peer->scenario, "late-answer") &&
-			    !peer->opened) {
-				struct timespec pause = { .tv_nsec =
-								  700000000L };
-
-				nanosleep(&pause, NULL);
-			}
+			    !peer->opened)
+				wait_open_timeout(peer);
 			answer_open(peer, &request);
 			break;
 		case FPLINUX_AUDIO_CLOSE:
 			pthread_mutex_lock(&peer->mutex);
+			if (!strcmp(peer->scenario, "late-answer"))
+				assert(request.stream == peer->closed + 1);
 			++peer->closed;
 			pthread_mutex_unlock(&peer->mutex);
 			break;
@@ -290,6 +302,28 @@ static void test_disconnect(struct fplinux_audio_client *client,
 	fplinux_audio_stream_close(stream);
 }
 
+static void test_late_answer(struct fplinux_audio_client *client,
+			     struct peer *peer)
+{
+	struct fplinux_audio_stream *stream;
+	struct fplinux_audio_ring *ring;
+	const int16_t frames[2] = { 1234, -4321 };
+
+	assert(!fplinux_audio_stream_open(client, 8000, 1) &&
+	       errno == ETIMEDOUT);
+	pthread_mutex_lock(&peer->mutex);
+	peer->first_open_timed_out = true;
+	pthread_cond_signal(&peer->changed);
+	pthread_mutex_unlock(&peer->mutex);
+	stream = fplinux_audio_stream_open(client, 16000, 2);
+	assert(stream);
+	ring = ring_at(peer, 1);
+	assert(fplinux_audio_stream_write(stream, frames, 1) == 1);
+	assert(!memcmp(fplinux_audio_ring_frames(ring), frames,
+		       sizeof(frames)));
+	fplinux_audio_stream_close(stream);
+}
+
 int main(int argc, char **argv)
 {
 	struct sockaddr_un address = { .sun_family = AF_UNIX };
@@ -327,15 +361,9 @@ int main(int argc, char **argv)
 	else if (!strcmp(peer.scenario, "malformed"))
 		assert(!fplinux_audio_stream_open(client, 8000, 1) &&
 		       errno == EPROTO);
-	else if (!strcmp(peer.scenario, "late-answer")) {
-		struct fplinux_audio_stream *stream;
-
-		assert(!fplinux_audio_stream_open(client, 8000, 1) &&
-		       errno == ETIMEDOUT);
-		stream = fplinux_audio_stream_open(client, 8000, 1);
-		assert(stream && ring_at(&peer, 1));
-		fplinux_audio_stream_close(stream);
-	} else
+	else if (!strcmp(peer.scenario, "late-answer"))
+		test_late_answer(client, &peer);
+	else
 		assert(false);
 	fplinux_audio_client_close(client);
 	assert(pthread_join(thread, NULL) == 0);

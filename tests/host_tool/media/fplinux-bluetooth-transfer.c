@@ -2,29 +2,23 @@
 #define _POSIX_C_SOURCE 200809L
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
-#include <time.h>
+#include <unistd.h>
 
 #include "fplinux-bluetooth-opp.h"
 
 struct callbacks_state {
 	const char *policy;
 	bool cancel;
-	int64_t cancel_at_ms;
+	const char *cancel_marker;
 };
-
-static int64_t now_ms(void)
-{
-	struct timespec now;
-	clock_gettime(CLOCK_MONOTONIC, &now);
-	return (int64_t)now.tv_sec * 1000 + now.tv_nsec / 1000000;
-}
 
 static bool cancelled(void *data)
 {
 	struct callbacks_state *state = data;
-	return state->cancel ||
-	       (state->cancel_at_ms != 0 && now_ms() >= state->cancel_at_ms);
+	return state->cancel || (state->cancel_marker &&
+				 access(state->cancel_marker, F_OK) == 0);
 }
 
 static void progress(const struct fplinux_bluetooth_opp_progress *progress,
@@ -73,8 +67,12 @@ int main(int argc, char **argv)
 	if (argc != 4)
 		return 2;
 	struct callbacks_state state = { .policy = argv[3] };
-	if (strcmp(state.policy, "cancel-wait") == 0)
-		state.cancel_at_ms = now_ms() + 200;
+	if (strcmp(state.policy, "cancel-wait") == 0) {
+		state.cancel_marker =
+			getenv("FPLINUX_TEST_OBEX_SESSION_REQUEST");
+		if (!state.cancel_marker)
+			return 2;
+	}
 	struct fplinux_bluetooth_opp_callbacks callbacks = {
 		.cancelled = cancelled,
 		.progress = progress,

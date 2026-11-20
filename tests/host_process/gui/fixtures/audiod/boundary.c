@@ -10,6 +10,8 @@
  *   prepare and close;
  * - FPLINUX_AUDIOD_FAKE_PLAYED: every frame written, raw S16 stereo;
  * - FPLINUX_AUDIOD_FAKE_BUSY: while this file exists the card is busy;
+ * - FPLINUX_AUDIOD_FAKE_HOLD_PCM: while this file exists the card has
+ *   no space for another period; log "pcm hold" when first observed;
  * - FPLINUX_AUDIOD_FAKE_ABSENT: when set, playback PCM is absent;
  * - FPLINUX_AUDIOD_FAKE_XRUN: the write with this number, counted from 1,
  *   fails with an underrun;
@@ -42,6 +44,7 @@ struct _snd_pcm {
 	snd_pcm_sw_params_t software;
 	uint64_t written;
 	bool started;
+	bool held;
 	uint64_t start_ns;
 };
 
@@ -692,6 +695,15 @@ int snd_pcm_poll_descriptors(snd_pcm_t *pcm, struct pollfd *fds,
 
 snd_pcm_sframes_t snd_pcm_avail_update(snd_pcm_t *pcm)
 {
+	const char *hold = getenv("FPLINUX_AUDIOD_FAKE_HOLD_PCM");
+
+	if (hold && access(hold, F_OK) == 0) {
+		if (!pcm->held)
+			event("pcm hold");
+		pcm->held = true;
+		return 0;
+	}
+	pcm->held = false;
 	return (snd_pcm_sframes_t)(pcm->hardware.buffer - delay_of(pcm));
 }
 

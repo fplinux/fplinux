@@ -212,6 +212,18 @@ class Service:
             assert time.monotonic() < deadline, result
             time.sleep(0.005)
 
+    def wait_device_events(self, *expected: str) -> None:
+        """Wait for the device peer to finish recording an ordered event prefix."""
+        path = self.directory / "events"
+        deadline = time.monotonic() + 3
+        while True:
+            events = path.read_text().splitlines()
+            if len(events) >= len(expected):
+                assert tuple(events[: len(expected)]) == expected
+                return
+            assert time.monotonic() < deadline, events
+            time.sleep(0.005)
+
     def change_jack(self, change: bytes) -> None:
         """Send a jack event when the device peer has opened the FIFO."""
         path = self.directory / "jack"
@@ -400,8 +412,7 @@ def test_headphone_loss_pauses_media_before_speaker_fallback_and_alarm_still_pla
     service.wait_read(media, 480)
     service.change_jack(b"U")
     paused = service.wait_state(media, state=1, reason=5)
-    events = (service.directory / "events").read_text().splitlines()
-    assert events[:3] == ["PCM OPEN", "PCM CLOSE", "ROUTE SPEAKER"]
+    service.wait_device_events("PCM OPEN", "PCM CLOSE", "ROUTE SPEAKER")
     clock = service.stream(clock=True)
     service.control(f"ELIGIBLE {clock.pid} 1")
     assert clock.command("WRITE 2400 18000") == "OK"

@@ -48,6 +48,8 @@ struct fake_device {
 	uint8_t battery;
 	size_t uuid_count;
 	char uuids[32][37];
+	char connection_method[sizeof("ConnectProfile")];
+	char connection_uuid[37];
 };
 
 struct held_request {
@@ -432,6 +434,16 @@ static DBusMessage *apply_call(struct bluez_fake *fake, DBusMessage *call)
 	} else if (device && (!strcmp(member, "Connect") ||
 			      !strcmp(member, "ConnectProfile") ||
 			      !strcmp(member, "Disconnect"))) {
+		const char *uuid = "";
+
+		if (!strcmp(member, "ConnectProfile"))
+			assert(dbus_message_get_args(call, NULL,
+						     DBUS_TYPE_STRING, &uuid,
+						     DBUS_TYPE_INVALID));
+		assert(strlen(member) < sizeof(device->connection_method));
+		assert(strlen(uuid) < sizeof(device->connection_uuid));
+		strcpy(device->connection_method, member);
+		strcpy(device->connection_uuid, uuid);
 		bluez_fake_set_device_connected(fake, path,
 						strcmp(member, "Disconnect"));
 	} else if (device && !strcmp(member, "Pair")) {
@@ -848,6 +860,17 @@ bool bluez_fake_device_connected(struct bluez_fake *fake, const char *path)
 	struct fake_device *device = find_device(fake, path);
 
 	return device && device->connected;
+}
+
+bool bluez_fake_device_connection_requested(struct bluez_fake *fake,
+					    const char *path,
+					    const char *method,
+					    const char *uuid)
+{
+	struct fake_device *device = find_device(fake, path);
+
+	return device && !strcmp(device->connection_method, method) &&
+	       !strcmp(device->connection_uuid, uuid);
 }
 
 bool bluez_fake_discovering(struct bluez_fake *fake, const char *path)
