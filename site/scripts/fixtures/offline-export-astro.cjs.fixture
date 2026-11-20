@@ -1,0 +1,18 @@
+const { appendFileSync, mkdirSync, writeFileSync } = require("node:fs");
+const path = require("node:path");
+
+const output = process.argv[process.argv.indexOf("--outDir") + 1];
+const mode = process.env.TEST_EXPORT_MODE;
+mkdirSync(path.join(output, "guide"), { recursive: true });
+const link = mode === "broken-link" ? "/fplinux/missing.png" : "/fplinux/guide/";
+writeFileSync(
+	path.join(output, "index.html"),
+	`<!doctype html><body><nav><a href="${link}">Guide</a></nav><main><h1>Home</h1><p>Start here.</p></main></body>`
+);
+writeFileSync(
+	path.join(output, "guide/index.html"),
+	'<!doctype html><body><main><h1>Guide</h1><p>Read this guide.</p></main></body>'
+);
+if (mode === "changed-input") {
+	appendFileSync("../THIRD_PARTY_NOTICES.md", "Edited during the export.\n");
+}

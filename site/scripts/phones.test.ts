@@ -120,7 +120,7 @@ void test("SC9820E microSD availability names the RAM-loaded external-root profi
 	assert.deepEqual(phone.profiles, ["default", "microsd-root"]);
 });
 
-void test("documentation receipts track phone sources and retain unrelated driver reuse", async (context) => {
+void test("the documentation digest changes with phone inputs and ignores driver files", async (context) => {
 	const root = mkdtempSync(path.join(tmpdir(), "fplinux-doc-inputs-"));
 	context.after(() => {
 		rmSync(root, { force: true, recursive: true });
@@ -146,7 +146,7 @@ void test("documentation receipts track phone sources and retain unrelated drive
 	}
 });
 
-void test("documentation receipts omit reserved private trees while keeping ordinary sources", async (context) => {
+void test("the documentation digest omits reserved private trees and includes ordinary sources", async (context) => {
 	const root = mkdtempSync(path.join(tmpdir(), "fplinux-doc-data-"));
 	context.after(() => {
 		rmSync(root, { force: true, recursive: true });

@@ -4,26 +4,18 @@
 #
 # Terminal runs as a real application under a controlled Wayland peer. The
 # other phone programs draw into RGB565 buffers through small host drivers.
-# FPLINUX_SOURCES names the directory with the checksummed upstream archives
-# (default: the project download cache).
 set -eu
 
 screens_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 root=$(CDPATH='' cd -- "$screens_dir/../../.." && pwd)
 common=$root/tests/host_tool/gui/screens
 aports=$root/alpine/aports
-if [ -n "${FPLINUX_SOURCES:-}" ]; then
-	sources=$FPLINUX_SOURCES
-else
-	data=$("$root/fplinux" data-path --check)
-	sources=$data/downloads/alpine/sources
-fi
 output=$root/site/src/assets/screens
 # 6 s and 22 s into the 38 s ARMADA loop, before the closing metrics card.
 armada_frame=180
 rotate_frame=660
 work=$(mktemp -d)
-trap 'rm -rf -- "$work"' EXIT
+trap 'rm -rf -- "${work:?}"' EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
@@ -32,34 +24,7 @@ compile() {
 }
 
 png() {
-	python3 "$root/tests/host_tool/gui/support/rgb565_png.py" "$1" "$2" "$3" "$output/$4"
-}
-
-aport_value() {
-	sed -n "s/^$2=//p" "$aports/$1/APKBUILD"
-}
-
-# Extract an archive only when it matches the checksum its aport builds with.
-extract_verified() {
-	archive=$sources/$2
-	expected=$(awk -v name="$2" '$2 == name { print $1 }' \
-		"$aports/$1/APKBUILD")
-	actual=$(sha512sum -- "$archive" | cut -d ' ' -f 1)
-	if [ -z "$expected" ] || [ "$actual" != "$expected" ]; then
-		echo "render.sh: $archive does not match $1/APKBUILD" >&2
-		exit 1
-	fi
-	tar -xzf "$archive" -C "$work"
-}
-
-build_fonts() {
-	version=$(aport_value fplinux-font-terminus pkgver)
-	font=$work/terminus-font-$version
-	extract_verified fplinux-font-terminus "terminus-font-$version.tar.gz"
-	for size in 12 16; do
-		python3 "$font/bin/bdftopsf.py" -2 -o "$work/ter-u${size}n.psf" \
-			"$font/ter-u${size}n.bdf"
-	done
+	python3 "$root/tests/host_tool/gui/support/rgb565_png.py" "$1" "$2" "$3" "$work/$4"
 }
 
 render_armada_and_rotation() {
@@ -93,7 +58,10 @@ render_armada_and_rotation() {
 	png 240 320 "$work/rotate-result.rgb565" rotate-result.png
 }
 
-mkdir -p -- "$output"
-build_fonts
-sh "$root/tests/host_tool/gui/terminal/native/render-terminal.sh" "$output"
+sh "$root/tests/host_tool/gui/terminal/native/render-terminal.sh" "$work"
 render_armada_and_rotation
+
+mkdir -p -- "$output"
+cp -- "$work/terminal-keypad.png" "$work/terminal-menu.png" "$work/terminal-modifiers.png" \
+	"$work/terminal-keypad-128x160.png" "$work/terminal-keypad-320x240.png" \
+	"$work/armada.png" "$work/rotate-source.png" "$work/rotate-result.png" "$output/"

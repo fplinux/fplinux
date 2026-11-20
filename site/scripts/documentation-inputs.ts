@@ -43,7 +43,7 @@ export const documentationDigest = async (
 	);
 	for (const { contents, filename, info } of sources) {
 		const mode = Buffer.alloc(4);
-		// oxlint-disable-next-line no-bitwise, numeric-separators-style -- The receipt encodes POSIX executable permissions.
+		// oxlint-disable-next-line no-bitwise, numeric-separators-style -- Include executable permissions in the digest.
 		mode.writeUInt32BE(info.mode & 0o111 ? 0o100755 : 0o100644);
 		digest.update(path.relative(root, filename).split(path.sep).join("/"));
 		digest.update("\0");

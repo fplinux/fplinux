@@ -1,11 +1,15 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
+import { existsSync } from "node:fs";
 import {
-	cp,
 	mkdir,
+	mkdtemp,
+	mkdtempDisposable,
 	readFile,
 	readdir,
+	rename,
 	rm,
+	rmdir,
 	stat,
 	writeFile,
 } from "node:fs/promises";
@@ -25,9 +29,6 @@ import type { SearchPage } from "../src/scripts/offline-search.ts";
 type Node = DefaultTreeAdapterMap["node"];
 type Element = DefaultTreeAdapterMap["element"];
 const site = fileURLToPath(new URL("../", import.meta.url));
-const data = managedDataRoot();
-const raw = path.join(data, "out/site-offline-raw");
-const output = path.join(data, "out/site-offline");
 const base = `${siteBase.replace(/\/$/u, "")}/`;
 const { origin } = new URL(siteURL);
 
@@ -124,7 +125,7 @@ const prepareHTML = async (filename: string) => {
 				throw new Error(`Unexpected script URL: ${src}`);
 			}
 			imports.push(
-				`import ${JSON.stringify(path.join(raw, src.slice(base.length)))};`
+				`import ${JSON.stringify(path.join(output, src.slice(base.length)))};`
 			);
 		} else {
 			inline.push(`(() => {${serialize(module)}})();`);
@@ -235,7 +236,7 @@ const buildRuntime = async (source: string): Promise<string> => {
 		platform: "browser",
 		stdin: {
 			contents: source,
-			resolveDir: raw,
+			resolveDir: output,
 			sourcefile: "offline-runtime.js",
 		},
 		target: "es2022",
@@ -445,10 +446,46 @@ const pruneUnusedFiles = async (pages: string[]): Promise<number> => {
 	return unused.length;
 };
 
-const inputsDigest = await documentationDigest(path.resolve(site, ".."));
+const publishOfflineSite = async (
+	candidate: string,
+	destination: string
+): Promise<void> => {
+	if (!existsSync(destination)) {
+		await rename(candidate, destination);
+		return;
+	}
+	const backup = await mkdtemp(
+		path.join(path.dirname(destination), ".site-offline-previous-")
+	);
+	const previous = path.join(backup, "site");
+	try {
+		await rename(destination, previous);
+	} catch (error) {
+		await rmdir(backup);
+		throw error;
+	}
+	try {
+		await rename(candidate, destination);
+	} catch (error) {
+		await rename(previous, destination);
+		await rmdir(backup);
+		throw error;
+	}
+	await rm(backup, { recursive: true });
+};
+
+const destination = path.join(managedDataRoot(), "out/site-offline");
+const parent = path.dirname(destination);
+const checkout = path.resolve(site, "..");
+const inputsDigest = await documentationDigest(checkout);
+await mkdir(parent, { recursive: true });
+await using staging = await mkdtempDisposable(
+	path.join(parent, ".site-offline-")
+);
+const output = path.join(staging.path, "site");
 execFileSync(
 	process.execPath,
-	[path.join(site, "node_modules/.bin/astro"), "build", "--outDir", raw],
+	[path.join(site, "node_modules/.bin/astro"), "build", "--outDir", output],
 	{
 		cwd: site,
 		env: {
@@ -459,8 +496,6 @@ execFileSync(
 		stdio: "inherit",
 	}
 );
-await rm(output, { force: true, recursive: true });
-await cp(raw, output, { recursive: true });
 await mkdir(path.join(output, "offline"));
 const generated = await files(output);
 const pages = await Promise.all(
@@ -500,38 +535,12 @@ await writeFile(
 	`window.fplinuxOfflineIndex=${JSON.stringify(index)};\n`
 );
 const pruned = await pruneUnusedFiles(pages.map((page) => page.filename));
-if ((await documentationDigest(path.resolve(site, ".."))) !== inputsDigest) {
+if ((await documentationDigest(checkout)) !== inputsDigest) {
 	throw new Error(
 		"Site sources changed during the offline export; rebuild it."
 	);
 }
-interface ExportRecord {
-	mode: number;
-	sha256: string;
-	size: number;
-}
-const outputFiles = await files(output);
-const records: Record<string, ExportRecord> = Object.fromEntries(
-	await Promise.all(
-		outputFiles.map(async (filename): Promise<[string, ExportRecord]> => {
-			const contents = await readFile(filename);
-			const info = await stat(filename);
-			return [
-				path.relative(output, filename).split(path.sep).join("/"),
-				{
-					// oxlint-disable-next-line no-bitwise -- Retain the generated file's POSIX permissions.
-					mode: info.mode & 0o777,
-					sha256: createHash("sha256").update(contents).digest("hex"),
-					size: contents.length,
-				},
-			];
-		})
-	)
-);
-await writeFile(
-	path.resolve(output, "../site-offline-receipt.json"),
-	`${JSON.stringify({ files: records, inputs_sha256: inputsDigest })}\n`
-);
+await publishOfflineSite(output, destination);
 console.log(
-	`Offline documentation: ${output}/index.html (${index.length} indexed pages, 1 runtime bundle, ${pruned} unused files removed)`
+	`Offline documentation: ${destination}/index.html (${index.length} indexed pages, 1 runtime bundle, ${pruned} unused files removed)`
 );
