@@ -470,6 +470,24 @@ static void first_guest_ui(struct capture *capture, const char *directory,
 	assert(capture->accepted == 1);
 }
 
+static void wait_slow_open_alert(struct capture *capture)
+{
+	uint64_t until = fplinux_ui_frame_now_ms() + 5000;
+
+	do {
+		pump(capture);
+		/* The labels and the session legends arrive independently. */
+		if (has_label(capture, "slow.vxp") &&
+		    has_label(capture, "Opening…") &&
+		    !strcmp(capture->right, "Cancel"))
+			return;
+	} while (fplinux_ui_frame_now_ms() < until);
+	fprintf(stderr,
+		"expected slow-open alert; labels %s, right legend %s\n",
+		capture->labels, capture->right);
+	assert(false);
+}
+
 /*
  * Checking slow.vxp waits for the release file and its first frame for the
  * end file. Bounds leave room for a loaded host.
@@ -484,11 +502,9 @@ static void slow_open(struct capture *capture, const char *directory)
 	strcpy(before, capture->labels);
 	sent = fplinux_ui_frame_now_ms();
 	document(capture, directory, "slow.vxp", 1);
-	wait_label(capture, "slow.vxp");
+	wait_slow_open_alert(capture);
 	shown = fplinux_ui_frame_now_ms();
 	assert(shown - sent >= 300);
-	assert(has_label(capture, "Opening…") &&
-	       !strcmp(capture->right, "Cancel"));
 	press(capture, KEY_HOME);
 	assert(capture->homes == 1);
 	press(capture, KEY_ESC);
@@ -511,7 +527,7 @@ static void slow_open(struct capture *capture, const char *directory)
 	/* One alert from the check until the engine's first frame. */
 	begin_recording(capture);
 	document(capture, directory, "slow.vxp", 3);
-	wait_label(capture, "slow.vxp");
+	wait_slow_open_alert(capture);
 	create(getenv("FPLINUX_MRE_ENGINE_RELEASE"));
 	pump_for(capture, 700);
 	assert(has_label(capture, "slow.vxp") && capture->screens == 1);

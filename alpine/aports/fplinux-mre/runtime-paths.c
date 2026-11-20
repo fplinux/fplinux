@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 #define _GNU_SOURCE
 #include "runtime-paths.h"
-#include "mre-ipc.h"
+#include "ipc/mre-ipc.h"
 #include "text-codec.h"
 
 #include <errno.h>

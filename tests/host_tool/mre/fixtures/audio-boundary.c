@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /* UI frame scenarios use an engine peer which never requests audio. */
-#include "audio-broker.h"
+#include "brokers/audio-broker.h"
 #include <assert.h>
 #include <errno.h>
 #include <stddef.h>

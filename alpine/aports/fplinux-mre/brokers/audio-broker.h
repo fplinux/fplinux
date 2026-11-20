@@ -3,7 +3,8 @@
 #define FPLINUX_MRE_AUDIO_BROKER_H
 
 #include <stdbool.h>
-#include "mre-audio.h"
+
+#include "../ipc/mre-audio.h"
 
 struct fplinux_ui;
 struct mre_audio_broker;

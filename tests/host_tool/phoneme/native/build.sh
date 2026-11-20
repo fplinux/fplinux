@@ -5,7 +5,7 @@ set -eu
 root=$1
 work=$2
 screens=$root/tests/host_tool/gui/screens
-shared=$root/tests/host_tool/mre/fixtures
+shared=$root/tests/host_tool/guest_runtime/fixtures
 fixtures=$root/tests/host_tool/phoneme/native
 aport=$root/alpine/aports/fplinux-phoneme
 # shellcheck source=tests/host_tool/gui/screens/ui-host-build.sh
@@ -24,10 +24,4 @@ ui_host_build_application -I"$aport/port/app" -I"$aport/vm" \
 	-Wl,--wrap=open -Wl,--wrap=fsync -Wl,--wrap=fplinux_language_load \
 	-Wl,--wrap=libintl_bindtextdomain -Wl,--wrap=lv_display_flush_ready \
 	$(pkg-config --cflags --libs libcrypto) -lz -o "$work/phoneme"
-# shellcheck disable=SC2046
-ui_host_compile -I"$root/include/fplinux" -I"$ui_host_inputs" -I"$screens" \
-	$(pkg-config --cflags wayland-server xkbcommon json-c) \
-	"$shared/menu-screens.c" "$screens/ui-frame-peer.c" "$screens/screen-frame.c" \
-	"$ui_host_ui/fplinux-ui-session.c" "$ui_host_ui/fplinux-ui-profile.c" \
-	"$ui_host_ui/fplinux-utf8.c" "$ui_host_inputs/xdg-shell-protocol.c" \
-	$(pkg-config --libs wayland-server xkbcommon json-c) -o "$work/menu-screens"
+sh "$shared/build-menu-screens.sh" "$root" "$work" "$3"

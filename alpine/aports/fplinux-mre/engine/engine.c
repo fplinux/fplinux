@@ -29,8 +29,7 @@
 #include <time.h>
 #include <ucontext.h>
 #include <unistd.h>
-#include "mre-ipc.h"
-#include "vfs-broker.h"
+#include "../ipc/mre-ipc.h"
 #include "text-codec.h"
 #include "ads/ads_image.h"
 #include "gif/gif-image.h"

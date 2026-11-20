@@ -2,7 +2,7 @@
 #ifndef FPLINUX_MRE_SELECTOR_FILES_H
 #define FPLINUX_MRE_SELECTOR_FILES_H
 
-#include "vfs-broker.h"
+#include "ipc/mre-vfs.h"
 
 #include <limits.h>
 #include <stdbool.h>
@@ -17,6 +17,8 @@ struct mre_selector_entries {
 	struct mre_selector_entry *items;
 	size_t count;
 };
+
+struct mre_vfs;
 
 void mre_selector_entries_clear(struct mre_selector_entries *entries);
 /* Consumes fd, including on failure; clears earlier entries before reading. */

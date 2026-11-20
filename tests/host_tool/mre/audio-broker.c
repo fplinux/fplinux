@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
-#include "audio-broker.h"
+#include "brokers/audio-broker.h"
 #include "ui-boundary.h"
 
 #include <assert.h>

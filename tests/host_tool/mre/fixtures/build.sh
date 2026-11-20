@@ -6,6 +6,7 @@ root=$1
 work=$2
 screens=$root/tests/host_tool/gui/screens
 fixtures=$root/tests/host_tool/mre/fixtures
+shared=$root/tests/host_tool/guest_runtime/fixtures
 aport=$root/alpine/aports/fplinux-mre
 # shellcheck source=tests/host_tool/gui/screens/ui-host-build.sh
 . "$screens/ui-host-build.sh"
@@ -18,10 +19,10 @@ msgfmt --check --output-file="$work/locale/ru/LC_MESSAGES/fplinux-ui.mo" "$root/
 # shellcheck disable=SC2046
 ui_host_build_application -I"$aport" \
 	"$aport/fplinux-mre.c" "$aport/mre-selector-files.c" \
-	"$aport/runtime-paths.c" "$aport/vfs-broker.c" "$aport/vfs-path.c" \
-	"$aport/text-codec.c" "$aport/http-broker.c" "$fixtures/adapter.c" \
+	"$aport/runtime-paths.c" "$aport/brokers/vfs-broker.c" "$aport/brokers/vfs-path.c" \
+	"$aport/text-codec.c" "$aport/brokers/http-broker.c" "$fixtures/adapter.c" \
 	"$fixtures/audio-boundary.c" \
-	"$fixtures/ui-observer.c" "$screens/native-glyph-resources.c" \
+	"$shared/ui-observer.c" "$screens/native-glyph-resources.c" \
 	-Wl,--wrap=open -Wl,--wrap=fsync \
 	-Wl,--wrap=execl -Wl,--wrap=fplinux_language_load \
 	-Wl,--wrap=libintl_bindtextdomain \
@@ -39,10 +40,4 @@ ui_host_compile -I"$root/include/fplinux" -I"$ui_host_inputs" -I"$screens" \
 	"$ui_host_ui/fplinux-utf8.c" \
 	"$ui_host_inputs/xdg-shell-protocol.c" \
 	$(pkg-config --libs wayland-server xkbcommon json-c) -o "$work/mre-screens"
-# shellcheck disable=SC2046
-ui_host_compile -I"$root/include/fplinux" -I"$ui_host_inputs" -I"$screens" \
-	$(pkg-config --cflags wayland-server xkbcommon json-c) \
-	"$fixtures/menu-screens.c" "$screens/ui-frame-peer.c" "$screens/screen-frame.c" \
-	"$ui_host_ui/fplinux-ui-session.c" "$ui_host_ui/fplinux-ui-profile.c" \
-	"$ui_host_ui/fplinux-utf8.c" "$ui_host_inputs/xdg-shell-protocol.c" \
-	$(pkg-config --libs wayland-server xkbcommon json-c) -o "$work/menu-screens"
+sh "$shared/build-menu-screens.sh" "$root" "$work" "$3"

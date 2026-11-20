@@ -3,9 +3,10 @@
 #define FPLINUX_MRE_IPC_H
 
 #include <stdint.h>
-#include "mre-http.h"
+
 #include "mre-audio.h"
-#include "vfs-broker.h"
+#include "mre-http.h"
+#include "mre-vfs.h"
 
 #define MRE_SHARED_FD 3
 #define MRE_ORIGINAL_FD 4

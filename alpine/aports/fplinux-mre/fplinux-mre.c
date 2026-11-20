@@ -12,11 +12,12 @@
 #include <fplinux/fplinux-multitap.h>
 #include "fplinux-cli.h"
 
-#include "mre-ipc.h"
+#include "brokers/audio-broker.h"
+#include "brokers/http-broker.h"
+#include "brokers/vfs-broker.h"
+#include "ipc/mre-ipc.h"
 #include "mre-selector-files.h"
 #include "text-codec.h"
-#include "http-broker.h"
-#include "audio-broker.h"
 #include "runtime-paths.h"
 
 #include <errno.h>

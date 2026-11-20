@@ -3,7 +3,7 @@
  * filesystem authority; this process only checks guest memory and packs ABI
  * records. Include after guest_data/check_guest_api_stack and the IPC helpers.
  */
-#include "vfs-broker.h"
+#include "../ipc/mre-vfs.h"
 
 struct sdk_utility_fileinfo {
 	uint16_t filename[MRE_VFS_PATH_BYTES];

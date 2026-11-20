@@ -24,17 +24,6 @@ source="
 	runtime-paths.h
 	text-codec.c
 	text-codec.h
-	vfs-broker.c
-	vfs-broker.h
-	vfs-path.c
-	vfs-path.h
-	http-broker.c
-	http-broker.h
-	audio-broker.c
-	audio-broker.h
-	mre-audio.h
-	mre-http.h
-	mre-ipc.h
 	org.fplinux.mre.desktop
 	ru.po
 	fplinux-font.c
@@ -70,7 +59,8 @@ build() {
 	"$CC" $CPPFLAGS $CFLAGS -Os -std=c11 -Wall -Wextra -Werror \
 		-I"$srcdir/include" -I"$startdir" $(pkg-config --cflags fplinux-ui fplinux-runtime-media libcurl) \
 		fplinux-mre.c mre-selector-files.c runtime-paths.c text-codec.c \
-		vfs-broker.c vfs-path.c http-broker.c audio-broker.c fplinux-cli.c \
+		"$startdir/brokers/vfs-broker.c" "$startdir/brokers/vfs-path.c" \
+		"$startdir/brokers/http-broker.c" "$startdir/brokers/audio-broker.c" fplinux-cli.c \
 		$(pkg-config --libs fplinux-ui fplinux-runtime-media libcurl libcrypto) $LDFLAGS \
 		-o fplinux-mre
 	msgfmt --check --output-file=ru.mo ru.po
@@ -162,24 +152,13 @@ package() {
 
 sha512sums="
 f199f96b30558ca3fa5b5b218d224519c74acf507a967d3ad45a2ac4195d090cb5edfd0d2184ed5f514df935b7accee8a28f71b86e59017ecd26347a0ef796c7  subblock-length.patch
-2e7f3b79f4886fd98a94794862accd12519ac909472512b59b79749fa915fa7f96c9eab79271af14bb8e02103c8d0b5f9fb09c659ee6e37903da86974d2d63cd  fplinux-mre.c
-ee950da047d528882b81b8f460904fe147fe8e620f70a33643364776ca8817e3821c52e84df404ead55c687aa0b17d25c95af40df9ab87df52d6da60f695b178  mre-selector-files.c
-9042c52db450e800e18744319186120e9bb6b61b6e7a14dc6bf65ab79fd2bd4cd97d4d2ebb35bf1c116a65eeb2ec1cce079edcaef0cff32477e93a0b583bca0b  mre-selector-files.h
-e99d763df51f4a2511efd4843c112788109b0fca7327315ccab42a33ca2a09d68bed2e66b53be3a75827991c80c6cf611b0e9db9f1f70e5d243644faf20ccee3  runtime-paths.c
+525183cce664064046c51fdbfbc308be4b6e7f7c2ad84494e166f9960119798b9345a39428916999b34cf77942624a911de760b0f862ce4ffd505c77f2fa0557  fplinux-mre.c
+3319217790f76d4180a0154aff6cbdff6daa0ee1947decaf13dccfd16fa1b92968ef7ababfb6bf61dd54e513e8823f3fdb96dc6ff1c44056aed7cc994fe4dd23  mre-selector-files.c
+403e538f2a6ba540d106086455336d7b2f0209453b01305bb36aeb5fb3f2afadc22bf33d3416f97f1661f81a87e99eb52f2354d9f1f8880330545dd2fabdb7df  mre-selector-files.h
+46496612c694514c87634e89cbb1c35d1c69b68a214b5d99707eaea722891727dab16cc9121fa8f0b177aa15b4ca82cfd80f2ebe97b9fe1c43fa9606b73a5f8f  runtime-paths.c
 eb8bca600ed03a7d6835284ca0855b8b8270f80ee6c362a5f972321b2c8bf5baa8f134557c9a026a1c6e3d85f965a73acf5dc9c679342c797f29965afe22c002  runtime-paths.h
 8aaf5bca33329d275f83e0dc119089c30fc886382efac18c857006412b57cb25db38d8a9682afce6c5c5adcaad83bc0b8a42cb3bd71e493a1722b254b0184a76  text-codec.c
 9164e5eb748e6b4f2e419514ba97f0ff665a3d24c52fbebbf98847d38618af831bf9073633507dd2dadc52f29472ab5a05d79cda03d91df0153827ea0f6bf510  text-codec.h
-98e67998aeec91d76d9564ddc8d2c358de4d69326a92905f03513f86228aa7b507fa849134bf55819ff2bdfd9efc479173c4db16dcbacfaf579747e3507fb11f  vfs-broker.c
-0ab30311abbc542a02635cddaaa5441cb15b7803a80ebf6d67225281cf9de1a0314023896d67aa946198ae9e50a256cb966a23421125745f04bfdbc4296ed820  vfs-broker.h
-fe2a8a56b4575fd28a1c8f7c15a3c9687792f1082670bdc2a960b76cbab48e53d63b20c116876cfb5a6dc7c2f6e3a1c393957da66535ac33a4e01f1eb6097142  vfs-path.c
-2af39f5a04c8a45e991239234ac345c4e27c3e63100325fa33495f8dc3388cba6aee60de17321b133e64b29e0222fc6cc4310e4b728c227072f4deed91928c74  vfs-path.h
-07c06e46ef9a7a245ee86f27ba7c1aa412115caf08f366ce1bf2d6a29a0814bd58a0eba5c313862ab1e52dc11dbdc700a219ebb17a91c49383c598465744e8c6  http-broker.c
-74848dd43cee256504ff0bd0c1b74a6cdd18672fe5ef489c0845f4f09b60240f1b2ca174ad4a9c8238d284d6dc22a24e6ef47b35e2622c573582d88dcf9842cd  http-broker.h
-1af023d741874b11d940fd9d40c1ae2998d2b5db7810cc15ea619276d23efdaa9d4a46fc598044e1d5f93fb51b6ec7c8694ec740031d24e51199fc03ab2266f0  audio-broker.c
-d444f91c5623e865a8a50c08864331b1c60c9ea86f21630f87dea93095620531b5ba32f18bede0d699e56265f7e3e3b11e14f99a3c2ed72d0eab0987fc931c1f  audio-broker.h
-390f9f273b0eefb4bb549db5f8c1f37e353fee8cca53f2f6b98b0b9da48899ace0e2a265b9cc67d74fc26d351f5f6e694c07924b51c1c17ed109311b70e3983c  mre-audio.h
-3bf8fae90d15989ff2602d13665bf91d57540964deaaf5de965e5d4cd4adb1b28a06fef16e2af2a1ac7bc5dc901f84eaa9889a3304f55cd25ced8f9dbe0432e9  mre-http.h
-594e1b110c38762859d81e81169124dc1e20ed1d7a0da171479816f304c83dd5bca8a65a0d768602c496be4be7070ccafbf3ffcf7668a78417352760b3e0f3b7  mre-ipc.h
 12198123ef9026aaf5e8055cfa7250c137a76b34d3a58eb72d96a939b499de59661ac324e9c28ba64e0ad05c394fe3f1ea1bf3c4ccd586f2e60ec568ef109ef7  org.fplinux.mre.desktop
 448f1d912ca45085e47e261aec8393ef3b1e5b12e6b51df38e620c2765eafe9985b2552219a2c6bcdf5c3ea3ceb98a1598b9629c7deeb82942c5dbd74d55be5e  ru.po
 ea1b7d5a48c7c0f6a06693e843620cc87a0553e0a1ea70604d4162bec7b44384e53d6eb946310f58a51fee453e4c3978dfd862cf22370bfd8ff5e87de807bf09  fplinux-font.c

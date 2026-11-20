@@ -54,7 +54,7 @@ def test_mre_parent_midi_loops_pause_gain_mp3_heard_eof_and_guest_cleanup(
             str(native_midi / "include"),
             f'-DFPLINUX_MIDI_SOUNDFONT="{native_midi / "bank/TimGM6mb.sf2"}"',
             str(Path(__file__).with_name("audio-broker.c")),
-            str(aport / "audio-broker.c"),
+            str(aport / "brokers/audio-broker.c"),
             str(boundary / "ui-boundary.c"),
             str(ROOT / "lib/fplinux-runtime-media/fplinux-runtime-media.c"),
             str(ROOT / "lib/fplinux-midi/fplinux-midi.c"),

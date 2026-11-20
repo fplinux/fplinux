@@ -5,7 +5,9 @@
 
 #include <assert.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <json-c/json.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -96,6 +98,26 @@ static void collect_labels(lv_obj_t *object, FILE *output,
 			       labels);
 }
 
+static bool publish_layout(const char *path, struct json_object *labels)
+{
+	char temporary[PATH_MAX];
+	int length, fd, written, closed;
+
+	length = snprintf(temporary, sizeof(temporary), "%s.XXXXXX", path);
+	if (length < 0 || length >= (int)sizeof(temporary))
+		return false;
+	fd = mkostemp(temporary, O_CLOEXEC);
+	if (fd < 0)
+		return false;
+	written = json_object_to_fd(fd, labels, JSON_C_TO_STRING_PLAIN);
+	closed = close(fd);
+	/* Readers holding the previous file must see that whole refresh. */
+	if (!written && !closed && rename(temporary, path) == 0)
+		return true;
+	unlink(temporary);
+	return false;
+}
+
 void __real_lv_display_flush_ready(lv_display_t *display);
 
 /* Observe rendered labels; the runtime still presents the real Wayland frame. */
@@ -106,7 +128,7 @@ void __wrap_lv_display_flush_ready(lv_display_t *display)
 	if (path && lv_display_flush_is_last(display)) {
 		FILE *output = fopen(path, "a");
 		struct json_object *labels = json_object_new_array();
-		char layout[4096];
+		char layout[PATH_MAX];
 
 		assert(output && labels);
 		collect_labels(lv_display_get_screen_active(display), output,
@@ -119,11 +141,7 @@ void __wrap_lv_display_flush_ready(lv_display_t *display)
 		assert(fclose(output) == 0);
 		assert(snprintf(layout, sizeof(layout), "%s.layout.json",
 				path) < (int)sizeof(layout));
-		output = fopen(layout, "w");
-		assert(output && fputs(json_object_to_json_string_ext(
-					       labels, JSON_C_TO_STRING_PLAIN),
-				       output) >= 0);
-		assert(fclose(output) == 0);
+		assert(publish_layout(layout, labels));
 		json_object_put(labels);
 	}
 	__real_lv_display_flush_ready(display);

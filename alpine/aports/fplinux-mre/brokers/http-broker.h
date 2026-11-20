@@ -2,7 +2,7 @@
 #ifndef FPLINUX_MRE_HTTP_BROKER_H
 #define FPLINUX_MRE_HTTP_BROKER_H
 
-#include "mre-http.h"
+#include "../ipc/mre-http.h"
 
 struct mre_http_broker;
 

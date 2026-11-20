@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: 0BSD */
 #define _GNU_SOURCE
 #include "vfs-path.h"
-#include "vfs-broker.h"
+#include "../ipc/mre-vfs.h"
 
 #include <errno.h>
 #include <stdint.h>

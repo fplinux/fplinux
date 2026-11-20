@@ -18,11 +18,8 @@
 #define VFS_TEMP_BYTES 64
 #define VFS_TEMP_ATTEMPTS 128
 #define VFS_FIND_ENTRY_LIMIT 4096
-
-_Static_assert(sizeof(struct mre_vfs_entry) == 316, "VFS entry wire size");
-_Static_assert(sizeof(struct mre_vfs_request) == 4648, "VFS request wire size");
-_Static_assert(sizeof(struct mre_vfs_response) == 4436,
-	       "VFS response wire size");
+#define MRE_VFS_FILE_HANDLES 16
+#define MRE_VFS_FIND_HANDLES 8
 
 struct vfs_file_handle {
 	int32_t id;

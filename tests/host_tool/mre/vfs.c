@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 #define _GNU_SOURCE
-#include "vfs-broker.h"
+#include "brokers/vfs-broker.h"
 
 #include <assert.h>
 #include <errno.h>

@@ -10,7 +10,7 @@ import pytest
 
 from tests import ROOT
 from tests.c_harness import c_build_directory
-from tests.host_tool.mre.menu_frames import (
+from tests.host_tool.guest_runtime.menu_frames import (
     capture_menu_frames,
     check_rotation_only_inherits_global_settings,
     check_settings_cross_scope,

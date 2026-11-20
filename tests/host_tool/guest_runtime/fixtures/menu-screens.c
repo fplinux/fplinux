@@ -6,6 +6,9 @@
 
 #include <assert.h>
 #include <errno.h>
+#include <fcntl.h>
+#include <json-c/json.h>
+#include <limits.h>
 #include <linux/input-event-codes.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -18,8 +21,8 @@ struct capture {
 	struct fplinux_ui_session_message result;
 	int session, listener, width, height;
 	pid_t application;
-	FILE *labels;
-	char text[4096];
+	struct json_object *layout;
+	char layout_path[PATH_MAX];
 	const char *directory;
 	bool russian;
 	bool mre;
@@ -33,40 +36,40 @@ static const char *translated(const struct capture *capture,
 	return capture->russian ? russian : english;
 }
 
-static bool has_label(const struct capture *capture, const char *text)
+static const char *label_text(const struct capture *capture, size_t index)
 {
-	char label[512];
+	struct json_object *label =
+		json_object_array_get_idx(capture->layout, index);
+	struct json_object *text = json_object_object_get(label, "text");
 
-	assert(snprintf(label, sizeof(label), "|%s|", text) <
-	       (int)sizeof(label));
-	return strstr(capture->text, label) != NULL;
+	assert(json_object_is_type(text, json_type_string));
+	return json_object_get_string(text);
 }
 
-static void read_labels(struct capture *capture)
+static bool has_label(const struct capture *capture, const char *text)
 {
-	char line[sizeof(capture->text) - 1];
+	if (!capture->layout)
+		return false;
+	for (size_t i = 0; i < json_object_array_length(capture->layout); i++)
+		if (!strcmp(label_text(capture, i), text))
+			return true;
+	return false;
+}
 
-	if (!capture->labels)
-		capture->labels =
-			fopen(getenv("FPLINUX_APP_FRAME_RECORD"), "r");
-	if (!capture->labels)
+static void read_layout(struct capture *capture)
+{
+	struct json_object *layout;
+	int fd = open(capture->layout_path, O_RDONLY | O_CLOEXEC);
+
+	if (fd < 0) {
+		assert(errno == ENOENT && !capture->layout);
 		return;
-	for (;;) {
-		long position = ftell(capture->labels);
-		char *newline;
-
-		if (!fgets(line, sizeof(line), capture->labels)) {
-			clearerr(capture->labels);
-			return;
-		}
-		newline = strchr(line, '\n');
-		if (!newline) {
-			assert(fseek(capture->labels, position, SEEK_SET) == 0);
-			return;
-		}
-		*newline = 0;
-		snprintf(capture->text, sizeof(capture->text), "|%s", line);
 	}
+	layout = json_object_from_fd(fd);
+	assert(close(fd) == 0);
+	assert(json_object_is_type(layout, json_type_array));
+	json_object_put(capture->layout);
+	capture->layout = layout;
 }
 
 static void pump(struct capture *capture)
@@ -111,7 +114,7 @@ static void pump(struct capture *capture)
 		}
 	}
 	assert(received == 0);
-	read_labels(capture);
+	read_layout(capture);
 }
 
 static void settle(struct capture *capture)
@@ -128,12 +131,17 @@ static void wait_label(struct capture *capture, const char *text)
 
 	do {
 		pump(capture);
-		if (has_label(capture, text)) {
+		if (has_label(capture, text) && capture->peer.commits &&
+		    !capture->peer.configure_pending) {
 			settle(capture);
-			return;
+			if (has_label(capture, text) &&
+			    !capture->peer.configure_pending)
+				return;
 		}
 	} while (fplinux_ui_frame_now_ms() < until);
-	fprintf(stderr, "expected %s, actual %s\n", text, capture->text);
+	fprintf(stderr, "expected %s, actual %s\n", text,
+		json_object_to_json_string_ext(capture->layout,
+					       JSON_C_TO_STRING_PLAIN));
 	assert(false);
 }
 
@@ -147,12 +155,11 @@ static void press(struct capture *capture, unsigned int key)
 static void save_frame(struct capture *capture, const char *name)
 {
 	char path[1024];
-	char observed[4096], buffer[1024];
-	FILE *labels, *layout;
-	size_t count;
+	FILE *labels;
 
 	settle(capture);
-	assert(!capture->peer.configure_pending && capture->peer.pixels);
+	assert(!capture->peer.configure_pending && capture->peer.pixels &&
+	       capture->layout);
 	assert(snprintf(path, sizeof(path), "%s/%s.rgb565", capture->directory,
 			name) < (int)sizeof(path));
 	assert(screen_frame_write(path, capture->peer.pixels,
@@ -162,20 +169,18 @@ static void save_frame(struct capture *capture, const char *name)
 	assert(snprintf(path, sizeof(path), "%s/%s.labels", capture->directory,
 			name) < (int)sizeof(path));
 	labels = fopen(path, "w");
-	assert(labels && fprintf(labels, "%s\n", capture->text) > 0);
+	assert(labels && fputc('|', labels) != EOF);
+	for (size_t i = 0; i < json_object_array_length(capture->layout); i++) {
+		for (const char *text = label_text(capture, i); *text; text++)
+			assert(fputc(*text == '\n' ? ' ' : *text, labels) !=
+			       EOF);
+		assert(fputc('|', labels) != EOF);
+	}
+	assert(fputc('\n', labels) != EOF);
 	assert(fclose(labels) == 0);
-	assert(snprintf(observed, sizeof(observed), "%s.layout.json",
-			getenv("FPLINUX_APP_FRAME_RECORD")) <
-	       (int)sizeof(observed));
-	layout = fopen(observed, "r");
 	assert(snprintf(path, sizeof(path), "%s/%s.layout.json",
 			capture->directory, name) < (int)sizeof(path));
-	labels = fopen(path, "w");
-	assert(layout && labels);
-	while ((count = fread(buffer, 1, sizeof(buffer), layout)) != 0)
-		assert(fwrite(buffer, 1, count, labels) == count);
-	assert(!ferror(layout) && fclose(layout) == 0);
-	assert(fclose(labels) == 0);
+	assert(json_object_to_file(path, capture->layout) == 0);
 }
 
 static void settings_frames(struct capture *capture, const char *name)
@@ -384,7 +389,9 @@ static void settings_scenario(struct capture *capture, const char *document,
 		if (!has_label(capture, "Integer"))
 			fprintf(stderr,
 				"expected inherited Integer scale, actual %s\n",
-				capture->text);
+				json_object_to_json_string_ext(
+					capture->layout,
+					JSON_C_TO_STRING_PLAIN));
 		assert_settings(capture, "Integer", "270°",
 				capture->mre ? "On" : "176x208");
 	} else if (!strncmp(scenario, "retry-", 6)) {
@@ -468,11 +475,17 @@ int main(int argc, char **argv)
 	};
 	struct fplinux_ui_session_message message;
 	const struct fplinux_ui_profile_spec *profile;
-	int wayland[2], status;
+	const char *record = getenv("FPLINUX_APP_FRAME_RECORD");
+	int wayland[2], length, status;
 	uint64_t until;
 	pid_t ended;
 
 	assert(argc == 11 || argc == 12);
+	assert(record);
+	length = snprintf(capture.layout_path, sizeof(capture.layout_path),
+			  "%s.layout.json", record);
+	assert(length >= 0 && length < (int)sizeof(capture.layout_path));
+	assert(unlink(capture.layout_path) == 0 || errno == ENOENT);
 	config.theme = !strcmp(argv[10], "dark") ?
 			       FPLINUX_UI_SESSION_THEME_DARK :
 			       FPLINUX_UI_SESSION_THEME_LIGHT;
@@ -530,8 +543,7 @@ int main(int argc, char **argv)
 	       !WEXITSTATUS(status));
 	close(capture.session);
 	close(capture.listener);
-	if (capture.labels)
-		assert(fclose(capture.labels) == 0);
+	json_object_put(capture.layout);
 	fplinux_ui_frame_cleanup(&capture.peer);
 	assert(unlink(argv[3]) == 0);
 	puts(argc == 12 ?

@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: 0BSD */
 #define _GNU_SOURCE
 #include "mre-selector-files.h"
+#include "brokers/vfs-broker.h"
 #include "text-codec.h"
 
 #include <dirent.h>
