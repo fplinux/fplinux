@@ -40,7 +40,8 @@ def test_loader_distribution_retains_exact_upstream_license_files() -> None:
         ),
         "upstream/loaders/sml.tar.gz": _source_archive(
             {
-                "sml/license.md": b"original monitor license\n",
+                "sml/license.rst": b"See docs/license.rst\n",
+                "sml/docs/license.rst": b"original monitor license\n",
                 "sml/main.c": b"monitor code\n",
             }
         ),
@@ -49,7 +50,7 @@ def test_loader_distribution_retains_exact_upstream_license_files() -> None:
     assert notices == {
         "licenses/loaders/fdl2/README": b"original license explanation\n",
         "licenses/loaders/fdl2/gpl-2.0.txt": b"original GPL terms\n",
-        "licenses/loaders/sml/license.md": b"original monitor license\n",
+        "licenses/loaders/sml/docs/license.rst": b"original monitor license\n",
     }
 
 

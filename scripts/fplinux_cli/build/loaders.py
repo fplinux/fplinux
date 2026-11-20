@@ -208,17 +208,11 @@ def _build_sml(source: Path, build: Path, loader: dict[str, Any], *, jobs: int) 
             f"{_LLVM}clang",
             "--target=aarch64-none-elf",
             "-E",
-            "-D__ASSEMBLY__",
+            "-D__ASSEMBLER__",
             "-I",
             "include",
             "-I",
-            "include/common",
-            "-I",
-            "include/plat/common",
-            "-I",
-            "include/lib",
-            "-I",
-            "include/lib/aarch64",
+            "include/arch/aarch64",
             "-I",
             "plat/qin1splus/include",
             str(check),
@@ -228,7 +222,6 @@ def _build_sml(source: Path, build: Path, loader: dict[str, Any], *, jobs: int) 
         cwd=source,
     )
     compiler = f"{_LLVM}clang --target=aarch64-none-elf"
-    compatibility = "-Wno-error=unused-command-line-argument"
     process_build.run(
         [
             "make",
@@ -237,15 +230,13 @@ def _build_sml(source: Path, build: Path, loader: dict[str, Any], *, jobs: int) 
             "PLAT=qin1splus",
             "ARCH=aarch64",
             "DEBUG=0",
-            f"CC={compiler} {compatibility} -Wno-error=deprecated-non-prototype",
-            f"AS={compiler} {compatibility}",
-            f"CPP={compiler} {compatibility} -E",
-            f"PP={compiler} {compatibility} -E",
+            f"CC={compiler}",
+            f"AS={compiler}",
+            f"CPP={compiler}",
             f"AR={_LLVM}llvm-ar",
             "LD=ld.lld",
             f"OC={_LLVM}llvm-objcopy",
             f"OD={_LLVM}llvm-objdump",
-            f"NM={_LLVM}llvm-nm",
             "bl31",
         ],
         cwd=source,
@@ -359,7 +350,6 @@ def build_loaders(  # noqa: PLR0913 -- source, target, output and build policy s
     output = work / "loaders"
     if not _cache_hit(recipe, output):
         work.mkdir(parents=True, exist_ok=True)
-        # The pinned monitor build strips '/.' while normalizing output directories.
         with tempfile.TemporaryDirectory(dir=work, prefix="loaders-") as temporary:
             staging = _build_chain(
                 selected, target_source, target_config, Path(temporary), jobs=jobs

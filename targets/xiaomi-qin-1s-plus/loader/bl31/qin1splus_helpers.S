@@ -5,6 +5,9 @@
 
 	.globl plat_my_core_pos
 	.globl platform_mem_init
+	.globl plat_crash_console_init
+	.globl plat_crash_console_putc
+	.globl plat_crash_console_flush
 
 func plat_my_core_pos
 	mrs x0, mpidr_el1
@@ -15,3 +18,18 @@ endfunc plat_my_core_pos
 func platform_mem_init
 	ret
 endfunc platform_mem_init
+
+	/* No console is available during the RAM handoff. */
+func plat_crash_console_init
+	mov x0, #0
+	ret
+endfunc plat_crash_console_init
+
+func plat_crash_console_putc
+	mov w0, #-1
+	ret
+endfunc plat_crash_console_putc
+
+func plat_crash_console_flush
+	ret
+endfunc plat_crash_console_flush

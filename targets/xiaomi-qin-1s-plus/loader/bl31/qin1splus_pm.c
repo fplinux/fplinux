@@ -2,16 +2,16 @@
 /* Copyright (c) 2026, FPLinux contributors. */
 #include <arch_helpers.h>
 #include <assert.h>
-#include <bakery_lock.h>
-#include <bl31.h>
-#include <debug.h>
-#include <gicv2.h>
-#include <mmio.h>
-#include <platform.h>
+#include <bl31/bl31.h>
+#include <common/debug.h>
+#include <drivers/arm/gicv2.h>
+#include <lib/bakery_lock.h>
+#include <lib/mmio.h>
+#include <lib/psci/psci.h>
+#include <plat/common/platform.h>
 #include <platform_def.h>
-#include <psci.h>
 
-static bakery_lock_t power_lock __attribute__((section("tzfw_coherent_mem")));
+static DEFINE_BAKERY_LOCK(power_lock);
 
 static void cpu_standby(plat_local_state_t state)
 {
@@ -101,7 +101,7 @@ static int validate_ns_entrypoint(uintptr_t entrypoint)
 	return PSCI_E_SUCCESS;
 }
 
-/* v1.3 requires both hooks to expose the CPU_SUSPEND standby fast path. */
+/* Both hooks are required to expose CPU_SUSPEND for standby. */
 static void unreachable_power_down_suspend(const psci_power_state_t *state)
 {
 	(void)state;

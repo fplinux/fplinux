@@ -109,8 +109,8 @@ int dram_init(void)
 
 int dram_init_banksize(void)
 {
-	gd->bd->bi_dram[0].start = UMS9117_RAM_BASE;
-	gd->bd->bi_dram[0].size = UMS9117_RAM_BYTES;
+	gd->dram[0].start = UMS9117_RAM_BASE;
+	gd->dram[0].size = UMS9117_RAM_BYTES;
 	return 0;
 }
 

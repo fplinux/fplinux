@@ -409,10 +409,10 @@ index cb015fb..7812481 100644
  };
  MODULE_DEVICE_TABLE(of, sprd_pmic_eic_of_match);
 diff --git a/drivers/mfd/Kconfig b/drivers/mfd/Kconfig
-index 763ce6a..f9fe70b 100644
+index 857ca3b..2ee65b6 100644
 --- a/drivers/mfd/Kconfig
 +++ b/drivers/mfd/Kconfig
-@@ -1530,9 +1530,10 @@ config MFD_SKY81452
+@@ -1531,9 +1531,10 @@ config MFD_SKY81452
 
  config MFD_SC27XX_PMIC
  	tristate "Spreadtrum SC27xx PMICs"
@@ -425,7 +425,7 @@ index 763ce6a..f9fe70b 100644
  	select REGMAP_IRQ
  	help
 diff --git a/drivers/mfd/sprd-sc27xx-spi.c b/drivers/mfd/sprd-sc27xx-spi.c
-index aa052f6..962977c 100644
+index 9a8e6ad..2d3f5be 100644
 --- a/drivers/mfd/sprd-sc27xx-spi.c
 +++ b/drivers/mfd/sprd-sc27xx-spi.c
 @@ -8,6 +8,7 @@
@@ -502,7 +502,7 @@ index aa052f6..962977c 100644
  };
 
  static const struct mfd_cell sc2730_devices[] = {
-@@ -83,6 +122,19 @@ static const struct mfd_cell sc2731_devices[] = {
+@@ -84,6 +125,19 @@ static const struct mfd_cell sc2731_devices[] = {
   * base address and irq number, we should save irq number and irq base
   * in the device data structure.
   */
@@ -522,7 +522,7 @@ index aa052f6..962977c 100644
  static const struct sprd_pmic_data sc2730_data = {
  	.irq_base = SPRD_SC2730_IRQ_BASE,
  	.num_irqs = SPRD_SC2730_IRQ_NUMS,
-@@ -95,6 +147,11 @@ static const struct sprd_pmic_data sc2731_data = {
+@@ -96,6 +150,11 @@ static const struct sprd_pmic_data sc2731_data = {
  	.charger_det = SPRD_SC2731_CHG_DET,
  };
 
@@ -534,7 +534,7 @@ index aa052f6..962977c 100644
  enum usb_charger_type sprd_pmic_detect_charger_type(struct device *dev)
  {
  	struct spi_device *spi = to_spi_device(dev);
-@@ -104,6 +161,9 @@ enum usb_charger_type sprd_pmic_detect_charger_type(struct device *dev)
+@@ -105,6 +164,9 @@ enum usb_charger_type sprd_pmic_detect_charger_type(struct device *dev)
  	u32 val;
  	int ret;
 
@@ -544,7 +544,7 @@ index aa052f6..962977c 100644
  	ret = regmap_read_poll_timeout(ddata->regmap, pdata->charger_det, val,
  				       (val & SPRD_PMIC_CHG_DET_DONE),
  				       SPRD_PMIC_CHG_DET_DELAY_US,
-@@ -177,17 +237,68 @@ static const struct regmap_config sprd_pmic_config = {
+@@ -178,17 +240,68 @@ static const struct regmap_config sprd_pmic_config = {
  	.max_register = 0xffff,
  };
 
@@ -613,7 +613,7 @@ index aa052f6..962977c 100644
  	case PMIC_TYPE_SC2730:
  		pdata = &sc2730_data;
  		cells = sc2730_devices;
-@@ -208,7 +319,7 @@ static int sprd_pmic_probe(struct spi_device *spi)
+@@ -209,7 +322,7 @@ static int sprd_pmic_probe(struct spi_device *spi)
  		return -ENOMEM;
 
  	ddata->regmap = devm_regmap_init(&spi->dev, &sprd_pmic_regmap,
@@ -622,7 +622,7 @@ index aa052f6..962977c 100644
  	if (IS_ERR(ddata->regmap)) {
  		ret = PTR_ERR(ddata->regmap);
  		dev_err(&spi->dev, "Failed to allocate register map %d\n", ret);
-@@ -220,6 +331,41 @@ static int sprd_pmic_probe(struct spi_device *spi)
+@@ -221,6 +334,41 @@ static int sprd_pmic_probe(struct spi_device *spi)
  	ddata->irq = spi->irq;
  	ddata->pdata = pdata;
 
@@ -664,7 +664,7 @@ index aa052f6..962977c 100644
  	ddata->irq_chip.name = dev_name(&spi->dev);
  	ddata->irq_chip.status_base =
  		pdata->irq_base + SPRD_PMIC_INT_MASK_STATUS;
-@@ -246,9 +392,12 @@ static int sprd_pmic_probe(struct spi_device *spi)
+@@ -247,9 +395,12 @@ static int sprd_pmic_probe(struct spi_device *spi)
  		return ret;
  	}
 
@@ -680,7 +680,7 @@ index aa052f6..962977c 100644
  	if (ret) {
  		dev_err(&spi->dev, "Failed to populate sub-devices %d\n", ret);
  		return ret;
-@@ -258,9 +407,35 @@ static int sprd_pmic_probe(struct spi_device *spi)
+@@ -259,9 +410,35 @@ static int sprd_pmic_probe(struct spi_device *spi)
  	if (ret)
  		return dev_err_probe(&spi->dev, ret, "Failed to init wakeup\n");
 
@@ -716,7 +716,7 @@ index aa052f6..962977c 100644
  static int sprd_pmic_suspend(struct device *dev)
  {
  	struct sprd_pmic *ddata = dev_get_drvdata(dev);
-@@ -285,6 +460,8 @@ static DEFINE_SIMPLE_DEV_PM_OPS(sprd_pmic_pm_ops,
+@@ -286,6 +463,8 @@ static DEFINE_SIMPLE_DEV_PM_OPS(sprd_pmic_pm_ops,
  				sprd_pmic_suspend, sprd_pmic_resume);
 
  static const struct of_device_id sprd_pmic_match[] = {
@@ -725,7 +725,7 @@ index aa052f6..962977c 100644
  	{ .compatible = "sprd,sc2730", .data = (void *)PMIC_TYPE_SC2730 },
  	{ .compatible = "sprd,sc2731", .data = (void *)PMIC_TYPE_SC2731 },
  	{},
-@@ -292,6 +469,8 @@ static const struct of_device_id sprd_pmic_match[] = {
+@@ -293,9 +472,11 @@ static const struct of_device_id sprd_pmic_match[] = {
  MODULE_DEVICE_TABLE(of, sprd_pmic_match);
 
  static const struct spi_device_id sprd_pmic_spi_ids[] = {
@@ -733,8 +733,12 @@ index aa052f6..962977c 100644
 +	{ .name = "sc2721", .driver_data = PMIC_TYPE_SC2721 },
  	{ .name = "sc2730", .driver_data = PMIC_TYPE_SC2730 },
  	{ .name = "sc2731", .driver_data = PMIC_TYPE_SC2731 },
- 	{},
-@@ -303,8 +482,11 @@ static struct spi_driver sprd_pmic_driver = {
+-	{ }
++	{}
+ };
+ MODULE_DEVICE_TABLE(spi, sprd_pmic_spi_ids);
+
+@@ -304,8 +485,11 @@ static struct spi_driver sprd_pmic_driver = {
  		.name = "sc27xx-pmic",
  		.of_match_table = sprd_pmic_match,
  		.pm = pm_sleep_ptr(&sprd_pmic_pm_ops),

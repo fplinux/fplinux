@@ -105,7 +105,7 @@ def _loader_license_notices(
                 selected = [
                     item
                     for item in archive.getmembers()
-                    if item.isfile() and item.name == f"{prefix}license.md"
+                    if item.isfile() and item.name == f"{prefix}docs/license.rst"
                 ]
                 if not selected:
                     fail("RAM secure monitor license is missing")

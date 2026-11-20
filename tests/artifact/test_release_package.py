@@ -140,4 +140,4 @@ def test_release_carries_each_qin_loader_and_its_original_notices(
         assert files[payload[name][0]] == contents
     assert files["licenses/loaders/fdl2/README"] == b"original license explanation\n"
     assert files["licenses/loaders/fdl2/gpl-2.0.txt"] == b"original GPL terms\n"
-    assert files["licenses/loaders/sml/license.md"] == b"original monitor license\n"
+    assert files["licenses/loaders/sml/docs/license.rst"] == b"original monitor license\n"

@@ -2,27 +2,41 @@
 /* Copyright (c) 2026, FPLinux contributors. */
 #include <arch_helpers.h>
 #include <assert.h>
-#include <bl31.h>
-#include <bl_common.h>
-#include <console.h>
-#include <gicv2.h>
-#include <mmio.h>
-#include <platform.h>
+#include <bl31/bl31.h>
+#include <common/bl_common.h>
+#include <drivers/arm/gic_common.h>
+#include <drivers/arm/gicv2.h>
+#include <lib/mmio.h>
+#include <lib/xlat_tables/xlat_tables.h>
+#include <plat/common/platform.h>
 #include <platform_def.h>
-#include <xlat_tables.h>
 
 static entry_point_info_t ns_image;
 static const unsigned char power_domains[] = { 1, PLATFORM_CORE_COUNT };
 
-/* Preserve secure interrupt routing during the RAM handoff. */
-static const unsigned int secure_interrupts[] = { 29, 9,  10, 11, 12, 13,
-						  15, 56, 57, 8,  14 };
+#define QIN_SECURE_IRQ(id, cfg) \
+	INTR_PROP_DESC(id, GIC_HIGHEST_SEC_PRIORITY, GICV2_INTR_GROUP0, cfg)
+
+/* Secure SGIs have no configurable trigger. */
+static const interrupt_prop_t secure_interrupts[] = {
+	QIN_SECURE_IRQ(29, GICV2_PPI_CFG_KEEP),
+	QIN_SECURE_IRQ(9, GIC_INTR_CFG_EDGE),
+	QIN_SECURE_IRQ(10, GIC_INTR_CFG_EDGE),
+	QIN_SECURE_IRQ(11, GIC_INTR_CFG_EDGE),
+	QIN_SECURE_IRQ(12, GIC_INTR_CFG_EDGE),
+	QIN_SECURE_IRQ(13, GIC_INTR_CFG_EDGE),
+	QIN_SECURE_IRQ(15, GIC_INTR_CFG_EDGE),
+	QIN_SECURE_IRQ(56, GIC_INTR_CFG_LEVEL),
+	QIN_SECURE_IRQ(57, GIC_INTR_CFG_LEVEL),
+	QIN_SECURE_IRQ(8, GIC_INTR_CFG_EDGE),
+	QIN_SECURE_IRQ(14, GIC_INTR_CFG_EDGE),
+};
 
 static const gicv2_driver_data_t gic_data = {
 	.gicd_base = QIN_GICD_PHYS,
 	.gicc_base = QIN_GICC_PHYS,
-	.g0_interrupt_num = ARRAY_SIZE(secure_interrupts),
-	.g0_interrupt_array = secure_interrupts,
+	.interrupt_props_num = ARRAY_SIZE(secure_interrupts),
+	.interrupt_props = secure_interrupts,
 };
 
 static const mmap_region_t device_regions[] = {
@@ -65,10 +79,13 @@ static void cold_power_setup(void)
 	mmio_write_32(QIN_PMU_PHYS + 0x2018, 1U << 25);
 }
 
-void bl31_early_platform_setup(bl31_params_t *from_bl2, void *plat_params)
+void bl31_early_platform_setup2(u_register_t arg0, u_register_t arg1,
+				u_register_t arg2, u_register_t arg3)
 {
-	(void)from_bl2;
-	(void)plat_params;
+	(void)arg0;
+	(void)arg1;
+	(void)arg2;
+	(void)arg3;
 	SET_PARAM_HEAD(&ns_image, PARAM_EP, VERSION_1, NON_SECURE);
 	ns_image.pc = QIN_NS_ENTRY;
 	ns_image.spsr = SPSR_MODE32(MODE32_hyp, SPSR_T_ARM, SPSR_E_LITTLE,
@@ -77,17 +94,12 @@ void bl31_early_platform_setup(bl31_params_t *from_bl2, void *plat_params)
 
 void bl31_plat_arch_setup(void)
 {
-	uintptr_t ro_start = (uintptr_t)&__RO_START__;
-	uintptr_t ro_end = (uintptr_t)&__RO_END__;
-	uintptr_t coherent_start = (uintptr_t)&__COHERENT_RAM_START__;
-	uintptr_t coherent_end = (uintptr_t)&__COHERENT_RAM_END__;
-
 	mmap_add_region(BL31_BASE, BL31_BASE, BL31_LIMIT - BL31_BASE,
 			MT_MEMORY | MT_RW | MT_SECURE);
-	mmap_add_region(ro_start, ro_start, ro_end - ro_start,
-			MT_MEMORY | MT_RO | MT_SECURE);
-	mmap_add_region(coherent_start, coherent_start,
-			coherent_end - coherent_start,
+	mmap_add_region(BL_CODE_BASE, BL_CODE_BASE, BL_CODE_END - BL_CODE_BASE,
+			MT_CODE | MT_SECURE);
+	mmap_add_region(BL_COHERENT_RAM_BASE, BL_COHERENT_RAM_BASE,
+			BL_COHERENT_RAM_END - BL_COHERENT_RAM_BASE,
 			MT_DEVICE | MT_RW | MT_SECURE);
 	mmap_add(device_regions);
 	init_xlat_tables();
@@ -127,15 +139,4 @@ int plat_core_pos_by_mpidr(u_register_t mpidr)
 	if (affinity >= PLATFORM_CORE_COUNT)
 		return -1;
 	return (int)affinity;
-}
-
-/* This stage has no configured UART console. */
-int console_putc(int character)
-{
-	(void)character;
-	return -1;
-}
-
-void console_uninit(void)
-{
 }

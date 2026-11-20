@@ -1,104 +1,23 @@
-diff --git a/bl31/bl31.ld.S b/bl31/bl31.ld.S
-index 743e65c..a229902 100644
---- a/bl31/bl31.ld.S
-+++ b/bl31/bl31.ld.S
-@@ -52,7 +52,7 @@ SECTIONS
-         *bl31_entrypoint.o(.text*)
-         *(.text*)
-         *(.vectors)
--        . = NEXT(4096);
-+        . = ALIGN(4096);
-         __TEXT_END__ = .;
-     } >RAM
+--- a/include/drivers/arm/gicv2.h
++++ b/include/drivers/arm/gicv2.h
+@@ -19,6 +19,9 @@
+ #define GICV2_INTR_GROUP0	U(0)
+ #define GICV2_INTR_GROUP1	U(1)
  
-@@ -83,7 +83,7 @@ SECTIONS
-         KEEP(*(cpu_ops))
-         __CPU_OPS_END__ = .;
++/* Leave the current trigger configuration of a PPI unchanged. */
++#define GICV2_PPI_CFG_KEEP	U(1)
++
+ /* Interrupt IDs reported by the HPPIR and IAR registers */
+ #define PENDING_G1_INTID	U(1022)
  
--        . = NEXT(4096);
-+        . = ALIGN(4096);
-         __RODATA_END__ = .;
-     } >RAM
- #else
-@@ -123,7 +123,7 @@ SECTIONS
-          * executable.  No RW data from the next section must creep in.
-          * Ensure the rest of the current memory page is unused.
-          */
--        . = NEXT(4096);
-+        . = ALIGN(4096);
-         __RO_END__ = .;
-     } >RAM
- #endif
-@@ -234,7 +234,7 @@ SECTIONS
-          * as device memory.  No other unexpected data must creep in.
-          * Ensure the rest of the current memory page is unused.
-          */
--        . = NEXT(4096);
-+        . = ALIGN(4096);
-         __COHERENT_RAM_END__ = .;
-     } >RAM
- #endif
-diff --git a/include/common/asm_macros_common.S b/include/common/asm_macros_common.S
-index 023124b..4750463 100644
---- a/include/common/asm_macros_common.S
-+++ b/include/common/asm_macros_common.S
-@@ -38,7 +38,6 @@
- 	.macro func _name
- 	.section .text.\_name, "ax"
- 	.type \_name, %function
--	.func \_name
- 	\_name:
- 	.endm
- 
-@@ -46,7 +45,6 @@
- 	 * This macro is used to mark the end of a function.
- 	 */
- 	.macro endfunc _name
--	.endfunc
- 	.size \_name, . - \_name
- 	.endm
- 
-diff --git a/include/lib/cpus/aarch64/cpu_macros.S b/include/lib/cpus/aarch64/cpu_macros.S
-index f34f078..fbc5b5f 100644
---- a/include/lib/cpus/aarch64/cpu_macros.S
-+++ b/include/lib/cpus/aarch64/cpu_macros.S
-@@ -38,25 +38,27 @@
- 	/*
- 	 * Define the offsets to the fields in cpu_ops structure.
- 	 */
--	.struct 0
--CPU_MIDR: /* cpu_ops midr */
--	.space  8
-+	.equ CPU_MIDR, 0
- /* Reset fn is needed in BL at reset vector */
- #if IMAGE_BL1 || IMAGE_BL31
--CPU_RESET_FUNC: /* cpu_ops reset_func */
--	.space  8
-+	.equ CPU_RESET_FUNC, CPU_MIDR + 8
- #endif
- #if IMAGE_BL31 /* The power down core and cluster is needed only in BL31 */
--CPU_PWR_DWN_CORE: /* cpu_ops core_pwr_dwn */
--	.space  8
--CPU_PWR_DWN_CLUSTER: /* cpu_ops cluster_pwr_dwn */
--	.space  8
-+	.equ CPU_PWR_DWN_CORE, CPU_RESET_FUNC + 8
-+	.equ CPU_PWR_DWN_CLUSTER, CPU_PWR_DWN_CORE + 8
- #endif
- #if (IMAGE_BL31 && CRASH_REPORTING)
--CPU_REG_DUMP: /* cpu specific register dump for crash reporting */
--	.space  8
-+	.equ CPU_REG_DUMP, CPU_PWR_DWN_CLUSTER + 8
-+#endif
-+#if (IMAGE_BL31 && CRASH_REPORTING)
-+	.equ CPU_OPS_SIZE, CPU_REG_DUMP + 8
-+#elif IMAGE_BL31
-+	.equ CPU_OPS_SIZE, CPU_PWR_DWN_CLUSTER + 8
-+#elif IMAGE_BL1
-+	.equ CPU_OPS_SIZE, CPU_RESET_FUNC + 8
-+#else
-+	.equ CPU_OPS_SIZE, CPU_MIDR + 8
- #endif
--CPU_OPS_SIZE = .
- 
- 	/*
- 	 * Convenience macro to declare cpu_ops structure.
+--- a/drivers/arm/gic/v2/gicv2_helpers.c
++++ b/drivers/arm/gic/v2/gicv2_helpers.c
+@@ -198,7 +198,7 @@
+ 		 * are ignored.
+ 		 */
+ 		if ((prop_desc->intr_num >= MIN_PPI_ID) &&
+-				(prop_desc->intr_num < MIN_SPI_ID)) {
++				(prop_desc->intr_cfg != GICV2_PPI_CFG_KEEP)) {
+ 			gicd_set_icfgr(gicd_base, prop_desc->intr_num,
+ 					prop_desc->intr_cfg);
+ 		}

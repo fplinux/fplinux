@@ -1025,14 +1025,14 @@ algorithm = "sha512"
 checksum = "98fdcd0e962849a7d132c964745a8ff3b902ffc50d80c7af72378e848bc94228ad7a569f9d8a5b7c5484478709932a2c0988dba613e19a35cb208ad56a987f5f"
 
 [arm_trusted_firmware]
-version = "6bb37adc203567c2f9322dfbe34058a5f12d4c70"
+version = "2.15.0"
 name = "arm_trusted_firmware.tar.gz"
-url = "https://codeload.github.com/ARM-software/arm-trusted-firmware/tar.gz/6bb37adc203567c2f9322dfbe34058a5f12d4c70"
+url = "https://codeload.github.com/ARM-software/arm-trusted-firmware/tar.gz/da738d5eae93af342fdc4995dd3c05acb4c9d757"
 algorithm = "sha256"
-checksum = "129983ed471a29bd1dc125ec5147a4891731f6aa544818e7dec4fc11472bfdf3"
+checksum = "3a13cf062213f92a54af015c55ced26b1ea75a2ca48c77491a4f5077bfb14ca1"
 repository = "https://github.com/ARM-software/arm-trusted-firmware"
 license = "BSD-3-Clause"
-archive_prefix = "arm-trusted-firmware-6bb37adc203567c2f9322dfbe34058a5f12d4c70"
+archive_prefix = "arm-trusted-firmware-da738d5eae93af342fdc4995dd3c05acb4c9d757"
 
 [bch]
 version = "8d0656ab8f37e734428635501738d360ad80eebd"
@@ -1133,11 +1133,11 @@ checksum = "fec5004aad55b3fa922c88b512431e8e2f4085bbcc9d9f232501dcf405832c8cbc9b
 archive_prefix = "libubox-7dd127841e82eb1cfb61185da37dde7b9bd9ba6d"
 
 [linux]
-version = "7.2.9"
-name = "linux-7.2.9.tar.xz"
-url = "https://cdn.kernel.org/pub/linux/kernel/v7.x/linux-7.2.9.tar.xz"
+version = "7.3.5"
+name = "linux-7.3.5.tar.xz"
+url = "https://cdn.kernel.org/pub/linux/kernel/v7.x/linux-7.3.5.tar.xz"
 algorithm = "sha256"
-checksum = "b4c5dfbe51a364a6c7f03869200f88c8e1f77403539005f14b7fc6bc91b8d8ba"
+checksum = "8f293f83d54f0b7b9be56863ebc5e4ea79d73e530b4ae55c572be97ef39f0990"
 license = "GPL-2.0-only"
 
 [linux_host_bzip2]
@@ -1497,11 +1497,12 @@ algorithm = "sha256"
 checksum = "aca6b5d546307092b8d0a8e0a89dd80f9da51f2f7617c5e45c5607c1684ffbf2"
 
 [u_boot]
-version = "2026.07"
-name = "u-boot-2026.07.tar.bz2"
-url = "https://distfiles.alpinelinux.org/distfiles/edge/u-boot-2026.07.tar.bz2"
+version = "2026.10"
+name = "u-boot-2026.10.tar.bz2"
+url = "https://distfiles.alpinelinux.org/distfiles/edge/u-boot-2026.10.tar.bz2"
 algorithm = "sha256"
-checksum = "78e8bfc382fe388f9b55aa1daf8c563522a037779b5d4c349d1415e381f1243e"
+checksum = "3f856da3cbbc93af51ff95fde18588a348b4a26723b01d9841e999d988481015"
+bytes = 35346177
 
 [vale_google]
 version = "0.7.0"

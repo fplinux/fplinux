@@ -418,7 +418,7 @@ def build_archive_inputs(
             {
                 "licenses/loaders/fdl2/README": b"original license explanation\n",
                 "licenses/loaders/fdl2/gpl-2.0.txt": b"original GPL terms\n",
-                "licenses/loaders/sml/license.md": b"original monitor license\n",
+                "licenses/loaders/sml/docs/license.rst": b"original monitor license\n",
             }
             if selected["platform"] == "sc9820e"
             else {}

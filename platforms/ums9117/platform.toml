@@ -40,7 +40,7 @@ packages = [
 
 [uboot]
 source = "platforms/ums9117/uboot/u-boot.lock.toml"
-archive_prefix = "u-boot-2026.07"
+archive_prefix = "u-boot-v2026.10"
 defconfig = "platforms/ums9117/uboot/fplinux_ums9117_defconfig"
 patches = ["platforms/ums9117/uboot/integration.patch"]
 required_config = [

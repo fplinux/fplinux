@@ -695,8 +695,17 @@ index 3584a2b..e346c20 100644
  	host = sdhci_pltfm_init(pdev, &sdhci_sprd_pdata, sizeof(*sprd_host));
  	if (IS_ERR(host))
  		return PTR_ERR(host);
-@@ -891,15 +1518,29 @@ static void sdhci_sprd_remove(struct platform_device *pdev)
+@@ -891,19 +1518,35 @@ static void sdhci_sprd_remove(struct platform_device *pdev)
  	struct sdhci_sprd_host *sprd_host = TO_SPRD_HOST(host);
+
+-	pm_runtime_get_sync(&pdev->dev);
+-	pm_runtime_disable(&pdev->dev);
+-	pm_runtime_put_noidle(&pdev->dev);
++	if (!sprd_host->is_r10) {
++		pm_runtime_get_sync(&pdev->dev);
++		pm_runtime_disable(&pdev->dev);
++		pm_runtime_put_noidle(&pdev->dev);
++	}
 
  	sdhci_remove_host(host, 0);
 +	if (sprd_host->is_r10) {

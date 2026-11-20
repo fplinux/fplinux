@@ -4,7 +4,7 @@
 #define QIN1SPLUS_PLATFORM_DEF_H
 
 #include <arch.h>
-#include <common_def.h>
+#include <plat/common/common_def.h>
 
 #define PLATFORM_STACK_SIZE 0x400
 #define PLATFORM_CORE_COUNT 2
@@ -20,7 +20,8 @@
 #define BL31_LIMIT 0x8e100000
 #define BL31_PROGBITS_LIMIT BL31_LIMIT
 
-#define ADDR_SPACE_SIZE (1ULL << 32)
+#define PLAT_VIRT_ADDR_SPACE_SIZE (1ULL << 32)
+#define PLAT_PHY_ADDR_SPACE_SIZE (1ULL << 32)
 #define MAX_MMAP_REGIONS 8
 #define MAX_XLAT_TABLES 8
 
