@@ -8,7 +8,7 @@ url="https://github.com/magicus/phoneME"
 arch="armv7"
 license="GPL-2.0-only AND MIT"
 depends="fplinux-ui fplinux-runtime-media libcrypto3"
-makedepends_build="clang22 lld22 llvm22 binutils gcc linux-headers make patch pkgconf python3 gettext
+makedepends_build="clang23 lld23 llvm23 binutils gcc linux-headers make patch pkgconf python3 gettext
 	glib-dev glib-static pcre2-static py3-pip py3-setuptools py3-wheel samurai zlib-static"
 makedepends_host="musl-dev musl-libintl linux-headers gcc zlib-dev openssl-dev fplinux-ui-dev fplinux-runtime-media-dev"
 options="!check"
@@ -16,7 +16,6 @@ options="!check"
 # CLDC generators require ILP32; JDK 8 produces their input class files.
 _muslver=@version:phoneme_host_musl@
 _gccver=@version:phoneme_host_libstdcpp@
-_llvmver=@version:phoneme_host_compiler_rt@
 _qemuver=@version:phoneme_qemu@
 _jdkver=@version:phoneme_jdk@
 _mascot_commit=@version:phoneme_mascotme@
@@ -27,8 +26,6 @@ source="
 	@source:phoneme_mascotme@
 	@source:phoneme_host_musl@
 	@source:phoneme_host_libstdcpp@
-	@source:phoneme_host_compiler_rt@
-	@source:phoneme_host_unwind@
 	@source:phoneme_qemu@
 	@source:phoneme_jdk@
 	@source:phoneme_jre@
@@ -61,8 +58,8 @@ prepare() {
 
 	_unpack_tool x86-musl-dev-$_muslver.apk "$srcdir/i386-root"
 	_unpack_tool x86-libstdc++-dev-$_gccver.apk "$srcdir/i386-root"
-	_unpack_tool x86-compiler-rt-$_llvmver.apk "$srcdir/i386-root"
-	_unpack_tool x86-llvm-libunwind-static-$_llvmver.apk "$srcdir/i386-root"
+	install -Dm644 /usr/lib/llvm23/lib/fplinux/i586/libunwind.a \
+		"$srcdir/i386-root/usr/lib/libunwind.a"
 	local jdk
 	for jdk in jdk jre-base jre-lib; do
 		_unpack_tool x86_64-openjdk8-$jdk-$_jdkver.apk "$srcdir/jdk"
@@ -92,9 +89,9 @@ _setup_tools() {
 	# clang looks up the i586 compiler-rt files under its resource
 	# directory with per-target names.
 	local resource="$srcdir/i386-resource"
-	local runtime="$srcdir/i386-root/usr/lib/llvm22/lib/clang/22/lib/i586-alpine-linux-musl"
+	local runtime="/usr/lib/llvm23/lib/clang/23/lib/i586-alpine-linux-musl"
 	mkdir -p "$resource/lib/i586-alpine-linux-musl"
-	ln -sfn /usr/lib/llvm22/lib/clang/22/include "$resource/include"
+	ln -sfn /usr/lib/llvm23/lib/clang/23/include "$resource/include"
 	ln -sf "$runtime/libclang_rt.builtins-i386.a" \
 		"$resource/lib/i586-alpine-linux-musl/libclang_rt.builtins.a"
 	ln -sf "$runtime/clang_rt.crtbegin-i386.o" \

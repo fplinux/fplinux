@@ -6,7 +6,7 @@ pkgdesc="Keyboard layout library for FPLinux applications"
 url="https://xkbcommon.org"
 arch="armv7"
 license="MIT AND MIT-open-group AND HPND AND HPND-sell-variant"
-makedepends_build="bison clang22 lld22 llvm22 meson samurai"
+makedepends_build="bison clang23 lld23 llvm23 meson samurai"
 makedepends_host="musl-dev"
 subpackages="$pkgname-dev $pkgname-static"
 options="!check"
@@ -19,7 +19,7 @@ build() {
 	: "${CHOST:?missing target CHOST}" "${CBUILDROOT:?missing target sysroot}"
 	cat >fplinux-cross.meson <<-EOF
 		[binaries]
-		ar = '/usr/lib/llvm22/bin/llvm-ar'
+		ar = '/usr/lib/llvm23/bin/llvm-ar'
 		[properties]
 		pkg_config_libdir = ['$CBUILDROOT/usr/lib/pkgconfig', '$CBUILDROOT/usr/share/pkgconfig']
 	EOF

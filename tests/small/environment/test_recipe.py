@@ -7,12 +7,16 @@ import copy
 import shutil
 import tempfile
 from pathlib import Path
+from unittest import mock
 
 import pytest
 import tomlkit
 from fplinux_cli import common
 from fplinux_cli.alpine.sources import aport_sources
-from fplinux_cli.environment import definition
+from fplinux_cli.build import environment as build_environment
+from fplinux_cli.environment import definition, runtime
+from fplinux_cli.environment import setup as env_setup
+from fplinux_cli.environment.state import EnvironmentState, publish_environment_state
 
 
 @pytest.fixture
@@ -50,6 +54,55 @@ def test_recipe_tracks_installer_bytes_modes_and_runtime(
     changed_runtime = copy.deepcopy(lock)
     changed_runtime["kern"]["binary_sha256"] = "0" * 64
     assert definition.environment_recipe_digest(changed_runtime) != original
+
+
+def test_setup_reloads_original_checksums_before_publishing(
+    recipe_checkout: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A change to the source catalog after capture prevents publishing the old environment."""
+    catalog_path = recipe_checkout / "sources.lock.toml"
+
+    def stage_inputs(context: Path, **_kwargs: object) -> None:
+        lock = definition.load_environment_lock()
+        (context / "environment-inputs.json").write_bytes(common.canonical_json_bytes(lock))
+
+    def change_original(*_args: object, **_kwargs: object) -> None:
+        catalog = tomlkit.parse(catalog_path.read_text())
+        llvm = catalog["llvm_project"]
+        assert isinstance(llvm, tomlkit.items.Table)
+        llvm["checksum"] = "a" * 64
+        catalog_path.write_text(tomlkit.dumps(catalog))
+
+    monkeypatch.setattr(env_setup, "ROOT", recipe_checkout)
+    monkeypatch.setattr(env_setup, "install_kern", mock.Mock(return_value="kern"))
+    monkeypatch.setattr(env_setup, "current_environment_state", mock.Mock(return_value=None))
+    monkeypatch.setattr(env_setup, "_stage_environment_inputs", stage_inputs)
+    monkeypatch.setattr(env_setup, "_prepare_toolchain", mock.Mock())
+    monkeypatch.setattr(env_setup, "_prepare_rootfs", change_original)
+    monkeypatch.setattr(env_setup, "remove_environment_rootfs", mock.Mock())
+    probe = mock.Mock()
+    monkeypatch.setattr(env_setup, "probe_environment_state", probe)
+
+    with pytest.raises(SystemExit, match="environment inputs changed while setup was running"):
+        env_setup.setup(reporter=mock.MagicMock(), cache=recipe_checkout / "test-data")
+    probe.assert_not_called()
+
+
+def test_ready_environment_misses_after_changing_source_date_epoch(
+    recipe_checkout: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The packaging epoch must match before reusing an installed environment."""
+    cache = recipe_checkout / "test-data"
+    monkeypatch.setattr(build_environment, "SOURCE_DATE_EPOCH", "1800000000")
+    recipe = definition.environment_recipe_digest()
+    ready = EnvironmentState(recipe, "a" * 64, "b" * 64)
+    publish_environment_state(cache, ready)
+    monkeypatch.setattr(runtime, "probe_environment_state", mock.Mock(return_value=ready))
+    assert runtime.current_environment_state("kern", recipe, cache=cache) == ready
+
+    monkeypatch.setattr(build_environment, "SOURCE_DATE_EPOCH", "1800000001")
+    changed_recipe = definition.environment_recipe_digest()
+    assert runtime.current_environment_state("kern", changed_recipe, cache=cache) is None
 
 
 def test_same_inputs_at_another_checkout_keep_recipe(

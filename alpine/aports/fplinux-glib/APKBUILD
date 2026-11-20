@@ -6,7 +6,7 @@ pkgdesc="GLib core library for BlueZ without GIO, GObject and introspection"
 url="https://gitlab.gnome.org/GNOME/glib"
 arch="armv7"
 license="LGPL-2.1-or-later"
-makedepends_build="clang22 lld22 llvm22 meson python3 samurai"
+makedepends_build="clang23 lld23 llvm23 meson python3 samurai"
 makedepends_host="libffi-dev musl-dev musl-libintl pcre2-dev pcre2-static zlib-dev zlib-static"
 subpackages="$pkgname-static-dev:static_dev"
 options="!check"
@@ -55,9 +55,9 @@ build() {
 	ninja -C output "glib/$_library"
 	export CFLAGS="$CFLAGS -Oz -flto=thin -mthumb -ffunction-sections -fdata-sections"
 	export LDFLAGS="$LDFLAGS -flto=thin -Wl,--thinlto-jobs=2 -Wl,--icf=safe"
-	export AR=/usr/lib/llvm22/bin/llvm-ar
-	export RANLIB=/usr/lib/llvm22/bin/llvm-ranlib
-	sed "s|ar = '$CHOST-ar'|ar = '/usr/lib/llvm22/bin/llvm-ar'|" \
+	export AR=/usr/lib/llvm23/bin/llvm-ar
+	export RANLIB=/usr/lib/llvm23/bin/llvm-ranlib
+	sed "s|ar = '$CHOST-ar'|ar = '/usr/lib/llvm23/bin/llvm-ar'|" \
 		fplinux-cross.meson >fplinux-static-cross.meson
 	env -u CXX abuild-meson \
 		--cross-file fplinux-static-cross.meson \

@@ -112,12 +112,13 @@ static int read_charge_counter(const char *path, long long *value)
 	*value = parsed;
 	return 0;
 
-fail: {
-	int saved_errno = errno;
+fail:
+	{
+		int saved_errno = errno;
 
-	(void)close(descriptor);
-	errno = saved_errno;
-}
+		(void)close(descriptor);
+		errno = saved_errno;
+	}
 	return -1;
 }
 

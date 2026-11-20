@@ -9,6 +9,7 @@ from dataclasses import asdict
 from typing import TYPE_CHECKING, Any, Protocol
 
 from fplinux_cli import common
+from fplinux_cli.build import environment as build_environment
 from fplinux_cli.common import fail
 from fplinux_cli.manifests.source_catalog import resolve_source, source_build_metadata
 from fplinux_cli.manifests.values import sha256_value
@@ -16,6 +17,22 @@ from fplinux_cli.manifests.values import sha256_value
 if TYPE_CHECKING:
     from pathlib import Path
 
+
+TOOLCHAIN_RECIPE_DIR = "scripts/fplinux_cli/environment/install/toolchain"
+TOOLCHAIN_RECIPE_INPUTS = tuple(
+    f"{TOOLCHAIN_RECIPE_DIR}/{name}"
+    for name in (
+        "prepare.sh",
+        "configure-host.sh",
+        "build-host.sh",
+        "build-host-scudo.sh",
+        "build-i586-runtime.sh",
+        "build-spirv.sh",
+        "stage-toolchain.sh",
+        "package-toolchain.sh",
+        "llvm23-alpine-driver.patch",
+    )
+)
 
 ENVIRONMENT_RECIPE_INPUTS = (
     "scripts/fplinux_cli/__init__.py",
@@ -50,6 +67,7 @@ ENVIRONMENT_RECIPE_INPUTS = (
     "alpine/aports/fplinux-libtsm/0001-xterm-function-keys.patch",
     "alpine/aports/fplinux-midi/borrowed-s16.patch",
     "alpine/aports/fplinux-font-terminus/APKBUILD",
+    *TOOLCHAIN_RECIPE_INPUTS,
 )
 
 
@@ -94,7 +112,7 @@ def _resolve_environment_sources(lock: dict[str, Any], root: Path) -> dict[str, 
             if source.size is not None:
                 record["bytes"] = source.size
             records[record["key"]] = source
-        elif record.get("purpose") != "environment-package":
+        elif record.get("purpose") not in {"environment-package", "environment-bootstrap-package"}:
             fail("environment direct originals must use source references")
     if not isinstance(lock["tools"], dict):
         fail("environment tools must be a table")
@@ -148,8 +166,12 @@ def load_environment_lock(root: Path | None = None) -> dict[str, Any]:
         fail(f"environment base rootfs URL must use HTTPS: {path}")
     sha256_value(rootfs_sha256, f"environment base rootfs SHA-256 in {path}")
     selection = lock.get("selection")
-    if not isinstance(selection, dict) or set(selection) != {"arch", "apk_groups"}:
-        fail(f"environment selection must contain arch and apk_groups: {path}")
+    if not isinstance(selection, dict) or set(selection) != {
+        "arch",
+        "apk_groups",
+        "bootstrap_apks",
+    }:
+        fail(f"environment selection must contain arch, apk_groups and bootstrap_apks: {path}")
     if selection["arch"] != base["arch"] or not isinstance(selection["apk_groups"], list):
         fail(f"invalid environment package selection: {path}")
     for group in selection["apk_groups"]:
@@ -200,6 +222,19 @@ def load_environment_lock(root: Path | None = None) -> dict[str, Any]:
             fail(f"environment input cache path is invalid: {key}")
         if record["arch"] != base["arch"]:
             fail(f"environment input architecture is invalid: {key}")
+    bootstrap_apks = selection["bootstrap_apks"]
+    package_keys = {
+        record["key"]
+        for record in records
+        if record["purpose"] in {"environment-package", "environment-bootstrap-package"}
+    }
+    if (
+        not isinstance(bootstrap_apks, list)
+        or not bootstrap_apks
+        or any(not isinstance(key, str) or key not in package_keys for key in bootstrap_apks)
+        or len(bootstrap_apks) != len(set(bootstrap_apks))
+    ):
+        fail(f"environment bootstrap_apks must select unique locked package inputs: {path}")
     tools = lock.get("tools")
     names = {
         "node",
@@ -269,13 +304,17 @@ def _stable_regular_file(path: Path) -> tuple[bytes, int]:
         fail(f"recipe input cannot be read: {path}: {error}")
 
 
-def file_recipe_digest(paths: list[Path], *, prefix: bytes = b"") -> str:
+def file_recipe_digest(
+    paths: list[Path], *, prefix: bytes = b"", source_root: Path | None = None
+) -> str:
     """Hash exact logical paths, bytes and modes for one causal file closure."""
     value = hashlib.sha256()
     _length_prefixed(value, prefix)
+    if source_root is None:
+        source_root = common.ROOT
     for path in paths:
         contents, mode = _stable_regular_file(path)
-        relative = path.relative_to(common.ROOT).as_posix()
+        relative = path.relative_to(source_root).as_posix()
         _length_prefixed(value, relative.encode())
         _length_prefixed(value, contents)
         _length_prefixed(value, mode.to_bytes(2, "big"))
@@ -333,6 +372,8 @@ def environment_recipe_digest(lock: dict[str, Any] | None = None) -> str:
         prefix=(
             b"fplinux.environment-recipe\0"
             + common.canonical_json_bytes(lock)
+            + b"fplinux.source-date-epoch\0"
+            + common.canonical_json_bytes(build_environment.SOURCE_DATE_EPOCH)
             + b"fplinux.quality-source-projection\0"
             + common.canonical_json_bytes(spreadtrum_flash_environment_source(common.ROOT))
             + b"fplinux.quality-ui-font-projection\0"

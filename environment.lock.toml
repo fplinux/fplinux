@@ -59,10 +59,10 @@ apk_groups = [
     "abuild=3.17.0-r0",
     "atools-go=0.6.1-r6",
     "build-base=0.5-r4",
-    "clang22=22.1.3-r2",
+    "clang23=23.1.6-r0",
     "linux-headers=7.0.0-r1",
-    "lld22=22.1.3-r0",
-    "llvm22=22.1.3-r1",
+    "lld23=23.1.6-r0",
+    "llvm23=23.1.6-r0",
   ],
   [
     "alsa-lib-dev=1.2.15.3-r0",
@@ -70,9 +70,8 @@ apk_groups = [
     "automake=1.18.1-r1",
     "bc=1.08.2-r1",
     "bison=3.8.2-r3",
-    "clang22-analyzer=22.1.3-r2",
-    "clang22-dev=22.1.3-r2",
-    "clang22-extra-tools=22.1.3-r2",
+    "clang23-analyzer=23.1.6-r0",
+    "clang23-dev=23.1.6-r0",
     "curl-dev=8.23.0-r0",
     "elfutils-dev=0.195-r0",
     "eudev-dev=3.2.14-r6",
@@ -84,14 +83,14 @@ apk_groups = [
     "libevdev-dev=1.13.6-r0",
     "libffi-dev=3.5.2-r1",
     "libusb-dev=1.0.30-r0",
-    "llvm22-dev=22.1.3-r1",
+    "llvm23-dev=23.1.6-r0",
     "mpdecimal-dev=4.0.1-r0",
     "ncurses-dev=6.6_p20260516-r0",
     "openssl-dev=3.5.9-r1",
     "pcre2-static=10.49-r0",
     "pixman-dev=0.46.4-r0",
-    "spirv-llvm-translator-dev=22.1.0-r0",
-    "spirv-tools-dev=1.4.341.0-r0",
+    "spirv-llvm-translator-dev=23.1.1-r0",
+    "spirv-tools-dev=1.4.357.0-r0",
     "swig=4.4.1-r1",
     "xz-dev=5.8.4-r0",
     "zlib-dev=1.4-r0",
@@ -133,6 +132,88 @@ apk_groups = [
     "wayland-dev=1.25.0-r0",
     "wayland-protocols=1.48-r0",
   ],
+]
+bootstrap_apks = [
+  "environment:apk:x86_64:acl-libs-2.3.2-r1.apk",
+  "environment:apk:x86_64:binutils-2.45.1-r1.apk",
+  "environment:apk:x86_64:brotli-1.2.1-r0.apk",
+  "environment:apk:x86_64:brotli-dev-1.2.1-r0.apk",
+  "environment:apk:x86_64:brotli-libs-1.2.1-r0.apk",
+  "environment:apk:x86_64:c-ares-1.34.9-r0.apk",
+  "environment:apk:x86_64:c-ares-dev-1.34.9-r0.apk",
+  "environment:apk:x86_64:clang22-22.1.3-r2.apk",
+  "environment:apk:x86_64:clang22-headers-22.1.3-r2.apk",
+  "environment:apk:x86_64:clang22-libs-22.1.3-r2.apk",
+  "environment:apk:x86_64:cmake-4.2.3-r0.apk",
+  "environment:apk:x86_64:curl-dev-8.23.0-r0.apk",
+  "environment:apk:x86_64:fortify-headers-3.0.1-r2.apk",
+  "environment:apk:x86_64:gcc-15.2.0-r5.apk",
+  "environment:apk:x86_64:gdbm-1.26-r0.apk",
+  "environment:apk:x86_64:gmp-6.3.0-r4.apk",
+  "environment:apk:x86_64:isl26-0.26-r2.apk",
+  "environment:apk:x86_64:jansson-2.15.0-r0.apk",
+  "environment:apk:x86_64:libarchive-3.8.11-r0.apk",
+  "environment:apk:x86_64:libatomic-15.2.0-r5.apk",
+  "environment:apk:x86_64:libbz2-1.0.8-r6.apk",
+  "environment:apk:x86_64:libcrypto3-3.5.9-r1.apk",
+  "environment:apk:x86_64:libcurl-8.23.0-r0.apk",
+  "environment:apk:x86_64:libexpat-2.10.0-r0.apk",
+  "environment:apk:x86_64:libffi-3.5.2-r1.apk",
+  "environment:apk:x86_64:libffi-dev-3.5.2-r1.apk",
+  "environment:apk:x86_64:libgcc-15.2.0-r5.apk",
+  "environment:apk:x86_64:libgcc-static-15.2.0-r5.apk",
+  "environment:apk:x86_64:libgomp-15.2.0-r5.apk",
+  "environment:apk:x86_64:libidn2-2.3.8-r0.apk",
+  "environment:apk:x86_64:libidn2-dev-2.3.8-r0.apk",
+  "environment:apk:x86_64:libncursesw-6.6_p20260516-r0.apk",
+  "environment:apk:x86_64:libpanelw-6.6_p20260516-r0.apk",
+  "environment:apk:x86_64:libpsl-0.21.5-r3.apk",
+  "environment:apk:x86_64:libpsl-dev-0.21.5-r3.apk",
+  "environment:apk:x86_64:libpsl-utils-0.21.5-r3.apk",
+  "environment:apk:x86_64:libssl3-3.5.9-r1.apk",
+  "environment:apk:x86_64:libstdc++-15.2.0-r5.apk",
+  "environment:apk:x86_64:libstdc++-dev-15.2.0-r5.apk",
+  "environment:apk:x86_64:libunistring-1.4.2-r0.apk",
+  "environment:apk:x86_64:libuv-1.52.1-r0.apk",
+  "environment:apk:x86_64:libxml2-2.13.9-r2.apk",
+  "environment:apk:x86_64:libxml2-dev-2.13.9-r2.apk",
+  "environment:apk:x86_64:libxml2-utils-2.13.9-r2.apk",
+  "environment:apk:x86_64:linux-headers-7.0.0-r1.apk",
+  "environment:apk:x86_64:lld22-22.1.3-r0.apk",
+  "environment:apk:x86_64:lld22-libs-22.1.3-r0.apk",
+  "environment:apk:x86_64:llvm22-libs-22.1.3-r1.apk",
+  "environment:apk:x86_64:llvm22-linker-tools-22.1.3-r1.apk",
+  "environment:apk:x86_64:lz4-libs-1.10.0-r1.apk",
+  "environment:apk:x86_64:mpc1-1.3.1-r1.apk",
+  "environment:apk:x86_64:mpdecimal-4.0.1-r0.apk",
+  "environment:apk:x86_64:mpfr4-4.2.2-r0.apk",
+  "environment:apk:x86_64:musl-dev-1.2.6-r3.apk",
+  "environment:apk:x86_64:ncurses-terminfo-base-6.6_p20260516-r0.apk",
+  "environment:apk:x86_64:nghttp2-dev-1.70.0-r0.apk",
+  "environment:apk:x86_64:nghttp2-libs-1.70.0-r0.apk",
+  "environment:apk:x86_64:ninja-build-1.13.2-r1.apk",
+  "environment:apk:x86_64:openssl-3.5.9-r1.apk",
+  "environment:apk:x86_64:openssl-dev-3.5.9-r1.apk",
+  "environment:apk:x86_64:patch-2.8.1-r0.apk",
+  "environment:apk:x86_64:patchelf-0.18.0-r3.apk",
+  "environment:apk:x86_64:pkgconf-2.5.1-r0.apk",
+  "environment:apk:x86_64:pyc-3.14.10-r1.apk",
+  "environment:apk:x86_64:python3-3.14.10-r1.apk",
+  "environment:apk:x86_64:python3-pyc-3.14.10-r1.apk",
+  "environment:apk:x86_64:python3-pycache-pyc0-3.14.10-r1.apk",
+  "environment:apk:x86_64:readline-8.3.3-r1.apk",
+  "environment:apk:x86_64:rhash-libs-1.4.6-r0.apk",
+  "environment:apk:x86_64:scudo-malloc-22.1.3-r0.apk",
+  "environment:apk:x86_64:sqlite-libs-3.53.4-r0.apk",
+  "environment:apk:x86_64:tar-1.35-r5.apk",
+  "environment:apk:x86_64:xz-5.8.4-r0.apk",
+  "environment:apk:x86_64:xz-dev-5.8.4-r0.apk",
+  "environment:apk:x86_64:xz-libs-5.8.4-r0.apk",
+  "environment:apk:x86_64:zlib-1.4-r0.apk",
+  "environment:apk:x86_64:zlib-dev-1.4-r0.apk",
+  "environment:apk:x86_64:zstd-1.5.7-r2.apk",
+  "environment:apk:x86_64:zstd-dev-1.5.7-r2.apk",
+  "environment:apk:x86_64:zstd-libs-1.5.7-r2.apk",
 ]
 
 [tools.node]
@@ -205,6 +286,60 @@ arch = "x86_64"
 key = "environment:base-rootfs"
 source = "alpine_environment"
 purpose = "environment-base"
+arch = "x86_64"
+
+[[input]]
+key = "source:llvm_project"
+source = "llvm_project"
+purpose = "environment-toolchain-source"
+arch = "x86_64"
+
+[[input]]
+key = "source:spirv_headers"
+source = "spirv_headers"
+purpose = "environment-toolchain-source"
+arch = "x86_64"
+
+[[input]]
+key = "source:spirv_tools"
+source = "spirv_tools"
+purpose = "environment-toolchain-source"
+arch = "x86_64"
+
+[[input]]
+key = "source:spirv_llvm_translator"
+source = "spirv_llvm_translator"
+purpose = "environment-toolchain-source"
+arch = "x86_64"
+
+[[input]]
+key = "source:phoneme_host_musl"
+source = "phoneme_host_musl"
+purpose = "environment-toolchain-source"
+arch = "x86_64"
+
+[[input]]
+key = "source:phoneme_host_libstdcpp"
+source = "phoneme_host_libstdcpp"
+purpose = "environment-toolchain-source"
+arch = "x86_64"
+
+[[input]]
+key = "environment:apk:x86_64:ninja-build-1.13.2-r1.apk"
+url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/community/x86_64/ninja-build-1.13.2-r1.apk"
+sha256 = "095f32b8ff198272012e485942c602bf2df4b7abed11f7f01bc54503e5afb635"
+bytes = 167847
+destination = "downloads/environment/apk/community/x86_64/ninja-build-1.13.2-r1.apk"
+purpose = "environment-bootstrap-package"
+arch = "x86_64"
+
+[[input]]
+key = "environment:apk:x86_64:patchelf-0.18.0-r3.apk"
+url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/patchelf-0.18.0-r3.apk"
+sha256 = "76231dd6886d9ad1b885340b41327ce74f840fd70c6b7b8ee013d4191314012d"
+bytes = 72721
+destination = "downloads/environment/apk/main/x86_64/patchelf-0.18.0-r3.apk"
+purpose = "environment-bootstrap-package"
 arch = "x86_64"
 
 [[input]]
@@ -642,43 +777,7 @@ url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/clang22-22.1.3-r2
 sha256 = "2a6d8bdff328196d5c73300bd5d4d3e55b3d3ee3d9bdccff8d8ceb7398d0f6b9"
 bytes = 704690
 destination = "downloads/environment/apk/main/x86_64/clang22-22.1.3-r2.apk"
-purpose = "environment-package"
-arch = "x86_64"
-
-[[input]]
-key = "environment:apk:x86_64:clang22-analyzer-22.1.3-r2.apk"
-url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/clang22-analyzer-22.1.3-r2.apk"
-sha256 = "357a35ff6fe952ea65a4ca6a1dc332c4257037f010745ba8c0e8bf04faf7251a"
-bytes = 46412
-destination = "downloads/environment/apk/main/x86_64/clang22-analyzer-22.1.3-r2.apk"
-purpose = "environment-package"
-arch = "x86_64"
-
-[[input]]
-key = "environment:apk:x86_64:clang22-ccache-22.1.3-r2.apk"
-url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/clang22-ccache-22.1.3-r2.apk"
-sha256 = "e66b705dac2c09640129da0189130060cc298cb06532bcecc7858e50908cdecf"
-bytes = 1773
-destination = "downloads/environment/apk/main/x86_64/clang22-ccache-22.1.3-r2.apk"
-purpose = "environment-package"
-arch = "x86_64"
-
-[[input]]
-key = "environment:apk:x86_64:clang22-dev-22.1.3-r2.apk"
-url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/clang22-dev-22.1.3-r2.apk"
-sha256 = "3b87b4836dfbcef3b2ce8cc4b747c7ce2e54587c085be22298d195ac4df024a3"
-bytes = 4255784
-destination = "downloads/environment/apk/main/x86_64/clang22-dev-22.1.3-r2.apk"
-purpose = "environment-package"
-arch = "x86_64"
-
-[[input]]
-key = "environment:apk:x86_64:clang22-extra-tools-22.1.3-r2.apk"
-url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/clang22-extra-tools-22.1.3-r2.apk"
-sha256 = "a7b98c8d4d9cb77c0c1c48a5afb449eae14263141a1b3905d76a9bd60585a3ac"
-bytes = 18465783
-destination = "downloads/environment/apk/main/x86_64/clang22-extra-tools-22.1.3-r2.apk"
-purpose = "environment-package"
+purpose = "environment-bootstrap-package"
 arch = "x86_64"
 
 [[input]]
@@ -687,16 +786,7 @@ url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/clang22-headers-2
 sha256 = "a987e1e1b7e0c42a1868ca44b703fe07367cbdda4a71675a2517d5f5d0bc86fe"
 bytes = 1037485
 destination = "downloads/environment/apk/main/x86_64/clang22-headers-22.1.3-r2.apk"
-purpose = "environment-package"
-arch = "x86_64"
-
-[[input]]
-key = "environment:apk:x86_64:clang22-libclang-22.1.3-r2.apk"
-url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/clang22-libclang-22.1.3-r2.apk"
-sha256 = "5502d07c2317da041b1552a2b1e5eb0d9155f5d7fc2112fbdbe18b8eeaf40344"
-bytes = 22952860
-destination = "downloads/environment/apk/main/x86_64/clang22-libclang-22.1.3-r2.apk"
-purpose = "environment-package"
+purpose = "environment-bootstrap-package"
 arch = "x86_64"
 
 [[input]]
@@ -705,7 +795,7 @@ url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/clang22-libs-22.1
 sha256 = "fbc673dd4057cec92532f9ae70fa1304ae56e3bc320b9fbbc54a99627b83be80"
 bytes = 38048044
 destination = "downloads/environment/apk/main/x86_64/clang22-libs-22.1.3-r2.apk"
-purpose = "environment-package"
+purpose = "environment-bootstrap-package"
 arch = "x86_64"
 
 [[input]]
@@ -1920,7 +2010,7 @@ url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/lld22-22.1.3-r0.a
 sha256 = "758669cb183a6ddd6f36226a4cef07f260e37bdac3ac1486e65216c7e77bfd76"
 bytes = 11377
 destination = "downloads/environment/apk/main/x86_64/lld22-22.1.3-r0.apk"
-purpose = "environment-package"
+purpose = "environment-bootstrap-package"
 arch = "x86_64"
 
 [[input]]
@@ -1929,25 +2019,7 @@ url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/lld22-libs-22.1.3
 sha256 = "09baed80d6e836d2a09c7319e3a8406e09f2a798aa4e9cf066aa78024a3f6daf"
 bytes = 2823454
 destination = "downloads/environment/apk/main/x86_64/lld22-libs-22.1.3-r0.apk"
-purpose = "environment-package"
-arch = "x86_64"
-
-[[input]]
-key = "environment:apk:x86_64:llvm22-22.1.3-r1.apk"
-url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/llvm22-22.1.3-r1.apk"
-sha256 = "6c675cb63a183cf6b4cb75e585e4ccc393c93c58ef10bc22fced4460a8967493"
-bytes = 45789596
-destination = "downloads/environment/apk/main/x86_64/llvm22-22.1.3-r1.apk"
-purpose = "environment-package"
-arch = "x86_64"
-
-[[input]]
-key = "environment:apk:x86_64:llvm22-dev-22.1.3-r1.apk"
-url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/llvm22-dev-22.1.3-r1.apk"
-sha256 = "53edc3d7d47bd3bfaf2d82ebc0c250e8a6041e565f40f638c9ef81d0dafb1e3e"
-bytes = 6631327
-destination = "downloads/environment/apk/main/x86_64/llvm22-dev-22.1.3-r1.apk"
-purpose = "environment-package"
+purpose = "environment-bootstrap-package"
 arch = "x86_64"
 
 [[input]]
@@ -1956,7 +2028,7 @@ url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/llvm22-libs-22.1.
 sha256 = "dec15bdd29b6ec7fc22aee43bac153a22e6b132c599e5e5d9ccd0d159eae764f"
 bytes = 67286392
 destination = "downloads/environment/apk/main/x86_64/llvm22-libs-22.1.3-r1.apk"
-purpose = "environment-package"
+purpose = "environment-bootstrap-package"
 arch = "x86_64"
 
 [[input]]
@@ -1965,16 +2037,7 @@ url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/llvm22-linker-too
 sha256 = "6ac25b0354487cbf43c78f9eaf1ba944cb8b4006a488508043841b129e31de25"
 bytes = 83062
 destination = "downloads/environment/apk/main/x86_64/llvm22-linker-tools-22.1.3-r1.apk"
-purpose = "environment-package"
-arch = "x86_64"
-
-[[input]]
-key = "environment:apk:x86_64:llvm22-test-utils-22.1.3-r1.apk"
-url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/llvm22-test-utils-22.1.3-r1.apk"
-sha256 = "24a5f2fd184ecf25ddd7a0bca565372342a31591b3665b73a3cff8faf00ff6df"
-bytes = 476452
-destination = "downloads/environment/apk/main/x86_64/llvm22-test-utils-22.1.3-r1.apk"
-purpose = "environment-package"
+purpose = "environment-bootstrap-package"
 arch = "x86_64"
 
 [[input]]
@@ -2388,15 +2451,6 @@ url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/py3-charset-norma
 sha256 = "9d60cb0b5e508692a4a8ee3938cc0e31c4056d4f29f025e2b57f52dfdbeb2b08"
 bytes = 82455
 destination = "downloads/environment/apk/main/x86_64/py3-charset-normalizer-pyc-3.4.9-r0.apk"
-purpose = "environment-package"
-arch = "x86_64"
-
-[[input]]
-key = "environment:apk:x86_64:py3-clang22-22.1.3-r2.apk"
-url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/py3-clang22-22.1.3-r2.apk"
-sha256 = "afa6c60d8b1efd4241e67d37155600897e7af044922bbfdd02d0a09b9156392e"
-bytes = 102671
-destination = "downloads/environment/apk/main/x86_64/py3-clang22-22.1.3-r2.apk"
 purpose = "environment-package"
 arch = "x86_64"
 
@@ -2910,7 +2964,7 @@ url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/scudo-malloc-22.1
 sha256 = "3a34e54040c95c585a49fcb0d07e794cc0e9093d1dd61860a508c300d0edf3d4"
 bytes = 55360
 destination = "downloads/environment/apk/main/x86_64/scudo-malloc-22.1.3-r0.apk"
-purpose = "environment-package"
+purpose = "environment-bootstrap-package"
 arch = "x86_64"
 
 [[input]]
@@ -2937,60 +2991,6 @@ url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/skalibs-libs-2.15
 sha256 = "3301f6ccbeaea49cdd966c7e636898a8612fb8fe964a15f24f6d204b3944c3f3"
 bytes = 84969
 destination = "downloads/environment/apk/main/x86_64/skalibs-libs-2.15.0.0-r0.apk"
-purpose = "environment-package"
-arch = "x86_64"
-
-[[input]]
-key = "environment:apk:x86_64:spirv-headers-1.4.341.0-r0.apk"
-url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/spirv-headers-1.4.341.0-r0.apk"
-sha256 = "bd63d4dc1c9e706724bbea290d6d8bd40b80c944dc977407f38ef7d32211d72f"
-bytes = 481667
-destination = "downloads/environment/apk/main/x86_64/spirv-headers-1.4.341.0-r0.apk"
-purpose = "environment-package"
-arch = "x86_64"
-
-[[input]]
-key = "environment:apk:x86_64:spirv-llvm-translator-22.1.0-r0.apk"
-url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/spirv-llvm-translator-22.1.0-r0.apk"
-sha256 = "8d2524cfce0e3c6a12954ff9e573e6006dfc20783186df43023d1ceac3d59736"
-bytes = 53369
-destination = "downloads/environment/apk/main/x86_64/spirv-llvm-translator-22.1.0-r0.apk"
-purpose = "environment-package"
-arch = "x86_64"
-
-[[input]]
-key = "environment:apk:x86_64:spirv-llvm-translator-dev-22.1.0-r0.apk"
-url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/spirv-llvm-translator-dev-22.1.0-r0.apk"
-sha256 = "21782f683d797b4481a6523d625ce534c85b84668997b1af9ea73eab3a565661"
-bytes = 9036
-destination = "downloads/environment/apk/main/x86_64/spirv-llvm-translator-dev-22.1.0-r0.apk"
-purpose = "environment-package"
-arch = "x86_64"
-
-[[input]]
-key = "environment:apk:x86_64:spirv-llvm-translator-libs-22.1.0-r0.apk"
-url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/spirv-llvm-translator-libs-22.1.0-r0.apk"
-sha256 = "9fc368205cacb8006a1f0b1412f65458ace79b1d04d34806532670854d932114"
-bytes = 1428389
-destination = "downloads/environment/apk/main/x86_64/spirv-llvm-translator-libs-22.1.0-r0.apk"
-purpose = "environment-package"
-arch = "x86_64"
-
-[[input]]
-key = "environment:apk:x86_64:spirv-tools-1.4.341.0-r0.apk"
-url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/spirv-tools-1.4.341.0-r0.apk"
-sha256 = "6034c22c4f61fb76e517c1d5b11ef5c26c7154d2baeacec8b0a9dcca94ff9a93"
-bytes = 1877316
-destination = "downloads/environment/apk/main/x86_64/spirv-tools-1.4.341.0-r0.apk"
-purpose = "environment-package"
-arch = "x86_64"
-
-[[input]]
-key = "environment:apk:x86_64:spirv-tools-dev-1.4.341.0-r0.apk"
-url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/spirv-tools-dev-1.4.341.0-r0.apk"
-sha256 = "b814b7986ae39fef29789291276790a373ea6d14921154263cb53105745a020d"
-bytes = 37900
-destination = "downloads/environment/apk/main/x86_64/spirv-tools-dev-1.4.341.0-r0.apk"
 purpose = "environment-package"
 arch = "x86_64"
 

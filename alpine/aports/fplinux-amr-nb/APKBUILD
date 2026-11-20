@@ -7,7 +7,7 @@ url="https://ffmpeg.org"
 arch="armv7"
 license="LGPL-2.1-or-later"
 depends_dev="$pkgname=$pkgver-r$pkgrel"
-makedepends_build="clang22 lld22 llvm22 make"
+makedepends_build="clang23 lld23 llvm23 make"
 makedepends_host="musl-dev"
 subpackages="$pkgname-dev"
 options="!check"
@@ -23,10 +23,10 @@ build() {
 	sh "$srcdir/configure-amr-nb.sh" \
 		--target-os=linux --arch=arm --cpu=cortex-a7 --enable-cross-compile \
 		--cc="$CC" \
-		--ar=/usr/lib/llvm22/bin/llvm-ar \
-		--nm=/usr/lib/llvm22/bin/llvm-nm \
-		--ranlib=/usr/lib/llvm22/bin/llvm-ranlib \
-		--strip=/usr/lib/llvm22/bin/llvm-strip \
+		--ar=/usr/lib/llvm23/bin/llvm-ar \
+		--nm=/usr/lib/llvm23/bin/llvm-nm \
+		--ranlib=/usr/lib/llvm23/bin/llvm-ranlib \
+		--strip=/usr/lib/llvm23/bin/llvm-strip \
 		--sysroot="$CBUILDROOT" \
 		--extra-cflags="--target=$CHOST --gcc-toolchain=$CBUILDROOT/usr $CPPFLAGS $CFLAGS -march=armv7-a -mfpu=neon-vfpv4 -mfloat-abi=hard -marm" \
 		--extra-ldflags="--target=$CHOST --gcc-toolchain=$CBUILDROOT/usr $LDFLAGS" \

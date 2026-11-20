@@ -6,7 +6,7 @@ pkgdesc="MP3 decoding library for FPLinux media applications"
 url="https://www.mpg123.de/"
 arch="armv7"
 license="LGPL-2.1-only"
-makedepends_build="llvm22"
+makedepends_build="llvm23"
 makedepends_host="musl-dev"
 subpackages="$pkgname-dev"
 options="!check"
@@ -16,8 +16,8 @@ builddir="$srcdir/mpg123-$pkgver"
 build() {
 	export CFLAGS="$CFLAGS -Oz -mfpu=neon-vfpv4"
 	export LDFLAGS="$LDFLAGS -Wl,--icf=safe"
-	export AR=/usr/lib/llvm22/bin/llvm-ar
-	export RANLIB=/usr/lib/llvm22/bin/llvm-ranlib
+	export AR=/usr/lib/llvm23/bin/llvm-ar
+	export RANLIB=/usr/lib/llvm23/bin/llvm-ranlib
 	./configure \
 		--build="$CBUILD" \
 		--host="$CHOST" \

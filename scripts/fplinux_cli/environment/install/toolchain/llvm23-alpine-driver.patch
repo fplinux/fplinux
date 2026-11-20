@@ -1,0 +1,136 @@
+--- a/clang/lib/Driver/ToolChains/Gnu.cpp
++++ b/clang/lib/Driver/ToolChains/Gnu.cpp
+@@ -447,6 +447,13 @@
+   bool NeedsSanitizerDeps = addSanitizerRuntimes(ToolChain, Args, CmdArgs);
+   bool NeedsXRayDeps = addXRayRuntime(ToolChain, Args, CmdArgs);
+   addLinkerCompressDebugSectionsOption(ToolChain, Args, CmdArgs);
++
++  // Use --as-needed by default for all explicit linker inputs on Linux
++  // We don't reset it afterwards because explicit argument does not
++  // get reset either (and that is permitted, so it should be fine)
++  if (Triple.isOSLinux())
++    CmdArgs.push_back("--as-needed");
++
+   AddLinkerInputs(ToolChain, Inputs, Args, CmdArgs, JA);
+ 
+   ToolChain.addOffloadRTLibs(C.getActiveOffloadKinds(), Args, CmdArgs);
+@@ -469,6 +476,10 @@
+     CmdArgs.push_back("-lm");
+   }
+ 
++  if (!Args.hasArg(options::OPT_nostdlib, options::OPT_nostartfiles, options::OPT_nodefaultlibs)) {
++    CmdArgs.push_back("-lssp_nonshared");
++  }
++
+   // Silence warnings when linking C code with a C++ '-stdlib' argument.
+   Args.ClaimAllArgs(options::OPT_stdlib_EQ);
+ 
+@@ -2354,7 +2365,7 @@
+   // lists should shrink over time. Please don't add more elements to *Triples.
+   static const char *const AArch64LibDirs[] = {"/lib64", "/lib"};
+   static const char *const AArch64Triples[] = {
+-      "aarch64-none-linux-gnu", "aarch64-redhat-linux", "aarch64-suse-linux"};
++      "aarch64-none-linux-gnu", "aarch64-redhat-linux", "aarch64-suse-linux", "aarch64-linux-musl"};
+   static const char *const AArch64beLibDirs[] = {"/lib"};
+   static const char *const AArch64beTriples[] = {"aarch64_be-none-linux-gnu"};
+ 
+@@ -2363,7 +2374,9 @@
+   static const char *const ARMHFTriples[] = {"arm-linux-gnueabihf",
+                                              "armv7hl-redhat-linux-gnueabi",
+                                              "armv6hl-suse-linux-gnueabi",
+-                                             "armv7hl-suse-linux-gnueabi"};
++                                             "armv7hl-suse-linux-gnueabi",
++                                             "arm-linux-musleabihf",
++                                             "armv7l-linux-musleabihf"};
+   static const char *const ARMebLibDirs[] = {"/lib"};
+   static const char *const ARMebTriples[] = {"armeb-linux-gnueabi"};
+   static const char *const ARMebHFTriples[] = {
+@@ -2382,7 +2395,8 @@
+       "x86_64-pc-linux-gnu",    "x86_64-redhat-linux6E",
+       "x86_64-redhat-linux",    "x86_64-suse-linux",
+       "x86_64-manbo-linux-gnu", "x86_64-slackware-linux",
+-      "x86_64-unknown-linux",   "x86_64-amazon-linux"};
++      "x86_64-unknown-linux",   "x86_64-amazon-linux",
++      "x86_64-linux-musl"};
+   static const char *const X32Triples[] = {"x86_64-linux-gnux32",
+                                            "x86_64-pc-linux-gnux32"};
+   static const char *const X32LibDirs[] = {"/libx32", "/lib"};
+@@ -2391,6 +2405,7 @@
+       "i586-linux-gnu",      "i686-linux-gnu",        "i686-pc-linux-gnu",
+       "i386-redhat-linux6E", "i686-redhat-linux",     "i386-redhat-linux",
+       "i586-suse-linux",     "i686-montavista-linux",
++      "i686-linux-musl",
+   };
+ 
+   static const char *const LoongArch32LibDirs[] = {"/lib32", "/lib"};
+--- a/clang/lib/Driver/ToolChains/Linux.cpp
++++ b/clang/lib/Driver/ToolChains/Linux.cpp
+@@ -824,10 +824,14 @@
+   if (getTriple().getOS() == llvm::Triple::RTEMS)
+     return;
+ 
+-  // Add an include of '/include' directly. This isn't provided by default by
+-  // system GCCs, but is often used with cross-compiling GCCs, and harmless to
+-  // add even when Clang is acting as-if it were a system compiler.
+-  addExternCSystemInclude(DriverArgs, CC1Args, concat(SysRoot, "/include"));
++  if (getTriple().isMusl()) {
++    addExternCSystemInclude(DriverArgs, CC1Args, concat(SysRoot, "/usr/include/fortify"));
++  } else {
++    // Preserve original clang behavior for non-musl triples, but for musl
++    // this just gets in the way and none of our crosstoolchains are ever
++    // actually built this way (and we'd have to figure out fortify for it)
++    addExternCSystemInclude(DriverArgs, CC1Args, concat(SysRoot, "/include"));
++  }
+ 
+   addExternCSystemInclude(DriverArgs, CC1Args, concat(SysRoot, "/usr/include"));
+ 
+--- a/clang/lib/Driver/ToolChains/Linux.h
++++ b/clang/lib/Driver/ToolChains/Linux.h
+@@ -11,6 +11,7 @@
+ 
+ #include "Gnu.h"
+ #include "clang/Driver/ToolChain.h"
++#include "clang/Basic/LangOptions.h"
+ 
+ namespace clang {
+ namespace driver {
+@@ -72,6 +73,14 @@
+   std::vector<std::string> ExtraOpts;
+ 
+   const char *getDefaultLinker() const override;
++  LangOptions::StackProtectorMode
++  GetDefaultStackProtectorLevel(bool KernelOrKext) const override {
++    StringRef VendorName = Linux::getTriple().getVendorName();
++    if (VendorName.compare("alpine") == 0)
++      return LangOptions::SSPStrong;
++
++    return LangOptions::SSPOff;
++  }
+ 
+ protected:
+   Tool *buildAssembler() const override;
+--- a/clang/lib/Frontend/InitPreprocessor.cpp
++++ b/clang/lib/Frontend/InitPreprocessor.cpp
+@@ -1559,6 +1559,11 @@
+   if (CGOpts.Dwarf2CFIAsm)
+     Builder.defineMacro("__GCC_HAVE_DWARF2_CFI_ASM");
+ 
++  // Enable fortify by default on musl when optimizing, but not with asan
++  if (TI.getTriple().isMusl() && CGOpts.OptimizationLevel != 0 &&
++      !LangOpts.Sanitize.has(SanitizerKind::Address))
++    Builder.defineMacro("_FORTIFY_SOURCE", "2");
++
+   // Get other target #defines.
+   TI.getTargetDefines(LangOpts, Builder);
+ }
+--- a/llvm/lib/Support/Threading.cpp
++++ b/llvm/lib/Support/Threading.cpp
+@@ -78,7 +78,7 @@
+   return std::min((unsigned)MaxThreadCount, ThreadsRequested);
+ }
+ 
+-#if defined(__APPLE__)
++#if 1
+   // Darwin's default stack size for threads except the main one is only 512KB,
+   // which is not enough for some/many normal LLVM compilations. This implements
+   // the same interface as std::thread but requests the same stack size as the

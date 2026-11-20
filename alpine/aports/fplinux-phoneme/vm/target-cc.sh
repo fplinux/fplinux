@@ -13,7 +13,7 @@ set -eu
 sysroot=${CBUILDROOT:?}
 pre_ual=${FPLINUX_PM_PRE_UAL_SED:?}
 target=armv7-alpine-linux-musleabihf
-llvm=/usr/lib/llvm22/bin
+llvm=/usr/lib/llvm23/bin
 tool=${0##*/}
 
 case ${tool} in

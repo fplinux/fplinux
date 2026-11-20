@@ -7,7 +7,7 @@ url="https://www.alsa-project.org"
 arch="armv7"
 license="LGPL-2.1-or-later"
 replaces="alsa-lib"
-makedepends_build="clang22 lld22 make llvm22"
+makedepends_build="clang23 lld23 make llvm23"
 makedepends_host="musl-dev linux-headers"
 subpackages="$pkgname-dev $pkgname-card-profiles:card_profiles:noarch"
 options="!check"
@@ -20,8 +20,8 @@ build() {
 	export CFLAGS="$CFLAGS -Oz -flto=thin"
 	export CXXFLAGS="$CXXFLAGS -Oz -flto=thin"
 	export LDFLAGS="$LDFLAGS -flto=thin -Wl,--thinlto-jobs=2 -Wl,--icf=safe"
-	export AR=/usr/lib/llvm22/bin/llvm-ar
-	export RANLIB=/usr/lib/llvm22/bin/llvm-ranlib
+	export AR=/usr/lib/llvm23/bin/llvm-ar
+	export RANLIB=/usr/lib/llvm23/bin/llvm-ranlib
 	./configure \
 		--build="$CBUILD" \
 		--host="$CHOST" \

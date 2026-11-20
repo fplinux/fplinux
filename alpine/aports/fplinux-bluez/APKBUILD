@@ -9,7 +9,7 @@ license="GPL-2.0-or-later AND BSD-2-Clause AND MIT"
 depends="dbus fplinux-bluez-glib"
 provides="bluez=$pkgver-r$pkgrel bluez-obexd=$pkgver-r$pkgrel bluez-openrc=$pkgver-r$pkgrel obexd"
 replaces="bluez bluez-obexd bluez-openrc"
-makedepends_build="autoconf automake clang22 libtool lld22 pkgconf llvm22"
+makedepends_build="autoconf automake clang23 libtool lld23 pkgconf llvm23"
 makedepends_host="dbus-dev fplinux-bluez-glib-dev linux-headers musl-dev readline-dev"
 subpackages="$pkgname-libs:libs $pkgname-dev"
 options="!check"
@@ -36,8 +36,8 @@ build() {
 	export CFLAGS="$CFLAGS -Oz -flto=thin"
 	export CXXFLAGS="$CXXFLAGS -Oz -flto=thin"
 	export LDFLAGS="$LDFLAGS -flto=thin -Wl,--thinlto-jobs=2 -Wl,--icf=safe"
-	export AR=/usr/lib/llvm22/bin/llvm-ar
-	export RANLIB=/usr/lib/llvm22/bin/llvm-ranlib
+	export AR=/usr/lib/llvm23/bin/llvm-ar
+	export RANLIB=/usr/lib/llvm23/bin/llvm-ranlib
 	export PKG_CONFIG_LIBDIR="$CBUILDROOT/usr/lib/pkgconfig:$CBUILDROOT/usr/share/pkgconfig"
 	CFLAGS="$CFLAGS -mthumb -ffunction-sections -fdata-sections" \
 	LDFLAGS="$LDFLAGS -Wl,--gc-sections" \

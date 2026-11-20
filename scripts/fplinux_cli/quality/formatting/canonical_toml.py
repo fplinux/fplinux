@@ -267,7 +267,7 @@ _ROOT_ORDERS: dict[str, dict[str, tuple[str, ...]]] = {
         "": ("kern", "base", "selection", "tools", "input"),
         "kern": ("source", "binary_sha256"),
         "base": ("source", "arch"),
-        "selection": ("arch", "apk_groups"),
+        "selection": ("arch", "apk_groups", "bootstrap_apks"),
         "input": (
             "key",
             "source",

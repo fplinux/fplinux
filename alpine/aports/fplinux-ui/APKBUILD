@@ -10,7 +10,7 @@ depends="fplinux-lvgl fplinux-wayland fplinux-libxkbcommon json-c fplinux-icons"
 # The UI fonts also need lv_font_conv, which the build image pins in its
 # npm tools (/opt/quality/node-tools, run by nodejs) rather than an Alpine
 # package.
-makedepends_build="clang22 lld22 pkgconf wayland-dev wayland-protocols gettext python3
+makedepends_build="clang23 lld23 pkgconf wayland-dev wayland-protocols gettext python3
 	py3-fonttools nodejs"
 makedepends_host="musl-dev musl-libintl linux-headers gcc fplinux-lvgl-dev fplinux-wayland-dev fplinux-libxkbcommon-dev json-c-dev"
 subpackages="$pkgname-dev"

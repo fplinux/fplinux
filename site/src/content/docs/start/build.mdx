@@ -53,7 +53,7 @@ Use [`prune`](#free-disk-space) to remove disposable files. Removing the entire 
    ./fplinux doctor
    ```
 
-   `setup nokia-ta1618` downloads the pinned inputs for this target and prepares the shared build environment. If the environment's inputs change, it prepares and validates a complete replacement before switching to it and removing the previous environment. Changes to phone sources reuse the existing environment. `doctor` reports anything on the host that prevents a build.
+   `setup nokia-ta1618` downloads the pinned inputs for this target and prepares the shared build environment. The first setup builds the native LLVM toolchain from source. Later setups reuse its locally built package while its inputs match. If the environment's inputs change, setup prepares and validates a complete replacement before switching to it and removing the previous environment. Changes to phone sources reuse the existing environment. `doctor` reports anything on the host that prevents a build.
 
 3. Build the image for your phone:
 

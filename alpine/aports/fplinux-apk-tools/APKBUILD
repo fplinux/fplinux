@@ -7,7 +7,7 @@ url="https://gitlab.alpinelinux.org/alpine/apk-tools"
 arch="armv7"
 license="GPL-2.0-only"
 depends="fplinux-uclient"
-makedepends_build="clang22 lld22 llvm22 meson samurai"
+makedepends_build="clang23 lld23 llvm23 meson samurai"
 makedepends_host="linux-headers fplinux-mbedtls-static-dev musl-dev zlib-dev"
 options="!check"
 source="
@@ -22,7 +22,7 @@ build() {
 	# the archiver and keeps pkg-config inside the sysroot.
 	cat >fplinux-cross.meson <<-EOF
 		[binaries]
-		ar = '/usr/lib/llvm22/bin/llvm-ar'
+		ar = '/usr/lib/llvm23/bin/llvm-ar'
 		[properties]
 		pkg_config_libdir = ['$CBUILDROOT/usr/lib/pkgconfig', '$CBUILDROOT/usr/share/pkgconfig']
 	EOF

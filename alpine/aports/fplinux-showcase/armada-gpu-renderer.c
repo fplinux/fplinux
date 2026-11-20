@@ -328,11 +328,12 @@ static char *read_shader(struct armada_gpu_renderer *renderer, const char *name)
 	free(source);
 	goto failed;
 
-close_failed: {
-	int saved_errno = errno;
-	fclose(file);
-	errno = saved_errno;
-}
+close_failed:
+	{
+		int saved_errno = errno;
+		fclose(file);
+		errno = saved_errno;
+	}
 failed:
 	snprintf(renderer->error, sizeof(renderer->error),
 		 "cannot read ARMADA shader %s: %s", path, strerror(errno));

@@ -7,7 +7,7 @@ url="https://github.com/arkq/bluez-alsa"
 arch="armv7"
 license="MIT AND GPL-2.0-only AND LGPL-2.1-or-later AND BSD-3-Clause AND Zlib"
 depends="fplinux-alsa-lib fplinux-bluez fplinux-bluez-libs fplinux-sbc"
-makedepends_build="autoconf automake clang22 glib-dev libtool lld22 llvm22 make pkgconf python3"
+makedepends_build="autoconf automake clang23 glib-dev libtool lld23 llvm23 make pkgconf python3"
 makedepends_host="dbus-dev fplinux-alsa-lib-dev fplinux-bluez-dev fplinux-glib-static-dev fplinux-sbc-dev musl-dev"
 options="!check"
 source="
@@ -42,8 +42,8 @@ build() {
 	export CFLAGS="$CFLAGS -Oz -flto=thin -mthumb -ffunction-sections -fdata-sections"
 	export CXXFLAGS="$CXXFLAGS -Oz -flto=thin"
 	export LDFLAGS="$LDFLAGS -flto=thin -Wl,--thinlto-jobs=2 -Wl,--icf=safe -Wl,--gc-sections"
-	export AR=/usr/lib/llvm22/bin/llvm-ar
-	export RANLIB=/usr/lib/llvm22/bin/llvm-ranlib
+	export AR=/usr/lib/llvm23/bin/llvm-ar
+	export RANLIB=/usr/lib/llvm23/bin/llvm-ranlib
 	export PKG_CONFIG_LIBDIR="$CBUILDROOT/usr/lib/pkgconfig:$CBUILDROOT/usr/share/pkgconfig"
 	export PKG_CONFIG_SYSROOT_DIR="$CBUILDROOT"
 	local gio_libs glib_libs

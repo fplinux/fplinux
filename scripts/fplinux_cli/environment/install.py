@@ -55,6 +55,10 @@ def _prepare_system(declarations: dict[str, Any]) -> None:
     Path("/etc/apk/repositories").write_text("\n".join(repositories) + "\n", encoding="utf-8")
     selectors = [package for group in declarations["selection"]["apk_groups"] for package in group]
     subprocess.run(["apk", "add", "--no-network", "--no-cache", *selectors], check=True)
+    subprocess.run(
+        [sys.executable, "-B", "-c", "from clang import cindex; cindex.Index.create()"],
+        check=True,
+    )
     subprocess.run(["adduser", "-D", "-u", "1000", "builder"], check=True)
     subprocess.run(["addgroup", "builder", "abuild"], check=True)
 

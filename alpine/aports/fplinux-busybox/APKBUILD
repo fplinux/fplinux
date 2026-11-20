@@ -10,7 +10,7 @@ license="GPL-2.0-only AND ISC"
 provides="busybox=1.37.0-r31 busybox-binsh=1.37.0-r31 /bin/sh"
 provider_priority=100
 replaces="busybox busybox-binsh busybox-initscripts"
-makedepends_build="clang22 lld22 make perl llvm22"
+makedepends_build="clang23 lld23 make perl llvm23"
 makedepends_host="musl-dev linux-headers utmps-dev utmps-static skalibs-static"
 options="!check"
 source="
@@ -74,8 +74,8 @@ build() {
 	export CFLAGS="$CFLAGS -Oz -flto=thin"
 	export CXXFLAGS="$CXXFLAGS -Oz -flto=thin"
 	export LDFLAGS="$LDFLAGS -flto=thin -Wl,--thinlto-jobs=2 -Wl,--icf=safe"
-	export AR=/usr/lib/llvm22/bin/llvm-ar
-	export RANLIB=/usr/lib/llvm22/bin/llvm-ranlib
+	export AR=/usr/lib/llvm23/bin/llvm-ar
+	export RANLIB=/usr/lib/llvm23/bin/llvm-ranlib
 	local utmps_cflags utmps_libs
 	utmps_cflags=$(pkg-config --cflags --static libutmps)
 	# trylink takes one quoted Kconfig string and treats bare inputs as library names.

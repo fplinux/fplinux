@@ -12,7 +12,7 @@ Distribute optional application APKs from the same FPLinux build as the system. 
 
 ## Build dependencies
 
-Declare `fplinux-ui` as a runtime dependency and `fplinux-ui-dev` as a target build dependency. The latter provides the installed headers and pkg-config metadata. Use `clang22 lld22 pkgconf` as build tools, plus `gettext` for translation catalogs. Use the target compiler and flags supplied to the aport, not the PC compiler.
+Declare `fplinux-ui` as a runtime dependency and `fplinux-ui-dev` as a target build dependency. The latter provides the installed headers and pkg-config metadata. Use `clang23 lld23 pkgconf` as build tools, plus `gettext` for translation catalogs. Use the target compiler and flags supplied to the aport, not the PC compiler.
 
 Before invoking pkg-config, set `PKG_CONFIG_SYSROOT_DIR="$CBUILDROOT"` and `PKG_CONFIG_LIBDIR="$CBUILDROOT/usr/lib/pkgconfig:$CBUILDROOT/usr/share/pkgconfig"`. This selects the ARM libraries. Keep local library ordering in `LOCAL_BUILD_DEPENDENCIES` in `scripts/fplinux_cli/alpine/registration.py`; `makedepends_host` alone does not establish that ordering.
 

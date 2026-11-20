@@ -8,6 +8,8 @@ Original FPLinux code and documentation are licensed under `GPL-2.0-only` unless
 
 The corresponding source snapshot records exact versions, URLs, commits and hashes in `sources.lock.toml`, `environment.lock.toml`, `alpine.lock.toml`, package locks, host-runtime locks, platform loader asset locks, target manifests and the platform U-Boot source lock. Binary archives carry the resolved asset lock as `assets.lock.toml` for a single model or `assets/<target>.lock.toml` for a release with model selection. Archives also include content receipts and `SHA256SUMS`. Aport `APKBUILD` files refer to upstream originals declared in `sources.lock.toml`. The build resolves these references into local files with SHA-512 checksums. Checksums for checked-in package sources remain in the APKBUILD.
 
+The native build environment uses LLVM, Clang, LLD, compiler-rt and libunwind 23.1.6 under Apache-2.0 with the LLVM exception. It also uses SPIR-V Headers and Tools from Vulkan SDK 1.4.357.0 and SPIRV-LLVM-Translator 23.1.1. The locally built toolchain package installs the upstream license notices under `/usr/share/licenses/fplinux-build-toolchain`.
+
 ## Third-party components
 
 | Component                                         | Role                                                                 | Declared license / provenance                                                                                                   |

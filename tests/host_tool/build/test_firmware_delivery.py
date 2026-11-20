@@ -151,9 +151,10 @@ def test_build_stage_delivers_snapshot_bytes_at_the_selected_loader_boundary(  #
     monkeypatch.setattr(common, "ROOT", firmware_workspace)
     monkeypatch.setattr(build_source_inputs, "CACHE", qin_firmware.cache)
     monkeypatch.setattr(build_source_inputs, "OUTPUT", qin_firmware.root / "out")
-    monkeypatch.setattr(
-        sys, "argv", ["build-stages", "--target", qin_firmware.target, "--jobs", "1"]
-    )
+    arguments = ["build-stages", "--target", qin_firmware.target, "--jobs", "1"]
+    if profile is not None:
+        arguments.extend(["--profile", profile])
+    monkeypatch.setattr(sys, "argv", arguments)
     with (
         mock.patch.object(build_process, "lower_build_priority"),
         mock.patch.object(RunReporter, "from_environment", return_value=None),

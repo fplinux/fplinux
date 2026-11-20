@@ -6,7 +6,7 @@ pkgdesc="Static Mbed TLS development files for FPLinux consumers"
 url="https://www.trustedfirmware.org/projects/mbed-tls/"
 arch="armv7"
 license="Apache-2.0 OR GPL-2.0-or-later"
-makedepends_build="clang22 lld22 llvm22 cmake python3 samurai"
+makedepends_build="clang23 lld23 llvm23 cmake python3 samurai"
 makedepends_host="musl-dev"
 options="!check"
 source="
@@ -32,10 +32,10 @@ build() {
 		-DCMAKE_C_COMPILER="$CC" -DCMAKE_C_COMPILER_TARGET="$CHOST" \
 		-DCMAKE_SYSROOT="$CBUILDROOT" \
 		-DCMAKE_C_FLAGS="$CPPFLAGS $CFLAGS -ffile-prefix-map=$srcdir=." -DCMAKE_C_FLAGS_MINSIZEREL= \
-		-DCMAKE_AR=/usr/lib/llvm22/bin/llvm-ar \
-		-DCMAKE_RANLIB=/usr/lib/llvm22/bin/llvm-ranlib \
-		-DCMAKE_C_COMPILER_AR=/usr/lib/llvm22/bin/llvm-ar \
-		-DCMAKE_C_COMPILER_RANLIB=/usr/lib/llvm22/bin/llvm-ranlib \
+		-DCMAKE_AR=/usr/lib/llvm23/bin/llvm-ar \
+		-DCMAKE_RANLIB=/usr/lib/llvm23/bin/llvm-ranlib \
+		-DCMAKE_C_COMPILER_AR=/usr/lib/llvm23/bin/llvm-ar \
+		-DCMAKE_C_COMPILER_RANLIB=/usr/lib/llvm23/bin/llvm-ranlib \
 		-DCMAKE_POSITION_INDEPENDENT_CODE=ON \
 		-DCMAKE_FIND_ROOT_PATH="$CBUILDROOT" \
 		-DCMAKE_FIND_ROOT_PATH_MODE_PROGRAM=NEVER \

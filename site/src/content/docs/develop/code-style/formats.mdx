@@ -54,7 +54,7 @@ Profiles group root kind/filesystem/wait, package selection, boot kinds, residen
 
 `sources.lock.toml` owns direct originals. Each source record groups `version`, `name`, `url`, `algorithm`, `checksum` and optional `bytes`, followed by source-specific metadata. Consumer locks select a `source` ID and retain their usage fields. The [dependency guide](/fplinux/guides/dependencies/) describes acquisition and restoration; native npm and Alpine locks retain their exact dependency graphs.
 
-The environment lock groups Kern, Alpine base, direct APK selection, tools and ordered inputs. Kern uses `source`, `binary_sha256`; the base uses `source`, `arch`. Selection uses `arch`, `apk_groups`. Named tools select an `input`; input records use `key`, `purpose`, `arch`, `source`. Input records, package groups and packages within those groups retain their order. The installation recipe reads these selections rather than repeating original URLs and checksums.
+The environment lock groups Kern, Alpine base, direct APK selection, tools and ordered inputs. Kern uses `source`, `binary_sha256`; the base uses `source`, `arch`. Selection uses `arch`, `apk_groups` and `bootstrap_apks`. The bootstrap list references locked APK inputs by key. Named tools select an `input`; input records use `key`, `purpose`, `arch`, `source`. Input records, package groups and packages within those groups retain their order. The installation recipe reads these selections rather than repeating original URLs and checksums.
 
 The platform loader asset lock's `[fdl1]` uses `source`, `path`. Generated standalone asset locks retain their resolved source/output form.
 

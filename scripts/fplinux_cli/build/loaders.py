@@ -29,7 +29,7 @@ if TYPE_CHECKING:
     from fplinux_cli.manifests.loaders import LoaderSource
 
 _RECEIPT_NAME = ".fplinux-loader-receipt.json"
-_LLVM = "/usr/lib/llvm22/bin/"
+_LLVM = "/usr/lib/llvm23/bin/"
 _OUTPUTS = (
     "fdl1.bin",
     "fdl2.bin",

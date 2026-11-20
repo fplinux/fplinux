@@ -50,6 +50,17 @@ SPDX-FileCopyrightText = "2026 FPLinux contributors"
 SPDX-License-Identifier = "GPL-2.0-only"
 
 [[annotations]]
+path = "scripts/fplinux_cli/environment/install/toolchain/llvm23-alpine-driver.patch"
+precedence = "override"
+SPDX-FileCopyrightText = [
+  "LLVM Project contributors",
+  "Alpine Linux contributors",
+  "2021 Daniel Kolesa",
+  "2026 FPLinux contributors",
+]
+SPDX-License-Identifier = "Apache-2.0 WITH LLVM-exception"
+
+[[annotations]]
 path = [
   "scripts/fplinux_cli/build/host_tools/inbox-winusb.patch",
   "scripts/fplinux_cli/build/host_tools/source-date-epoch.patch",

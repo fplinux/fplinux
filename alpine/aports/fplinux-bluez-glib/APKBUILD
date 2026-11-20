@@ -6,7 +6,7 @@ pkgdesc="Private GLib core library for the BlueZ daemons and client"
 url="https://gitlab.gnome.org/GNOME/glib"
 arch="armv7"
 license="LGPL-2.1-or-later"
-makedepends_build="clang22 lld22 meson python3 samurai llvm22"
+makedepends_build="clang23 lld23 meson python3 samurai llvm23"
 makedepends_host="libffi-dev musl-dev musl-libintl zlib-dev"
 subpackages="$pkgname-dev"
 options="!check"
@@ -24,12 +24,12 @@ build() {
 	export CFLAGS="$CFLAGS -Oz -flto=thin"
 	export CXXFLAGS="$CXXFLAGS -Oz -flto=thin"
 	export LDFLAGS="$LDFLAGS -flto=thin -Wl,--thinlto-jobs=2 -Wl,--icf=safe"
-	export AR=/usr/lib/llvm22/bin/llvm-ar
-	export RANLIB=/usr/lib/llvm22/bin/llvm-ranlib
+	export AR=/usr/lib/llvm23/bin/llvm-ar
+	export RANLIB=/usr/lib/llvm23/bin/llvm-ranlib
 	: "${CHOST:?missing target CHOST}" "${CBUILDROOT:?missing target sysroot}"
 	cat >fplinux-cross.meson <<-EOF
 		[binaries]
-		ar = '/usr/lib/llvm22/bin/llvm-ar'
+		ar = '/usr/lib/llvm23/bin/llvm-ar'
 		[properties]
 		pkg_config_libdir = ['$CBUILDROOT/usr/lib/pkgconfig', '$CBUILDROOT/usr/share/pkgconfig']
 		have_c99_vsnprintf = true

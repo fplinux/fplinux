@@ -8,7 +8,7 @@ arch="armv7"
 license="MIT AND BSD-2-Clause AND BSD-3-Clause AND BSL-1.0 AND SGI-B-2.0 AND Apache-2.0"
 depends="fplinux-libdrm fplinux-mesa-gbm=$pkgver-r$pkgrel libexpat"
 depends_dev="fplinux-mesa-headers=$pkgver-r$pkgrel fplinux-mesa-gbm-dev=$pkgver-r$pkgrel"
-makedepends_build="bison clang22 clang22-dev flex lld22 llvm22-dev meson pkgconf py3-mako py3-packaging py3-yaml python3 samurai spirv-llvm-translator-dev spirv-tools-dev"
+makedepends_build="bison clang23 clang23-dev flex lld23 llvm23-dev meson pkgconf py3-mako py3-packaging py3-yaml python3 samurai spirv-llvm-translator-dev spirv-tools-dev"
 makedepends_host="musl-dev linux-headers libstdc++-dev eudev-dev fplinux-expat-dev fplinux-libdrm-dev fplinux-mesa-gbm-dev"
 subpackages="$pkgname-dev"
 options="!check"
@@ -28,7 +28,7 @@ build() {
 		PKG_CONFIG_PATH= \
 		PKG_CONFIG_LIBDIR=/usr/lib/pkgconfig:/usr/share/pkgconfig \
 		PKG_CONFIG_SYSROOT_DIR=/ \
-		PATH="/usr/lib/llvm22/bin:$PATH" \
+		PATH="/usr/lib/llvm23/bin:$PATH" \
 		meson setup --prefix=/usr --libdir=lib --buildtype=release \
 		--auto-features=disabled --wrap-mode=nodownload \
 		-Dgallium-drivers= -Dvulkan-drivers= -Dplatforms= \
@@ -42,7 +42,7 @@ build() {
 		-Dzlib=disabled -Dzstd=disabled -Dshader-cache=disabled \
 		-Dxmlconfig=disabled -Dexpat=disabled -Dbuild-tests=false \
 		host-output
-	PATH="/usr/lib/llvm22/bin:$PATH" meson compile -j "${JOBS:-1}" -C host-output \
+	PATH="/usr/lib/llvm23/bin:$PATH" meson compile -j "${JOBS:-1}" -C host-output \
 		mesa_clc vtn_bindgen2 panfrost_compile
 	export PATH="$builddir/host-output/src/compiler/clc:$builddir/host-output/src/compiler/spirv:$builddir/host-output/src/panfrost/clc:$PATH"
 	cat >fplinux-cross.meson <<-EOF

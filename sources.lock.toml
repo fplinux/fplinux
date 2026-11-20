@@ -1257,6 +1257,15 @@ algorithm = "sha256"
 checksum = "37d7284556b20954e56e1ca85b80226768902e2edabd3b649e9e72c0c9012ee3"
 bytes = 2451884
 
+[llvm_project]
+version = "23.1.6"
+name = "llvm-project-23.1.6.src.tar.xz"
+url = "https://github.com/llvm/llvm-project/releases/download/llvmorg-23.1.6/llvm-project-23.1.6.src.tar.xz"
+algorithm = "sha256"
+checksum = "d3b86ab29cfb4445a6652e5c2642ccc75e04e38084dde3701d323320f35a31da"
+bytes = 179172364
+archive_prefix = "llvm-project-23.1.6.src"
+
 [lvgl]
 version = "9.6.0"
 name = "v9.6.0.tar.gz"
@@ -1331,13 +1340,6 @@ url = "https://github.com/magicus/phoneME/archive/5a13f65cff07b2211b7b867c51ada4
 algorithm = "sha512"
 checksum = "48cc95ae3dc6cbece48abc2eecfcd5261aee8c17764ed9cf10b1500e5883c629e861c054ad674c580e6ae20d610fe14a698428bd5913cc56ed4c23f2aa046417"
 
-[phoneme_host_compiler_rt]
-version = "22.1.3-r0"
-name = "x86-compiler-rt-22.1.3-r0.apk"
-url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86/compiler-rt-22.1.3-r0.apk"
-algorithm = "sha512"
-checksum = "a0030d51d054654160be5914bcbf9e3273d1f4e7479cd9dc72eb36c16cab9b64a6f125b2a5e1e8ac0b00e4d05595792d718ffa39a9ff54ac8869a47b2b0cd94b"
-
 [phoneme_host_libstdcpp]
 version = "15.2.0-r5"
 name = "x86-libstdc++-dev-15.2.0-r5.apk"
@@ -1351,13 +1353,6 @@ name = "x86-musl-dev-1.2.6-r3.apk"
 url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86/musl-dev-1.2.6-r3.apk"
 algorithm = "sha512"
 checksum = "88086bf4b3182074cf4847127c292b7e10101c55e294a542ed832ddc9418c30b4d7d6ec55198ccb8ba0733f8e290ada5e3baf45b9047d824261ef187daa5d04f"
-
-[phoneme_host_unwind]
-version = "22.1.3-r0"
-name = "x86-llvm-libunwind-static-22.1.3-r0.apk"
-url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86/llvm-libunwind-static-22.1.3-r0.apk"
-algorithm = "sha512"
-checksum = "bdc7a1b74fff864e06ca65a274ed9040bc5dac919a91d8b8e60f6f43500f01f49069744274bfa5da14e83fb90b562ff29d19e5f874075d600abb3008a0092b8e"
 
 [phoneme_jdk]
 version = "8.512.01-r0"
@@ -1492,6 +1487,33 @@ url = "https://git.kernel.org/pub/scm/devel/sparse/sparse.git/snapshot/sparse-84
 algorithm = "sha256"
 checksum = "446cb89c14a5a2d637d922de8c28c3af15c415915c66bea3b7e57f533d891fc8"
 bytes = 490125
+
+[spirv_headers]
+version = "1.4.357.0"
+name = "SPIRV-Headers-vulkan-sdk-1.4.357.0.tar.gz"
+url = "https://codeload.github.com/KhronosGroup/SPIRV-Headers/tar.gz/refs/tags/vulkan-sdk-1.4.357.0"
+algorithm = "sha256"
+checksum = "4d703067a7e06331ccb37bdfed3f9b7879cc61969a2689ae95c95db34a47ff07"
+bytes = 571830
+archive_prefix = "SPIRV-Headers-vulkan-sdk-1.4.357.0"
+
+[spirv_llvm_translator]
+version = "23.1.1"
+name = "SPIRV-LLVM-Translator-23.1.1.tar.gz"
+url = "https://codeload.github.com/KhronosGroup/SPIRV-LLVM-Translator/tar.gz/refs/tags/v23.1.1"
+algorithm = "sha256"
+checksum = "9e0bf1beb0ab7edca6cd8c17fd9bbb7ce3dcd520f3e969e0485ff5b00931f929"
+bytes = 1928919
+archive_prefix = "SPIRV-LLVM-Translator-23.1.1"
+
+[spirv_tools]
+version = "1.4.357.0"
+name = "SPIRV-Tools-vulkan-sdk-1.4.357.0.tar.gz"
+url = "https://codeload.github.com/KhronosGroup/SPIRV-Tools/tar.gz/refs/tags/vulkan-sdk-1.4.357.0"
+algorithm = "sha256"
+checksum = "d31e7109b6ef3559067e53e520870eafed7c9534d00db9728814b6df03fa4a5e"
+bytes = 3518451
+archive_prefix = "SPIRV-Tools-vulkan-sdk-1.4.357.0"
 
 [sprd_chipram]
 version = "61fdb1f975457599839d91418706b83dacc41203"

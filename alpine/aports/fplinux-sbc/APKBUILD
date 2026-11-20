@@ -6,7 +6,7 @@ pkgdesc="SBC audio codec library for Bluetooth audio"
 url="https://www.bluez.org/"
 arch="armv7"
 license="LGPL-2.1-or-later"
-makedepends_build="clang22 lld22 llvm22 make"
+makedepends_build="clang23 lld23 llvm23 make"
 makedepends_host="musl-dev"
 subpackages="$pkgname-dev"
 options="!check"
@@ -19,8 +19,8 @@ build() {
 	export CFLAGS="$CFLAGS -Oz -flto=thin"
 	export CXXFLAGS="$CXXFLAGS -Oz -flto=thin"
 	export LDFLAGS="$LDFLAGS -flto=thin -Wl,--thinlto-jobs=2 -Wl,--icf=safe"
-	export AR=/usr/lib/llvm22/bin/llvm-ar
-	export RANLIB=/usr/lib/llvm22/bin/llvm-ranlib
+	export AR=/usr/lib/llvm23/bin/llvm-ar
+	export RANLIB=/usr/lib/llvm23/bin/llvm-ranlib
 	./configure \
 		--build="$CBUILD" \
 		--host="$CHOST" \

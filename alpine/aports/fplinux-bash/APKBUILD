@@ -10,7 +10,7 @@ license="GPL-3.0-or-later"
 provides="bash=$pkgver-r1"
 provider_priority=100
 replaces="bash"
-makedepends_build="bison clang22 flex lld22 make llvm22"
+makedepends_build="bison clang23 flex lld23 make llvm23"
 makedepends_host="musl-dev fplinux-readline-dev fplinux-ncurses-dev"
 subpackages="$pkgname-dev $pkgname-doc $pkgname-loadables:loadables"
 install="$pkgname.post-install $pkgname.post-upgrade $pkgname.pre-deinstall"
@@ -61,8 +61,8 @@ build() {
 	export CFLAGS="$CFLAGS -Oz -flto=thin"
 	export CXXFLAGS="$CXXFLAGS -Oz -flto=thin"
 	export LDFLAGS="$LDFLAGS -flto=thin -Wl,--thinlto-jobs=2 -Wl,--icf=safe"
-	export AR=/usr/lib/llvm22/bin/llvm-ar
-	export RANLIB=/usr/lib/llvm22/bin/llvm-ranlib
+	export AR=/usr/lib/llvm23/bin/llvm-ar
+	export RANLIB=/usr/lib/llvm23/bin/llvm-ranlib
 	export CFLAGS="$CFLAGS -std=gnu17 -DSYS_BASHRC='\"/etc/bash/bashrc\"'"
 	export CFLAGS_FOR_BUILD="-Os -std=gnu17"
 	# musl supports allocating getcwd; configure cannot run its cross-build probe.

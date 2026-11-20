@@ -8,7 +8,7 @@ url="https://invisible-island.net/ncurses/"
 arch="armv7"
 license="X11"
 depends="ncurses-terminfo-base=$pkgver-r$pkgrel"
-makedepends_build="clang22 lld22 make ncurses llvm22"
+makedepends_build="clang23 lld23 make ncurses llvm23"
 makedepends_host="musl-dev"
 subpackages="$pkgname-dev $pkgname-curses:curses"
 options="!check"
@@ -22,8 +22,8 @@ build() {
 	export CFLAGS="$CFLAGS -Oz -flto=thin"
 	export CXXFLAGS="$CXXFLAGS -Oz -flto=thin"
 	export LDFLAGS="$LDFLAGS -flto=thin -Wl,--thinlto-jobs=2 -Wl,--icf=safe"
-	export AR=/usr/lib/llvm22/bin/llvm-ar
-	export RANLIB=/usr/lib/llvm22/bin/llvm-ranlib
+	export AR=/usr/lib/llvm23/bin/llvm-ar
+	export RANLIB=/usr/lib/llvm23/bin/llvm-ranlib
 	./configure \
 		--build="$CBUILD" \
 		--host="$CHOST" \

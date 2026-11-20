@@ -12,7 +12,7 @@ license="GPL-3.0-or-later"
 provides="readline=$_alpine_readlinever"
 provider_priority=100
 replaces="readline"
-makedepends_build="chrpath clang22 lld22 make llvm22"
+makedepends_build="chrpath clang23 lld23 make llvm23"
 makedepends_host="musl-dev fplinux-ncurses-dev"
 subpackages="$pkgname-dev $pkgname-doc $pkgname-history:history"
 options="!check"
@@ -33,8 +33,8 @@ build() {
 	export CFLAGS="$CFLAGS -Oz -flto=thin"
 	export CXXFLAGS="$CXXFLAGS -Oz -flto=thin"
 	export LDFLAGS="$LDFLAGS -flto=thin -Wl,--thinlto-jobs=2 -Wl,--icf=safe"
-	export AR=/usr/lib/llvm22/bin/llvm-ar
-	export RANLIB=/usr/lib/llvm22/bin/llvm-ranlib
+	export AR=/usr/lib/llvm23/bin/llvm-ar
+	export RANLIB=/usr/lib/llvm23/bin/llvm-ranlib
 	./configure \
 		--build="$CBUILD" \
 		--host="$CHOST" \

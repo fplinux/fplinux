@@ -10,7 +10,7 @@ depends="ifupdown-any $pkgname-user=$pkgver-r$pkgrel"
 provides="openrc=$pkgver-r$pkgrel ifupdown-ng-openrc=0.12.1-r4"
 provider_priority=100
 replaces="openrc alpine-baselayout"
-makedepends_build="clang22 lld22 meson llvm22"
+makedepends_build="clang23 lld23 meson llvm23"
 makedepends_host="musl-dev bsd-compat-headers libcap-dev linux-headers"
 subpackages="$pkgname-dev $pkgname-doc $pkgname-init:init $pkgname-user:user"
 options="!check"
@@ -50,11 +50,11 @@ build() {
 	export CFLAGS="$CFLAGS -Oz -flto=thin"
 	export CXXFLAGS="$CXXFLAGS -Oz -flto=thin"
 	export LDFLAGS="$LDFLAGS -flto=thin -Wl,--thinlto-jobs=2 -Wl,--icf=safe"
-	export AR=/usr/lib/llvm22/bin/llvm-ar
-	export RANLIB=/usr/lib/llvm22/bin/llvm-ranlib
+	export AR=/usr/lib/llvm23/bin/llvm-ar
+	export RANLIB=/usr/lib/llvm23/bin/llvm-ranlib
 	cat >fplinux-cross.meson <<-EOF
 		[binaries]
-		ar = '/usr/lib/llvm22/bin/llvm-ar'
+		ar = '/usr/lib/llvm23/bin/llvm-ar'
 	EOF
 	abuild-meson \
 		--cross-file fplinux-cross.meson \

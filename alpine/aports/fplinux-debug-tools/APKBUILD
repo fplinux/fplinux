@@ -7,7 +7,7 @@ url="https://perf.wiki.kernel.org/"
 arch="armv7"
 license="GPL-2.0-only"
 depends="strace"
-makedepends_build="bison clang22 flex lld22 llvm22 make pkgconf"
+makedepends_build="bison clang23 flex lld23 llvm23 make pkgconf"
 makedepends_host="elfutils-dev fplinux-libdrm-dev fplinux-mesa-headers linux-headers musl-dev zlib-dev zstd-dev"
 options="!check"
 source="
@@ -41,7 +41,7 @@ build() {
 		CC="$CC --sysroot=$CBUILDROOT" \
 		CXX="$CXX --sysroot=$CBUILDROOT" \
 		LD="$CHOST-ld -m armelf_linux_eabi" \
-		AR=/usr/lib/llvm22/bin/llvm-ar \
+		AR=/usr/lib/llvm23/bin/llvm-ar \
 		HOSTCC=cc HOSTLD=ld HOSTAR=ar \
 		CLANG_CROSS_FLAGS="--target=$CHOST --sysroot=$CBUILDROOT" \
 		EXTRA_CFLAGS="$CPPFLAGS $CFLAGS" \

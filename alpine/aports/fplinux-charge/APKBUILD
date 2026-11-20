@@ -6,7 +6,7 @@ pkgdesc="Application charge measurement helper for FPLinux"
 url="https://github.com/fplinux/fplinux"
 arch="armv7"
 license="GPL-2.0-only"
-makedepends_build="clang22 lld22"
+makedepends_build="clang23 lld23"
 makedepends_host="musl-dev"
 options="!check"
 source="
@@ -29,7 +29,7 @@ package() {
 }
 
 sha512sums="
-2bfd487d9549a74aa12889d325047a5a5962b2f86e18029846a75f5de552dae991b56d418a63a2f8797f8ac8605295699a3030bfdb3e5ff2f5bb4d4ad910d345  fplinux-charge.c
+9426fba54b2ef6ec28c5ffef466740e5b29ad01f71b0982f6984b990f6357ca70b9a834de031c1cab4c17a2c7b507a5bdcde51e6e8bb48d6132a8dcc82972b32  fplinux-charge.c
 60be1ccccf0215ea13bc64fd442a0498e7db203234ce74f92cec502295e8ac703a089438848b9a1850102836855537f561e9bd8313751574a069eb0ec6dcf31a  fplinux-cli.c
 9677a324ea1cbcca154f472c83eb0660badfa11c2b444116f27080bd839dee2ab9ea6ef3b0c495f6074207559b813c843f284786f8b1e3c89023121b5aacb453  fplinux-cli.h
 "

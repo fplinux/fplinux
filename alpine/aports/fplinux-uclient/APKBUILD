@@ -7,7 +7,7 @@ url="https://git.openwrt.org/project/uclient.git"
 arch="armv7"
 license="ISC"
 depends="ca-certificates-bundle"
-makedepends_build="clang22 lld22 llvm22 cmake pkgconf samurai"
+makedepends_build="clang23 lld23 llvm23 cmake pkgconf samurai"
 makedepends_host="json-c-dev fplinux-mbedtls-static-dev musl-dev"
 options="!check"
 _uclient_directory=@archive_prefix:aport_uclient_daad21fa2c17cae54d37149bf27bb3dd78e50a3f_tar_gz@
@@ -45,8 +45,8 @@ _build_component() {
 		-DCMAKE_FIND_ROOT_PATH_MODE_INCLUDE=ONLY \
 		-DCMAKE_FIND_ROOT_PATH_MODE_PACKAGE=ONLY \
 		-DCMAKE_SKIP_RPATH=TRUE \
-		-DCMAKE_AR=/usr/lib/llvm22/bin/llvm-ar \
-		-DCMAKE_RANLIB=/usr/lib/llvm22/bin/llvm-ranlib \
+		-DCMAKE_AR=/usr/lib/llvm23/bin/llvm-ar \
+		-DCMAKE_RANLIB=/usr/lib/llvm23/bin/llvm-ranlib \
 		"$@"
 	cmake --build "$builddir/$component-build" --parallel "${JOBS:-1}"
 	DESTDIR="$builddir/stage" cmake --install "$builddir/$component-build"

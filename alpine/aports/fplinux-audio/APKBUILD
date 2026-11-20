@@ -7,7 +7,7 @@ url="https://github.com/fplinux/fplinux"
 arch="armv7"
 license="GPL-2.0-or-later AND GPL-2.0-only"
 depends="fplinux-alsa-lib"
-makedepends_build="llvm22"
+makedepends_build="llvm23"
 makedepends_host="fplinux-alsa-lib-dev pkgconf"
 options="!check"
 source="
@@ -20,8 +20,8 @@ build() {
 	export CFLAGS="$CFLAGS -Oz -flto=thin"
 	export CXXFLAGS="$CXXFLAGS -Oz -flto=thin"
 	export LDFLAGS="$LDFLAGS -flto=thin -Wl,--thinlto-jobs=2 -Wl,--icf=safe"
-	export AR=/usr/lib/llvm22/bin/llvm-ar
-	export RANLIB=/usr/lib/llvm22/bin/llvm-ranlib
+	export AR=/usr/lib/llvm23/bin/llvm-ar
+	export RANLIB=/usr/lib/llvm23/bin/llvm-ranlib
 	./configure \
 		--build="$CBUILD" \
 		--host="$CHOST" \
