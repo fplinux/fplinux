@@ -2370,6 +2370,10 @@ static void set_tasks_view(struct fixture *fixture, struct peer *launcher,
 
 static void test_task_close_ready_keeps_tasks(struct fixture *fixture)
 {
+	struct fplinux_ui_session_message title = {
+		.type = FPLINUX_UI_SESSION_TITLE,
+		.title = "Tasks after closing one app",
+	};
 	struct peer *launcher = start_launcher(fixture);
 	struct peer *app = show_app(fixture, launcher, TEST_APP);
 	struct peer *other = show_app(fixture, launcher, TEST_SETTINGS);
@@ -2387,8 +2391,16 @@ static void test_task_close_ready_keeps_tasks(struct fixture *fixture)
 	CHECK(snapshot.task_count == 1);
 	CHECK(task_record(&snapshot, TEST_SETTINGS)->token ==
 	      fplinux_session_find_process(fixture->session, other->pid)->token);
+	issue(fixture, launcher, &title);
+	struct fplinux_ui_session_message active =
+		active_for(fixture, launcher, "");
+
+	CHECK(!strcmp(active.title, title.title));
+	CHECK(active.tasks_view && !strcmp(active.value, "home"));
+	acknowledge(fixture, launcher, &active);
 	/* Red leaves Tasks for Home instead of locking an already bare Home. */
 	phone_gesture(fixture, FPLINUX_KEY_POWER);
+	wait_message(fixture, launcher, FPLINUX_UI_SESSION_HOME, NULL);
 	CHECK(!fplinux_session_is_locked(fixture->session));
 }
 
