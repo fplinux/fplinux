@@ -218,7 +218,8 @@ PM-LFFORM form.deleteall 0
 PM-LFFORM form.rebuild 25 true true
 PM-LFFORM form.title [Check 2]
 PM-LFFORM display.item.unowned ISE
-PM-LFFORM display.item form shown
+PM-LFFORM display.item.before textbox shown
+PM-LFFORM display.item.restores-form form shown
 PM-LFFORM switch1 textbox shown
 PM-LFFORM tb.init [Line 1\nLine 2]
 PM-LFFORM tb.size 13

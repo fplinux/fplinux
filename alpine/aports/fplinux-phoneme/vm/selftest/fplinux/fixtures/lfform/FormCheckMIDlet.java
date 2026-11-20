@@ -614,9 +614,10 @@ public class FormCheckMIDlet extends MIDlet implements Runnable {
         } catch (RuntimeException e) {
             p("display.item.unowned", exc(e));
         }
+        switchTo(box, "display.item.before");
         display.setCurrentItem(tfNum);
         await(form);
-        p("display.item", current());
+        p("display.item.restores-form", current());
     }
 
     private void checkTextBox() {

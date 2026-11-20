@@ -92,8 +92,11 @@ build_jar vectors "${here}/vectors.mf"
 cp "${here}/vectors-hotspot.expected" "${work}/vectors-expected.txt"
 patch -s "${work}/vectors-expected.txt" "${here}/vectors-cldc.diff"
 
-"${qemu_arm}" "${cldc_vm}" -cp "${classes}:${work}/vectors.jar" \
-	fplinux.fixtures.vectors.Vectors >"${work}/vectors-vm.txt"
+if ! timeout -k 5 60 "${qemu_arm}" "${cldc_vm}" -cp "${classes}:${work}/vectors.jar" \
+	fplinux.fixtures.vectors.Vectors >"${work}/vectors-vm.txt"; then
+	cat "${work}/vectors-vm.txt" >&2
+	fail "CLDC vectors on the bare VM failed (${work}/vectors-vm.txt)"
+fi
 cmp -s "${work}/vectors-expected.txt" "${work}/vectors-vm.txt" ||
 	fail "CLDC vectors on the bare VM differ (${work}/vectors-vm.txt)"
 
@@ -188,7 +191,7 @@ fi
 rmdir "${files_card}" "${files_home}/Files" "${files_home}"
 
 # Canvas port headless: sizes of the modes, sizeChanged after a mode change,
-# game actions, key names and codes, GameCanvas flushes, font metrics.
+# game actions, key names and codes, GameCanvas draw-call smoke, font metrics.
 build_jar canvas "${here}/canvas.mf"
 "${qemu_arm}" -L "${sysroot}" "${headless}" --system-classes "${classes}" \
 	--timeout-ms 60000 "${work}/canvas.jar" >"${work}/canvas-log.txt"
@@ -251,8 +254,7 @@ lfscreens_script="${lfscreens_script};0:dump;0:cmd:Exit"
 FPLINUX_PM_LF_TRACE=1 FPLINUX_PM_LF_SCRIPT="${lfscreens_script}" \
 	"${qemu_arm}" -L "${sysroot}" "${headless}" --system-classes "${classes}" \
 	--timeout-ms 60000 "${work}/lfscreens.jar" >"${work}/lfscreens-log.txt"
-grep -E '^(PM-LFSCREENS |\[lf\] (stack|rows|keys|script)|\[lf\] alert #[0-9]+ [a-z]+ text=)' \
-	"${work}/lfscreens-log.txt" >"${work}/lfscreens.txt" || true
+awk -f "${here}/lfscreens-trace.awk" "${work}/lfscreens-log.txt" >"${work}/lfscreens.txt"
 if ! cmp -s "${here}/lfscreens.expected" "${work}/lfscreens.txt"; then
 	diff "${here}/lfscreens.expected" "${work}/lfscreens.txt" | head -20 >&2 || true
 	fail "List and Alert LF check output differs (${work}/lfscreens.txt)"

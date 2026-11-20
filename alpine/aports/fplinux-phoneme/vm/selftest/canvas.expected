@@ -34,7 +34,7 @@ PM-CANVAS isDoubleBuffered true
 PM-CANVAS fullscreen size=240x320 sizeChanged=240x320
 PM-CANVAS normal size=240x240 sizeChanged=240x240
 PM-CANVAS hide count=1
-PM-CANVAS game size=240x320 flushed=10 keyStates=0
+PM-CANVAS headless GameCanvas size=240x320 drawCalls=10 keyStates=0
 PM-CANVAS shownotify full size=240x320 clip=320
 PM-CANVAS nokia size=240x320 clip=320 commandRejected=true listenerRejected=true screenPixel=true
 PM-CANVAS image opaque pixels are white=true

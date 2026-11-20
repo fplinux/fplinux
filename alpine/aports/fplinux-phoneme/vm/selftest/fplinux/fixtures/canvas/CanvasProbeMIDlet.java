@@ -95,7 +95,7 @@ public class CanvasProbeMIDlet extends MIDlet implements Runnable {
         fullScreen(canvas, true, "fullscreen");
         fullScreen(canvas, false, "normal");
 
-        game(canvas);
+        gameSmoke(canvas);
         showFull();
         nokiaCanvas();
         nokiaImages();
@@ -584,7 +584,7 @@ public class CanvasProbeMIDlet extends MIDlet implements Runnable {
             + " sizeChanged=" + c.lastW + "x" + c.lastH);
     }
 
-    private void game(ProbeCanvas first) throws InterruptedException {
+    private void gameSmoke(ProbeCanvas first) throws InterruptedException {
         ProbeGameCanvas game = new ProbeGameCanvas();
         display.setCurrent(game);
         boolean ok = false;
@@ -598,11 +598,12 @@ public class CanvasProbeMIDlet extends MIDlet implements Runnable {
             say("timeout game show");
         }
         say("hide count=" + first.hideCount);
-        for (int i = 0; i < 10; i++) {
-            game.drawFrame(i);
+        int drawCalls;
+        for (drawCalls = 0; drawCalls < 10; drawCalls++) {
+            game.drawFrame(drawCalls);
         }
-        say("game size=" + game.getWidth() + "x" + game.getHeight()
-            + " flushed=10 keyStates=" + game.getKeyStates());
+        say("headless GameCanvas size=" + game.getWidth() + "x" + game.getHeight()
+            + " drawCalls=" + drawCalls + " keyStates=" + game.getKeyStates());
     }
 
     private void font() {
