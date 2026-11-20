@@ -385,7 +385,8 @@ static DBusHandlerResult handle(DBusConnection *connection,
 			snprintf(recorded, sizeof(recorded), "%lld\n",
 				 milliseconds());
 			publish_marker(".session-requested", recorded);
-			if (rename(".session-requested", "session-requested") < 0)
+			if (rename(".session-requested", "session-requested") <
+			    0)
 				fail("cannot publish session request timestamp");
 			return DBUS_HANDLER_RESULT_HANDLED;
 		}
