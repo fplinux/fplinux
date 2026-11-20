@@ -1,10 +1,5 @@
-import type { DefaultTreeAdapterMap } from "parse5";
-
-type Node = DefaultTreeAdapterMap["node"];
-type Element = DefaultTreeAdapterMap["element"];
-
-const attr = (element: Element, name: string): string | undefined =>
-	element.attrs.find((value) => value.name === name)?.value;
+import type { Node } from "./nodes.ts";
+import { attr } from "./nodes.ts";
 
 const text = (node: Node): string => {
 	if ("value" in node) {

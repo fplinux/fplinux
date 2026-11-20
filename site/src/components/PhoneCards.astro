@@ -9,13 +9,13 @@ const { phones } = loadPhones();
 const support = loadSupport();
 
 const renders = import.meta.glob<{ default: ImageMetadata }>(
-	"../assets/screens/terminal-keypad*.png",
+	"../assets/screens/terminal/terminal-keypad*.png",
 	{
 		eager: true,
 	}
 );
 const render = (name: string) =>
-	renders[`../assets/screens/${name}.png`]?.default;
+	renders[`../assets/screens/terminal/${name}.png`]?.default;
 const highlights = [
 	{ feature: "bluetooth", label: "Bluetooth" },
 	{ feature: "fm-radio", label: "FM radio" },

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import { parseFragment } from "parse5";
-import { indexText } from "./offline-search-index.ts";
+import { indexText } from "./search-index.ts";
 
 void test("search text keeps titles and formatted Unicode prose", () => {
 	const title = parseFragment("<h1>Guide to <em>café</em></h1>");
@@ -17,7 +17,10 @@ void test("search text keeps titles and formatted Unicode prose", () => {
 void test("search text excludes navigation, source chrome, ignored elements, and templates", () => {
 	const page = parseFragment(
 		readFileSync(
-			new URL("fixtures/offline-search-page.html.fixture", import.meta.url),
+			new URL(
+				"../../fixtures/offline-search-page.html.fixture",
+				import.meta.url
+			),
 			"utf-8"
 		)
 	);

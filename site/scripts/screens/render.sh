@@ -1,67 +1,22 @@
 #!/bin/sh
 # SPDX-License-Identifier: GPL-2.0-only
-# Render the documentation phone screens from the production UI sources.
-#
-# Terminal runs as a real application under a controlled Wayland peer. The
-# other phone programs draw into RGB565 buffers through small host drivers.
+# Update the documentation screens using the prepared Alpine quality tools.
 set -eu
 
 screens_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 root=$(CDPATH='' cd -- "$screens_dir/../../.." && pwd)
-common=$root/tests/host_tool/gui/screens
-aports=$root/alpine/aports
+gui=$root/tests/host_tool/gui
 output=$root/site/src/assets/screens
-# 6 s and 22 s into the 38 s ARMADA loop, before the closing metrics card.
-armada_frame=180
-rotate_frame=660
 work=$(mktemp -d)
 trap 'rm -rf -- "${work:?}"' EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-compile() {
-	cc -std=c11 -Wall -Wextra -Werror "$@"
-}
+sh "$gui/terminal/native/render-terminal.sh" "$work"
+sh "$gui/screens/render-armada-rotate.sh" "$work"
 
-png() {
-	python3 "$root/tests/host_tool/gui/support/rgb565_png.py" "$1" "$2" "$3" "$work/$4"
-}
-
-render_armada_and_rotation() {
-	showcase=$aports/fplinux-showcase
-	rotate=$aports/fplinux-rotate
-	# The pinned libdrm pkg-config output is a list of compiler arguments.
-	# shellcheck disable=SC2046
-	compile -O2 -I"$root/include/fplinux" -I"$showcase" -I"$screens_dir" -I"$common" \
-		-isystem /opt/quality/include $(pkg-config --cflags libdrm) \
-		"$screens_dir/armada-screen.c" "$common/screen-frame.c" \
-		"$showcase/armada-scene.c" "$showcase/armada-renderer.c" \
-		"$showcase/armada-geometry.c" \
-		"$showcase/armada-gpu-renderer.c" "$root/lib/fplinux-shared/fplinux-gpu.c" \
-		"$root/lib/fplinux-shared/fplinux-gpu-frame.c" \
-		"$showcase/armada-storyboard.c" \
-		$(pkg-config --libs libdrm) -ldl -o "$work/armada-screen"
-	compile -O2 -I"$rotate" -I"$screens_dir" -I"$common" \
-		"$screens_dir/rotate-screen.c" "$common/screen-frame.c" \
-		"$rotate/fplinux-rotate-core.c" -o "$work/rotate-screen"
-	"$work/armada-screen" "$armada_frame" \
-		"$work/armada.rgb565"
-	png 240 320 "$work/armada.rgb565" armada.png
-	# Use one portrait scene for both sides of the rotation example.
-	"$work/armada-screen" "$rotate_frame" \
-		"$work/portrait.rgb565"
-	"$work/rotate-screen" "$work/portrait.rgb565" 240 320 270 \
-		"$work/rotate-source.rgb565"
-	"$work/rotate-screen" "$work/rotate-source.rgb565" 320 240 90 \
-		"$work/rotate-result.rgb565"
-	png 320 240 "$work/rotate-source.rgb565" rotate-source.png
-	png 240 320 "$work/rotate-result.rgb565" rotate-result.png
-}
-
-sh "$root/tests/host_tool/gui/terminal/native/render-terminal.sh" "$work"
-render_armada_and_rotation
-
-mkdir -p -- "$output"
+mkdir -p -- "$output/terminal" "$output/armada" "$output/rotate"
 cp -- "$work/terminal-keypad.png" "$work/terminal-menu.png" "$work/terminal-modifiers.png" \
-	"$work/terminal-keypad-128x160.png" "$work/terminal-keypad-320x240.png" \
-	"$work/armada.png" "$work/rotate-source.png" "$work/rotate-result.png" "$output/"
+	"$work/terminal-keypad-128x160.png" "$work/terminal-keypad-320x240.png" "$output/terminal/"
+cp -- "$work/armada.png" "$output/armada/"
+cp -- "$work/rotate-source.png" "$work/rotate-result.png" "$output/rotate/"
