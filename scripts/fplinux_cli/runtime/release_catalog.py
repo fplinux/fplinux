@@ -16,13 +16,13 @@ from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from fplinux_cli.artifacts.card_kit import CARD_APK_INDEX, CARD_APK_KEY
 from fplinux_cli.artifacts.release_identity import RELEASE_FIELDS, release_context_from_fields
 from fplinux_cli.common import fail, is_sha256, relative_name, sha256_bytes, sha256_file
 from fplinux_cli.data_paths import data_root
 
 from . import live
 from .bundle import MICROSD_BOOT_MODE, MICROSD_BOOT_PROFILE, TARGET_NAME
-from .card_media import CARD_APK_INDEX, CARD_APK_KEY
 from .cli import argument_parser, confirm_card_action, operation_request
 from .data_paths import archive_runtime_root
 from .operations import (

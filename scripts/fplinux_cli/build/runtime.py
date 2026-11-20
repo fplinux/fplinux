@@ -21,6 +21,7 @@ _RUNTIME_MODULES = (
     "data_paths.py",
     "artifacts/__init__.py",
     "artifacts/build_manifest.py",
+    "artifacts/card_kit.py",
     "artifacts/release_identity.py",
     "device_data/__init__.py",
     "device_data/formats.py",

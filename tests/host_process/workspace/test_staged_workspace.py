@@ -78,7 +78,12 @@ class StagedWorkspaceTests:
                 snapshot, selected_data_root=Path(temporary) / "build-data"
             )
             imported = subprocess.run(
-                [sys.executable, "-B", "-c", "import fplinux_cli.build.__main__"],
+                [
+                    sys.executable,
+                    "-B",
+                    "-c",
+                    "import fplinux_cli.build.__main__; import fplinux_cli.build.storage.card",
+                ],
                 cwd=staged,
                 env={"PYTHONPATH": str(staged / "scripts")},
                 capture_output=True,

@@ -12,11 +12,11 @@ from collections import defaultdict
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from fplinux_cli.artifacts.card_kit import FIT_AUDIO_CPIO_BYTES
 from fplinux_cli.build import process as process_build
 from fplinux_cli.build.environment import SOURCE_DATE_EPOCH
 from fplinux_cli.build.inputs import require_file
 from fplinux_cli.common import ROOT, fail, sha256_file
-from fplinux_cli.device_data.cpio import FIT_AUDIO_CPIO_BYTES
 
 from .rootfs_state import INITRAMFS_NAME
 

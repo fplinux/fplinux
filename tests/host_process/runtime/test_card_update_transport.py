@@ -11,16 +11,16 @@ from subprocess import CompletedProcess as ProcessResult
 from typing import TYPE_CHECKING, Any
 
 import pytest
+from fplinux_cli.artifacts.card_kit import read_card_layout
 from fplinux_cli.runtime import card_update
 from fplinux_cli.runtime.card import SdCard
-from fplinux_cli.runtime.card_media import read_card_layout
 from fplinux_cli.runtime.events import RunLog
 from fplinux_cli.runtime.ssh import transport
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
-    from fplinux_cli.runtime.card_media import CardLayout
+    from fplinux_cli.artifacts.card_kit import CardLayout
 
 _PEER = Path(__file__).parent / "fixtures/card-update/ssh-peer.sh"
 _REMOTE = "/tmp/fplinux-card-update.TEST0123"  # noqa: S108 -- fixture reports a remote path.

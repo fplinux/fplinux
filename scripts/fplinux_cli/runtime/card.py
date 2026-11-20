@@ -15,21 +15,19 @@ from pathlib import Path
 from textwrap import dedent
 from typing import TYPE_CHECKING, Any
 
+from fplinux_cli.artifacts.card_kit import (
+    CARD_APK_INDEX,
+    CARD_APK_KEY,
+    CARD_MEMBERS,
+    CardKitError,
+    card_package_members,
+    read_card_layout,
+)
 from fplinux_cli.common import fail, sha256_file
 
 from .bundle import require_file
 from .card_access import CARD_CID, prepare_card_access
-from .card_media import (
-    CARD_APK_INDEX,
-    CARD_APK_KEY,
-    CARD_ASSETS,
-    CARD_WRITER,
-    CardMediaError,
-    card_package_members,
-    prepare_card_media,
-    prepare_card_update_media,
-    read_card_layout,
-)
+from .card_media import prepare_card_media, prepare_card_update_media
 from .operations import card_selection_error
 from .phone_data import preparation_progress
 from .state import private_directory
@@ -38,13 +36,14 @@ from .workflow import run_phone
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from fplinux_cli.artifacts.card_kit import CardLayout
     from fplinux_cli.device_data.inputs import FirmwareInput
 
-    from .card_media import CardLayout
     from .events import RunLog
     from .operations import CardAction
 
 _CARD_DEVICE = re.compile(r"/dev/mmcblk[0-9]{1,2}")
+_CARD_WRITER = Path(__file__).with_name("install-card.sh")
 _REMOTE_STAGING = re.compile(r"/tmp/fplinux-card\.[A-Za-z0-9]+")  # noqa: S108 -- remote mktemp.
 _MIB = 1024 * 1024
 _LIST_CARDS = dedent(
@@ -128,7 +127,7 @@ def load_verified_card_kit(bundle: Path, card_bundle: Path) -> CardLayout:
     files = _manifest(card_bundle).get("files")
     if not isinstance(files, dict):
         fail("The microSD kit has no build file inventory")
-    for relative in (*(f"card/{name}" for name in CARD_ASSETS), *card_package_members(files)):
+    for relative in CARD_MEMBERS + card_package_members(files):
         path = card_bundle / relative
         require_file(path)
         record = files.get(relative)
@@ -145,6 +144,19 @@ def load_verified_card_kit(bundle: Path, card_bundle: Path) -> CardLayout:
     return layout
 
 
+def _writer_arguments(layout: CardLayout) -> tuple[str, ...]:
+    return (
+        str(layout.boot_offset // _MIB),
+        str(layout.boot_size // _MIB),
+        str(layout.root_offset // _MIB),
+        str(layout.root_size // _MIB),
+        layout.boot_sha256,
+        layout.root_sha256,
+        layout.target,
+        layout.release_id,
+    )
+
+
 def _write_card(  # noqa: PLR0913 -- admitted inputs and selected transport stay explicit.
     connection: tuple[Any, dict[str, Any]],
     card: SdCard,
@@ -159,15 +171,15 @@ def _write_card(  # noqa: PLR0913 -- admitted inputs and selected transport stay
         local = private_directory(Path(temp))
         try:
             generated = prepare_card_media(card_dir, local, layout, firmware)
-        except CardMediaError as error:
+        except CardKitError as error:
             fail(str(error))
         paths = (
             card_dir / "boot.xz",
             card_dir / "root.ext4.xz",
             card_dir / "board.tar",
             *generated,
-            CARD_WRITER,
-            CARD_WRITER.with_name("card-slots.sh"),
+            _CARD_WRITER,
+            _CARD_WRITER.with_name("card-slots.sh"),
         )
         result = transport.run_remote(
             session, "mktemp -d /tmp/fplinux-card.XXXXXXXX", capture_output=True, shared=True
@@ -175,7 +187,7 @@ def _write_card(  # noqa: PLR0913 -- admitted inputs and selected transport stay
         staging = result.stdout.strip()
         if result.returncode or _REMOTE_STAGING.fullmatch(staging) is None:
             fail("Cannot create a temporary directory on the phone")
-        writer = ("sh", f"{staging}/{CARD_WRITER.name}")
+        writer = ("sh", f"{staging}/{_CARD_WRITER.name}")
         cleanup_names = [*(path.name for path in paths), "host-key"]
         writer_pending = False
         try:
@@ -200,7 +212,7 @@ def _write_card(  # noqa: PLR0913 -- admitted inputs and selected transport stay
                         card.device,
                         card.cid,
                         staging,
-                        *layout.writer_arguments(),
+                        *_writer_arguments(layout),
                         sha256_file(card_dir / "board.tar"),
                         *(sha256_file(path) for path in generated),
                         host_key,
@@ -297,7 +309,7 @@ def _change_card(  # noqa: PLR0913 -- selected assets, consent and transport sta
         destination = private_directory(Path(temporary))
         try:
             checksums, fit = prepare_card_update_media(card_dir, destination, layout, firmware)
-        except CardMediaError as error:
+        except CardKitError as error:
             fail(str(error))
         update_card(
             connection,
@@ -352,7 +364,7 @@ def run_card(  # noqa: PLR0913 -- input selection, session and consent are indep
     assets = bundle if card_bundle is None else card_bundle
     try:
         layout = load_verified_card_kit(bundle, assets)
-    except (OSError, ValueError, CardMediaError) as error:
+    except (OSError, ValueError, CardKitError) as error:
         fail(str(error))
     if action == "install":
         write = partial(

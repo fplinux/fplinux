@@ -12,15 +12,11 @@ from io import BytesIO
 from typing import TYPE_CHECKING
 
 import pytest
+from fplinux_cli.artifacts.card_kit import CardKitError, locate_fit_ramdisk, read_card_layout
 from fplinux_cli.artifacts.newc import newc_entries
 from fplinux_cli.build.device_tree import exact_path_properties
 from fplinux_cli.device_data.inputs import FirmwareInput
-from fplinux_cli.runtime.card_media import (
-    CardMediaError,
-    locate_fit_ramdisk,
-    prepare_card_media,
-    read_card_layout,
-)
+from fplinux_cli.runtime.card_media import prepare_card_media
 
 from tests.fdt import binary_tree
 
@@ -104,7 +100,7 @@ def test_card_layout_requires_an_unsigned_mbr_disk_signature(
     else:
         record["disk_signature"] = signature
     layout_path.write_text(json.dumps(record), encoding="utf-8")
-    with pytest.raises(CardMediaError, match="invalid disk_signature"):
+    with pytest.raises(CardKitError, match="invalid disk_signature"):
         read_card_layout(card_kit)
 
 
@@ -129,16 +125,6 @@ def test_personalization_updates_only_fit_ramdisk_and_installs_private_firmware(
     assert layout.target == "inoi-240-modern-4g"
     assert layout.release_id == "test-release"
     assert layout.capacity_bytes == 135_266_304
-    assert layout.writer_arguments() == (
-        "1",
-        "64",
-        "65",
-        "64",
-        "a" * 64,
-        "b" * 64,
-        "inoi-240-modern-4g",
-        "test-release",
-    )
     assert (personal.name, checksums.name, fit.name) == (
         "personal.tar",
         "installed.sha256",
@@ -220,7 +206,7 @@ def test_fit_hash_mismatch_preserves_release_and_does_not_stage_phone_data(
     stage = tmp_path / "stage"
     stage.mkdir()
 
-    with pytest.raises(CardMediaError, match="Invalid inline ramdisk or SHA-256"):
+    with pytest.raises(CardKitError, match="Invalid inline ramdisk or SHA-256"):
         prepare_card_media(card_kit, stage, layout, {})
 
     assert list(stage.iterdir()) == []
@@ -236,7 +222,7 @@ def test_audio_overflow_leaves_the_release_slot_and_staging_unchanged(
     stage.mkdir()
     audio = _firmware("fplinux/profile.bin", random.Random(867).randbytes(5000))  # noqa: S311 -- fixture.
 
-    with pytest.raises(CardMediaError, match="exceeds the release FIT ramdisk slot"):
+    with pytest.raises(CardKitError, match="exceeds the release FIT ramdisk slot"):
         prepare_card_media(card_kit, stage, layout, {"audio-profile": (audio,)})
 
     assert list(stage.iterdir()) == []

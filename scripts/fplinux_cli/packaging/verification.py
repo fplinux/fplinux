@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Any, cast
 
+from fplinux_cli.artifacts.card_kit import CARD_MEMBERS
 from fplinux_cli.artifacts.release import (
     RELEASE_VERSION_NAME,
     public_source_digest,
@@ -20,7 +21,6 @@ from fplinux_cli.artifacts.release import (
 from fplinux_cli.artifacts.release_identity import RELEASE_FIELDS, release_context_from_fields
 from fplinux_cli.common import canonical_json_bytes, display_text, fail, sha256_bytes, sha256_file
 from fplinux_cli.dependencies.distribution import read_dependency_distribution
-from fplinux_cli.packaging.card_kit import CARD_MEMBERS
 from fplinux_cli.packaging.universal import release_archive_name
 from fplinux_cli.runtime.bundle import MICROSD_BOOT_PROFILE
 from fplinux_cli.runtime.release_catalog import parse_catalog, read_bundle_manifest
@@ -197,9 +197,8 @@ def _universal_manifests(
     used_objects = set()
     for target, board in catalog.targets.items():
         card_members = set(CARD_MEMBERS) & board.files.keys()
-        if (
-            card_members != (set(CARD_MEMBERS) if board.microsd is not None else set())
-            or (board.microsd is None and any(name.startswith("card/") for name in board.files))
+        if card_members != (set(CARD_MEMBERS) if board.microsd is not None else set()) or (
+            board.microsd is None and any(name.startswith("card/") for name in board.files)
         ):
             fail(f"release board has incomplete card installation files: {target}")
         for recipe, profile in ((board, None), (board.microsd, MICROSD_BOOT_PROFILE)):

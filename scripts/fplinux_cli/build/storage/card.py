@@ -17,17 +17,17 @@ from fplinux_cli.alpine.rootfs_files import (
 )
 from fplinux_cli.alpine.rootfs_state import trusted_receipt_identity
 from fplinux_cli.alpine.signing import _ensure_apk_signing_key
+from fplinux_cli.artifacts.card_kit import (
+    CARD_APK_INDEX,
+    CARD_APK_KEY,
+    CardKitError,
+    locate_fit_ramdisk,
+)
 from fplinux_cli.artifacts.records import write_canonical_json
 from fplinux_cli.artifacts.release import current_release_context
 from fplinux_cli.build import process as process_build
 from fplinux_cli.common import fail, sha256_file
 from fplinux_cli.manifests.values import sha256_value
-from fplinux_cli.runtime.card_media import (
-    CARD_APK_INDEX,
-    CARD_APK_KEY,
-    CardMediaError,
-    locate_fit_ramdisk,
-)
 
 from . import ext4, sd
 
@@ -227,7 +227,7 @@ def build(  # noqa: PLR0913 -- each selected source and artifact stay explicit.
                 "fit_hash_offset": hash_offset,
             },
         )
-    except (OSError, CardMediaError, sd.SdImageError) as error:
+    except (OSError, CardKitError, sd.SdImageError) as error:
         fail(str(error))
 
     return {

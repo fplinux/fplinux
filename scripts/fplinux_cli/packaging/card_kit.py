@@ -6,18 +6,16 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING, Any
 
+from fplinux_cli.artifacts.card_kit import CARD_MEMBERS, card_package_members
 from fplinux_cli.common import fail
 from fplinux_cli.manifests.paths import discover_profiles
 from fplinux_cli.packaging.archive import read_bundle_members
 from fplinux_cli.runtime.bundle import MICROSD_BOOT_PROFILE
-from fplinux_cli.runtime.card_media import CARD_ASSETS, card_package_members
 
 if TYPE_CHECKING:
     from pathlib import Path
 
     from fplinux_cli.artifacts.release_identity import ReleaseContext
-
-CARD_MEMBERS = tuple(f"card/{name}" for name in CARD_ASSETS)
 
 
 def supports_release_card(target: str) -> bool:

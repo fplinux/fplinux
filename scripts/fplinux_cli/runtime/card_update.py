@@ -14,14 +14,16 @@ from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from fplinux_cli.artifacts.card_kit import CARD_APK_INDEX, CARD_APK_KEY
 from fplinux_cli.common import fail, sha256_file
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
     from typing import IO
 
+    from fplinux_cli.artifacts.card_kit import CardLayout
+
     from .card import SdCard
-    from .card_media import CardLayout
     from .events import RunLog
 
 CARD_UPDATE_READER = Path(__file__).with_name("card-update-reader.sh")
@@ -35,8 +37,8 @@ _UPDATE_ASSETS = {
     "board.tar",
     "board.sha256",
     "fit.itb",
-    "apks/Packages.adb",
-    "apks/fplinux-build.rsa.pub",
+    CARD_APK_INDEX,
+    CARD_APK_KEY,
 }
 _APK_ASSET = re.compile(r"apks/[a-zA-Z0-9][a-zA-Z0-9._+-]{0,95}\.apk")
 _UNCERTAIN = (
