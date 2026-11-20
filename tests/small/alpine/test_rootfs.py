@@ -18,6 +18,7 @@ from fplinux_cli.alpine import (
 from fplinux_cli.alpine import (
     rootfs_verify as alpine_rootfs_verify,
 )
+from fplinux_cli.artifacts.release_identity import ReleaseContext
 
 from tests.small.alpine.fixtures import (
     alpine_source as alpine_source,  # noqa: PLC0414 -- pytest fixture export.
@@ -30,15 +31,17 @@ if TYPE_CHECKING:
     from tests.small.alpine.fixtures import AlpineSourceContext
 
 
-def test_composed_rootfs_stamps_build_id_without_changing_system_version(tmp_path: Path) -> None:
-    """Image composition adds the selected ID and replaces any previous stamped value."""
+def test_composed_rootfs_stamps_version_and_build_id(tmp_path: Path) -> None:
+    """Image composition replaces any previous stamps from the selected release identity."""
     release = tmp_path / "etc/os-release"
     release.parent.mkdir()
     release.write_bytes(b'NAME=FPLinux\nVERSION_ID=1\nBUILD_ID="old"\n')
-    alpine_rootfs_files._stamp_build_id(tmp_path, "012345abcdef")  # noqa: SLF001 -- inspect composed image bytes.
-    assert release.read_bytes() == b"NAME=FPLinux\nVERSION_ID=1\nBUILD_ID=012345abcdef\n"
-    alpine_rootfs_files._stamp_build_id(tmp_path, "abcdef012345")  # noqa: SLF001 -- compose the next release.
-    assert release.read_bytes() == b"NAME=FPLinux\nVERSION_ID=1\nBUILD_ID=abcdef012345\n"
+    first = ReleaseContext("012345abcdef", "1.0.0", None, "012345abcdef" + "0" * 52)
+    alpine_rootfs_files._stamp_release(tmp_path, first)  # noqa: SLF001 -- inspect composed image bytes.
+    assert release.read_bytes() == b"NAME=FPLinux\nVERSION_ID=1.0.0\nBUILD_ID=012345abcdef\n"
+    next_release = ReleaseContext("abcdef012345", "1.0.1", None, "abcdef012345" + "0" * 52)
+    alpine_rootfs_files._stamp_release(tmp_path, next_release)  # noqa: SLF001 -- compose the next release.
+    assert release.read_bytes() == b"NAME=FPLinux\nVERSION_ID=1.0.1\nBUILD_ID=abcdef012345\n"
 
 
 def verified_rootfs(alpine_source: AlpineSourceContext) -> Path:
@@ -561,5 +564,13 @@ class AlpineRootfsTests:
         shutdown.mkdir(parents=True)
         for service in ("killprocs", "savecache", "mount-ro"):
             (shutdown / service).symlink_to(f"/etc/init.d/{service}")
+        with (
+            mock.patch.object(alpine_rootfs_verify, "_require_apk_owner"),
+            pytest.raises(
+                SystemExit, match="shutdown runlevel is missing fplinux-microsd-shutdown"
+            ),
+        ):
+            alpine_rootfs_verify._verify_alpine_rootfs(root, microsd_root)  # noqa: SLF001
+        (shutdown / "fplinux-microsd-shutdown").symlink_to("/etc/init.d/fplinux-microsd-shutdown")
         with mock.patch.object(alpine_rootfs_verify, "_require_apk_owner"):
             alpine_rootfs_verify._verify_alpine_rootfs(root, microsd_root)  # noqa: SLF001

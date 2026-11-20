@@ -13,7 +13,7 @@ from fplinux_cli.common import canonical_json_bytes, fail, relative_name
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from fplinux_cli.artifacts.release import ReleaseContext
+    from fplinux_cli.artifacts.release_identity import ReleaseContext
 
 
 @dataclass(frozen=True)

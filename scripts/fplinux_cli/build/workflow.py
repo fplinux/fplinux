@@ -30,7 +30,7 @@ from fplinux_cli.workspace import staging as workspace_staging
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from fplinux_cli.artifacts.release import ReleaseContext
+    from fplinux_cli.artifacts.release_identity import ReleaseContext
     from fplinux_cli.device_data.inputs import FirmwareInput
     from fplinux_cli.workspace.capture import WorkspaceSnapshot
 

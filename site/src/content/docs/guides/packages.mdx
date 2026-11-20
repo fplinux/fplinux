@@ -42,9 +42,9 @@ Use the target, profile and build type of the running session. For a system card
 Run from the extracted Release ZIP. Replace `<apk-directory>` with the directory printed by the launcher and `nokia-ta1618` with the selected target ID:
 
 ```sh title="PC"
-sh Run.sh console --target nokia-ta1618 --upload \
+sh Run.sh console nokia-ta1618 --upload \
   "<apk-directory>/fplinux-tyrquake.apk" /tmp/fplinux-tyrquake.apk
-sh Run.sh console --target nokia-ta1618 --exec \
+sh Run.sh console nokia-ta1618 --exec \
   'apk add --no-network --allow-untrusted --force-non-repository /tmp/fplinux-tyrquake.apk'
 ```
 
@@ -63,7 +63,7 @@ Close the application through **Open applications** first. Remove it by its pack
 apk del fplinux-tyrquake
 ```
 
-The same command can be run from Linux with `./fplinux console nokia-ta1618 --exec 'apk del fplinux-tyrquake'` or `sh Run.sh console --target nokia-ta1618 --exec 'apk del fplinux-tyrquake'`. Use the target of your connected phone.
+The same command can be run from Linux with `./fplinux console nokia-ta1618 --exec 'apk del fplinux-tyrquake'` or `sh Run.sh console nokia-ta1618 --exec 'apk del fplinux-tyrquake'`. Use the target of your connected phone.
 
 ## Java and MRE
 

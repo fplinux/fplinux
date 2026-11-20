@@ -50,6 +50,7 @@ class PushRepository:
             json.dumps(
                 {
                     "source_commit": self.commit if commit is None else commit,
+                    "release_version": "1.0.0",
                     "source_snapshot": "a" * 64,
                     "snapshot": "b" * 64,
                     "environment_recipe": "c" * 64,

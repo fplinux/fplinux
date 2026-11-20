@@ -8,6 +8,7 @@ import hashlib
 import io
 import json
 import os
+import shutil
 import tarfile
 import zipfile
 from dataclasses import dataclass
@@ -49,6 +50,86 @@ def test_site_inputs_inspection_does_not_create_an_empty_data_root(tmp_path: Pat
     assert not root.exists()
 
 
+@pytest.mark.parametrize(
+    ("selection", "expected", "excluded"),
+    [
+        (
+            ("nokia-ta1618",),
+            ("linux_host_python3", "u_boot"),
+            ("windows_host_python", "site-node"),
+        ),
+        (
+            ("nokia-ta1618", "--host", "windows"),
+            ("windows_host_python", "u_boot"),
+            ("linux_host_python3", "site-node"),
+        ),
+        (
+            ("--site",),
+            ("site-node", "npm"),
+            ("linux_host_python3", "windows_host_python", "u_boot"),
+        ),
+        (("--all",), ("linux_host_python3", "windows_host_python", "u_boot", "site-node"), ()),
+    ],
+)
+def test_input_list_uses_the_requested_setup_selection(
+    tmp_path: Path,
+    selection: tuple[str, ...],
+    expected: tuple[str, ...],
+    excluded: tuple[str, ...],
+) -> None:
+    store = tmp_path / "missing store"
+    result = run_process(
+        [str(ROOT / "fplinux"), "inspect", "inputs", "--list", *selection],
+        name="list selected missing originals",
+        cwd=ROOT,
+        env=os.environ | {"FPLINUX_DATA_DIR": str(store)},
+        timeout=60,
+    )
+
+    assert result.returncode == 1, result.stderr
+    for key in expected:
+        assert f"missing: source:{key}: {store}/downloads/sources/{key}/" in result.stdout
+    for key in excluded:
+        assert f"source:{key}:" not in result.stdout
+    assert not store.exists()
+
+
+def test_input_list_checks_present_and_mismatched_files_read_only(tmp_path: Path) -> None:
+    checkout = tmp_path / "checkout"
+    checkout.mkdir()
+    prepare_cli_checkout(checkout)
+    site = checkout / "site"
+    site.mkdir()
+    fixtures = ROOT / "tests/host_process/dependencies/fixtures/release-inputs"
+    shutil.copyfile(fixtures / "package.json", checkout / "package.json")
+    shutil.copyfile(fixtures / "site-package-lock.json", site / "package-lock.json")
+    shutil.copyfile(fixtures / "site-sources.toml", checkout / "sources.lock.toml")
+    store = tmp_path / "input store"
+    node = store / "downloads/sources/site-node/node.tar.xz"
+    npm = store / "downloads/sources/npm/npm.tgz"
+    for path, contents in ((node, b"abc"), (npm, b"bad")):
+        path.parent.mkdir(parents=True)
+        path.write_bytes(contents)
+    command = [str(checkout / "fplinux"), "inspect", "inputs", "--site"]
+    environment = os.environ | {"FPLINUX_DATA_DIR": str(store)}
+
+    ordinary = run_process(
+        command, name="check site originals", cwd=checkout, env=environment, timeout=10
+    )
+    listed = run_process(
+        [*command, "--list"], name="list site originals", cwd=checkout, env=environment, timeout=10
+    )
+
+    assert ordinary.returncode == listed.returncode == 1
+    assert "present: source:site-node:" not in ordinary.stdout
+    assert f"present: source:site-node: {node}\n" in listed.stdout
+    assert f"mismatched: source:npm: {npm}\n" in listed.stdout
+    assert "inputs: 1 present, 0 missing, 1 mismatched" in listed.stdout
+    assert node.read_bytes() == b"abc"
+    assert npm.read_bytes() == b"bad"
+    assert sorted(path.name for path in store.iterdir()) == ["downloads"]
+
+
 @dataclass(frozen=True)
 class InspectCli:
     """Own the checkout and artifacts read by the public inspector."""
@@ -87,6 +168,7 @@ class InspectCli:
             "workspace_digest": "a" * 64,
             "release_id": "aaaaaaaaaaaa",
             "source_commit": "a" * 40,
+            "release_version": "1.0.0",
             "source_snapshot": "b" * 64,
             "environment_recipe": "b" * 64,
             "environment_content": "c" * 64,
@@ -105,23 +187,53 @@ class InspectCli:
 
     def make_archive(self, *, damaged: bool = False, extra: bool = False) -> Path:
         """Write an independently checksummed ZIP without calling the production packager."""
-        manifest = {
-            "target": "example",
+        release = {
             "release_id": "aaaaaaaaaaaa",
+            "release_version": "1.0.0",
             "source_commit": "a" * 40,
             "source_snapshot": "b" * 64,
+        }
+        runtime = json.dumps({**release, "target": "example", "profile": None}).encode()
+        payload = b"abc"
+        bundle = {"runtime-manifest.json": runtime, "payload.bin": payload}
+        manifest = {
+            **release,
+            "target": "example",
             "profile": None,
             "build_type": "release",
-            "files": {"payload.bin": {"mode": 0o644, "size": 3, "sha256": ABC_SHA256}},
+            "files": {
+                name: {
+                    "mode": 0o644,
+                    "size": len(data),
+                    "sha256": hashlib.sha256(data).hexdigest(),
+                }
+                for name, data in bundle.items()
+            },
         }
         canonical = json.dumps(manifest, sort_keys=True, separators=(",", ":")).encode() + b"\n"
         manifest["generation"] = hashlib.sha256(canonical).hexdigest()
-        contents = {"build-manifest.json": json.dumps(manifest).encode(), "payload.bin": b"abc"}
+        bundle["build-manifest.json"] = json.dumps(manifest).encode()
+        bundle["SHA256SUMS"] = b"selected bundle checksum list\n"
+        parts = {
+            name: f"objects/{hashlib.sha256(data).hexdigest()}" for name, data in bundle.items()
+        }
+        contents = {parts[name]: data for name, data in bundle.items()}
+        catalog = {
+            **release,
+            "targets": {
+                "example": {
+                    "name": "Example",
+                    "files": {name: [part] for name, part in parts.items()},
+                    "executables": [],
+                },
+            },
+        }
+        contents["targets.json"] = json.dumps(catalog).encode()
         checksums = "".join(
             f"{hashlib.sha256(data).hexdigest()}  {name}\n" for name, data in contents.items()
         )
         if damaged:
-            contents["payload.bin"] = b"xyz"
+            contents[parts["payload.bin"]] = b"xyz"
         if extra:
             contents["unexpected.txt"] = b"unlisted file\n"
         path = self.root / "example.zip"
@@ -263,6 +375,53 @@ class InspectCliTests:
         assert ("build-manifest checksums: OK") in (result.stdout)
         assert (str(inspect_cli.root)) not in (result.stdout)
 
+    def test_bundle_path_uses_current_debug_profile_in_external_store(
+        self, inspect_cli: InspectCli, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Select an exact generation and leave payload checks to full inspection."""
+        output = inspect_cli.root / ".data/out"
+        selected = inspect_cli.make_bundle("1" * 64, "microsd-uboot", build_type="debug")
+        publish_current_bundle(output, "example", selected, "microsd-uboot", build_type="debug")
+        newer = inspect_cli.make_bundle("2" * 64, "microsd-uboot", build_type="debug")
+        os.utime(selected, (1, 1))
+        assert newer.stat().st_mtime > selected.stat().st_mtime
+        (selected / "payload.bin").write_bytes(b"bad")
+        external = inspect_cli.root / "separate store"
+        output.parent.rename(external)
+        monkeypatch.setenv("FPLINUX_DATA_DIR", "separate store")
+        command = (
+            "inspect",
+            "bundle",
+            "example",
+            "--profile",
+            "microsd-uboot",
+            "--build-type",
+            "debug",
+        )
+
+        path_result = inspect_cli.run_cli(*command, "--path")
+        verified = inspect_cli.run_cli(*command)
+
+        assert path_result.returncode == 0, path_result.stderr
+        assert path_result.stdout == f"{external / 'out' / selected.relative_to(output)}\n"
+        assert verified.returncode == 1
+        assert "bundle file differs from its build manifest: payload.bin" in verified.stderr
+
+    @pytest.mark.parametrize("broken", [False, True], ids=["absent", "corrupt"])
+    def test_bundle_path_requires_a_valid_current_pointer(
+        self, inspect_cli: InspectCli, *, broken: bool
+    ) -> None:
+        """A valid published directory never substitutes for an unusable pointer."""
+        bundle = inspect_cli.make_bundle("1" * 64)
+        if broken:
+            (bundle.parent.parent / "current.json").write_text("invalid")
+
+        result = inspect_cli.run_cli("inspect", "bundle", "example", "--path")
+
+        assert result.returncode == 1
+        assert result.stdout == ""
+        assert "current bundle pointer is missing or invalid" in result.stderr
+
     def test_archive_reports_identity_and_checks_every_listed_file_without_extraction(
         self, inspect_cli: InspectCli
     ) -> None:
@@ -271,12 +430,11 @@ class InspectCliTests:
         original = archive.read_bytes()
         result = inspect_cli.run_cli("inspect", "archive", archive.name)
         assert (result.returncode) == (0), result.stderr
-        assert ("kind: runtime\n") in (result.stdout)
-        assert "release_id: aaaaaaaaaaaa\n" in result.stdout
-        assert "source_commit: " + "a" * 40 + "\n" in result.stdout
-        assert "source_snapshot: " + "b" * 64 + "\n" in result.stdout
+        assert "kind: universal runtime\n" in result.stdout
+        assert "release: aaaaaaaaaaaa\n" in result.stdout
+        assert "release_version: 1.0.0\n" in result.stdout
         assert ("target: example\n") in (result.stdout)
-        assert (f"3 {ABC_SHA256} payload.bin\n") in (result.stdout)
+        assert f"3 {ABC_SHA256} objects/{ABC_SHA256}\n" in result.stdout
         assert ("SHA256SUMS: OK") in (result.stdout)
         assert not ((inspect_cli.root / "bundle").exists())
         assert not ((inspect_cli.root / ".data").exists())

@@ -52,22 +52,45 @@ With a system card, Linux stops its services, writes pending data and makes the 
 
 Use this procedure with a supported microSD system-card profile when the phone cannot use the battery-only sequence above. Unplugging USB alone, or a plain `poweroff`, does not make the system card safe.
 
+Keep USB connected. Save your work, copy out any files you need from RAM and close any open FPLinux console. Stop other programs that write to the card, disable disk-backed swap and unmount any data partitions you mounted.
+
+For a phone with a saved USB connection, run:
+
+```sh title="Source checkout"
+./fplinux console TARGET --shutdown
+```
+
+In the standalone release, choose **Shut down the running microSD system** in the model menu, or use `./Run.sh console TARGET --shutdown` on Linux and `Run.cmd console TARGET --shutdown` on Windows. The command selects the system-card profile, authenticates the phone and stops the graphical session. It requests shutdown only after synchronizing the system card and confirming that its ext4 filesystem is read-only. If a check or the remount fails, keep USB connected and resolve the reported cause before retrying.
+
+The command reports the read-only confirmation, the result of the power-off request and whether the phone's USB connection was still detected. Check that the phone has shut down before unplugging the cable or removing the card.
+
+For a phone reached through direct SSH, continue in the root shell:
+
 <Steps>
 
-1. Keep the USB cable connected. Save graphical work and stop the interface with `rc-service fplinux-session stop`. Stop the other programs and services that write to the card, turn off any swap on the card and unmount every card filesystem except the system root.
+1. Keep the USB cable connected. Save graphical work and stop the interface with `rc-service fplinux-session stop`. Stop the other programs and services that write to the card, turn off any swap on the card and unmount any data filesystems you mounted yourself.
 
-2. Write pending data and make the system root read-only:
+2. Write pending data and make the system card read-only. On UMS9117 phones with the `microsd-uboot` profile, run:
+
+   ```sh title="Phone"
+   sync
+   mount -o remount,ro /run/fplinux-card
+   ```
+
+   On the Xiaomi Qin 1s+ with the `microsd-root` profile, run:
 
    ```sh title="Phone"
    sync
    mount -o remount,ro /
    ```
 
-3. Check that the root is now read-only. The line for `/` must show `ro`:
+3. Check that the mount point from the previous step shows `ro` in `/proc/mounts`. On UMS9117 phones, check:
 
    ```sh title="Phone"
-   grep ' / ' /proc/mounts
+   grep ' /run/fplinux-card ext4 ro' /proc/mounts
    ```
+
+   On the Xiaomi Qin 1s+, use `grep ' / ext4 ro' /proc/mounts`.
 
    If the remount failed, stop the remaining programs that write to the card and repeat step 2. Keep the phone powered until it succeeds.
 

@@ -153,8 +153,8 @@ def test_archive_manifest_read_error_is_reported_without_traceback(
     assert not (tmp_path / "runtime.log").exists()
 
 
-def test_strict_rejection_reports_actual_build_without_running_remote_command(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def test_strict_console_reports_rejected_build_without_running_any_remote_command(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     phone = Phone()
     admitted = ValidatedBundle(
@@ -176,7 +176,8 @@ def test_strict_rejection_reports_actual_build_without_running_remote_command(
     )
 
     assert result == 1
-    assert phone.commands == ["uname -r; sed -n 's/^BUILD_ID=//p' /etc/os-release"]
+    assert "FPLinux: different build" in capsys.readouterr().err
+    assert phone.commands == []
 
 
 def test_strict_shell_rechecks_source_and_phone_data_before_replug(
@@ -204,3 +205,156 @@ def test_strict_shell_rechecks_source_and_phone_data_before_replug(
     assert revalidations == ["checked", "checked"]
     assert phone.shells == 1
     assert phone.commands == ["uname -r; sed -n 's/^BUILD_ID=//p' /etc/os-release"]
+
+
+@pytest.mark.parametrize(
+    ("profile", "mountpoint", "powered_status", "usb_present"),
+    [
+        ("microsd-uboot", "/run/fplinux-card", 0, True),
+        ("microsd-root", "/", 0, False),
+        ("microsd-uboot", "/run/fplinux-card", 255, False),
+    ],
+    ids=["slot-usb-still-present", "direct-root-usb-gone", "lost-poweroff-reply"],
+)
+def test_shutdown_reports_the_read_only_receipt_poweroff_reply_and_usb_observation(  # noqa: PLR0913 -- fixtures and transport observations.
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    *,
+    profile: str,
+    mountpoint: str,
+    powered_status: int,
+    usb_present: bool,
+) -> None:
+    phone = Phone(present=usb_present)
+    admitted = ValidatedBundle(
+        tmp_path,
+        {"target": "phone", "profile": profile, "release_id": "012345abcdef"},
+        "a" * 64,
+        "b" * 64,
+        None,
+    )
+    monkeypatch.setattr(live, "_prepared_identity", lambda *_args: None)
+    metadata = "uname -r; sed -n 's/^BUILD_ID=//p' /etc/os-release"
+    metadata_reply = "6.18.42-card\n012345abcdef\n"
+    if profile == "microsd-uboot":
+        metadata += " && /usr/libexec/fplinux/card-boot inspect"
+        metadata_reply += "slot=b\n"
+    prepare = "/usr/libexec/fplinux/microsd-grow prepare-poweroff"
+    request = "/usr/libexec/fplinux/microsd-grow poweroff"
+    replies = {
+        metadata: (0, metadata_reply),
+        prepare: (0, f"readonly {mountpoint}\n"),
+        request: (powered_status, ""),
+    }
+
+    def run_remote(
+        session: dict[str, Any], command: str, **_options: object
+    ) -> subprocess.CompletedProcess[str]:
+        assert session["generation"] == admitted.generation
+        assert phone.authenticated == [None, admitted.device_identity]
+        phone.commands.append(command)
+        status, output = replies[command]
+        return subprocess.CompletedProcess(command, status, output, "")
+
+    monkeypatch.setattr(phone, "run_remote", run_remote)
+    status = live.console_connection(
+        (phone, {"target": "phone", "generation": "a" * 64, "prepared_data_sha256": None}),
+        tmp_path / "data",
+        tmp_path / "logs",
+        admitted=admitted,
+        shutdown=True,
+    )
+
+    diagnostics = capsys.readouterr().err
+    observation = "still detected" if usb_present else "no longer detected"
+    assert f"confirmed read-only at {mountpoint}." in diagnostics
+    assert f"USB connection is {observation}." in diagnostics
+    assert ("accepted the power-off request" in diagnostics) is (powered_status == 0)
+    assert ("SSH could not confirm" in diagnostics) is (powered_status == 255)
+    assert status == (0 if powered_status == 0 else 1)
+    assert phone.commands == [metadata, prepare, request]
+
+
+@pytest.mark.parametrize(
+    ("returncode", "receipt", "detail"),
+    [
+        (1, "", "Cannot remount the system card read-only"),
+        (0, "readonly /\n", "did not confirm a synchronized, read-only system card"),
+    ],
+    ids=["busy-card", "wrong-mountpoint"],
+)
+def test_shutdown_never_requests_poweroff_without_the_expected_read_only_receipt(  # noqa: PLR0913 -- fixtures and transport responses.
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    *,
+    returncode: int,
+    receipt: str,
+    detail: str,
+) -> None:
+    phone = Phone()
+    admitted = ValidatedBundle(
+        tmp_path,
+        {"target": "phone", "profile": "microsd-uboot", "release_id": "012345abcdef"},
+        "a" * 64,
+        "b" * 64,
+        None,
+    )
+    prepare = "/usr/libexec/fplinux/microsd-grow prepare-poweroff"
+
+    def run_remote(
+        _session: dict[str, Any], command: str, **_options: object
+    ) -> subprocess.CompletedProcess[str]:
+        if command.startswith("uname -r;"):
+            return subprocess.CompletedProcess(
+                command, 0, "6.18.42-card\n012345abcdef\nslot=b\n", ""
+            )
+        assert command == prepare
+        return subprocess.CompletedProcess(
+            command, returncode, receipt, detail if returncode else ""
+        )
+
+    monkeypatch.setattr(phone, "run_remote", run_remote)
+    status = live.console_connection(
+        (phone, {"target": "phone", "generation": "a" * 64, "prepared_data_sha256": None}),
+        tmp_path / "data",
+        tmp_path / "logs",
+        admitted=admitted,
+        shutdown=True,
+    )
+
+    assert status == 1
+    diagnostics = capsys.readouterr().err
+    assert detail in diagnostics
+    assert "confirmed read-only" not in diagnostics
+
+
+@pytest.mark.parametrize("profile", [None, "microsd-uboot"], ids=["ram", "wrong-generation"])
+def test_shutdown_rejects_a_ram_build_or_mismatched_saved_build_before_remote_commands(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    profile: str | None,
+) -> None:
+    phone = Phone()
+    admitted = ValidatedBundle(
+        tmp_path,
+        {"target": "phone", "profile": profile, "release_id": "012345abcdef"},
+        "a" * 64,
+        "b" * 64,
+        None,
+    )
+    monkeypatch.setattr(live, "_prepared_identity", lambda *_args: None)
+    status = live.console_connection(
+        (phone, {"target": "phone", "generation": "c" * 64, "prepared_data_sha256": None}),
+        tmp_path / "data",
+        tmp_path / "logs",
+        admitted=admitted,
+        shutdown=True,
+    )
+
+    assert status == 1
+    assert not phone.commands
+    expected = "requires a selected microSD system build" if profile is None else "different build"
+    assert expected in capsys.readouterr().err

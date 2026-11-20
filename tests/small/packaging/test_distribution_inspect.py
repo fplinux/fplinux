@@ -99,6 +99,19 @@ def test_runtime_archive_rejects_an_incomplete_card_kit(assets: Path) -> None:
         inspect_archive(runtime)
 
 
+def test_runtime_archive_rejects_a_catalog_version_from_another_release(assets: Path) -> None:
+    runtime = assets / f"FPLinux-linux-x64-{RELEASE_ID}.zip"
+    files, modes = read_zip(runtime)
+    files.pop("SHA256SUMS")
+    catalog = json.loads(files["targets.json"])
+    catalog["release_version"] = "1.0.1"
+    files["targets.json"] = json_bytes(catalog)
+    write_zip(runtime, files, {name for name, mode in modes.items() if mode & 0o111})
+
+    with pytest.raises(SystemExit, match=r"build-manifest\.json does not match release"):
+        inspect_archive(runtime)
+
+
 def test_source_inspection_requires_the_selected_rebuild_material(assets: Path) -> None:
     source = assets / f"FPLinux-{RELEASE_ID}-sources.zip"
     files, modes = read_zip(source)
@@ -117,6 +130,22 @@ def test_source_inspection_rejects_changed_project_bytes_with_consistent_zip_che
     files.pop("SHA256SUMS")
     files["project/common/example.c"] = b"changed corresponding source\n"
     write_zip(source, files, {name for name, mode in modes.items() if mode & 0o111})
+    with pytest.raises(SystemExit, match="sources differ from their release identity"):
+        inspect_archive(source)
+
+
+def test_source_inspection_rejects_version_different_from_the_source_declaration(
+    assets: Path,
+) -> None:
+    source = assets / f"FPLinux-{RELEASE_ID}-sources.zip"
+    files, modes = read_zip(source)
+    files.pop("SHA256SUMS")
+    for name in ("DISTRIBUTION.json", "project/.fplinux-release.json"):
+        metadata = json.loads(files[name])
+        metadata["release_version"] = "1.0.1"
+        files[name] = json_bytes(metadata)
+    write_zip(source, files, {name for name, mode in modes.items() if mode & 0o111})
+
     with pytest.raises(SystemExit, match="sources differ from their release identity"):
         inspect_archive(source)
 

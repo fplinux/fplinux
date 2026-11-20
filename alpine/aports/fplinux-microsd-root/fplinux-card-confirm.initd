@@ -1,0 +1,22 @@
+#!/sbin/openrc-run
+# SPDX-License-Identifier: GPL-2.0-only
+# shellcheck shell=sh disable=SC2034
+
+description="Confirm the booted FPLinux microSD system slot"
+
+depend() {
+	need localmount
+	after fplinux-session
+}
+
+start() {
+	[ -f /sys/firmware/devicetree/base/chosen/fplinux,slot ] || return 0
+	ebegin "Confirming the booted microSD system"
+	remaining=60
+	while [ ! -s /run/fplinux-gui/ready ] && [ "$remaining" -gt 0 ]; do
+		sleep 1
+		remaining=$((remaining - 1))
+	done
+	/usr/libexec/fplinux/card-boot confirm
+	eend $?
+}

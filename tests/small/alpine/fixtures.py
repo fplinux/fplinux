@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 from fplinux_cli.alpine import recipes as alpine_recipes
+from fplinux_cli.artifacts.release_identity import ReleaseContext
 
 from tests import ROOT
 
@@ -82,6 +83,7 @@ class AlpineSourceContext:
         *,
         root_kind: str = "initramfs",
         release_id: str = "012345abcdef",
+        release_version: str = "1.0.0",
     ) -> str:
         """Compute the rootfs recipe for this checkout and the scenario's selected inputs."""
         return alpine_recipes.alpine_rootfs_recipe(
@@ -89,7 +91,7 @@ class AlpineSourceContext:
             self.signing_key if signing_key is None else signing_key,
             self.packages if packages is None else packages,
             self.root,
-            release_id=release_id,
+            release=ReleaseContext(release_id, release_version, None, release_id + "0" * 52),
             display_brightness=display_brightness,
             root_kind=root_kind,
         )

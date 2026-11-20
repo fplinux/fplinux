@@ -59,6 +59,8 @@ class SharedLinuxTests:
         )
         alpine_lock = root / "alpine.lock.toml"
         alpine_lock.write_text('[minirootfs]\nsource = "alpine_target"\n')
+        version = root / "VERSION"
+        version.write_bytes(b"1.0.0\n")
         with (root / "targets/alpha/target.toml").open("a") as manifest:
             manifest.write(
                 '\n[loader.build]\nfdl1_source = "chipram"\n'
@@ -73,6 +75,7 @@ class SharedLinuxTests:
         selected_files = [
             (path.relative_to(root).as_posix(), path)
             for path in (
+                version,
                 source_lock,
                 alpine_lock,
                 platform_path,

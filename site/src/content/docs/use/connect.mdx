@@ -17,7 +17,7 @@ Use the USB link to open a root shell, run commands, copy files with an integrit
 
 Start the phone first, as described in [Run FPLinux](/fplinux/start/run/) or, for a downloaded archive, in [Standalone archive](/fplinux/guides/standalone-archive/). The commands on this page work once that run reports a ready session.
 
-In an extracted ZIP, use the target ID shown beside your phone in the launcher. For a session started from a [microSD system card](/fplinux/guides/microsd-system-card/), add `--boot microsd` to the archive's `console` and `verify` commands.
+In an extracted ZIP, the launcher shows the target ID beside each phone. For a session started from a [microSD system card](/fplinux/guides/microsd-system-card/), add `--boot microsd` to `console` or `verify`.
 
 ## What the USB link is
 
@@ -42,14 +42,14 @@ The phone is always the USB device on this cable. It cannot act as a USB host, s
     <TabItem label="Linux ZIP">
 
 ```sh title="PC"
-sh Run.sh console --target nokia-ta1618
+sh Run.sh console
 ```
 
     </TabItem>
     <TabItem label="Windows ZIP">
 
 ```bat title="PC"
-Run.cmd console --target nokia-ta1618
+Run.cmd console
 ```
 
     </TabItem>
@@ -60,15 +60,15 @@ You get a root shell. It is authenticated with a key created for the current ses
 
 :::note[Match the running build]
 
-A checkout selects the only connected phone with a saved session. If several phones match, specify the target. The default check expects the current release RAM build. Select the matching `--profile` for a [system-card profile](/fplinux/guides/microsd-system-card/) or `--build-type debug` for a debug build.
+The command selects the only connected phone with a saved session for this checkout or extracted ZIP. If several phones match, specify the target. The default check expects the release RAM build. From a checkout, select `--build-type debug` for a debug build.
 
-To inspect or shut down an earlier build that is still running, use `./fplinux console --allow-other-build`. You can also pass a single command, for example `./fplinux console --allow-other-build --exec 'uname -r'`. The launcher authenticates the saved USB and SSH session and reports the running build ID. In a release ZIP, add `--allow-other-build` to the `console --target TARGET` command from the archive that started the session. Use ordinary `console` or `verify` to check your current build.
+To inspect or shut down an earlier build that is still running, add `--allow-other-build` to `console` from the installation that started the session. For example, `./fplinux console --allow-other-build --exec 'uname -r'` runs a single command. The launcher authenticates the saved USB and SSH session and reports the running build ID. Use ordinary `console` or `verify` to check your current build.
 
 :::
 
 ## Verify the running build
 
-Run `./fplinux verify` from a checkout, `sh Run.sh verify --target TARGET` from a Linux ZIP, or `Run.cmd verify --target TARGET` from a Windows ZIP. The command authenticates the running session, checks the selected build and exits with the result. You can open `console` directly when you need a shell.
+Run `./fplinux verify` from a checkout, `sh Run.sh verify` from a Linux ZIP, or `Run.cmd verify` from a Windows ZIP. The command authenticates the running session, checks the selected build and exits with the result. You can open `console` directly when you need a shell.
 
 ## Reconnect after unplugging
 
@@ -93,14 +93,14 @@ Use `--exec` when you do not need an interactive shell. The command runs on the 
     <TabItem label="Linux ZIP">
 
 ```sh title="PC"
-sh Run.sh console --target nokia-ta1618 --exec 'uname -r'
+sh Run.sh console nokia-ta1618 --exec 'uname -r'
 ```
 
     </TabItem>
     <TabItem label="Windows ZIP">
 
 ```bat title="PC"
-Run.cmd console --target nokia-ta1618 --exec "uname -r"
+Run.cmd console nokia-ta1618 --exec "uname -r"
 ```
 
     </TabItem>
@@ -127,8 +127,8 @@ On a Linux PC, upload a file to the phone or pull one from it. The Linux ZIP inc
     <TabItem label="Linux ZIP">
 
 ```sh title="PC"
-sh Run.sh console --target nokia-ta1618 --upload ./song.wav /tmp/song.wav
-sh Run.sh console --target nokia-ta1618 --pull /tmp/recording.wav ./recording.wav
+sh Run.sh console nokia-ta1618 --upload ./song.wav /tmp/song.wav
+sh Run.sh console nokia-ta1618 --pull /tmp/recording.wav ./recording.wav
 ```
 
     </TabItem>

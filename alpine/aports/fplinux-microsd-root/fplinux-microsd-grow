@@ -1,11 +1,169 @@
 #!/bin/sh
 # SPDX-License-Identifier: GPL-2.0-only
 
+fail() {
+	printf '%s\n' "$*" >&2
+	exit 1
+}
+
+read_ext4_mount() {
+	record=$(awk -v target="$1" '
+		$5 == target {
+			if (seen++) exit 1
+			for (i = 7; i <= NF - 3; i++) {
+				if ($i != "-") continue
+				if ($(i + 1) != "ext4") exit 1
+				print $3, $4, $6, $(i + 3)
+				break
+			}
+		}
+	' /proc/self/mountinfo) || return
+	[ -n "$record" ] || return 1
+	IFS=' ' read -r device fs_root mount_options super_options <<-EOF
+		$record
+	EOF
+}
+
+find_card_mount() {
+	mountpoint=/
+	read_ext4_mount "$mountpoint" || fail "Cannot identify the system-card root mount"
+	root_options=$mount_options
+	case "$fs_root" in
+	/system/[ab]/root)
+		root_device=$device
+		mountpoint=/run/fplinux-card
+		read_ext4_mount "$mountpoint" && [ "$fs_root" = / ] && [ "$device" = "$root_device" ] ||
+			fail "The backing system-card mount does not match the running slot"
+		;;
+	/)
+		cat /sys/firmware/devicetree/base/compatible | tr '\000' '\n' |
+			grep -qx 'xiaomi,qin1s-plus' ||
+			fail "This system requires a mounted system-card slot"
+		;;
+	*)
+		fail "Cannot identify the system-card root mount"
+		;;
+	esac
+}
+
+resolve_partition() {
+	# Resolve the kernel device number even when mountinfo calls the source /dev/root.
+	partition=$(awk -F= '$1 == "DEVNAME" { print $2 }' "/sys/dev/block/$device/uevent") ||
+		fail "Cannot resolve the mounted system-card partition"
+	case "$partition" in
+	mmcblk*p2) disk=${partition%p2} ;;
+	*) fail "The mounted system-card filesystem is not on an SD partition 2" ;;
+	esac
+	case "${disk#mmcblk}" in
+	"" | *[!0-9]*) fail "The mounted system-card filesystem is not on an SD partition 2" ;;
+	esac
+	[ "$(cat "/sys/class/block/$disk/device/type")" = SD ] ||
+		fail "The mounted system-card partition is not on a removable SD card"
+}
+
+card_mount_is_readonly() {
+	case ",$super_options," in
+	*,ro,*) return 0 ;;
+	esac
+	return 1
+}
+
+confirm_card_readonly() {
+	# A read-only bind mount leaves the ext4 superblock writable.
+	card_device=$device
+	read_ext4_mount "$mountpoint" && [ "$device" = "$card_device" ] && [ "$fs_root" = / ] ||
+		fail "Cannot verify the backing system-card mount after remounting"
+	card_mount_is_readonly || fail "The backing system-card filesystem is still writable"
+}
+
+remount_card_readonly() {
+	mount -o remount,ro "/dev/$partition" "$mountpoint" || return
+	confirm_card_readonly
+}
+
+require_inactive_card_storage() {
+	# Compare device numbers so a mounted partition cannot be hidden by a /dev alias.
+	awk -v disk="$disk" -v root_device="$device" '
+		FNR == NR {
+			if ($4 == disk || $4 ~ ("^" disk "p[0-9]+$")) parts[$1 ":" $2] = 1
+			next
+		}
+		FNR == 1 { mountinfo = 1 }
+		($3 in parts) && $3 != root_device {
+			print "Unmount the system card filesystem at " $5 " before shutdown"
+			busy = 1
+		}
+		END {
+			if (!mountinfo || !(root_device in parts)) {
+				print "Cannot verify which system card partitions are mounted"
+				exit 1
+			}
+			exit busy
+		}
+	' /proc/partitions /proc/self/mountinfo >&2 || exit 1
+	# The standard zram swap has no backing filesystem. A swapfile can use any card alias.
+	awk '
+		NR == 1 && $1 == "Filename" { header = 1; next }
+		$1 == "/dev/zram0" && $2 == "partition" { next }
+		{ print "Disable disk-backed swap " $1 " before shutdown"; busy = 1 }
+		END {
+			if (!header) {
+				print "Cannot verify active swap"
+				exit 1
+			}
+			exit busy
+		}
+	' /proc/swaps >&2 || exit 1
+}
+
+case "$#:${1-}" in
+0: | 1:shutdown | 1:prepare-poweroff | 1:poweroff) ;;
+*) fail "Usage: microsd-grow [shutdown|prepare-poweroff|poweroff]" ;;
+esac
+
+find_card_mount
+resolve_partition
+case "${1-}" in
+shutdown)
+	# OpenRC already handles Qin's directly mounted ext4 root.
+	if [ "$mountpoint" = / ] || card_mount_is_readonly; then
+		exit 0
+	fi
+	sync || exit $?
+	remount_card_readonly
+	exit $?
+	;;
+prepare-poweroff)
+	require_inactive_card_storage
+	rc-service fplinux-session stop >&2 || fail "Cannot stop the graphical session"
+	sync || fail "Cannot synchronize the system card"
+	if card_mount_is_readonly; then
+		confirm_card_readonly
+	else
+		remount_card_readonly || fail "Cannot remount the system card read-only"
+	fi
+	printf 'readonly %s\n' "$mountpoint"
+	exit 0
+	;;
+poweroff)
+	require_inactive_card_storage
+	confirm_card_readonly
+	exec poweroff
+	;;
+esac
+
+case ",$root_options,$mount_options,$super_options," in
+*,ro,*)
+	printf '%s\n' "Skipping growth of the read-only system-card filesystem"
+	exit 0
+	;;
+esac
+
 status=0
-growpart --update=on /dev/mmcblk0 2 || status=$?
+growpart --update=on "/dev/$disk" 2 || status=$?
 case $status in
 0 | 1)
-	exec resize2fs /dev/mmcblk0p2
+	exec resize2fs "/dev/$partition"
 	;;
 *)
 	exit "$status"

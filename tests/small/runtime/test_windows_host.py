@@ -55,7 +55,7 @@ def test_connection_tools_do_not_require_current_ram_payload(
     (root / "build-manifest.json").unlink()
     (root / "runtime-manifest.json").unlink()
 
-    tools = windows_bundle.validate_connection_tools(root)
+    tools = windows_bundle.validate_connection_tools(lambda name: root / name)
 
     assert tools["ssh"] == root / "tools/openssh/ssh.exe"
     assert tools["keyscan"] == root / "tools/openssh/ssh-keyscan.exe"
@@ -76,7 +76,7 @@ def test_connection_tools_reject_unverified_executables(tmp_path: Path, damage: 
     manifest_path.write_text(json.dumps(manifest))
 
     with pytest.raises(SystemExit, match=r"checksum|host tools"):
-        windows_bundle.validate_connection_tools(root)
+        windows_bundle.validate_connection_tools(lambda name: root / name)
 
 
 def test_sc9820e_archive_admits_its_compact_ram_image_without_a_bridge(tmp_path: Path) -> None:

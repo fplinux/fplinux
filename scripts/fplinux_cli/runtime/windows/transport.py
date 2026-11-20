@@ -38,7 +38,7 @@ from .session import write_session
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-    from typing import BinaryIO
+    from typing import IO, BinaryIO
 
 
 _UPLOAD_TIMEOUT_SECONDS = 15 * 60
@@ -128,6 +128,15 @@ class WindowsTransport:
             check=False,
             timeout=timeout,
             creationflags=console_creation_flags(),
+        )
+
+    def send_remote(
+        self, session: dict[str, Any], command: str, write: Callable[[IO[bytes]], None]
+    ) -> subprocess.CompletedProcess[str]:
+        """Send input to one authenticated SSH command and capture its result."""
+        self._require_bound(session)
+        return commands.run_with_input(
+            self._ssh_arguments(session, command), write, creationflags=console_creation_flags()
         )
 
     def run_shell(self, session: dict[str, Any]) -> int:
@@ -475,7 +484,9 @@ class WindowsTransport:
             self.host.require_private(path)
         return value
 
-    def load_saved_sessions(self, target: str, *, session_root: Path) -> list[dict[str, Any]]:
+    def load_saved_sessions(
+        self, target: str, *, session_root: Path, shared_root: bool = False
+    ) -> list[dict[str, Any]]:
         """Read ready bindings without requiring a connected USB device or SSH peer."""
         root = self.host.runtime_root(session_root)
         candidates: list[dict[str, Any]] = []
@@ -484,8 +495,15 @@ class WindowsTransport:
                 value = json.loads(state_path.read_text(encoding="utf-8"))
             except (OSError, ValueError) as error:
                 fail(f"Saved phone connection cannot be read: {error}")
-            if isinstance(value, dict) and value.get("status") == "prepared":
-                continue
+            if isinstance(value, dict):
+                if value.get("status") == "prepared":
+                    continue
+                if (
+                    shared_root
+                    and isinstance(value.get("target"), str)
+                    and value["target"] != target
+                ):
+                    continue
             candidates.append(
                 self._validate_saved_session(value, state_path.parent, target=target)
             )

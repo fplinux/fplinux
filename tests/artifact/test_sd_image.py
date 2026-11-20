@@ -27,7 +27,6 @@ BOOT_SIZE = 64 * 1024 * 1024
 ROOT_OFFSET = 65 * 1024 * 1024
 ROOT_SIZE = 64 * 1024 * 1024
 MBR_SIGNATURE = 0x46504C58
-FIT_SPEC = {"kind": "sha256", "filename": "FPLINUX.ITB"}
 STORAGE = {
     "filename": "FPLINUX.img",
     "disk_signature": MBR_SIGNATURE,
@@ -49,20 +48,17 @@ STORAGE = {
 
 @dataclass(frozen=True)
 class SdInputs:
-    """Exact FIT and ext4 inputs plus a private whole-card publication path."""
+    """Exact ext4 input plus a private whole-card publication path."""
 
     root: Path
-    fit: Path
     rootfs: Path
     output: Path
 
     def build(self, cold_boot: ColdSdBootstrap | None = None) -> Path:
         """Build from the current exact fixture inputs."""
         return sd_image.build(
-            self.fit,
             self.rootfs,
             self.output,
-            fit_spec=FIT_SPEC,
             storage=STORAGE,
             cold_boot=cold_boot,
         )
@@ -85,13 +81,11 @@ def sd_files() -> Iterator[SdInputs]:
     """Own regular input files and promptly release any large image outputs."""
     with tempfile.TemporaryDirectory() as temporary:
         root = Path(temporary)
-        fit = root / "FPLINUX.ITB"
         rootfs = root / "FPLROOT.ext4"
         output = root / "FPLINUX.img.xz"
-        fit.write_bytes(b"FPLINUX FIT test payload\n")
         with rootfs.open("wb") as stream:
             stream.truncate(ROOT_SIZE)
-        yield SdInputs(root, fit, rootfs, output)
+        yield SdInputs(root, rootfs, output)
 
 
 @pytest.fixture
@@ -156,13 +150,13 @@ class SdImageTests:
             assert (boot_sector[82:90]) == (b"FAT32   ")
             stream.seek(ROOT_OFFSET)
             assert (stream.read(ROOT_SIZE)) == (sd_inputs.rootfs.read_bytes())
-        extracted = sd_inputs.root / "extracted.itb"
-        subprocess.run(
-            ["mcopy", "-i", f"{raw}@@{BOOT_OFFSET}", "::FPLINUX.ITB", str(extracted)],
+        directory = subprocess.run(
+            ["mdir", "-b", "-i", f"{raw}@@{BOOT_OFFSET}", "::"],
+            capture_output=True,
             check=True,
             timeout=120,
         )
-        assert (extracted.read_bytes()) == (sd_inputs.fit.read_bytes())
+        assert b"fplinux.itb" not in directory.stdout.lower()
         if autonomous:
             extracted_stage0 = sd_inputs.root / "extracted-stage0.bin"
             subprocess.run(
@@ -178,31 +172,11 @@ class SdImageTests:
             )
             assert extracted_stage0.read_bytes() == stage0_bytes
 
-    def test_fit_content_is_causal(self, sd_inputs: SdInputs) -> None:
-        """Changed FIT bytes replace the old image with the exact fresh-build result."""
-        sd_inputs.build()
-        before = sha256_file(sd_inputs.output)
-        sd_inputs.fit.write_bytes(b"FPLINUX altered FIT payload\n")
-        sd_inputs.build()
-        assert (before) != (sha256_file(sd_inputs.output))
-        reference = sd_inputs.root / "changed-fit-reference" / "FPLINUX.img.xz"
-        assert not reference.parent.exists()
-        sd_image.build(
-            sd_inputs.fit,
-            sd_inputs.rootfs,
-            reference,
-            fit_spec=FIT_SPEC,
-            storage=STORAGE,
-        )
-        assert sd_inputs.output.read_bytes() == reference.read_bytes()
-
     def test_ram_linux_profile_contains_exact_ext4_root_and_an_empty_fat_partition(
         self, sd_inputs: SdInputs
     ) -> None:
         """A USB-loaded kernel receives the same card layout without a card boot payload."""
-        result = sd_image.build(
-            None, sd_inputs.rootfs, sd_inputs.output, fit_spec=None, storage=STORAGE
-        )
+        result = sd_image.build(sd_inputs.rootfs, sd_inputs.output, storage=STORAGE)
         assert result == sd_inputs.output
         raw = sd_inputs.extract_raw()
         assert raw.stat().st_size == ROOT_OFFSET + ROOT_SIZE
@@ -263,34 +237,15 @@ class SdImageTests:
         )
         assert extracted.read_bytes() == stage0_payload
 
-    @pytest.mark.parametrize("with_fit", [False, True], ids=["missing-fit", "unexpected-fit"])
-    def test_fit_bytes_and_specification_must_be_selected_together(
-        self, sd_files: SdInputs, *, with_fit: bool
-    ) -> None:
-        """A profile mismatch fails before replacing the previous output bytes."""
-        before = b"previous published output\n"
-        sd_files.output.write_bytes(before)
-        with pytest.raises(sd_image.SdImageError, match="selected together"):
-            sd_image.build(
-                sd_files.fit if with_fit else None,
-                sd_files.rootfs,
-                sd_files.output,
-                fit_spec=None if with_fit else FIT_SPEC,
-                storage=STORAGE,
-            )
-        assert sd_files.output.read_bytes() == before
-
     def test_rebuild_from_unchanged_inputs_is_byte_reproducible(self, sd_inputs: SdInputs) -> None:
-        """Rebuilding the same FIT and ext4 bytes publishes an identical compressed image."""
+        """Rebuilding the same ext4 bytes publishes an identical compressed image."""
         sd_inputs.build()
         before = sha256_file(sd_inputs.output)
         second = sd_inputs.root / "second-build" / "FPLINUX.img.xz"
         assert not second.parent.exists()
         sd_image.build(
-            sd_inputs.fit,
             sd_inputs.rootfs,
             second,
-            fit_spec=FIT_SPEC,
             storage=STORAGE,
         )
         assert before == sha256_file(second)
@@ -299,16 +254,14 @@ class SdImageTests:
         """An absent or empty input cannot replace previous output bytes."""
         before = b"previous published output\n"
         sd_files.output.write_bytes(before)
-        sd_files.fit.write_bytes(b"")
+        sd_files.rootfs.write_bytes(b"")
         with pytest.raises(sd_image.SdImageError, match="is empty"):
             sd_files.build()
         assert sd_files.output.read_bytes() == before
         with pytest.raises(sd_image.SdImageError, match="missing or invalid"):
             sd_image.build(
-                sd_files.root / "missing.itb",
-                sd_files.rootfs,
+                sd_files.root / "missing.ext4",
                 sd_files.output,
-                fit_spec=FIT_SPEC,
                 storage=STORAGE,
             )
         assert sd_files.output.read_bytes() == before

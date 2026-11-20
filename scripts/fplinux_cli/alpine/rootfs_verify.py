@@ -240,7 +240,7 @@ def _verify_alpine_rootfs(  # noqa: PLR0913 -- verify each independently selecte
     if "fplinux-ssh" in packages:
         _require_openrc_service(root, "default", "fplinux-ssh")
     if "fplinux-microsd-root" in packages:
-        for service in ("killprocs", "savecache", "mount-ro"):
+        for service in ("killprocs", "savecache", "fplinux-microsd-shutdown", "mount-ro"):
             _require_openrc_service(root, "shutdown", service)
 
     fstab = require_file(root / "etc/fstab").read_text(encoding="utf-8")

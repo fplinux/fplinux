@@ -8,7 +8,7 @@ import json
 from typing import TYPE_CHECKING
 
 import pytest
-from fplinux_cli.artifacts.release import ReleaseContext
+from fplinux_cli.artifacts.release_identity import ReleaseContext
 from fplinux_cli.dependencies.distribution import (
     dependency_metadata,
     read_dependency_distribution,
@@ -18,7 +18,7 @@ from fplinux_cli.dependencies.distribution import (
 if TYPE_CHECKING:
     from pathlib import Path
 
-_RELEASE = ReleaseContext("123456789abc", "123456789abc" + "0" * 28, "a" * 64)
+_RELEASE = ReleaseContext("123456789abc", "1.0.0", "123456789abc" + "0" * 28, "a" * 64)
 
 
 def test_release_metadata_authenticates_the_index_and_exact_part_bytes(tmp_path: Path) -> None:
@@ -46,6 +46,7 @@ def test_release_metadata_authenticates_the_index_and_exact_part_bytes(tmp_path:
     assert json.loads((tmp_path / "DEPENDENCIES.json").read_bytes()) == {
         "release_id": "123456789abc",
         "source_commit": "123456789abc" + "0" * 28,
+        "release_version": "1.0.0",
         "source_snapshot": "a" * 64,
         "snapshot": "b" * 64,
         "index": "FPLinux-123456789abc-inputs.sha256",
@@ -71,6 +72,7 @@ def test_download_metadata_rejects_unpinned_or_mismatched_identity(
     metadata = {
         "release_id": "123456789abc",
         "source_commit": "123456789abc" + "0" * 28,
+        "release_version": "1.0.0",
         "source_snapshot": "a" * 64,
         "snapshot": "b" * 64,
         "index": "FPLinux-123456789abc-inputs.sha256",

@@ -10,10 +10,9 @@ if [ "$#" -eq 0 ]; then
 fi
 
 [ "$1" = run ]
-[ "$2" = --target ]
-target=$3
-[ "$4" = --events ]
-events=$5
+target=$2
+[ "$3" = --events ]
+events=$4
 if [ "$target" = nokia-ta1618 ]; then
 	"${FPLINUX_TEST_PYTHON:?fixture Python is required}" -B phone-store.py "$target"
 fi

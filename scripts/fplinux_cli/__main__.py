@@ -51,25 +51,25 @@ def _host_main(selected_root: Path) -> None:
         discover_targets,
         normalize_profile,
     )
+    from fplinux_cli.runtime.cli import (  # noqa: PLC0415 -- host commands only.
+        session_request,
+        validate_session_request,
+    )
 
     targets = discover_targets()
     parser, check_parser = create_parser(targets)
     args = parser.parse_args()
-    if args.command == "console":
-        if args.allow_other_build and any(
-            value is not None for value in (args.build_type, args.profile, args.phone_data)
-        ):
-            parser.error(
-                "--allow-other-build cannot be combined with "
-                "--build-type, --profile or --phone-data"
-            )
-        if args.build_type is None:
-            args.build_type = "release"
+    if args.command in {"run", "console", "verify"}:
+        validate_session_request(parser, args, session_request(args))
+    if args.command == "console" and args.build_type is None:
+        args.build_type = "release"
     if args.command == "format" and not args.paths and not args.changed:
         parser.error("format requires PATH or --changed")
     # Each tier session without recorded failures would otherwise run completely.
     if args.command == "test" and args.last_failed and not args.names and args.tier is None:
         parser.error("test --last-failed requires TEST or --tier")
+    if args.command == "logs" and args.logs_action == "show" and args.json and not args.summary:
+        parser.error("logs show --json requires --summary")
     if hasattr(args, "profile") and not (args.command == "check" and args.list_scopes):
         args.profile = normalize_profile(args.profile)
     execute_command(args, command_action(args, check_parser), data_directory=selected_root)

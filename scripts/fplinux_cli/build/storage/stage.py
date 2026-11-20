@@ -154,7 +154,7 @@ def build_profile_fit(  # noqa: PLR0913 -- target selection and artifact paths s
     if config["kind"] == "none":
         return None
     if config["kind"] != "sha256" or uboot is None or ramdisk is None:
-        fail("SHA-256 FIT requires verified U-Boot tools and an early firmware archive")
+        fail("SHA-256 FIT requires verified U-Boot tools and an initramfs")
     from . import fit as fit_image  # noqa: PLC0415 -- profile-only source.
 
     try:
@@ -178,6 +178,11 @@ def build_profile_fit(  # noqa: PLR0913 -- target selection and artifact paths s
             plan=plan,
         )
         fit_image.receipt_identity(output, plan)
+        layout = target_config["layout"]
+        if fit.stat().st_size > layout["fit_size"]:
+            fail("FIT exceeds its reserved memory range")
+        if dtb.stat().st_size + layout["fdt_pad"] > layout["fdt_size"]:
+            fail("FIT device tree and U-Boot padding exceed the reserved device tree range")
     except (
         OSError,
         subprocess.SubprocessError,
@@ -191,7 +196,6 @@ def build_profile_fit(  # noqa: PLR0913 -- target selection and artifact paths s
 def build_profile_sd_image(
     target_config: dict[str, Any],
     work: Path,
-    fit: Path | None,
     ext4: Path | None,
     *,
     cold_boot: ColdSdBootstrap | None,
@@ -202,9 +206,6 @@ def build_profile_sd_image(
         return None
     if image_config["kind"] != "ext4-root" or ext4 is None:
         fail("whole-card image requires an ext4 root artifact")
-    fit_config = target_config["fit"]
-    if (fit_config["kind"] == "none") != (fit is None):
-        fail("whole-card FIT artifact does not match the selected profile")
     storage = target_config["storage"]
     if not isinstance(storage, dict):
         fail("whole-card image requires a storage layout")
@@ -214,10 +215,8 @@ def build_profile_sd_image(
     try:
         return inputs_build.require_file(
             sd_image.build(
-                fit,
                 ext4,
                 destination,
-                fit_spec=fit_config if fit is not None else None,
                 storage=storage,
                 cold_boot=cold_boot,
             )

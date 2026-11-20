@@ -34,8 +34,9 @@ def write_registration_source(root: Path) -> tuple[str, Path]:
     return relative, source
 
 
-def write_source_lock_files(root: Path, target: str = "demo") -> list[tuple[str, Path]]:
-    """Supply captured lock inputs beside controlled target and package discovery."""
+def write_source_declarations(root: Path, target: str = "demo") -> list[tuple[str, Path]]:
+    """Supply the checkout version and return the declarations selected by the build."""
+    (root / "VERSION").write_bytes(b"1.0.0\n")
     fixture_files = {
         "sources.lock.toml": "sources.lock.toml",
         "alpine.lock.toml": "alpine.lock.toml",

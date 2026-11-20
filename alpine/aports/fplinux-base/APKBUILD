@@ -14,6 +14,7 @@ replaces_priority=100
 options="!check"
 source="fstab inittab interfaces hostname issue os-release fplinux-zram.initd
 	fplinux-devices.initd
+	fplinux-accounts
 	fplinux-brightness.initd
 	fplinux-kmsg.c fplinux-cli.c fplinux-cli.h
 	fplinux-brightness.c fplinux-brightnessd.c
@@ -56,6 +57,8 @@ package() {
 		"$pkgdir/etc/init.d/fplinux-brightness"
 	install -Dm755 "$srcdir/fplinux-devices.initd" \
 		"$pkgdir/etc/init.d/fplinux-devices"
+	install -Dm755 "$srcdir/fplinux-accounts" \
+		"$pkgdir/usr/libexec/fplinux/accounts"
 
 	mkdir -p "$pkgdir/sbin"
 	ln -s /bin/busybox "$pkgdir/sbin/ifup"
@@ -87,7 +90,8 @@ d4f32b008bfadf39d86f04cd29e3d39a2124d3c3cd59481f61f573caee2be2ff5b074e9959a02543
 49021c0bcdfe0034ccafc330ca63886aa0a00a8e9100e2ecae21678178e4df98775932be6195067e944a79b8620a420484b9d70e1b41e095696a9358f3cbc4f9  issue
 c78d6b9b4995a018827d2a36fec591310cc90fe3e1e31d9ac9ca3c1dbac7d10445e46f19cce2c312ec6d19135d3009388d75ff405c16180ebb70ce29cc001b1b  os-release
 d94e93733a6df7c6e04f559675d93c54241fb7809caee9a6134d3d829d0011d3e6b65c3cb88e20f1f1ec9a8ff5fb956436c49545161b799fb1daafd82d2cdd52  fplinux-zram.initd
-42f67162ab433b31b3561f120c8c47ec2beb7130ec58056e19e7b0f910067818c22868243ac6064c97fb263eeef0a28bbacf1e102d560a2bdfb8116afe5a9ade  fplinux-devices.initd
+771d2e4a1b3881670e3fbb3b0ef0fcd8027de527c335e3b7b6af0fae7fa4d024e906007788e5ccb41b376972715e0ba4045a10099bd6775fdcd23d4bd00c9dd5  fplinux-devices.initd
+091d7f02376871fe3b620c83425dba7d3c5ce77da4125141d08189624f3cbedcf7548e0bc92ec7e8e2a473917fb42897d0c74e16d7eb20332cc4db80526e1c96  fplinux-accounts
 14adb002d72cc77bdf106c2d3ec4e655c20ed34710af77e6c613a4f3cd1543eca381ff99946c8cba68a27883ffee537839dae1603b135498f856a331cf1a8240  fplinux-brightness.initd
 61ac67c34c4879c58956b59ca4ba3806b11bb04be2200c9010f1c8772b223a947678c2450611a69ea23d4eb0afa2508a6ca75c8eee5842dd5b1ae3dbbd25a596  fplinux-kmsg.c
 60be1ccccf0215ea13bc64fd442a0498e7db203234ce74f92cec502295e8ac703a089438848b9a1850102836855537f561e9bd8313751574a069eb0ec6dcf31a  fplinux-cli.c

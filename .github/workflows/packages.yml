@@ -4,6 +4,7 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
+    tags: ["v[0-9]+.[0-9]+.[0-9]+"]
 
 permissions: {}
 
@@ -139,7 +140,7 @@ jobs:
 
   publish:
     needs: [check, smoke-linux, smoke-windows]
-    if: github.repository == 'fplinux/fplinux' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.repository == 'fplinux/fplinux' && github.event_name == 'push' && !github.event.deleted && (github.ref == 'refs/heads/main' || github.ref_type == 'tag')
     runs-on: ubuntu-24.04
     permissions:
       contents: write

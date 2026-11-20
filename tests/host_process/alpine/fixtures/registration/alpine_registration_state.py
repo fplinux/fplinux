@@ -10,6 +10,7 @@ sys.dont_write_bytecode = True
 root = Path(sys.argv[1])
 sys.path.insert(0, str(root / "scripts"))
 from fplinux_cli.alpine import packages, recipes  # noqa: E402 -- select the supplied checkout.
+from fplinux_cli.artifacts.release_identity import ReleaseContext  # noqa: E402 -- same checkout.
 
 names = json.loads(sys.argv[2])
 selected = json.loads(sys.argv[3])
@@ -28,7 +29,10 @@ with mock.patch.object(packages, "CACHE", root / ".cache"):
             for name in names
         },
         "rootfs": recipes.alpine_rootfs_recipe(
-            "1" * 64, "d" * 64, selected, release_id="012345abcdef"
+            "1" * 64,
+            "d" * 64,
+            selected,
+            release=ReleaseContext("012345abcdef", "1.0.0", None, "012345abcdef" + "0" * 52),
         ),
     }
 print(json.dumps(result))

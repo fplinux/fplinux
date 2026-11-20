@@ -12,13 +12,14 @@ from fplinux_cli.data_paths import data_root
 from fplinux_cli.environment import definition
 from fplinux_cli.environment import state as environment_states
 from fplinux_cli.manifests import targets
-from fplinux_cli.manifests.paths import normalize_profile
+from fplinux_cli.manifests.paths import discover_profiles, normalize_profile
 from fplinux_cli.manifests.values import TARGET_NAME
 from fplinux_cli.runtime import bundle_session as runtime_bundle_session
 from fplinux_cli.runtime import live
 from fplinux_cli.runtime.bundle import admit_bundle
 from fplinux_cli.runtime.data_paths import checkout_runtime_root
 from fplinux_cli.runtime.keyboard import forward_keyboard, resolve_keyboard_target
+from fplinux_cli.runtime.operations import LiveRequest, SelectedConnection, execute_operation
 from fplinux_cli.workspace import build_inputs as workspaces
 
 if TYPE_CHECKING:
@@ -89,8 +90,9 @@ def console_target(  # noqa: PLR0913 -- public CLI modes remain explicit.
     pull: list[str] | None,
     phone_data: Path | None = None,
     allow_other_build: bool = False,
+    shutdown: bool = False,
 ) -> None:
-    """Open the SSH session, or forward one evdev keyboard over USB."""
+    """Use the authenticated phone or forward one evdev keyboard over USB."""
     if keyboard is not None:
         target = resolve_keyboard_target(target)
         bundle = None
@@ -119,6 +121,7 @@ def console_target(  # noqa: PLR0913 -- public CLI modes remain explicit.
         exec_command=exec_command,
         upload=upload,
         pull=pull,
+        shutdown=shutdown,
     )
 
 
@@ -146,10 +149,16 @@ def _console(  # noqa: PLR0913 -- selection, policy and existing remote actions 
     upload: list[str] | None = None,
     pull: list[str] | None = None,
     verify_only: bool = False,
+    shutdown: bool = False,
 ) -> None:
     connection = _checkout_connection(target)
     target = str(connection[1]["target"])
     profile = normalize_profile(profile)
+    if shutdown and profile is None:
+        card_profiles = [name for name in discover_profiles(target) if name != "default"]
+        if not card_profiles:
+            fail(f"{target} has no system microSD boot")
+        profile = card_profiles[0]
     admitted = None
     revalidate: Callable[[], None] | None = None
     if not allow_other_build:
@@ -180,17 +189,18 @@ def _console(  # noqa: PLR0913 -- selection, policy and existing remote actions 
     logs = cache / "logs/run" / target
     if profile is not None:
         logs = logs / "profiles" / profile
-    status = live.console_connection(
-        connection,
-        data,
-        logs,
-        admitted=admitted,
-        phone_data=phone_data,
-        exec_command=exec_command,
-        upload=upload,
-        pull=pull,
-        verify_only=verify_only,
-        revalidate=revalidate,
+    status = execute_operation(
+        LiveRequest(
+            target=target,
+            phone_data=phone_data,
+            allow_other_build=allow_other_build,
+            exec_command=exec_command,
+            upload=upload,
+            pull=pull,
+            verify_only=verify_only,
+            shutdown=shutdown,
+        ),
+        SelectedConnection(connection, data, logs, admitted, revalidate),
     )
     if status:
         raise SystemExit(status)

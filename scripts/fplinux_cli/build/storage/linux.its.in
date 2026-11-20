@@ -34,8 +34,8 @@
 		};
 
 		ramdisk {
-			description = "FPLinux early firmware";
-			data = /incbin/("early-firmware.cpio");
+			description = "FPLinux initramfs";
+			data = /incbin/("initramfs.cpio");
 			type = "ramdisk";
 			arch = "arm";
 			os = "linux";

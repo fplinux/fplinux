@@ -14,6 +14,7 @@
 #define FIT_HASH_NODENAME "hash"
 #define FIT_ALGO_PROP "algo"
 #define FIT_VALUE_PROP "value"
+#define FIT_IGNORE_PROP "uboot-ignore"
 #define FIT_KERNEL_PROP "kernel"
 #define FIT_FDT_PROP "fdt"
 #define FIT_RAMDISK_PROP "ramdisk"

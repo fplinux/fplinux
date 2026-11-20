@@ -30,12 +30,14 @@ if TYPE_CHECKING:
     from .bundle import ValidatedBundle
 
 
-def load_connections(
+def load_connections(  # noqa: PLR0913 -- fixed bundles and archive projections admit host files separately.
     target: str,
     session_root: Path,
     *,
     bundle_root: Path | None = None,
     runtime: dict[str, Any] | None = None,
+    host_file: Callable[[str], Path] | None = None,
+    shared_root: bool = False,
 ) -> list[tuple[Any, dict[str, Any]]]:
     """Read saved credentials from this installation without creating a session."""
     if not session_root.exists():
@@ -45,15 +47,22 @@ def load_connections(
         from .windows.host import WindowsHost  # noqa: PLC0415
         from .windows.transport import WindowsTransport  # noqa: PLC0415
 
-        if bundle_root is None or runtime is None:
+        if runtime is None:
             fail("Windows connection requires its archive and runtime metadata")
-        tools = validate_connection_tools(bundle_root)
+        if host_file is not None:
+            tools = validate_connection_tools(host_file)
+        elif bundle_root is not None:
+            tools = validate_connection_tools(lambda name: bundle_root / name)
+        else:
+            fail("Windows connection requires its archive and runtime metadata")
         transport = WindowsTransport(
             WindowsHost(), tools, wait_seconds=runtime["usb"]["linux_gadget"]["wait_seconds"]
         )
         return [
             (transport, session)
-            for session in transport.load_saved_sessions(target, session_root=session_root)
+            for session in transport.load_saved_sessions(
+                target, session_root=session_root, shared_root=shared_root
+            )
         ]
     session = ssh_session.load_saved_session(target, runtime_root=session_root)
     return [(ssh_transport, session)] if session is not None else []
@@ -91,12 +100,74 @@ def _prepared_identity(admitted: ValidatedBundle, phone_data: Path | None) -> st
     return phone_data_runtime.content_identity(phone_data_runtime.selected_capsule(selected))
 
 
-def _show_running_build(connection: tuple[Any, dict[str, Any]], log: RunLog) -> None:
-    observed = read_running_build(connection)
+def _show_running_build(
+    connection: tuple[Any, dict[str, Any]],
+    log: RunLog,
+    *,
+    expected_build: str | None,
+    inspect_card: bool,
+) -> None:
+    observed = read_running_build(connection, inspect_card=inspect_card)
+    if expected_build is not None and observed.build_id != expected_build:
+        fail("The running microSD root has a different build identity")
+    slot = f"; microSD slot: {observed.card_slot}" if observed.card_slot is not None else ""
     log.message(
         f"Phone: {connection[1]['target']}; kernel: {observed.kernel_release}; "
-        f"BUILD_ID: {observed.build_id}"
+        f"BUILD_ID: {observed.build_id}{slot}"
     )
+
+
+def _shutdown_mountpoint(admitted: ValidatedBundle | None) -> str:
+    if admitted is not None:
+        if boots_system_card(admitted.runtime):
+            return "/run/fplinux-card"
+        if admitted.runtime.get("profile") == "microsd-root":
+            return "/"
+    return fail("Shutdown requires a selected microSD system build")
+
+
+def _shutdown_card(
+    connection: tuple[Any, dict[str, Any]], log: RunLog, *, mountpoint: str
+) -> None:
+    """Require a complete read-only receipt before sending a separate power-off request."""
+    transport, session = connection
+    helper = "/usr/libexec/fplinux/microsd-grow"
+    log.message("Preparing system-card shutdown. Keep USB connected.")
+    prepared = transport.run_remote(
+        session, f"{helper} prepare-poweroff", capture_output=True, shared=True, timeout=60
+    )
+    detail = prepared.stderr.strip()
+    if detail:
+        log.record(detail)
+    if prepared.returncode:
+        fail(detail or f"Could not prepare system-card shutdown (exit {prepared.returncode})")
+    if prepared.stdout.strip() != f"readonly {mountpoint}":
+        fail("The phone did not confirm a synchronized, read-only system card")
+    log.message(f"System card synchronized and confirmed read-only at {mountpoint}.")
+
+    log.message("Requesting power-off. Keep USB connected until the phone has shut down.")
+    try:
+        requested = transport.run_remote(
+            session, f"{helper} poweroff", capture_output=True, shared=True, timeout=15
+        )
+    except subprocess.TimeoutExpired as error:
+        message = "SSH timed out before confirming the power-off request"
+        raise SystemExit(message) from error
+    detail = requested.stderr.strip()
+    if detail:
+        log.record(detail)
+    if requested.returncode == 0:
+        log.message("The phone accepted the power-off request.")
+    elif requested.returncode != 255:
+        fail(detail or f"The phone refused the power-off request (exit {requested.returncode})")
+
+    if transport.usb_present(session):
+        log.message("The phone's USB connection is still detected.")
+    else:
+        log.message("The phone's USB connection is no longer detected.")
+    if requested.returncode != 0:
+        fail("SSH could not confirm the power-off request")
+    log.message("Check that the phone has shut down before removing power or the card.")
 
 
 def console_connection(  # noqa: PLR0913 -- selected session and action policies stay explicit.
@@ -110,6 +181,7 @@ def console_connection(  # noqa: PLR0913 -- selected session and action policies
     upload: list[str] | None = None,
     pull: list[str] | None = None,
     verify_only: bool = False,
+    shutdown: bool = False,
     revalidate: Callable[[], None] | None = None,
     log: RunLog | None = None,
 ) -> int:
@@ -117,12 +189,10 @@ def console_connection(  # noqa: PLR0913 -- selected session and action policies
     status = "failed"
     try:
         private_directory(data_root)
-        remote_action = verify_only or any(
-            value is not None for value in (exec_command, upload, pull)
-        )
+        remote_action = any(value is not None for value in (exec_command, upload, pull))
         lock = (
             nullcontext()
-            if remote_action
+            if verify_only or remote_action
             else exclusive_lock(
                 data_root / ".launcher.lock",
                 message="Another launcher is already open. Close it before starting this one.",
@@ -133,10 +203,11 @@ def console_connection(  # noqa: PLR0913 -- selected session and action policies
                 private_directory(log_root)
                 log = RunLog(log_root, protect=private_directory, visible=sys.stderr)
                 log.message(f"Log: {log.path}")
-            if verify_only and (
-                admitted is None or any(x is not None for x in (exec_command, upload, pull))
-            ):
+            if verify_only and (admitted is None or shutdown or remote_action):
                 fail("Verification requires a selected build and no remote action")
+            if shutdown and (remote_action or phone_data is not None):
+                fail("Shutdown requires a selected microSD system and no other console action")
+            mountpoint = _shutdown_mountpoint(admitted) if shutdown else None
             if os.name == "nt" and (upload is not None or pull is not None):
                 fail("File transfer is available from a Linux host")
             if admitted is None:
@@ -167,13 +238,27 @@ def console_connection(  # noqa: PLR0913 -- selected session and action policies
             with log.capture():
                 session = transport.reacquire_bound_session(session, expected_device_identity=None)
             connection = transport, session
-            _show_running_build(connection, log)
             if admitted is not None:
                 with log.capture():
                     connection = reconnect(connection)
             transport, session = connection
+            inspect_card = (
+                (verify_only or shutdown)
+                and admitted is not None
+                and boots_system_card(admitted.runtime)
+            )
+            expected_build = (
+                admitted.runtime["release_id"]
+                if (inspect_card or shutdown) and admitted is not None
+                else None
+            )
+            _show_running_build(
+                connection, log, expected_build=expected_build, inspect_card=inspect_card
+            )
             if verify_only:
                 log.message("The running phone matches the selected build.")
+            elif mountpoint is not None:
+                _shutdown_card(connection, log, mountpoint=mountpoint)
             elif exec_command is not None:
                 result = transport.run_remote(session, exec_command)
                 if result.returncode:
@@ -211,6 +296,8 @@ def console_bundle(  # noqa: PLR0913 -- archive selectors and remote actions are
     pull: list[str] | None = None,
     phone_data: Path | None = None,
     verify_only: bool = False,
+    shutdown: bool = False,
+    connection: tuple[Any, dict[str, Any]] | None = None,
 ) -> int:
     """Select this archive's saved phone and apply its chosen build policy."""
     log = None
@@ -222,11 +309,17 @@ def console_bundle(  # noqa: PLR0913 -- archive selectors and remote actions are
             log.message(f"Log: {log.path}")
             host_preflight()
             runtime = load_runtime_manifest(bundle / "runtime-manifest.json")
-            connection = select_connection(
-                load_connections(
-                    runtime["target"], data_root / "session", bundle_root=bundle, runtime=runtime
+            if connection is None:
+                connection = select_connection(
+                    load_connections(
+                        runtime["target"],
+                        data_root / "session",
+                        bundle_root=bundle,
+                        runtime=runtime,
+                    )
                 )
-            )
+            elif connection[1]["target"] != runtime["target"]:
+                fail("The selected build belongs to another phone target")
             admitted = None if allow_other_build else admit_bundle(bundle)
     except (
         KeyboardInterrupt,
@@ -249,5 +342,6 @@ def console_bundle(  # noqa: PLR0913 -- archive selectors and remote actions are
         upload=upload,
         pull=pull,
         verify_only=verify_only,
+        shutdown=shutdown,
         log=log,
     )

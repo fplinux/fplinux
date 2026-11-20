@@ -71,7 +71,7 @@ def test_cleanup_retains_release_and_debug_rootfs_layers_and_apks(
     source_recipe = environment_recipe_digest()
     publish_environment_state(cache, EnvironmentState(source_recipe, "a" * 64, "b" * 64))
     environment_recipe = environment_artifact_recipe_digest(source_recipe, "b" * 64)
-    release_id = current_release_context().release_id
+    release = current_release_context()
     platform = load_platform("ums9117")
     retained: dict[str, Path] = {}
     packages_by_build_type: dict[str, tuple[str, ...]] = {}
@@ -81,14 +81,14 @@ def test_cleanup_retains_release_and_debug_rootfs_layers_and_apks(
         assert base_packages is not None
         packages_by_build_type[build_type] = base_packages
         base_recipe = alpine_rootfs_recipe(
-            environment_recipe, signing_key, base_packages, release_id=release_id
+            environment_recipe, signing_key, base_packages, release=release
         )
         retained[f"{build_type} shared RAM rootfs"] = _publish_rootfs(cache, base_recipe)
         recipe = alpine_rootfs_recipe(
             environment_recipe,
             signing_key,
             selected_packages(platform, target),
-            release_id=release_id,
+            release=release,
             display_brightness=target.get("display_brightness"),
         )
         retained[f"{build_type} board RAM rootfs"] = _publish_rootfs(
@@ -101,7 +101,7 @@ def test_cleanup_retains_release_and_debug_rootfs_layers_and_apks(
             environment_recipe,
             signing_key,
             card_packages,
-            release_id=release_id,
+            release=release,
             root_kind="external",
         )
         retained[f"{build_type} shared microSD rootfs"] = _publish_rootfs(cache, card_recipe)

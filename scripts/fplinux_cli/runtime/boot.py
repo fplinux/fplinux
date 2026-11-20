@@ -184,9 +184,6 @@ def _run_new_bundle(  # noqa: PLR0913 -- the waiting observer preserves the admi
             runtime["target"],
             runtime["usb"]["linux_gadget"],
             runtime_root=session_root,
-        )
-        ssh_session.bind_prepared_content(
-            session,
             bundle_generation=admitted.generation,
             prepared_data_sha256=prepared_data_sha256,
         )

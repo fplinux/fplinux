@@ -223,13 +223,15 @@ def _retire_target_sessions(root: Path, target: str, *, current_serial: str) -> 
             _remove_owned_session(directory, target, owner["usb_serial"], root=root)
 
 
-def prepare_session(
+def prepare_session(  # noqa: PLR0913 -- bundle identity and runtime destination are distinct.
     image: Path,
     personalization: dict[str, Any],
     target: str,
     linux_usb: dict[str, Any],
     *,
     runtime_root: Path,
+    bundle_generation: str,
+    prepared_data_sha256: str | None,
 ) -> dict[str, Any]:
     """Create keys, addressing and one mode-0600 personalized image copy."""
     if TARGET_NAME.fullmatch(target) is None:
@@ -334,6 +336,8 @@ def prepare_session(
         "wait_seconds": linux_usb["wait_seconds"],
         "status": "prepared",
         "runtime_root": str(root),
+        "bundle_generation": bundle_generation,
+        "prepared_data_sha256": prepared_data_sha256,
     }
     try:
         _write_json(state_path, state)
@@ -426,25 +430,13 @@ def mark_current(session: dict[str, Any]) -> dict[str, Any]:
     return session
 
 
-def bind_prepared_content(
-    session: dict[str, Any], *, bundle_generation: str, prepared_data_sha256: str | None
-) -> None:
-    """Keep the actual runtime and capsule binding in the saved connection record."""
-    session["bundle_generation"] = bundle_generation
-    session["prepared_data_sha256"] = prepared_data_sha256
-    _write_json(Path(session["private_key"]).parent / "session.json", session)
-
-
 def require_prepared_content(
     session: dict[str, Any], *, bundle_generation: str, prepared_data_sha256: str | None
 ) -> None:
     """Refuse to reconnect after the selected bundle or personal contents changed."""
-    if session.get("bundle_generation") != bundle_generation:
+    if session["bundle_generation"] != bundle_generation:
         fail("the running phone uses a different build; shut it down before starting this build")
-    if (
-        "prepared_data_sha256" not in session
-        or session["prepared_data_sha256"] != prepared_data_sha256
-    ):
+    if session["prepared_data_sha256"] != prepared_data_sha256:
         fail(
             "the running phone uses different prepared phone data; "
             "shut it down before using this data"
@@ -473,24 +465,22 @@ def validate_session(
         "status",
         "interface",
         "runtime_root",
+        "bundle_generation",
+        "prepared_data_sha256",
     }
-    if not isinstance(value, dict):
+    if not isinstance(value, dict) or set(value) != required:
         fail("current SSH session state has unexpected fields")
-    if "bundle_generation" in value or "prepared_data_sha256" in value:
-        required.update({"bundle_generation", "prepared_data_sha256"})
-        generation = value.get("bundle_generation")
-        prepared = value.get("prepared_data_sha256")
-        if (
-            not isinstance(generation, str)
-            or SHA256.fullmatch(generation) is None
-            or (
-                prepared is not None
-                and (not isinstance(prepared, str) or SHA256.fullmatch(prepared) is None)
-            )
-        ):
-            fail("current SSH session content identity is invalid")
-    if set(value) != required:
-        fail("current SSH session state has unexpected fields")
+    generation = value["bundle_generation"]
+    prepared = value["prepared_data_sha256"]
+    if (
+        not isinstance(generation, str)
+        or SHA256.fullmatch(generation) is None
+        or (
+            prepared is not None
+            and (not isinstance(prepared, str) or SHA256.fullmatch(prepared) is None)
+        )
+    ):
+        fail("current SSH session content identity is invalid")
     if value.get("status") != "ready":
         fail("current SSH session state is not ready")
     if target is not None and value.get("target") != target:

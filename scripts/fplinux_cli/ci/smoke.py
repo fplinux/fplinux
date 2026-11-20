@@ -143,7 +143,9 @@ def _launch_to_invitation(  # noqa: PLR0913 -- host, model, action and attempt i
 ) -> None:
     events = scope / f"smoke-events-{attempt}.jsonl"
     output = scope / f"smoke-output-{attempt}.txt"
-    command = [*_native_launcher(host), *action, "--target", target, "--events", str(events)]
+    target_at = 2 if action[0] == "card" else 1
+    operation = [*action[:target_at], target, *action[target_at:]]
+    command = [*_native_launcher(host), *operation, "--events", str(events)]
     environment = _smoke_environment(root)
     environment.update(TMP=str(scope / "temp"), TEMP=str(scope / "temp"))
     creation_flags = 0

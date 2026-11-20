@@ -57,6 +57,7 @@ def project_sources() -> dict[str, bytes]:
         "project/fplinux": b"#!/bin/sh\nexit 0\n",
         "project/LICENSE": b"project license\n",
         "project/THIRD_PARTY_NOTICES.md": b"third-party notices\n",
+        "project/VERSION": b"1.0.0\n",
         "project/targets/konrow-senior-280-plus/target.toml": b'platform = "test"\n',
         **{
             f"project/targets/{target}/target.toml": b'platform = "test"\n'
@@ -65,7 +66,7 @@ def project_sources() -> dict[str, bytes]:
     }
 
 
-def release_fields() -> dict[str, str]:
+def release_fields(commit: str = COMMIT) -> dict[str, str]:
     records = [
         {
             "path": name.removeprefix("project/"),
@@ -75,8 +76,9 @@ def release_fields() -> dict[str, str]:
         for name, contents in sorted(project_sources().items())
     ]
     return {
-        "release_id": RELEASE_ID,
-        "source_commit": COMMIT,
+        "release_id": commit[:12],
+        "source_commit": commit,
+        "release_version": "1.0.0",
         "source_snapshot": hashlib.sha256(json_bytes(records)).hexdigest(),
     }
 
@@ -107,9 +109,11 @@ def read_zip(path: Path) -> tuple[dict[str, bytes], dict[str, int]]:
     return files, modes
 
 
-def _manifest(files: dict[str, bytes], modes: set[str], target: str, profile: str | None) -> bytes:
+def _manifest(
+    files: dict[str, bytes], modes: set[str], target: str, profile: str | None, commit: str
+) -> bytes:
     body: dict[str, Any] = {
-        **release_fields(),
+        **release_fields(commit),
         "target": target,
         "profile": profile,
         "build_type": "release",
@@ -133,13 +137,16 @@ def bundle_fixture(
     *,
     card: bool,
     profile: str | None = None,
+    commit: str = COMMIT,
 ) -> tuple[dict[str, bytes], set[str]]:
     platform = "sc9820e" if target == "xiaomi-qin-1s-plus" else "ums9117"
     head = f"board bootstrap for {target}\n".encode()
     kernel = f"kernel for {platform}\n".encode()
     root = f"hsqs: shared system for {platform}\n".encode()
     runtime = {
+        **release_fields(commit),
         "target": target,
+        "profile": profile,
         "image": "image/ramboot.bin",
         "identity": {"target": {"display_name": target}, "platform": {"name": platform}},
         "sha256": {},
@@ -164,18 +171,21 @@ def bundle_fixture(
         if card:
             files.update(
                 {
-                    "card/layout.json": json_bytes({"release_id": RELEASE_ID, "target": target}),
+                    "card/layout.json": json_bytes({"release_id": commit[:12], "target": target}),
                     "card/boot.xz": f"card boot for {target}\n".encode(),
                     "card/root.ext4.xz": b"common card system",
                     "card/board.tar": f"card system files for {target}\n".encode(),
                     "card/fit.itb": head + kernel + b"card FIT trailer",
+                    "card/apks/Packages.adb": b"admitted card package index",
+                    "card/apks/fplinux-build.rsa.pub": b"admitted card package public key",
+                    "card/apks/fplinux-notes.apk": b"admitted card profile notes package",
                 }
             )
     modes: set[str] = set()
     if host == "linux":
         files["runtime/bin/python3.15"] = b"bundled executable\n"
         modes.add("runtime/bin/python3.15")
-    files["build-manifest.json"] = _manifest(files, modes, target, profile)
+    files["build-manifest.json"] = _manifest(files, modes, target, profile, commit)
     files["SHA256SUMS"] = "".join(
         f"{hashlib.sha256(data).hexdigest()}  {name}\n" for name, data in sorted(files.items())
     ).encode()
@@ -183,30 +193,33 @@ def bundle_fixture(
 
 
 def write_release(
-    directory: Path, *, selections: tuple[tuple[str, str], ...] = SELECTIONS
+    directory: Path, *, selections: tuple[tuple[str, str], ...] = SELECTIONS, commit: str = COMMIT
 ) -> None:
     """Create a small release via the real ZIP writer using literal input bytes."""
-    from fplinux_cli.artifacts.release import release_context_from_fields  # noqa: PLC0415
+    from fplinux_cli.artifacts.release_identity import release_context_from_fields  # noqa: PLC0415
     from fplinux_cli.packaging.distribution import _write_distribution  # noqa: PLC0415
     from fplinux_cli.packaging.sources import SourcePayload  # noqa: PLC0415
     from fplinux_cli.packaging.universal import HostArchive  # noqa: PLC0415
 
     sources = {
         **project_sources(),
-        "project/.fplinux-release.json": json_bytes(release_fields()),
+        "project/.fplinux-release.json": json_bytes(release_fields(commit)),
         "upstream/shared.tar.xz": b"same exact upstream input",
         "upstream/windows-runtime-source-channels.json": b"Windows source channels\n",
         "licenses/host-tools/COPYING": b"retained license\n",
         "BUILD-LINUX.txt": b"retained relinking and build instructions\n",
     }
     archives: dict[str, HostArchive] = {}
+    release = release_context_from_fields(release_fields(commit))
     identities = {}
     for target, host in selections:
-        payload = archives.setdefault(host, HostArchive(host, RELEASE_ID))
+        payload = archives.setdefault(host, HostArchive(host, release))
         card = target in CARD_TARGETS
-        files, modes = bundle_fixture(target, host, card=card)
+        files, modes = bundle_fixture(target, host, card=card, commit=commit)
         microsd = (
-            bundle_fixture(target, host, card=False, profile="microsd-uboot") if card else None
+            bundle_fixture(target, host, card=False, profile="microsd-uboot", commit=commit)
+            if card
+            else None
         )
         payload.add(target, files, modes, microsd=microsd)
         identities[target, host] = "f" * 64
@@ -238,28 +251,28 @@ def write_release(
                 }
             )
     for archive in archives.values():
-        archive.finish(f"FPLinux-{RELEASE_ID}-sources")
+        archive.finish(f"FPLinux-{commit[:12]}-sources")
     _write_distribution(
         directory,
-        release_context_from_fields(release_fields()),
+        release,
         archives,
         identities,
         SourcePayload(sources, {"project/fplinux"}, {}),
     )
 
 
-def write_transport(directory: Path) -> None:
+def write_transport(directory: Path, *, commit: str = COMMIT) -> None:
     directory.mkdir()
-    part = f"FPLinux-{RELEASE_ID}-inputs.tar.zst.part-00000"
+    part = f"FPLinux-{commit[:12]}-inputs.tar.zst.part-00000"
     data = b"retained transport original bytes\n"
     (directory / part).write_bytes(data)
-    index = f"FPLinux-{RELEASE_ID}-inputs.sha256"
+    index = f"FPLinux-{commit[:12]}-inputs.sha256"
     contents = f"{hashlib.sha256(data).hexdigest()}  {part}\n".encode()
     (directory / index).write_bytes(contents)
     (directory / "DEPENDENCIES.json").write_bytes(
         json_bytes(
             {
-                **release_fields(),
+                **release_fields(commit),
                 "snapshot": "1" * 64,
                 "index": index,
                 "index_sha256": hashlib.sha256(contents).hexdigest(),

@@ -2,9 +2,10 @@
 /* Host sdboot consumer: real libfdt; fake MMC, filesystem and bootm runtime. */
 #include <bootm.h>
 #include <command.h>
-#include <fs.h>
+#include <ext4fs.h>
 #include <image.h>
 #include <mmc.h>
+#include <part.h>
 #include <setjmp.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -21,6 +22,7 @@
 extern struct cmd_tbl test_command;
 static struct bootm_headers selected;
 static struct mmc fake_mmc;
+static struct blk_desc fake_block;
 static jmp_buf finished;
 static uint32_t failure;
 static size_t fit_bytes;
@@ -28,6 +30,12 @@ static int released;
 static int padded_fdt;
 static int autonomous;
 static const char *expected_usb_status;
+static const char *selector_path;
+static const char *fit_path;
+static const char *expected_fit;
+static FILE *open_file;
+static int mounted;
+static unsigned int fit_opens;
 
 static void fail(uint32_t code, uint32_t detail) __attribute__((noreturn));
 static void finalize(uint32_t kernel, uint32_t kernel_size, uint32_t dtb,
@@ -91,9 +99,16 @@ static void finalize(uint32_t kernel, uint32_t kernel_size, uint32_t dtb,
 		     uint32_t dtb_size)
 {
 	const void *tree = (const void *)(uintptr_t)dtb;
+	int chosen = fdt_path_offset(tree, "/chosen");
+	int slot_length;
+	const char *slot =
+		fdt_getprop(tree, chosen, "fplinux,slot", &slot_length);
 
 	if (kernel != KERNEL_ADDRESS || kernel_size != 64 ||
 	    dtb != DTB_ADDRESS || !dtb_size)
+		failure = UINT32_MAX;
+	if (!slot || slot_length != 2 || slot[1] ||
+	    slot[0] != expected_fit[sizeof("/system/") - 1U])
 		failure = UINT32_MAX;
 	if (padded_fdt && !padded_tree_handoff_valid(dtb_size)) {
 		fputs("DTB handoff includes padding or changed the RNG property\n",
@@ -101,7 +116,6 @@ static void finalize(uint32_t kernel, uint32_t kernel_size, uint32_t dtb,
 		failure = UINT32_MAX;
 	}
 	if (autonomous) {
-		int chosen = fdt_path_offset(tree, "/chosen");
 		const char *entry =
 			fdt_getprop(tree, chosen, "fplinux,boot-entry", NULL);
 
@@ -143,7 +157,7 @@ const struct fplinux_stage0_ops *ums9117_stage0_ops(void)
 
 void ums9117_mmc_release(void)
 {
-	released = 1;
+	released = !mounted && !open_file;
 }
 
 struct mmc *find_mmc_device(int device)
@@ -157,25 +171,73 @@ int mmc_init(struct mmc *mmc)
 	return 0;
 }
 
-int fs_set_blk_dev(const char *interface, const char *device, int type)
+int blk_get_device_part_str(const char *interface, const char *device,
+			    struct blk_desc **desc,
+			    struct disk_partition *partition, int whole_device)
 {
-	return strcmp(interface, "mmc") || strcmp(device, "0:1") ||
-	       type != FS_TYPE_FAT;
+	if (strcmp(interface, "mmc") || strcmp(device, "0:2") || whole_device)
+		return -1;
+	*desc = &fake_block;
+	partition->number = 2;
+	return 2;
 }
 
-int fs_size(const char *path, loff_t *size)
+void ext4fs_set_blk_dev(struct blk_desc *device,
+			struct disk_partition *partition)
 {
-	*size = fit_bytes;
-	return strcmp(path, "FPLINUX.ITB");
+	mounted = device == &fake_block && partition->number == 2;
 }
 
-int fs_read(const char *path, ulong address, loff_t offset, loff_t size,
-	    loff_t *actual)
+int ext4fs_mount_clean(void)
 {
-	/* The fixture is already in the fake filesystem's mapped destination. */
-	*actual = size;
-	return strcmp(path, "FPLINUX.ITB") || address != FIT_ADDRESS ||
-	       offset || size != (loff_t)fit_bytes;
+	return mounted;
+}
+
+int ext4fs_open_nofollow(const char *path, loff_t *size)
+{
+	const char *fixture;
+	long length;
+
+	if (!mounted)
+		return -EIO;
+	if (open_file) {
+		fclose(open_file);
+		open_file = NULL;
+	}
+	if (!strcmp(path, "/system/active")) {
+		fixture = selector_path;
+	} else {
+		++fit_opens;
+		fixture = strcmp(path, expected_fit) ? NULL : fit_path;
+	}
+	if (!fixture)
+		return -ENOENT;
+	open_file = fopen(fixture, "rb");
+	if (!open_file)
+		return -ENOENT;
+	if (fseek(open_file, 0, SEEK_END))
+		return -EIO;
+	length = ftell(open_file);
+	if (length < 0 || fseek(open_file, 0, SEEK_SET))
+		return -EIO;
+	*size = length;
+	return 0;
+}
+
+int ext4fs_read(char *buffer, loff_t offset, loff_t size, loff_t *actual)
+{
+	if (!open_file || offset || size <= 0)
+		return -EIO;
+	*actual = fread(buffer, 1, size, open_file);
+	return ferror(open_file) ? -EIO : 0;
+}
+
+void ext4fs_close(void)
+{
+	if (open_file)
+		fclose(open_file);
+	open_file = NULL;
+	mounted = 0;
 }
 
 int env_set(const char *name, const char *value)
@@ -377,6 +439,11 @@ int main(int argc, char **argv)
 	}
 	alignment = atoi(argv[2]);
 	expected = atoi(argv[3]);
+	fit_path = argv[1];
+	selector_path = getenv("FPLINUX_TEST_SDBOOT_SELECTOR");
+	expected_fit = getenv("FPLINUX_TEST_SDBOOT_FIT");
+	if (!expected_fit)
+		expected_fit = "/system/a/FPLINUX.ITB";
 	fit = mmap((void *)(uintptr_t)FIT_ADDRESS, 3 * ARENA_BYTES,
 		   PROT_READ | PROT_WRITE,
 		   MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);
@@ -395,8 +462,8 @@ int main(int argc, char **argv)
 		test_command.command(&test_command, 0, 0, NULL);
 		return 2;
 	}
-	printf("embedded_alignment=%d failure=%u released=%d\n", alignment,
-	       failure, released);
+	printf("embedded_alignment=%d failure=%u released=%d fit_opens=%u\n",
+	       alignment, failure, released, fit_opens);
 	munmap(fit, 3 * ARENA_BYTES);
 	return failure != (unsigned int)expected || !released;
 }

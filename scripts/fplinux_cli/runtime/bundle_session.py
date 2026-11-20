@@ -21,8 +21,6 @@ if TYPE_CHECKING:
 
     from fplinux_cli.artifacts.bundles import CurrentBundle
 
-PUBLIC_BOOT_MODES = (MICROSD_BOOT_MODE,)
-
 
 def profile_command(
     command: str, target: str, profile: str | None, *, build_type: str = "release"
@@ -45,8 +43,6 @@ def selected_context_profile(
         fail("--boot and --profile cannot be used together")
     if boot is None:
         return normalize_profile(profile)
-    if target is None:
-        fail(f"boot mode {boot} requires a target")
     if boot == MICROSD_BOOT_MODE:
         return MICROSD_BOOT_PROFILE
     fail(f"boot mode {boot} is not available for target {target}")

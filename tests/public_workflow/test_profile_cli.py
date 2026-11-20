@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -40,13 +41,39 @@ class ProfileAndToolCliHelpWorkflowTests:
         )
         assert (result.returncode) == (0), result.stderr
         assert ("--build-type {release,debug}") in (result.stdout)
-        if command == ("run",):
+        if command[0] in {"run", "console", "verify"}:
             assert "--boot {microsd}" in result.stdout
             assert "--profile NAME" in result.stdout
-            assert "--events PATH" in result.stdout
+            assert ("--events PATH" in result.stdout) == (command[0] == "run")
         elif command == ("nand", "backup"):
             assert "nokia-ta1618" in result.stdout
             assert "--profile NAME" in result.stdout
+
+    @pytest.mark.parametrize("command", ["run", "console", "verify"])
+    def test_microsd_boot_rejects_separate_phone_data_before_creating_state(
+        self, tmp_path: Path, command: str
+    ) -> None:
+        """A card boot always uses the phone data installed with its system."""
+        data = tmp_path / "checkout store"
+        result = run_process(
+            [
+                str(ROOT / "fplinux"),
+                command,
+                "nokia-ta1618",
+                "--boot",
+                "microsd",
+                "--phone-data",
+                "another-phone",
+            ],
+            name="system-card phone-data selection",
+            timeout=_PUBLIC_HELP_TIMEOUT_SECONDS,
+            cwd=ROOT,
+            env={**os.environ, "FPLINUX_DATA_DIR": str(data)},
+        )
+
+        assert result.returncode == 2
+        assert "system microSD boot uses the phone data already on the card" in result.stderr
+        assert not data.exists()
 
     def test_package_help_exposes_distribution_selections(self) -> None:
         """Package lets callers select the phone, host and output directory."""

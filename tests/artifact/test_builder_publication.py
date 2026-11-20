@@ -19,7 +19,7 @@ from fplinux_cli.artifacts.bundles import (
     create_bundle_staging,
     resolve_current_bundle,
 )
-from fplinux_cli.artifacts.release import ReleaseContext
+from fplinux_cli.artifacts.release_identity import ReleaseContext
 from fplinux_cli.build import inputs as inputs_build
 from fplinux_cli.build import publish as publish_build
 from fplinux_cli.build.runtime import runtime_source_files
@@ -145,6 +145,7 @@ def publication_inputs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Publi
         path.write_bytes(data)
         return path
 
+    write("VERSION", b"1.0.0\n")
     write("common/runtime.py", b"#!/usr/bin/env python3\n")
     write("common/60-fplinux.rules", b'SUBSYSTEM=="usb"\n')
     write("scripts/fplinux_cli/runtime/events.py", b"# bundled events helper\n")
@@ -317,7 +318,7 @@ class BuilderPublicationTests:
         source_commit: str | None,
     ) -> None:
         """The publisher and runner agree before any host setup or USB operation."""
-        context = ReleaseContext("1234567890ab", source_commit, "1234567890ab" + "a" * 52)
+        context = ReleaseContext("1234567890ab", "1.0.0", source_commit, "1234567890ab" + "a" * 52)
         monkeypatch.setattr(publish_build, "current_release_context", lambda: context)
         config = publication_inputs.target_config
         config["bootstrap"]["load_address"] = 0x80100000
@@ -417,6 +418,7 @@ class BuilderPublicationTests:
         assert (manifest["generation"]) == (published.name)
         assert (manifest["profile"]) is None
         assert (manifest["build_type"]) == ("release")
+        assert manifest["release_version"] == runtime["release_version"] == "1.0.0"
         assert (manifest["environment_recipe"]) == ("b" * 64)
         assert (manifest["environment_content"]) == ("c" * 64)
         assert (manifest["apk_signing_key"]) == ("7" * 64)
@@ -446,6 +448,7 @@ class BuilderPublicationTests:
                 "profile",
                 "build_type",
                 "release_id",
+                "release_version",
                 "source_commit",
                 "source_snapshot",
                 "identity",

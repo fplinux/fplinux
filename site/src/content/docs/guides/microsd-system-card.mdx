@@ -33,13 +33,13 @@ The installer also sets up SSH for your user account on the installing PC. Save 
 For commands without the menu, first inspect the card with the exact target ID. `inspect` reports the card's CID and capacity from the RAM reader. Keep the phone powered and connected while running the install command. Replace `CID` with the identifier printed by `inspect`.
 
 ```bat title="Windows PC"
-Run.cmd card inspect --target inoi-240-modern-4g
-Run.cmd card install --target inoi-240-modern-4g --erase-card CID
+Run.cmd card inspect inoi-240-modern-4g
+Run.cmd card install inoi-240-modern-4g --erase-card CID
 ```
 
 ```sh title="Linux PC"
-sh Run.sh card inspect --target inoi-240-modern-4g
-sh Run.sh card install --target inoi-240-modern-4g --erase-card CID
+sh Run.sh card inspect inoi-240-modern-4g
+sh Run.sh card install inoi-240-modern-4g --erase-card CID
 ```
 
 Add `--from-dump FILE` to import a backup for this handset. The source checkout uses the same installer with locally built card files:
@@ -50,6 +50,21 @@ Add `--from-dump FILE` to import a backup for this handset. The source checkout 
 
 Use `./fplinux card inspect inoi-240-modern-4g` to discover the card before passing `--erase-card CID` in a non-interactive checkout session. Inspection builds only the RAM profile.
 
+## Update or roll back from the PC
+
+Boot a freshly installed card once and wait for the graphical session to become ready. For an update, power off the phone with the card fitted and open the extracted ZIP for the new release. Choose your model and **Update microSD**. Connect when prompted and confirm the displayed CID. The update keeps your files, SSH access and supported additional APK selections.
+
+For a rollback, choose **Select a previous microSD build** and enter its confirmed build ID. `verify TARGET --boot microsd` reports the build ID and mounted slot of the running system. Keep the previous build ID before updating so you can select it from the RAM reader even if the new build cannot boot.
+
+The same actions are available as commands, for example on Linux:
+
+```sh title="Linux PC"
+sh Run.sh card update inoi-240-modern-4g --card CID
+sh Run.sh card rollback inoi-240-modern-4g --card CID --build-id ID
+```
+
+Use `Run.cmd` on Windows or `./fplinux` from a source checkout with the same arguments. Wait for the writer to finish and unmount the card before powering off the reader.
+
 ## Boot from the card
 
 From the extracted archive, open the launcher, select your model and choose **Start from microSD**. Keep the prepared card in the powered-off phone and connect USB only when the launcher asks for it. You can start the same card on Linux or Windows and keep the same installed system and files. Use the archive for the release you installed.
@@ -57,11 +72,11 @@ From the extracted archive, open the launcher, select your model and choose **St
 To start from the command line:
 
 ```bat title="Windows PC"
-Run.cmd run --target inoi-240-modern-4g --boot microsd
+Run.cmd run inoi-240-modern-4g --boot microsd
 ```
 
 ```sh title="Linux PC"
-sh Run.sh run --target inoi-240-modern-4g --boot microsd
+sh Run.sh run inoi-240-modern-4g --boot microsd
 ```
 
 For another model, use its target ID. Keep `--boot microsd` with `console` and `verify` for the running card session. Follow [Connect from a computer](/fplinux/use/connect/) for shell and transfer commands.

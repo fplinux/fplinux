@@ -46,6 +46,8 @@ def main() -> None:
             "image": str(image),
             "target": "test-phone",
             "runtime_root": str(runtime_root),
+            "bundle_generation": "b" * 64,
+            "prepared_data_sha256": None,
             "network": "10.23.45.0/30",
             "host_address": "10.23.45.1",
             "phone_address": "10.23.45.2",

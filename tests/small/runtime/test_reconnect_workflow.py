@@ -394,10 +394,14 @@ def test_normal_boot_discards_unloaded_candidate_before_reauthenticating_returni
         _linux_usb: dict[str, Any],
         *,
         runtime_root: Path,
+        bundle_generation: str,
+        prepared_data_sha256: str | None,
     ) -> dict[str, Any]:
         assert source == image
         assert target == "phone"
         assert runtime_root == session_root
+        assert bundle_generation == "a" * 64
+        assert prepared_data_sha256 is None
         candidate = create_ready_session(
             runtime_root, status="prepared", session_id=bytes.fromhex("cd" * 32)
         )

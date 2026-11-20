@@ -9,15 +9,13 @@ import re
 import shutil
 import subprocess
 import tarfile
+from dataclasses import replace
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from fplinux_cli import common
-from fplinux_cli.artifacts.release import (
-    SOURCE_IDENTITY_NAME,
-    ReleaseContext,
-    capture_public_sources,
-)
+from fplinux_cli.artifacts.release import SOURCE_IDENTITY_NAME, capture_public_sources
+from fplinux_cli.artifacts.release_identity import require_release_version
 from fplinux_cli.common import canonical_json_bytes, fail, is_sha256, replace_file_atomically
 from fplinux_cli.data_paths import DATA_ENV, data_root
 from fplinux_cli.dependencies.snapshots import read_snapshot
@@ -44,6 +42,7 @@ def require_preflight(root: Path, commit: str) -> dict[str, Any]:
         fail(
             f"main commit {commit} has no completed clean preparation; run ci preflight explicitly"
         )
+    require_release_version(receipt.get("release_version"))
     for field in ("source_snapshot", "snapshot", "environment_recipe", "environment_content"):
         if not is_sha256(receipt.get(field)):
             fail(f"main commit {commit} has an incomplete preparation: {field}")
@@ -96,7 +95,7 @@ def prepare_push(commit: str, directory: Path) -> None:
         archive.extractall(checkout, filter="data")
     archive_path.unlink()
     captured = capture_public_sources(checkout)
-    release = ReleaseContext(commit[:12], commit, captured.release.source_snapshot)
+    release = replace(captured.release, release_id=commit[:12], source_commit=commit)
     (checkout / SOURCE_IDENTITY_NAME).write_bytes(canonical_json_bytes(release.fields()))
     originals = directory / "originals"
     child_data = data_root(checkout, environment={})

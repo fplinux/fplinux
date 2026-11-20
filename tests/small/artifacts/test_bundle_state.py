@@ -64,6 +64,7 @@ def stage_bundle(  # noqa: PLR0913 -- slot and independently varied manifest ide
         "target": "demo",
         "release_id": "aaaaaaaaaaaa",
         "source_commit": "a" * 40,
+        "release_version": "1.0.0",
         "source_snapshot": "b" * 64,
         "workspace_digest": "a" * 64,
         "environment_recipe": "b" * 64,

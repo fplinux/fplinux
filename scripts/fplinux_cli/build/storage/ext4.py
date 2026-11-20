@@ -47,6 +47,7 @@ class Ext4Plan:
     recipe: str
     spec: dict[str, Any]
     rootfs_receipt: dict[str, str]
+    expected_files: tuple[str, ...]
 
 
 def create_plan(
@@ -54,6 +55,8 @@ def create_plan(
     rootfs_recipe: str,
     rootfs_receipt: dict[str, str],
     environment_recipe: str,
+    *,
+    expected_files: tuple[str, ...] = ("etc/os-release",),
 ) -> Ext4Plan:
     """Create the causal recipe for one profile-owned ext4 artifact."""
     if spec.get("kind") != "ext4-root":
@@ -76,6 +79,7 @@ def create_plan(
     implementation = Path(__file__)
     manifest = {
         "spec": spec,
+        "expected_files": expected_files,
         "rootfs_receipt": receipt,
         "environment_recipe": require_lowercase_sha256(
             environment_recipe, "environment recipe", Ext4RootError
@@ -92,7 +96,7 @@ def create_plan(
         },
     }
     recipe = hashlib.sha256(canonical_json_bytes(manifest)).hexdigest()
-    return Ext4Plan(recipe, dict(spec), receipt)
+    return Ext4Plan(recipe, dict(spec), receipt, expected_files)
 
 
 def _receipt_payload(plan: Ext4Plan, output: Path) -> dict[str, object]:
@@ -166,29 +170,32 @@ def _verify_superblock(image: Path, spec: dict[str, Any]) -> None:
         raise Ext4RootError("ext4 label differs from its profile")
 
 
-def _verify_contents(image: Path, root: Path, temporary: Path) -> None:
-    dumped = temporary / "os-release"
-    result = subprocess.run(
-        ["debugfs", "-R", f"dump /etc/os-release {dumped}", str(image)],
-        capture_output=True,
-        text=True,
-        env=build_env.build_environment(),
-        check=False,
-        timeout=_COMMAND_TIMEOUT_SECONDS,
-    )
-    if result.returncode != 0 or not dumped.is_file():
-        detail = result.stderr.strip() or result.stdout.strip()
-        raise Ext4RootError(detail or "debugfs could not read /etc/os-release")
-    if dumped.read_bytes() != (root / "etc/os-release").read_bytes():
-        raise Ext4RootError("ext4 /etc/os-release differs from the normalized root tree")
+def _verify_contents(image: Path, root: Path, temporary: Path, names: tuple[str, ...]) -> None:
+    for index, name in enumerate(names):
+        dump_name = f"ext4-file-{index}"
+        dumped = temporary / dump_name
+        result = subprocess.run(
+            ["debugfs", "-R", f"dump /{name} {dump_name}", str(image.absolute())],
+            cwd=temporary,
+            capture_output=True,
+            text=True,
+            env=build_env.build_environment(),
+            check=False,
+            timeout=_COMMAND_TIMEOUT_SECONDS,
+        )
+        if result.returncode != 0 or not dumped.is_file():
+            detail = result.stderr.strip() or result.stdout.strip()
+            raise Ext4RootError(detail or f"debugfs could not read /{name}")
+        if sha256_file(dumped) != sha256_file(root / name):
+            raise Ext4RootError(f"ext4 /{name} differs from the normalized root tree")
 
 
-def _verify_image(image: Path, root: Path, spec: dict[str, Any], temporary: Path) -> None:
-    if image.stat().st_size != spec["size"]:
+def _verify_image(image: Path, root: Path, plan: Ext4Plan, temporary: Path) -> None:
+    if image.stat().st_size != plan.spec["size"]:
         raise Ext4RootError("ext4 image size differs from its profile")
-    _verify_superblock(image, spec)
+    _verify_superblock(image, plan.spec)
     _run(["e2fsck", "-f", "-n", str(image)])
-    _verify_contents(image, root, temporary)
+    _verify_contents(image, root, temporary, plan.expected_files)
 
 
 def build(root: Path, output: Path, plan: Ext4Plan) -> Path:
@@ -206,6 +213,13 @@ def build(root: Path, output: Path, plan: Ext4Plan) -> Path:
             stream.truncate(int(plan.spec["size"]))
         image.chmod(0o644)
         config = Path(__file__).with_name("mke2fs.conf")
+        extended_options = (
+            "lazy_itable_init=0,lazy_journal_init=0,nodiscard,no_copy_xattrs,"
+            f"root_owner=0:0,root_perms=0755,hash_seed={plan.spec['uuid']}"
+        )
+        if "online_resize_bytes" in plan.spec:
+            max_blocks = plan.spec["online_resize_bytes"] // plan.spec["block_size"]
+            extended_options += f",resize={max_blocks}"
         _run(
             [
                 "mke2fs",
@@ -236,10 +250,7 @@ def build(root: Path, output: Path, plan: Ext4Plan) -> Path:
                 "-O",
                 FEATURES,
                 "-E",
-                (
-                    "lazy_itable_init=0,lazy_journal_init=0,nodiscard,no_copy_xattrs,"
-                    f"root_owner=0:0,root_perms=0755,hash_seed={plan.spec['uuid']}"
-                ),
+                extended_options,
                 "-d",
                 str(root),
                 str(image),
@@ -250,7 +261,7 @@ def build(root: Path, output: Path, plan: Ext4Plan) -> Path:
                 "MKE2FS_DEVICE_PHYS_SECTSIZE": "512",
             },
         )
-        _verify_image(image, root, plan.spec, temporary)
+        _verify_image(image, root, plan, temporary)
         write_canonical_json(staging / RECEIPT_NAME, _receipt_payload(plan, staging), mode=0o644)
         if output.exists():
             if output.is_symlink() or not output.is_dir():

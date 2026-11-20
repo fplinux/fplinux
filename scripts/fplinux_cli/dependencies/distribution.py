@@ -7,7 +7,11 @@ import json
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from fplinux_cli.artifacts.release import ReleaseContext, release_context_from_fields
+from fplinux_cli.artifacts.release_identity import (
+    RELEASE_FIELDS,
+    ReleaseContext,
+    release_context_from_fields,
+)
 from fplinux_cli.common import canonical_json_bytes, fail, is_sha256, sha256_file
 
 from .transport import transport_parts, verify_transport
@@ -64,14 +68,7 @@ def dependency_metadata(data: bytes) -> DependencyMetadata:
         metadata = json.loads(data)
     except ValueError as error:
         fail(f"release dependency metadata cannot be read: {error}")
-    fields = {
-        "release_id",
-        "source_commit",
-        "source_snapshot",
-        "snapshot",
-        "index",
-        "index_sha256",
-    }
+    fields = RELEASE_FIELDS | {"snapshot", "index", "index_sha256"}
     if not isinstance(metadata, dict) or set(metadata) != fields:
         fail("release dependency metadata has unsupported fields")
     release = release_context_from_fields(metadata)

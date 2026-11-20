@@ -13,12 +13,13 @@ from unittest import mock
 import pytest
 from fplinux_cli.alpine import recipes as alpine_recipes
 from fplinux_cli.alpine import rootfs_state as alpine_state
+from fplinux_cli.artifacts.release_identity import ReleaseContext
 from fplinux_cli.device_data import inputs as firmware_inputs
 from fplinux_cli.manifests import values
 from fplinux_cli.workspace import build_inputs as workspace_module
 from fplinux_cli.workspace import staging as workspace_staging
 
-from tests.small.workspace.workspace_fixtures import empty_package_graph, write_source_lock_files
+from tests.small.workspace.workspace_fixtures import empty_package_graph, write_source_declarations
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -185,7 +186,7 @@ class FirmwareInputTests:
         registration.write_bytes(b"# empty package declarations\n")
         source_locks = [
             (relative.replace("platforms/demo/", f"platforms/{platform}/"), source)
-            for relative, source in write_source_lock_files(
+            for relative, source in write_source_declarations(
                 firmware_generation.root, firmware_generation.target
             )
         ]
@@ -254,7 +255,7 @@ class FirmwareInputTests:
                 "1" * 64,
                 "2" * 64,
                 ("fplinux-base",),
-                release_id="012345abcdef",
+                release=ReleaseContext("012345abcdef", "1.0.0", None, "012345abcdef" + "0" * 52),
                 firmware_inputs=firmware_inputs.rootfs_firmware_inputs(
                     firmware_generation.capture()
                 ),
@@ -314,7 +315,7 @@ class FirmwareInputTests:
             "1" * 64,
             "2" * 64,
             ("fplinux-base",),
-            release_id="012345abcdef",
+            release=ReleaseContext("012345abcdef", "1.0.0", None, "012345abcdef" + "0" * 52),
             firmware_inputs=captured,
         )
         rootfs = firmware_generation.root / "radio-rootfs"
@@ -329,7 +330,7 @@ class FirmwareInputTests:
             "1" * 64,
             "2" * 64,
             ("fplinux-base",),
-            release_id="012345abcdef",
+            release=ReleaseContext("012345abcdef", "1.0.0", None, "012345abcdef" + "0" * 52),
             firmware_inputs=firmware_inputs.rootfs_firmware_inputs(firmware_generation.capture()),
         )
         assert changed != first

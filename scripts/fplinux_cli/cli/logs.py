@@ -6,12 +6,14 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
+import stat
 import sys
 import time
 from collections import deque
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING
 
 from fplinux_cli.common import ROOT, fail
@@ -54,7 +56,8 @@ class LogRun:
 def read_run(path: Path) -> LogRun | None:
     """Ignore absent or unrecognized journals; reporters publish complete JSON atomically."""
     try:
-        data = json.loads((path / "run.json").read_text())
+        receipt = path / "run.json"
+        data = json.loads(receipt.read_text()) if receipt.is_file(follow_symlinks=False) else None
         if not isinstance(data, dict) or data["status"] not in _STATUSES:
             return None
         started = datetime.fromisoformat(data["started_at"])
@@ -89,13 +92,37 @@ def read_run(path: Path) -> LogRun | None:
 
 def discover_runs(root: Path) -> Iterator[LogRun]:
     """Discover top-level invocations, not their container reporters or unrelated files."""
+    if root.is_symlink():
+        return
     for directory, children, files in root.walk():
         if "run.json" not in files:
             continue
         children.clear()
         run = read_run(directory)
-        if run is not None and run.parent is None:
+        if directory != root and run is not None and run.parent is None:
             yield run
+
+
+def _run_candidates(root: Path, selector: str) -> Iterator[LogRun]:
+    """Use a complete ID directly; discover journals for latest or a basename."""
+    if "/" not in selector:
+        yield from discover_runs(root)
+        return
+    relative = PurePosixPath(selector)
+    if relative.is_absolute() or ".." in relative.parts or relative.as_posix() != selector:
+        return
+    if root.is_symlink():
+        return
+    directory = root
+    for component in relative.parts:
+        if (directory / "run.json").exists(follow_symlinks=False):
+            return
+        directory /= component
+        if not directory.is_dir(follow_symlinks=False):
+            return
+    run = read_run(directory)
+    if run is not None and run.parent is None:
+        yield run
 
 
 def run_details(run: LogRun, root: Path) -> dict[str, object]:
@@ -134,13 +161,21 @@ def _tail_count(text: str) -> int:
     return count
 
 
+def _log_pattern(text: str) -> re.Pattern[str]:
+    try:
+        return re.compile(text)
+    except re.PatternError as error:
+        raise argparse.ArgumentTypeError(f"invalid regular expression: {error}") from error
+
+
 def add_log_arguments(parser: argparse.ArgumentParser) -> None:
-    """Expose read-only listing, bounded inspection and following of one invocation."""
+    """Expose read-only listing, inspection, and following of recorded invocations."""
     actions = parser.add_subparsers(dest="logs_action", required=True)
     for action, help_text in (
         ("list", "list recorded command runs, newest first"),
         ("show", "show stage output from one run"),
         ("follow", "follow stage output until the selected run finishes"),
+        ("artifacts", "list retained artifacts from one run"),
     ):
         child = actions.add_parser(action, help=help_text)
         child.add_argument(
@@ -162,49 +197,74 @@ def add_log_arguments(parser: argparse.ArgumentParser) -> None:
             child.add_argument(
                 "run", nargs="?", default="latest", help="run ID or latest (default)"
             )
+        if action in {"show", "follow"}:
             child.add_argument("--stage", help="stage name or path shown in log headings")
-            child.add_argument(
-                "--tail",
-                type=_tail_count,
-                default=40,
-                metavar="N",
-                help="last N lines per stage initially (default: 40; 0: none)",
+            tail_help = (
+                "last N lines or matches per stage (default: 40; 0: none)"
+                if action == "show"
+                else "last N lines per stage initially (default: 40; 0: none)"
             )
-            if action == "show":
-                child.add_argument(
-                    "--summary",
-                    action="store_true",
-                    help="show stage status and exit without logs",
-                )
-                child.add_argument(
-                    "--max-bytes",
-                    type=_tail_count,
-                    metavar="N",
-                    help="limit log content bytes across all selected stages",
-                )
-                child.add_argument(
-                    "--failed",
-                    action="store_true",
-                    help="show failed, interrupted or unfinished stages of an unsuccessful run",
-                )
+            child.add_argument("--tail", type=_tail_count, default=40, metavar="N", help=tail_help)
+        if action == "show":
+            output = child.add_mutually_exclusive_group()
+            output.add_argument(
+                "--summary",
+                action="store_true",
+                help="show stage status and exit without logs",
+            )
+            output.add_argument(
+                "--grep",
+                type=_log_pattern,
+                metavar="PATTERN",
+                help="search the complete selected stage logs for a regular expression",
+            )
+            child.add_argument(
+                "--json",
+                action="store_true",
+                help="print a JSON stage summary (requires --summary)",
+            )
+            child.add_argument(
+                "--max-bytes",
+                type=_tail_count,
+                metavar="N",
+                help="limit log content bytes across all selected stages",
+            )
+            child.add_argument(
+                "--failed",
+                action="store_true",
+                help="show failed, interrupted or unfinished stages of an unsuccessful run",
+            )
+        if action == "artifacts":
+            child.add_argument("--json", action="store_true", help="print a JSON artifact list")
+
+
+def _owned_log_tree(run: LogRun) -> Iterator[tuple[Path, list[str], LogRun | None]]:
+    """Walk one run and admit nested reporters only with matching recorded ownership."""
+    for directory, children, files in run.path.walk():
+        record = None
+        if directory == run.path:
+            record = run
+        elif "run.json" in files:
+            if run.display_root is not None:
+                child = read_run(directory)
+                expected = PurePosixPath(run.display_root) / directory.relative_to(run.path)
+                if (
+                    child is not None
+                    and child.display_root == expected.as_posix()
+                    and child.parent == expected.parent.as_posix()
+                ):
+                    record = child
+            if record is None:
+                children.clear()
+                continue
+        yield directory, files, record
 
 
 def _stage_logs(run: LogRun) -> list[LogStage]:
     """Include child reporters because compact parent logs omit their full tool output."""
     if run.display_root is None:
         return list(run.stages)
-    records = [run]
-    for receipt in run.path.rglob("run.json"):
-        if receipt.parent == run.path:
-            continue
-        child = read_run(receipt.parent)
-        expected_display_root = Path(run.display_root) / receipt.parent.relative_to(run.path)
-        if (
-            child is not None
-            and child.display_root == expected_display_root.as_posix()
-            and child.parent == expected_display_root.parent.as_posix()
-        ):
-            records.append(child)
+    records = [record for _, _, record in _owned_log_tree(run) if record is not None]
     records.sort(key=lambda item: (item.started, str(item.path)))
     stages = []
     for record in records:
@@ -227,6 +287,129 @@ def _stage_logs(run: LogRun) -> list[LogStage]:
 def _stage_id(stage: LogStage, run: LogRun) -> str:
     parent = stage.path.parent.relative_to(run.path)
     return (parent / stage.name).as_posix()
+
+
+def _matching_stages(
+    run: LogRun, stages: list[LogStage], args: argparse.Namespace
+) -> Iterator[tuple[str, LogStage]]:
+    for stage in stages:
+        identity = _stage_id(stage, run)
+        if args.stage is not None and args.stage not in {stage.name, identity}:
+            continue
+        if (
+            getattr(args, "failed", False)
+            and stage.status not in {"failed", "interrupted"}
+            and stage.unfinished_parent_status is None
+        ):
+            continue
+        yield identity, stage
+
+
+def _require_stage_match(run: LogRun, stages: list[LogStage], requested: str | None) -> None:
+    if requested is not None:
+        available = "\n".join(f"  {_stage_id(stage, run)}" for stage in stages)
+        fail(f"stage not found: {requested}\navailable stage IDs:\n" + (available or "  (none)"))
+
+
+def _stage_size(path: Path) -> int:
+    metadata = path.stat(follow_symlinks=False)
+    if not stat.S_ISREG(metadata.st_mode):
+        fail(f"stage log is not a regular file: {path}")
+    return metadata.st_size
+
+
+def _grep_stage(
+    path: Path, pattern: re.Pattern[str], tail: int
+) -> tuple[int, deque[tuple[int, str]]]:
+    """Search a snapshot of the stage and retain only the requested last matches."""
+    matches: deque[tuple[int, str]] = deque(maxlen=tail)
+    count = 0
+    remaining = _stage_size(path)
+    with path.open("rb") as stream:
+        line_number = 0
+        while remaining > 0:
+            line = stream.readline(remaining)
+            if not line:
+                break
+            remaining -= len(line)
+            line_number += 1
+            text = line.decode("utf-8", errors="replace").removesuffix("\n")
+            if pattern.search(text):
+                count += 1
+                matches.append((line_number, text))
+    return count, matches
+
+
+def _grep_run(run: LogRun, args: argparse.Namespace) -> None:
+    stages = _stage_logs(run)
+    selected = list(_matching_stages(run, stages, args))
+    if not selected:
+        _require_stage_match(run, stages, args.stage)
+        if args.failed:
+            print("no failed or interrupted stages in this run")
+            return
+    budget = args.max_bytes
+    matched = 0
+    omitted_by_tail = 0
+    clipped = False
+    for identity, stage in selected:
+        count, lines = _grep_stage(stage.path, args.grep, args.tail)
+        matched += count
+        omitted_by_tail += count - len(lines)
+        for line_number, text in lines:
+            if budget is not None:
+                size = len(text.encode("utf-8")) + 1
+                if size > budget:
+                    clipped = True
+                    break
+                budget -= size
+            print(f"{identity}:{line_number}:{text}")
+        if clipped:
+            budget = 0
+    if not matched:
+        print("no matching log lines")
+    if omitted_by_tail:
+        print(f"log matches truncated by --tail ({omitted_by_tail} omitted)")
+    if clipped:
+        print("log matches truncated by --max-bytes")
+
+
+def _json_summary(run: LogRun, details: dict[str, object], args: argparse.Namespace) -> None:
+    stages = _stage_logs(run)
+    selected = [
+        {
+            "id": identity,
+            "status": stage.status,
+            "exit_code": stage.exit_code,
+            "unfinished_parent_status": stage.unfinished_parent_status,
+        }
+        for identity, stage in _matching_stages(run, stages, args)
+    ]
+    if not selected:
+        _require_stage_match(run, stages, args.stage)
+    print(json.dumps({"run": details, "stages": selected}, indent=2, sort_keys=True))
+
+
+def _show_artifacts(run: LogRun, details: dict[str, object], *, json_output: bool) -> None:
+    artifacts: list[str] = []
+    for directory, files, record in _owned_log_tree(run):
+        excluded = {"run.json"}
+        if record is not None:
+            excluded.update(stage.path.name for stage in record.stages)
+        for filename in files:
+            if filename in excluded or filename.startswith(".run.json."):
+                continue
+            path = directory / filename
+            if path.is_file(follow_symlinks=False):
+                artifacts.append(str(path))
+    artifacts.sort()
+    if json_output:
+        print(json.dumps({"run": details, "artifacts": artifacts}, indent=2, sort_keys=True))
+    elif artifacts:
+        for path_text in artifacts:
+            print(path_text)
+    else:
+        print("no artifacts in this run")
 
 
 def _copy_log(
@@ -290,16 +473,7 @@ def _show_run(run: LogRun, args: argparse.Namespace) -> None:
         stages = _stage_logs(current)
         if args.logs_action == "show" and args.summary:
             print("STAGE STATUS EXIT")
-        for stage in stages:
-            identity = _stage_id(stage, current)
-            if args.stage is not None and args.stage not in {stage.name, identity}:
-                continue
-            if (
-                getattr(args, "failed", False)
-                and stage.status not in {"failed", "interrupted"}
-                and stage.unfinished_parent_status is None
-            ):
-                continue
+        for identity, stage in _matching_stages(current, stages, args):
             matched = True
             if args.logs_action == "show" and args.summary:
                 status = stage.status
@@ -311,7 +485,7 @@ def _show_run(run: LogRun, args: argparse.Namespace) -> None:
             offset = offsets.get(stage.path)
             if offset is None and not initial:
                 offset = 0
-            size = stage.path.stat().st_size
+            size = _stage_size(stage.path)
             if offset is None or size > offset:
                 if last_path != stage.path:
                     status = stage.status
@@ -327,12 +501,8 @@ def _show_run(run: LogRun, args: argparse.Namespace) -> None:
                     budget -= written
                 truncated = truncated or clipped
         if args.logs_action != "follow" or current.status != "running":
-            if args.stage is not None and not matched:
-                available = "\n".join(f"  {_stage_id(stage, current)}" for stage in stages)
-                fail(
-                    f"stage not found: {args.stage}\navailable stage IDs:\n"
-                    + (available or "  (none)")
-                )
+            if not matched:
+                _require_stage_match(current, stages, args.stage)
             if getattr(args, "failed", False) and not matched:
                 print("no failed or interrupted stages in this run", flush=True)
             if truncated:
@@ -358,7 +528,7 @@ def read_logs(args: argparse.Namespace) -> None:
     """Read existing journals without cache locks, runtime setup or new receipts."""
     root = data_root(ROOT) / "logs"
     runs = []
-    for run in discover_runs(root):
+    for run in _run_candidates(root, getattr(args, "run", "latest")):
         details = run_details(run, root)
         if all(
             value is None or value == details[key]
@@ -404,10 +574,21 @@ def read_logs(args: argparse.Namespace) -> None:
         if len(selected) > 1:
             fail(f"ambiguous run ID: {args.run}; use the full ID from logs list")
         run, details = selected[0]
+        if getattr(args, "json", False):
+            if args.logs_action == "artifacts":
+                _show_artifacts(run, details, json_output=True)
+            else:
+                _json_summary(run, details, args)
+            return
         context = ""
         if details["command"] in {"build", "check"}:
             context = f"; build type: {run.build_type or 'unknown'}"
         print(f"{details['id']}: {run.status}{context}", flush=True)
-        _show_run(run, args)
+        if args.logs_action == "artifacts":
+            _show_artifacts(run, details, json_output=False)
+        elif args.logs_action == "show" and args.grep is not None:
+            _grep_run(run, args)
+        else:
+            _show_run(run, args)
     except BrokenPipeError:
         silence_broken_pipe(sys.stdout)

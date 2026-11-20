@@ -42,10 +42,16 @@ packages = [
 source = "platforms/ums9117/uboot/u-boot.lock.toml"
 archive_prefix = "u-boot-v2026.10"
 defconfig = "platforms/ums9117/uboot/fplinux_ums9117_defconfig"
-patches = ["platforms/ums9117/uboot/integration.patch"]
+patches = [
+  "platforms/ums9117/uboot/integration.patch",
+  "platforms/ums9117/uboot/ext4-read-clean.patch",
+]
 required_config = [
   "CONFIG_TARGET_FPLINUX_UMS9117=y",
   'CONFIG_BOOTCOMMAND="sdboot"',
+  "CONFIG_FS_EXT4=y",
+  "# CONFIG_CMD_EXT4 is not set",
+  "# CONFIG_EXT4_WRITE is not set",
 ]
 
 [[uboot.copies]]

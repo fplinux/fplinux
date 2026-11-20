@@ -1,0 +1,7 @@
+home/fplinux 700
+etc/fplinux/card-access 700
+var/lib/fplinux 755
+var/lib/bluetooth 700
+var/lib/quake-data 755
+lib/firmware/fplinux 755
+lib/firmware/ums9117 755

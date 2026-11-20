@@ -10,9 +10,7 @@ depend() {
 }
 
 start() {
-	if ! grep -q '^render:' /etc/group; then
-		addgroup -S render || return 1
-	fi
+	/usr/libexec/fplinux/accounts || return 1
 	# Rendering does not grant ownership of the display or its input devices.
 	for node in /dev/dri/renderD[0-9]*; do
 		[ -c "$node" ] || continue

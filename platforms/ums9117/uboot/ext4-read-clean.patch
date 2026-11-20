@@ -1,0 +1,171 @@
+--- a/include/ext4fs.h
++++ b/include/ext4fs.h
+@@ -198,8 +198,10 @@
+ 
+ struct ext_filesystem *get_fs(void);
+ int ext4fs_open(const char *filename, loff_t *len);
++int ext4fs_open_nofollow(const char *filename, loff_t *len);
+ int ext4fs_read(char *buf, loff_t offset, loff_t len, loff_t *actread);
+ int ext4fs_mount(void);
++int ext4fs_mount_clean(void);
+ void ext4fs_close(void);
+ void ext4fs_reinit_global(void);
+ int ext4fs_ls(const char *dirname);
+--- a/fs/ext4/ext4_common.c
++++ b/fs/ext4/ext4_common.c
+@@ -2188,8 +2188,9 @@
+ 	return symlink;
+ }
+ 
+-int ext4fs_find_file1(const char *currpath, struct ext2fs_node *currroot,
+-		      struct ext2fs_node **currfound, int *foundtype)
++static int ext4fs_lookup(const char *currpath, struct ext2fs_node *currroot,
++			 struct ext2fs_node **currfound, int *foundtype,
++			 bool follow_symlinks)
+ {
+ 	char fpath[strlen(currpath) + 1];
+ 	char *name = fpath;
+@@ -2230,12 +2231,35 @@
+ 
+ 		/* Iterate over the directory. */
+ 		found = ext4fs_iterate_dir(currnode, name, &currnode, &type);
+-		if (found == 0)
++		if (found == 0) {
++			ext4fs_free_node(oldnode, currroot);
+ 			return 0;
++		}
+ 
+ 		if (found == -1)
+ 			break;
+ 
++		if (!follow_symlinks) {
++			unsigned int mode;
++
++			if (!currnode->inode_read &&
++			    !ext4fs_read_inode(currnode->data, currnode->ino,
++					       &currnode->inode)) {
++				ext4fs_free_node(currnode, currroot);
++				ext4fs_free_node(oldnode, currroot);
++				return 0;
++			}
++			currnode->inode_read = 1;
++			mode = le16_to_cpu(currnode->inode.mode) & FILETYPE_INO_MASK;
++			if (mode != FILETYPE_INO_DIRECTORY && mode != FILETYPE_INO_REG) {
++				ext4fs_free_node(currnode, currroot);
++				ext4fs_free_node(oldnode, currroot);
++				return 0;
++			}
++			type = mode == FILETYPE_INO_DIRECTORY ?
++			       FILETYPE_DIRECTORY : FILETYPE_REG;
++		}
++
+ 		/* Read in the symlink and follow it. */
+ 		if (type == FILETYPE_SYMLINK) {
+ 			char *symlink;
+@@ -2263,8 +2287,8 @@
+ 			}
+ 
+ 			/* Lookup the node the symlink points to. */
+-			status = ext4fs_find_file1(symlink, oldnode,
+-						    &currnode, &type);
++			status = ext4fs_lookup(symlink, oldnode, &currnode, &type,
++					       true);
+ 
+ 			free(symlink);
+ 
+@@ -2287,6 +2311,12 @@
+ 	return -1;
+ }
+ 
++int ext4fs_find_file1(const char *currpath, struct ext2fs_node *currroot,
++		      struct ext2fs_node **currfound, int *foundtype)
++{
++	return ext4fs_lookup(currpath, currroot, currfound, foundtype, true);
++}
++
+ int ext4fs_find_file(const char *path, struct ext2fs_node *rootnode,
+ 	struct ext2fs_node **foundnode, int expecttype)
+ {
+@@ -2341,7 +2371,34 @@
+ 	return -1;
+ }
+ 
+-int ext4fs_mount(void)
++int ext4fs_open_nofollow(const char *filename, loff_t *len)
++{
++	struct ext2fs_node *node = NULL;
++	int type = FILETYPE_DIRECTORY;
++
++	if (!ext4fs_root)
++		return -EINVAL;
++
++	ext4fs_free_node(ext4fs_file, &ext4fs_root->diropen);
++	ext4fs_file = NULL;
++	if (ext4fs_lookup(filename, &ext4fs_root->diropen, &node, &type, false) != 1 ||
++	    type != FILETYPE_REG) {
++		ext4fs_free_node(node, &ext4fs_root->diropen);
++		return -ENOENT;
++	}
++	if (node->inode.size_high) {
++		ext4fs_free_node(node, &ext4fs_root->diropen);
++		return -EFBIG;
++	}
++	*len = le32_to_cpu(node->inode.size);
++	ext4fs_file = node;
++	return 0;
++}
++
++#define EXT4_ERROR_FS			0x0002
++#define EXT4_FEATURE_RO_COMPAT_ORPHAN_PRESENT	0x10000
++
++static int ext4fs_mount_internal(bool clean)
+ {
+ 	struct ext2_data *data;
+ 	int status;
+@@ -2360,6 +2417,22 @@
+ 	if (le16_to_cpu(data->sblock.magic) != EXT2_MAGIC)
+ 		goto fail_noerr;
+ 
++	if (clean) {
++		u32 readable = (EXT4_FEATURE_INCOMPAT_SUPP &
++				~EXT4_FEATURE_INCOMPAT_RECOVER) |
++			       EXT4_FEATURE_INCOMPAT_CSUM_SEED;
++		u32 incompat = le32_to_cpu(data->sblock.feature_incompat);
++		u32 ro_compat = le32_to_cpu(data->sblock.feature_ro_compat);
++
++		/* Boot readers cannot replay the journal or clean up orphan inodes. */
++		if (incompat & ~readable ||
++		    ro_compat & (EXT4_FEATURE_RO_COMPAT_ORPHAN_PRESENT |
++				 EXT4_FEATURE_RO_COMPAT_BIGALLOC) ||
++		    le16_to_cpu(data->sblock.fs_state) & EXT4_ERROR_FS ||
++		    data->sblock.last_orphan)
++			goto fail_noerr;
++	}
++
+ 	if (le32_to_cpu(data->sblock.revision_level) == 0) {
+ 		fs->inodesz = 128;
+ 		fs->gdsize = 32;
+@@ -2401,6 +2474,9 @@
+ 	status = ext4fs_read_inode(data, 2, data->inode);
+ 	if (status == 0)
+ 		goto fail;
++	if (clean &&
++	    (le16_to_cpu(data->inode->mode) & FILETYPE_INO_MASK) != FILETYPE_INO_DIRECTORY)
++		goto fail;
+ 
+ 	ext4fs_root = data;
+ 
+@@ -2413,3 +2489,13 @@
+ 
+ 	return 0;
+ }
++
++int ext4fs_mount(void)
++{
++	return ext4fs_mount_internal(false);
++}
++
++int ext4fs_mount_clean(void)
++{
++	return ext4fs_mount_internal(true);
++}

@@ -9,6 +9,7 @@ import json
 from typing import TYPE_CHECKING
 
 import pytest
+from fplinux_cli.artifacts.release_identity import release_context_from_fields
 from fplinux_cli.ci.commands import run_ci
 from fplinux_cli.cli.inspect import inspect_distribution
 from fplinux_cli.packaging import distribution
@@ -60,6 +61,7 @@ def test_release_contains_the_complete_matrix_sources_and_dependency_transport(
     assert {path.name for path in output.iterdir()} == expected
     sources, modes = read_zip(source)
     assert modes["project/fplinux"] == 0o100755
+    assert sources["project/VERSION"] == b"1.0.0\n"
     assert sources["project/common/example.c"] == b"one shared project source\n"
     assert "project/targets/konrow-senior-280-plus/target.toml" in sources
     assert sources["upstream/shared.tar.xz"] == b"same exact upstream input"
@@ -71,7 +73,11 @@ def test_release_contains_the_complete_matrix_sources_and_dependency_transport(
         "sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
     }
     assert metadata["dependencies"] == "DEPENDENCIES.json"
-    records = json.loads(sources["DISTRIBUTION.json"])["runtimes"]
+    assert json.loads((output / "DEPENDENCIES.json").read_bytes())["release_version"] == "1.0.0"
+    assert json.loads(sources["project/.fplinux-release.json"])["release_version"] == "1.0.0"
+    source_distribution = json.loads(sources["DISTRIBUTION.json"])
+    assert source_distribution["release_version"] == "1.0.0"
+    records = source_distribution["runtimes"]
     assert metadata["runtimes"] == records
     assert {(record["target"], record["host"]) for record in records} == set(SELECTIONS)
     for record in records:
@@ -84,10 +90,22 @@ def test_release_contains_the_complete_matrix_sources_and_dependency_transport(
             & files.keys()
         )
         catalog = json.loads(files["targets.json"])
+        assert catalog["release_version"] == "1.0.0"
         assert set(catalog["targets"]) == {t for t, h in SELECTIONS if h == record["host"]}
         target_files = catalog["targets"][record["target"]]["files"]
+        for name in ("build-manifest.json", "runtime-manifest.json"):
+            raw = b"".join(files[part] for part in target_files[name])
+            assert json.loads(raw)["release_version"] == "1.0.0"
         assert ("card/layout.json" in target_files) == (record["target"] in CARD_TARGETS)
         if record["target"] in CARD_TARGETS:
+            card_fixture, _ = bundle_fixture(record["target"], record["host"], card=True)
+            for name in (
+                "card/apks/Packages.adb",
+                "card/apks/fplinux-build.rsa.pub",
+                "card/apks/fplinux-notes.apk",
+            ):
+                raw = b"".join(files[part] for part in target_files[name])
+                assert raw == card_fixture[name]
             assert target_files["image/ramboot.bin"][1] in target_files["card/fit.itb"]
             assert (
                 target_files["card/root.ext4.xz"]
@@ -150,7 +168,7 @@ def test_ci_rejects_single_model_package_that_passes_intrinsic_verification(
 
 
 def test_package_rejects_another_card_system(tmp_path: Path) -> None:
-    linux = HostArchive("linux", RELEASE_ID)
+    linux = HostArchive("linux", release_context_from_fields(release_fields()))
     for target in ("nokia-ta1618", "inoi-240-modern-4g"):
         files, modes = bundle_fixture(target, "linux", card=True)
         if target == "inoi-240-modern-4g":

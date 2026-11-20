@@ -14,6 +14,7 @@ from fplinux_cli.runtime.windows_tools import WINDOWS_TOOLS, windows_tool_paths
 from .host import fail
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
     from types import ModuleType
 
@@ -55,7 +56,7 @@ def validate_archive(
                 fail("The RAM payload does not have its required header")
     else:
         fail("This platform has no Windows RAM loader")
-    windows = _validate_windows_manifest(root)
+    windows = _validate_windows_manifest(lambda name: root / name)
     if windows["host_tools"] != tool_paths:
         fail("Windows host tools do not match this archive format")
     hashes = windows["sha256"]
@@ -72,10 +73,10 @@ def validate_archive(
     )
 
 
-def _validate_windows_manifest(root: Path) -> dict[str, Any]:
+def _validate_windows_manifest(file_path: Callable[[str], Path]) -> dict[str, Any]:
     runner = bundle_runtime
     try:
-        windows = json.loads((root / "windows-host.json").read_text(encoding="utf-8"))
+        windows = json.loads(file_path("windows-host.json").read_text(encoding="utf-8"))
     except (OSError, ValueError) as error:
         fail(f"Windows host manifest cannot be read: {error}")
     windows = runner.require_object(windows, {"host_tools", "sha256"}, "Windows host manifest")
@@ -86,15 +87,16 @@ def _validate_windows_manifest(root: Path) -> dict[str, Any]:
         name = runner.relative_name(relative, "Windows file")
         if not isinstance(expected, str) or not is_sha256(expected):
             fail(f"Windows file checksum is invalid: {name}")
-        runner.require_file(root / name)
-        if runner.digest(root / name) != expected:
+        path = file_path(name)
+        runner.require_file(path)
+        if runner.digest(path) != expected:
             fail(f"Windows file checksum differs: {name}")
     return windows
 
 
-def validate_connection_tools(root: Path) -> dict[str, Path]:
+def validate_connection_tools(file_path: Callable[[str], Path]) -> dict[str, Path]:
     """Admit packaged SSH tools without reading the current RAM build."""
-    windows = _validate_windows_manifest(root)
+    windows = _validate_windows_manifest(file_path)
     tool_paths = windows["host_tools"]
     if not isinstance(tool_paths, dict) or tool_paths not in (
         windows_tool_paths({"loader": WINDOWS_TOOLS["loader"]}),
@@ -104,4 +106,4 @@ def validate_connection_tools(root: Path) -> dict[str, Path]:
     roles = ("ssh", "keygen", "keyscan", "driver")
     if any(tool_paths[role] not in windows["sha256"] for role in roles):
         fail("Windows host manifest lacks native tool checksums")
-    return {role: root / tool_paths[role] for role in roles}
+    return {role: file_path(tool_paths[role]) for role in roles}

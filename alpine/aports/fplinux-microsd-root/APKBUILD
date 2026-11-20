@@ -8,23 +8,49 @@ arch="noarch"
 license="GPL-2.0-only"
 depends="cloud-utils-growpart fplinux-resize2fs openrc"
 options="!check"
-source="fplinux-microsd-grow fplinux-microsd-grow.initd"
+source="
+	card-slots.sh
+	fplinux-card-boot
+	fplinux-card-confirm.initd
+	fplinux-microsd-grow
+	fplinux-microsd-grow.initd
+	fplinux-microsd-shutdown.initd
+	fplinux-microsd-root.conf
+"
 
 package() {
+	install -Dm755 "$srcdir/card-slots.sh" \
+		"$pkgdir/usr/libexec/fplinux/card-slots.sh"
+	install -Dm755 "$srcdir/fplinux-card-boot" \
+		"$pkgdir/usr/libexec/fplinux/card-boot"
+	install -Dm755 "$srcdir/fplinux-card-confirm.initd" \
+		"$pkgdir/etc/init.d/fplinux-card-confirm"
 	install -Dm755 "$srcdir/fplinux-microsd-grow" \
 		"$pkgdir/usr/libexec/fplinux/microsd-grow"
 	install -Dm755 "$srcdir/fplinux-microsd-grow.initd" \
 		"$pkgdir/etc/init.d/fplinux-microsd-grow"
-	mkdir -p "$pkgdir/etc/runlevels/boot" "$pkgdir/etc/runlevels/shutdown"
+	install -Dm755 "$srcdir/fplinux-microsd-shutdown.initd" \
+		"$pkgdir/etc/init.d/fplinux-microsd-shutdown"
+	install -Dm644 "$srcdir/fplinux-microsd-root.conf" \
+		"$pkgdir/etc/rc.conf.d/fplinux-microsd-root.conf"
+	mkdir -p "$pkgdir/etc/runlevels/boot" "$pkgdir/etc/runlevels/default" \
+		"$pkgdir/etc/runlevels/shutdown"
+	ln -s /etc/init.d/fplinux-card-confirm \
+		"$pkgdir/etc/runlevels/default/fplinux-card-confirm"
 	ln -s /etc/init.d/fplinux-microsd-grow \
 		"$pkgdir/etc/runlevels/boot/fplinux-microsd-grow"
-	for service in killprocs savecache mount-ro; do
+	for service in killprocs savecache fplinux-microsd-shutdown mount-ro; do
 		ln -s "/etc/init.d/$service" \
 			"$pkgdir/etc/runlevels/shutdown/$service"
 	done
 }
 
 sha512sums="
-3a1aa8f10c24c5942d84474f54a49f2ae2cdf1815a5163352ef60cf259e56ca907f46c2bd317f3b833656ee9001042a7743c1a9206446665e223dda5c56406a4  fplinux-microsd-grow
+19106752a94f3c977826852aa0110e6fe74b23731439a380ac38b162376a77c053dd187a121a4efd456e2f3c6f6da6d2d7f9f041533367d475cef4ba6714e953  card-slots.sh
+fc7fba09a3991fec1f7717334d75a0043e9a2f6e5f24ffc1413890c52049d33df567d0635d035fc0c076b98325fb3203390f3aedc6e669dded7a51e3f931e015  fplinux-card-boot
+f941501f3aae1bb88a06c8026a665eba7bdb9cabf1d2e038a0c25969511b38a7ace0a54503f931951d4b57524abf0580a9cc7b00d2f1197bbd334a4dbebc9a41  fplinux-card-confirm.initd
+e6c89e4b95d7a8cdbae333e90bddcc48e7cb60ba9feb8582bf05601ad57449589815b0a7fd2141f465254717ec6476a2b0d6ba396e182790f2184c949606485f  fplinux-microsd-grow
 380a2ebb3dc64e15fd8b8f56417432a5b464e34aad94e0fae8d20622f1556bed712ef62c1b455ded5379a981cf9a98269a24bafe88281de2862f8e4f3bf7c0f8  fplinux-microsd-grow.initd
+bcc6f3f9ffeae55f8a738b2353342d5946b584703c235d55ecb68b7608527a882fbe6e59ee34042d81fc9de6807df700bdb3c8eecef114a22107802a105f09f4  fplinux-microsd-shutdown.initd
+8cab486b656ad22072118d0332afdc666563dffc121f1d9de93288e2f02cc696534e7582f941d320e5d1078705d9c77de3ec08efb4952bb68d758b269a8635ac  fplinux-microsd-root.conf
 "

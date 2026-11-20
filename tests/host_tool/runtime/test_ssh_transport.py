@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import shutil
 import subprocess
 import tempfile
@@ -164,11 +165,16 @@ def test_archive_preparation_uses_its_private_directory_without_xdg_or_sftp(
         "phone",
         {"vendor_id": 0x0525, "product_id": 0xA4A6, "wait_seconds": 1},
         runtime_root=root,
+        bundle_generation="b" * 64,
+        prepared_data_sha256="d" * 64,
     )
     directory = Path(session["private_key"]).parent
     personalized = Path(session["image"])
     assert directory.parent.parent == root
     assert session["runtime_root"] == str(root)
+    saved = json.loads((directory / "session.json").read_bytes())
+    assert saved["bundle_generation"] == "b" * 64
+    assert saved["prepared_data_sha256"] == "d" * 64
     assert directory.stat().st_mode & 0o777 == 0o700
     assert Path(session["private_key"]).stat().st_mode & 0o777 == 0o600
     assert personalized.stat().st_mode & 0o777 == 0o600

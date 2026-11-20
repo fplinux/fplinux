@@ -20,6 +20,7 @@ def runtime_manifest() -> dict[str, Any]:
         "build_type": "release",
         "release_id": "aaaaaaaaaaaa",
         "source_commit": "a" * 40,
+        "release_version": "1.0.0",
         "source_snapshot": "b" * 64,
         "identity": {
             "target": {

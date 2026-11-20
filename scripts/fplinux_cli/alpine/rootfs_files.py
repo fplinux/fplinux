@@ -10,25 +10,36 @@ import stat
 import tempfile
 from collections import defaultdict
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from fplinux_cli.build import process as process_build
 from fplinux_cli.build.environment import SOURCE_DATE_EPOCH
 from fplinux_cli.build.inputs import require_file
 from fplinux_cli.common import ROOT, fail, sha256_file
+from fplinux_cli.device_data.cpio import FIT_AUDIO_CPIO_BYTES
 
 from .rootfs_state import INITRAMFS_NAME
 
+if TYPE_CHECKING:
+    from fplinux_cli.artifacts.release_identity import ReleaseContext
 
-def _stamp_build_id(root: Path, release_id: str) -> None:
+_INITRAMFS_RUNTIME = (
+    "bin/busybox",
+    "lib/ld-musl-armhf.so.1",
+    "lib/libc.musl-armv7.so.1",
+    "usr/lib/libgcc_s.so.1",
+)
+
+
+def _stamp_release(root: Path, release: ReleaseContext) -> None:
     """Stamp the composed image after package installation, leaving APKs reusable."""
     path = require_file(root / "etc/os-release")
     lines = [
         line
         for line in path.read_text(encoding="utf-8").splitlines()
-        if not line.startswith("BUILD_ID=")
+        if not line.startswith(("VERSION_ID=", "BUILD_ID="))
     ]
-    lines.append(f"BUILD_ID={release_id}")
+    lines.extend((f"VERSION_ID={release.release_version}", f"BUILD_ID={release.release_id}"))
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
@@ -154,6 +165,25 @@ def _stage_board_layer(root: Path, base: Path, layer: Path) -> None:
         shutil.copystat(root / path, layer / path)
 
 
+def extract_rootfs(archive: Path, root: Path) -> None:
+    """Extract a composed root archive with its normalized package modes and links."""
+    root.mkdir()
+    process_build.run(
+        [
+            "cpio",
+            "--extract",
+            "--quiet",
+            "--make-directories",
+            "--no-preserve-owner",
+            "--preserve-modification-time",
+            "--file",
+            str(archive),
+            "--directory",
+            str(root),
+        ]
+    )
+
+
 def write_card_rootfs_layer(rootfs: Path, base_rootfs: Path, destination: Path) -> None:
     """Pack the board additions and replacements for a shared writable card root."""
     with tempfile.TemporaryDirectory(dir=destination.parent, prefix=".card-rootfs.") as name:
@@ -161,22 +191,8 @@ def write_card_rootfs_layer(rootfs: Path, base_rootfs: Path, destination: Path) 
         target = temporary / "target"
         base = temporary / "base"
         board = temporary / "board"
-        for root, archive in ((target, rootfs), (base, base_rootfs)):
-            root.mkdir()
-            process_build.run(
-                [
-                    "cpio",
-                    "--extract",
-                    "--quiet",
-                    "--make-directories",
-                    "--no-preserve-owner",
-                    "--preserve-modification-time",
-                    "--file",
-                    str(archive),
-                    "--directory",
-                    str(root),
-                ]
-            )
+        extract_rootfs(rootfs, target)
+        extract_rootfs(base_rootfs, base)
         _stage_board_layer(target, base, board)
         process_build.run(
             [
@@ -241,12 +257,7 @@ def _write_ramroot_initramfs(
     for directory in ("bin", "lib", "usr", "usr/lib", "dev", "proc", "sys", "run", "newroot"):
         (bootstrap / directory).mkdir(mode=0o755)
     # BusyBox and its shared libraries come from the same locked composed runtime.
-    for relative in (
-        "bin/busybox",
-        "lib/ld-musl-armhf.so.1",
-        "lib/libc.musl-armv7.so.1",
-        "usr/lib/libgcc_s.so.1",
-    ):
+    for relative in _INITRAMFS_RUNTIME:
         source = root / relative
         destination = bootstrap / relative
         if source.is_symlink():
@@ -263,3 +274,72 @@ def _write_ramroot_initramfs(
     _normalize_rootfs(bootstrap)
     _write_rootfs_cpio(bootstrap, staging / INITRAMFS_NAME)
     shutil.rmtree(bootstrap)
+
+
+def write_card_initramfs(  # noqa: PLR0913 -- the composed root and FIT inputs stay explicit.
+    rootfs: Path,
+    output: Path,
+    *,
+    target: str,
+    config: dict[str, Any],
+    build_id: str,
+    audio: bytes,
+) -> None:
+    """Pack the early userspace and the replaceable audio archive for the card FIT."""
+    if len(audio) > FIT_AUDIO_CPIO_BYTES:
+        fail("prepared audio firmware exceeds the FIT ramdisk slot")
+    storage = config["storage"]
+    identity = {
+        "target": f"{target}\n".encode("ascii"),
+        "build-id": f"{build_id}\n".encode("ascii"),
+        "disk-id": storage["disk_signature"].to_bytes(4, "little"),
+        "root-start": f"{storage['root_offset'] // 512}\n".encode("ascii"),
+        "root-uuid": f"{storage['root_uuid']}\n".encode("ascii"),
+        "wait-seconds": f"{config['linux']['root']['wait_seconds']}\n".encode("ascii"),
+    }
+    with tempfile.TemporaryDirectory(dir=output.parent, prefix=".card-initramfs.") as name:
+        staging = Path(name)
+        bootstrap = staging / "root"
+        bootstrap.mkdir()
+        for directory in (
+            "dev",
+            "proc",
+            "sys",
+            "run",
+            "newroot",
+            "etc/fplinux",
+            "etc/fplinux-card",
+        ):
+            (bootstrap / directory).mkdir(parents=True)
+        process_build.run(
+            [
+                "cpio",
+                "--extract",
+                "--quiet",
+                "--make-directories",
+                "--no-preserve-owner",
+                "--file",
+                str(rootfs),
+                *_INITRAMFS_RUNTIME,
+            ],
+            cwd=bootstrap,
+        )
+        for relative in _INITRAMFS_RUNTIME:
+            member = bootstrap / relative
+            if not member.is_file() or not member.resolve().is_relative_to(bootstrap):
+                fail(f"missing initramfs runtime file: {relative}")
+        (bootstrap / "bin/sh").symlink_to("busybox")
+        shutil.copyfile(require_file(ROOT / "alpine/cardroot-init.sh"), bootstrap / "init")
+        (bootstrap / "init").chmod(0o755)
+        directories = bootstrap / "etc/fplinux/card-data-directories"
+        shutil.copyfile(require_file(ROOT / "alpine/card-data-directories"), directories)
+        directories.chmod(0o644)
+        for filename, contents in identity.items():
+            (bootstrap / "etc/fplinux-card" / filename).write_bytes(contents)
+        _normalize_rootfs(bootstrap)
+        ramdisk = staging / output.name
+        _write_rootfs_cpio(bootstrap, ramdisk)
+        with ramdisk.open("ab") as stream:
+            stream.write(audio.ljust(FIT_AUDIO_CPIO_BYTES, b"\0"))
+        ramdisk.chmod(0o600)
+        ramdisk.replace(output)

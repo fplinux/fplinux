@@ -25,6 +25,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
     from pathlib import Path
 
+    from fplinux_cli.artifacts.release_identity import ReleaseContext
     from fplinux_cli.device_data.inputs import FirmwareInput
 
 
@@ -73,7 +74,7 @@ def alpine_rootfs_recipe(  # noqa: PLR0913 -- each selected rootfs input is caus
     packages: Sequence[str],
     root: Path = ROOT,
     *,
-    release_id: str,
+    release: ReleaseContext,
     firmware_inputs: Sequence[FirmwareInput] = (),
     display_brightness: dict[str, Any] | None = None,
     root_kind: str = "initramfs",
@@ -87,7 +88,8 @@ def alpine_rootfs_recipe(  # noqa: PLR0913 -- each selected rootfs input is caus
     build_packages = _canonical_packages(aport_build_order(selected), root)
     payload = {
         "environment_recipe": environment_recipe,
-        "release_id": release_id,
+        "release_id": release.release_id,
+        "release_version": release.release_version,
         "package_signing_key": signing_key_sha256,
         "packages": list(selected),
         "registration": selected_aport_graph(selected),

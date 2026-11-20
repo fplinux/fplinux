@@ -15,7 +15,7 @@ from fplinux_cli.manifests.paths import GLOBAL_PROFILES
 from fplinux_cli.manifests.values import TARGET_NAME
 from fplinux_cli.quality.scopes import CHECK_SCOPES
 from fplinux_cli.quality.testing import add_test_arguments
-from fplinux_cli.runtime.bundle_session import PUBLIC_BOOT_MODES
+from fplinux_cli.runtime.cli import add_card_commands, add_session_commands
 
 _CHECK_SCOPE_METAVAR = "{" + ",".join(CHECK_SCOPES) + "}"
 _PUBLIC_COMMAND_METAVAR = (
@@ -112,21 +112,6 @@ def _add_input_selection(parser: argparse.ArgumentParser, targets: tuple[str, ..
         "--host",
         choices=("linux", "windows"),
         help="select the target's archive host (default: linux; requires TARGET)",
-    )
-
-
-def _add_boot_profile_options(parser: argparse.ArgumentParser, verb: str) -> None:
-    context = parser.add_mutually_exclusive_group()
-    context.add_argument(
-        "--boot",
-        choices=PUBLIC_BOOT_MODES,
-        help=f"{verb} the selected public boot mode",
-    )
-    context.add_argument(
-        "--profile",
-        type=_profile_name,
-        metavar="NAME",
-        help=f"{verb} this build profile",
     )
 
 
@@ -283,6 +268,9 @@ def create_parser(
     inspections = inspect_parser.add_subparsers(dest="inspect_kind", required=True)
     input_parser = inspections.add_parser("inputs", help="inspect locally available setup inputs")
     _add_input_selection(input_parser, targets)
+    input_parser.add_argument(
+        "--list", action="store_true", help="list every selected input with its absolute path"
+    )
     inspections.add_parser("source", help="show the current public source identity")
     bundle_parser = inspections.add_parser("bundle", help="inspect the current target bundle")
     _add_build_type_option(bundle_parser)
@@ -293,7 +281,11 @@ def create_parser(
         metavar="NAME",
         help="inspect this build profile (default: default)",
     )
-    bundle_parser.add_argument(
+    bundle_output = bundle_parser.add_mutually_exclusive_group()
+    bundle_output.add_argument(
+        "--path", action="store_true", help="print only the selected generation's absolute path"
+    )
+    bundle_output.add_argument(
         "--current-source",
         action="store_true",
         help="compare the bundle with current build inputs",
@@ -510,64 +502,16 @@ def create_parser(
         action="store_true",
         help="remove disposable staged workspaces",
     )
-    run_parser = commands.add_parser(
-        "run", help="prepare phone data, start Linux or reopen its SSH connection"
+    run_parser, console_parser, verify_parser = add_session_commands(
+        commands, targets=targets, profile_type=_profile_name, keyboard=True
     )
     _add_build_type_option(run_parser)
-    _add_phone_data_option(run_parser)
-    run_parser.add_argument("target", choices=targets)
-    run_parser.add_argument(
-        "--from-dump",
-        type=Path,
-        metavar="PATH",
-        help="prepare the first run from an existing NAND or eMMC user-area backup",
-    )
-    run_parser.add_argument(
-        "--events", type=Path, metavar="PATH", help="write loader events as JSON lines"
-    )
-    run_parser.add_argument(
-        "--loader-trace",
-        action="store_true",
-        help="report RAM-loader protocol commands and reply sizes without payload bytes",
-    )
-    _add_boot_profile_options(run_parser, "run")
-
-    console_parser = commands.add_parser("console", help="connect to a running target over USB")
     _add_build_type_option(console_parser, default=None)
-    _add_phone_data_option(console_parser)
-    console_parser.add_argument("target", nargs="?", choices=targets)
-    console_parser.add_argument(
-        "--profile",
-        type=_profile_name,
-        metavar="NAME",
-        help="reconnect to a session started with this build profile",
-    )
-    console_parser.add_argument(
-        "--allow-other-build",
-        action="store_true",
-        help="use the saved connection without requiring a current build or prepared phone data",
-    )
-    console_actions = console_parser.add_mutually_exclusive_group()
-    console_actions.add_argument("--keyboard", metavar="EVDEV")
-    console_actions.add_argument("--exec", dest="exec_command", metavar="COMMAND")
-    console_actions.add_argument("--upload", nargs=2, metavar=("LOCAL", "REMOTE"))
-    console_actions.add_argument("--pull", nargs=2, metavar=("REMOTE", "LOCAL"))
+    _add_build_type_option(verify_parser)
 
-    card_parser = commands.add_parser("card", help="install a microSD system card")
-    card_commands = card_parser.add_subparsers(dest="card_command", required=True)
-    card_install = card_commands.add_parser(
-        "install", help="prepare and write a card in the phone over USB"
-    )
-    card_inspect = card_commands.add_parser("inspect", help="identify the SD in the RAM session")
-    for command in (card_install, card_inspect):
+    for command in add_card_commands(commands, targets):
         _add_build_type_option(command)
-        _add_phone_data_option(command)
-        command.add_argument("target", choices=targets)
-        command.add_argument("--from-dump", type=Path, metavar="FILE")
         command.add_argument("--jobs", type=_positive_integer, default=_default_build_jobs())
-    card_install.add_argument(
-        "--erase-card", metavar="CID", help="explicitly allow erasing this SD card"
-    )
 
     nand_parser = commands.add_parser("nand", help="read the target's internal NAND")
     nand_commands = nand_parser.add_subparsers(dest="nand_command", required=True)
@@ -617,13 +561,6 @@ def create_parser(
         help="exact board compatible (default: derived from the brand and product)",
     )
 
-    verify_parser = commands.add_parser(
-        "verify", help="check that the booted phone runs the current build"
-    )
-    _add_build_type_option(verify_parser)
-    _add_phone_data_option(verify_parser)
-    verify_parser.add_argument("target", nargs="?", choices=targets)
-    verify_parser.add_argument("--profile", type=_profile_name, metavar="NAME")
     for name in (
         "build",
         "check",

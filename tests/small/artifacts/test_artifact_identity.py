@@ -6,7 +6,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import pytest
-from fplinux_cli.artifacts.release import ReleaseContext
+from fplinux_cli.artifacts.release_identity import ReleaseContext
 from fplinux_cli.build.reuse import build_identity, manifest_matches_identity
 from fplinux_cli.environment.definition import environment_artifact_recipe_digest
 from fplinux_cli.environment.image_content import image_content_digest
@@ -33,7 +33,7 @@ class ArtifactIdentityTests:
         keys = cache / "apk-signing"
         keys.mkdir()
         (keys / "fplinux-build.rsa.pub").write_bytes(b"admitted public key\n")
-        release = ReleaseContext("012345abcdef", None, "012345abcdef" + "0" * 52)
+        release = ReleaseContext("012345abcdef", "1.0.0", None, "012345abcdef" + "0" * 52)
         snapshot = WorkspaceSnapshot((), "a" * 64, release_context=release)
         first = EnvironmentState("b" * 64, "c" * 64, "d" * 64)
         second = EnvironmentState("b" * 64, "e" * 64, "d" * 64)
@@ -48,6 +48,7 @@ class ArtifactIdentityTests:
         manifest = {
             "release_id": "012345abcdef",
             "source_commit": None,
+            "release_version": "1.0.0",
             "source_snapshot": "012345abcdef" + "0" * 52,
             "workspace_digest": initial.workspace_digest,
             "environment_recipe": initial.environment_recipe,
@@ -67,7 +68,7 @@ class ArtifactIdentityTests:
         keys = cache / "apk-signing"
         keys.mkdir()
         (keys / "fplinux-build.rsa.pub").write_bytes(b"admitted public key\n")
-        release = ReleaseContext("012345abcdef", None, "012345abcdef" + "0" * 52)
+        release = ReleaseContext("012345abcdef", "1.0.0", None, "012345abcdef" + "0" * 52)
         snapshot = WorkspaceSnapshot((), "a" * 64, release_context=release)
         first = EnvironmentState("b" * 64, "c" * 64, image_content_digest(image_root))
         if change == "bytes":
@@ -82,6 +83,7 @@ class ArtifactIdentityTests:
         manifest = {
             "release_id": "012345abcdef",
             "source_commit": None,
+            "release_version": "1.0.0",
             "source_snapshot": "012345abcdef" + "0" * 52,
             "workspace_digest": original.workspace_digest,
             "environment_recipe": original.environment_recipe,
@@ -101,7 +103,7 @@ class ArtifactIdentityTests:
         keys.mkdir()
         public_key = keys / "fplinux-build.rsa.pub"
         public_key.write_bytes(b"first admitted public key\n")
-        release = ReleaseContext("012345abcdef", None, "012345abcdef" + "0" * 52)
+        release = ReleaseContext("012345abcdef", "1.0.0", None, "012345abcdef" + "0" * 52)
         snapshot = WorkspaceSnapshot((), "a" * 64, release_context=release)
         state = EnvironmentState("b" * 64, "c" * 64, "d" * 64)
         first = build_identity(snapshot, state, cache)

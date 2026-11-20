@@ -33,15 +33,18 @@ A debug image that boots does not show that a feature works on the phone.
 ```sh title="PC"
 ./fplinux logs list --status failed
 ./fplinux logs show latest --command build --failed
+./fplinux logs show latest --command build --grep 'error:|FAILED'
+./fplinux logs artifacts latest --command test
 ./fplinux logs follow latest --command build
 ```
 
 - `logs list` shows recorded runs, newest first, with their command, target, profile, status, start time and duration.
 - `logs show` prints the last 40 lines of each stage of one run. `--failed` limits it to failed stages, `--stage NAME` to one stage, and `--tail N` changes the number of lines.
 - `logs show --summary` lists stage IDs, status and exit codes without printing their output. `--max-bytes N` limits log content across selected stages and reports truncation; `logs list --limit N` limits the number of recent runs.
+- `logs artifacts` prints absolute paths to retained files such as frames, capture logs and JUnit reports for one run, including its container reporters.
 - `logs follow` keeps printing new output until that run finishes. <Key>Ctrl</Key>+<Key>C</Key> stops only the reader.
 
-Filters such as `--command`, `--target`, `--profile` and `--status` work with all three. A run's status describes the command's result, not the phone's health. Run `./fplinux logs show --help` for all options.
+Filters such as `--command`, `--target`, `--profile` and `--status` work with all four. A run's status describes the command's result. Run `./fplinux logs show --help` for all show options.
 
 Commands that use the shared working-data lock wait by default. Add `--lock-timeout SECONDS`, such as `./fplinux console nokia-ta1618 --lock-timeout 0`, to limit that wait; zero returns immediately if the lock is busy. Timeout reports the recorded owner and exits with status 75 without stopping the holder or contacting the phone.
 
@@ -151,5 +154,9 @@ Follow [Report a problem](/fplinux/help/report/) for the information to include 
 `latest` is selected after applying filters, including `--build-type release` or `--build-type debug`. Runs without recorded build type show `unknown` and do not match either filter. A directory basename is accepted only when it identifies one run. `--stage` accepts a stage name or complete stage path; a shared name selects all matches. An unknown stage reports the available IDs. Use `--tail 0` to list stage headings without their existing output.
 
 `show --failed` filters stages of the chosen run, rather than selecting another run. It includes unfinished child stages when their parent run failed or was interrupted; the heading preserves the child's recorded status and explains the unfinished state. Reading logs does not change their recorded metadata. To select the latest failed build, use `logs show latest --command build --status failed --failed`. With no matching stages, the reader explains that result and exits successfully. `follow` stays with its selected invocation and prints new stages until completion; Ctrl+C stops only the reader.
+
+`show --grep PATTERN` applies a case-sensitive Python regular expression to each line of the complete selected stage logs, including lines before the usual tail. Each result starts with its stage ID and 1-based line number. `--tail N` keeps the last N matching lines per stage. `--max-bytes N` limits the reported log content to complete matching lines across stages. The reader reports any truncation. A search without matches succeeds with an empty result message.
+
+Add `--json` to `logs artifacts` or `logs show --summary` for a JSON document with a `run` object and an `artifacts` or `stages` array. The artifact list includes regular files already retained in the run when it is read. Stage output has its own reader, and journals provide the run and stage metadata. An active run may produce more files after the listing.
 
 Times are UTC. Output is grouped by stage, not globally merged; verbose parent logs may repeat child output. Log inspection needs no prepared build environment. Exit status is `0` for successful inspection, including a failed run, `1` for missing/ambiguous runs or read errors, `2` for invalid arguments and `130` for Ctrl+C. A running record without a surviving process is reported as incomplete.

@@ -11,7 +11,7 @@ int main(int argc, char **argv)
 
 	assert(argc == 5);
 	assert(fplinux_system_info_read_os_name(argv[1], value, sizeof(value)));
-	assert(!strcmp(value, "FPLinux 1"));
+	assert(!strcmp(value, "FPLinux 1.0.0"));
 	assert(fplinux_system_info_read_os_field(argv[1], "BUILD_ID", value,
 						 sizeof(value)));
 	assert(!strcmp(value, "012345abcdef"));

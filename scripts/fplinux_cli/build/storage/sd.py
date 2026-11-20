@@ -70,16 +70,14 @@ def _run(command: list[str], *, stdout: BinaryIO | None = None) -> None:
         raise SdImageError(detail or f"{command[0]} exited with {result.returncode}")
 
 
-def build(  # noqa: PLR0913 -- storage inputs and optional boot assets are distinct.
-    fit: Path | None,
+def build(
     rootfs: Path,
     destination: Path,
     *,
-    fit_spec: Mapping[str, object] | None,
     storage: Mapping[str, object],
     cold_boot: ColdSdBootstrap | None = None,
 ) -> Path:
-    """Publish one ``FPLINUX.img.xz`` from ext4 and the selected optional FIT."""
+    """Publish one ``FPLINUX.img.xz`` from ext4 and its optional autonomous entry."""
     compressed_name = compressed_image_name(storage)
     if destination.name != compressed_name:
         raise SdImageError(f"microSD image must be named {compressed_name}")
@@ -91,9 +89,7 @@ def build(  # noqa: PLR0913 -- storage inputs and optional boot assets are disti
         dir=destination.parent, prefix=".fplinux-sd-image."
     ) as temporary_name:
         temporary = Path(temporary_name)
-        raw = _assemble(
-            temporary, rootfs, fit=fit, fit_spec=fit_spec, storage=storage, cold_boot=cold_boot
-        )
+        raw = _assemble(temporary, rootfs, storage=storage, cold_boot=cold_boot)
         staging = temporary / compressed_name
         with staging.open("wb") as stream:
             _run(["xz", "--threads=1", "--check=crc64", "--stdout", str(raw)], stdout=stream)
@@ -111,11 +107,9 @@ def write_boot_prefix(
     storage: Mapping[str, object],
     cold_boot: ColdSdBootstrap,
 ) -> str:
-    """Pack the exact card prefix with an empty FIT slot and return its raw digest."""
+    """Pack the fixed card prefix with the autonomous FAT entry and return its raw digest."""
     with tempfile.TemporaryDirectory(dir=destination.parent, prefix=".card-boot.") as name:
-        raw = _assemble(
-            Path(name), rootfs, fit=None, fit_spec=None, storage=storage, cold_boot=cold_boot
-        )
+        raw = _assemble(Path(name), rootfs, storage=storage, cold_boot=cold_boot)
         return compress_card_region(
             raw, destination, _require_integer(storage["root_offset"], "root offset")
         )
@@ -140,26 +134,16 @@ def compress_card_region(source: Path, destination: Path, size: int) -> str:
     return digest.hexdigest()
 
 
-def _assemble(  # noqa: PLR0913 -- fixed layout, root and optional boot assets are distinct.
+def _assemble(
     temporary: Path,
     rootfs: Path,
     *,
-    fit: Path | None,
-    fit_spec: Mapping[str, object] | None,
     storage: Mapping[str, object],
     cold_boot: ColdSdBootstrap | None,
 ) -> Path:
     image_name = str(storage["filename"])
     rootfs_name = str(storage["root_filename"])
     rootfs_bytes = _require_integer(storage["root_size"], "root size")
-    if (fit is None) != (fit_spec is None):
-        message = "FIT input and specification must be selected together"
-        raise SdImageError(message)
-    if fit is not None and fit_spec is not None:
-        fit_name = str(fit_spec["filename"])
-        _require_input(fit, fit_name)
-        if fit.name != fit_name:
-            raise SdImageError(f"FIT input must be named {fit_name}")
     _require_input(rootfs, rootfs_name)
     if rootfs.name != rootfs_name:
         raise SdImageError(f"root filesystem input must be named {rootfs_name}")
@@ -174,15 +158,7 @@ def _assemble(  # noqa: PLR0913 -- fixed layout, root and optional boot assets a
     staged_rootfs = input_path / rootfs_name
     for directory in (input_path, output_path, root_path, tool_temporary):
         directory.mkdir()
-    config.write_bytes(
-        profile_layout.genimage_config(fit_spec, storage, cold_boot=cold_boot is not None)
-    )
-
-    if fit is not None and fit_spec is not None:
-        staged_fit = input_path / str(fit_spec["filename"])
-        shutil.copyfile(fit, staged_fit)
-        os.utime(staged_fit, (epoch, epoch))
-        _require_input(staged_fit, str(fit_spec["filename"]))
+    config.write_bytes(profile_layout.genimage_config(storage, cold_boot=cold_boot is not None))
     if cold_boot is not None:
         _require_input(cold_boot.stage0, "autonomous microSD stage0")
         stage0 = input_path / "cold-stage0.bin"

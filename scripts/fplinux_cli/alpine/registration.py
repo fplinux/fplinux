@@ -184,6 +184,7 @@ SHARED_APORT_SOURCES = {
         "lib/fplinux-media/fplinux-media-amr-nb.h",
         "include/fplinux/fplinux-media.h",
     ),
+    "fplinux-microsd-root": ("scripts/fplinux_cli/runtime/card-slots.sh",),
     "fplinux-midi": (
         "lib/fplinux-midi/fplinux-midi.c",
         "lib/fplinux-midi/fplinux-midi-smf.c",

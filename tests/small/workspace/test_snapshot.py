@@ -23,7 +23,7 @@ from tests.small.workspace.workspace_fixtures import (
     workspace_root,
     write_registration_source,
     write_source,
-    write_source_lock_files,
+    write_source_declarations,
 )
 
 if TYPE_CHECKING:
@@ -71,7 +71,7 @@ class WorkspaceSnapshotTests:
         root = tmp_path
         source = write_source(root)
         registration_name, registration_file = write_registration_source(root)
-        lock_files = write_source_lock_files(root)
+        declarations = write_source_declarations(root)
         for package in ("fplinux-selected", "fplinux-dependency", "fplinux-unrelated"):
             directory = root / "alpine/aports" / package
             directory.mkdir(parents=True)
@@ -104,7 +104,7 @@ class WorkspaceSnapshotTests:
                 return_value=[
                     ("source", source),
                     (registration_name, registration_file),
-                    *lock_files,
+                    *declarations,
                 ],
             ),
             mock.patch.object(alpine_registration, "COMMON_PACKAGES", ()),
@@ -138,7 +138,7 @@ class WorkspaceSnapshotTests:
         """Even identical fragment bytes cannot give two selected types one workspace identity."""
         root = tmp_path
         source = write_source(root)
-        lock_files = write_source_lock_files(root)
+        declarations = write_source_declarations(root)
         with (
             workspace_root(root),
             empty_package_graph(),
@@ -151,7 +151,7 @@ class WorkspaceSnapshotTests:
             mock.patch.object(
                 workspace_inputs,
                 "target_build_source_files",
-                return_value=[("source", source), write_registration_source(root), *lock_files],
+                return_value=[("source", source), write_registration_source(root), *declarations],
             ),
             mock.patch.object(
                 workspace_inputs,
@@ -181,7 +181,7 @@ class WorkspaceSnapshotTests:
         """A target recipe is available before any workspace directory is materialized."""
         root = tmp_path
         source = write_source(root, contents=b"first", mode=0o751)
-        lock_files = write_source_lock_files(root)
+        declarations = write_source_declarations(root)
         with (
             workspace_root(root),
             empty_package_graph(),
@@ -197,7 +197,7 @@ class WorkspaceSnapshotTests:
                 return_value=[
                     ("nested/source", source),
                     write_registration_source(root),
-                    *lock_files,
+                    *declarations,
                 ],
             ),
             mock.patch.object(
@@ -268,7 +268,7 @@ class WorkspaceSnapshotTests:
         ):
             write(relative)
 
-        write_source_lock_files(root, "phone")
+        write_source_declarations(root, "phone")
 
         target: dict[str, Any] = {
             "build_type": "release",
@@ -413,7 +413,7 @@ class WorkspaceSnapshotTests:
     ) -> None:
         """Peer C/DTS changes stay auxiliary while a shared driver remains causal."""
         root = tmp_path
-        write_source_lock_files(root, "phone-a")
+        write_source_declarations(root, "phone-a")
         platform = linux_inputs.platform(root, "demo", source_lock="linux", arch="arm")
         with platform.open("a", encoding="utf-8") as output:
             output.write(
@@ -571,6 +571,8 @@ class WorkspaceSnapshotTests:
         ("relative", "ram_changes", "card_changes"),
         [
             ("alpine/ramroot-init.sh", True, False),
+            ("alpine/cardroot-init.sh", False, True),
+            ("alpine/card-data-directories", False, True),
             ("platforms/ums9117/bootstrap/ram/main.c", True, False),
             ("targets/nokia-ta1618/bootstrap/lcd_config.h", True, True),
             ("platforms/ums9117/bootstrap-microsd/Makefile", False, True),

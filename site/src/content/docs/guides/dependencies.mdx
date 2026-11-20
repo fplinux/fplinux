@@ -9,9 +9,11 @@ A dependency snapshot keeps the pinned external inputs and build environment out
 
 Use `./fplinux inspect inputs`, `./fplinux inspect inputs nokia-ta1618 --host windows`, `./fplinux inspect inputs --site` or `./fplinux inspect inputs --all` to check locally stored originals without downloading or installing anything. The command reports counts and lists missing or mismatched inputs, then exits with status 1 if any selected original is unavailable. Target selection covers every supported profile and build type. Environment and site-tooling status only report local receipts and files; they do not execute or verify the installed tools.
 
+Add `--list` to see every selected original's key, verification status and absolute path in the managed data directory.
+
 ## Restore a release's inputs
 
-Use the matching source revision and the twelve-character build ID shown in the release name, runtime ZIP filename or the phone's **Settings → About → Build** row. Replace `<release-id>` below with that ID:
+Use the matching source revision and the twelve-character build ID shown in the runtime ZIP filename or the phone's **Settings → About → Build** row. Replace `<release-id>` below with that ID:
 
 ```sh title="PC"
 ./fplinux dependencies restore --release <release-id>
@@ -19,7 +21,7 @@ Use the matching source revision and the twelve-character build ID shown in the 
 ./fplinux doctor
 ```
 
-Each public Release contains its complete inputs-only snapshot, split into transport parts, alongside the runtime ZIPs and corresponding sources. Restoration downloads those public assets without private credentials, checks their association with this source checkout, verifies the transport and stored originals, then restores the declared cache files. It selects the explicit build ID; there is no `latest` selection.
+Each public Release contains its complete inputs-only snapshot, split into transport parts, alongside the runtime ZIPs and corresponding sources. Restoration looks for the exact build under the declared version's stable tag, then under its `build-<release-id>` tag if the stable tag has no matching inputs. It downloads public assets without private credentials, verifies the source association, transport and stored originals, then restores the declared cache files.
 
 The setup example selects `nokia-ta1618`; replace it with your target. Use the [setup selection](/fplinux/start/build/#select-setup-inputs) for a Windows archive, site tools or the complete checkout. Setup installs tools and prepares dependencies; it does not build images or archives.
 

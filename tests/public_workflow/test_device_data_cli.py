@@ -86,7 +86,7 @@ def device_data_cli(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> DeviceDa
     return DeviceDataCli(tmp_path, manifest)
 
 
-def test_public_original_import_retains_exact_source_originals_outputs_and_private_modes(
+def test_public_original_import_retains_files_and_prepared_outputs_in_the_private_store(
     device_data_cli: DeviceDataCli,
 ) -> None:
     """The real parser, target import, materializer and publisher admit one complete source."""
@@ -95,11 +95,22 @@ def test_public_original_import_retains_exact_source_originals_outputs_and_priva
 
     assert result.returncode == 0, result.stderr
     phone = device_data_cli.phone()
+    saved_originals = phone.parent / "originals"
+    saved_manifest = (saved_originals / "manifest.json").read_bytes()
     assert not (phone / "source").exists()
     assert not (phone / "originals").exists()
     assert device_data_cli.manifest.read_bytes() == expected_manifest
+    assert json.loads(saved_manifest) == {
+        "target": "example",
+        "directory": ".",
+        "files": [
+            {"name": name, "size": len(contents), "sha256": hashlib.sha256(contents).hexdigest()}
+            for name, contents in sorted(ORIGINALS.items())
+        ],
+    }
     for name, expected in ORIGINALS.items():
         assert (device_data_cli.root / "originals" / name).read_bytes() == expected
+        assert (saved_originals / name).read_bytes() == expected
     for name, expected in {
         "wcnmodem.bin": b"abc",
         "system-config.bin": b"CFG:a",
@@ -111,13 +122,14 @@ def test_public_original_import_retains_exact_source_originals_outputs_and_priva
     receipt = json.loads((phone / "receipt.json").read_bytes())
     assert receipt["source"] == {
         "kind": "original-files",
-        "size": len(expected_manifest),
-        "sha256": hashlib.sha256(expected_manifest).hexdigest(),
+        "size": len(saved_manifest),
+        "sha256": hashlib.sha256(saved_manifest).hexdigest(),
     }
     assert {item["source"] for item in receipt["groups"][0]["originals"]} == set(ORIGINALS)
-    for path in phone.rglob("*"):
-        assert path.stat().st_mode & 0o777 == (0o700 if path.is_dir() else 0o600)
-    assert phone.stat().st_mode & 0o777 == 0o700
+    for directory in (phone, saved_originals):
+        assert directory.stat().st_mode & 0o777 == 0o700
+        for path in directory.rglob("*"):
+            assert path.stat().st_mode & 0o777 == (0o700 if path.is_dir() else 0o600)
     assert not (device_data_cli.root / ".data/kern").exists()
     assert not (device_data_cli.root / ".data/out").exists()
     assert "./fplinux run example" in result.stdout
@@ -168,7 +180,9 @@ def test_public_original_import_materialization_failure_preserves_previous_phone
     first = device_data_cli.run("--from-originals", str(device_data_cli.manifest))
     assert first.returncode == 0, first.stderr
     phone = device_data_cli.phone()
+    saved_originals = phone.parent / "originals"
     previous_receipt = (phone / "receipt.json").read_bytes()
+    previous_manifest = (saved_originals / "manifest.json").read_bytes()
     target = device_data_cli.root / "targets/example/target.toml"
     target.write_text(
         target.read_text(encoding="utf-8").replace("size = 5", "size = 6", 1),
@@ -181,8 +195,8 @@ def test_public_original_import_materialization_failure_preserves_previous_phone
     assert "device-data group wcn-firmware" in result.stderr
     assert (phone / "receipt.json").read_bytes() == previous_receipt
     assert (phone / "groups/wcn-firmware/system-config.bin").read_bytes() == b"CFG:a"
-    assert list(phone.parent.glob(".phone-*")) == []
-    assert [path for path in phone.parent.iterdir() if path.is_dir()] == [phone]
+    assert (saved_originals / "manifest.json").read_bytes() == previous_manifest
+    assert {path for path in phone.parent.iterdir() if path.is_dir()} == {phone, saved_originals}
 
 
 @pytest.mark.parametrize("source", ["originals", "nand"])

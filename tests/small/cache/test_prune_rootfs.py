@@ -22,6 +22,8 @@ from tests.small.cache.prune_fixtures import patch_prune_discovery
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from fplinux_cli.artifacts.release_identity import ReleaseContext
+
 
 @pytest.fixture
 def phone_store_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
@@ -86,12 +88,12 @@ class RootfsPruneTests:
             _signing_key: str,
             packages: tuple[str, ...],
             *,
-            release_id: str,
+            release: ReleaseContext,
             firmware_inputs: tuple[firmware_inputs.FirmwareInput, ...],
             display_brightness: dict[str, object] | None,
             root_kind: str,
         ) -> str:
-            assert release_id == current_release_context().release_id
+            assert release == current_release_context()
             assert (root_kind) == ("initramfs")
             assert (firmware_inputs) == (())
             assert (display_brightness) == (
@@ -290,12 +292,12 @@ class RootfsPruneTests:
             _key: str,
             packages: tuple[str, ...],
             *,
-            release_id: str,
+            release: ReleaseContext,
             firmware_inputs: tuple[firmware_inputs.FirmwareInput, ...],
             display_brightness: dict[str, object] | None,
             root_kind: str,
         ) -> str:
-            assert release_id == current_release_context().release_id
+            assert release == current_release_context()
             assert (display_brightness) is None
             assert (root_kind) == ("external" if packages == ("package-host",) else "initramfs")
             recipes: dict[tuple[str, ...], str] = {
@@ -416,7 +418,7 @@ class RootfsPruneTests:
                 environment_recipe,
                 signing_key,
                 (),
-                release_id=current_release_context().release_id,
+                release=current_release_context(),
                 firmware_inputs=selected,
                 root_kind=root_kind,
             )

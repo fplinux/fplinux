@@ -10,7 +10,8 @@ from unittest import mock
 import fplinux_cli.workspace.capture as workspace_capture
 import fplinux_cli.workspace.staging as workspace_staging
 import pytest
-from fplinux_cli.artifacts.release import ReleaseContext, current_release_context
+from fplinux_cli.artifacts.release import current_release_context
+from fplinux_cli.artifacts.release_identity import ReleaseContext
 
 from tests.small.workspace.workspace_fixtures import write_source
 
@@ -28,8 +29,8 @@ class WorkspaceMaterializationTests:
         """A partial target workspace carries the full release rather than rehashing itself."""
         source = write_source(tmp_path)
         causal = workspace_capture.workspace_snapshot([("selected/source.c", source)])
-        first_release = ReleaseContext("012345abcdef", None, "012345abcdef" + "0" * 52)
-        second_release = ReleaseContext("abcdef012345", None, "abcdef012345" + "0" * 52)
+        first_release = ReleaseContext("012345abcdef", "1.0.0", None, "012345abcdef" + "0" * 52)
+        second_release = ReleaseContext("abcdef012345", "1.0.0", None, "abcdef012345" + "0" * 52)
         first = replace(causal, release_context=first_release)
         second = replace(causal, release_context=second_release)
         with mock.patch.object(workspace_staging, "ROOT", tmp_path):

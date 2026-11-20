@@ -12,7 +12,8 @@ from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, cast
 
 from fplinux_cli import common
-from fplinux_cli.artifacts.release import capture_public_sources, release_context_from_fields
+from fplinux_cli.artifacts.release import capture_public_sources
+from fplinux_cli.artifacts.release_identity import RELEASE_FIELDS, release_context_from_fields
 from fplinux_cli.common import canonical_json_bytes, fail, is_sha256
 from fplinux_cli.data_paths import DATA_DIR_NAME, PRIVATE_DIR_NAME, data_root
 from fplinux_cli.manifests import releases, targets
@@ -26,7 +27,7 @@ if TYPE_CHECKING:
     from collections.abc import Collection
     from typing import Any
 
-    from fplinux_cli.artifacts.release import ReleaseContext
+    from fplinux_cli.artifacts.release_identity import ReleaseContext
     from fplinux_cli.packaging.sources import SourcePayload
 
 _MAX_ASSET_BYTES = 2 * 1024**3
@@ -81,7 +82,7 @@ def source_distribution(data: bytes) -> dict[str, Any]:
         fail(f"invalid source distribution metadata: {error}")
     if (
         not isinstance(metadata, dict)
-        or set(metadata) != {"release_id", "source_commit", "source_snapshot", "runtimes"}
+        or set(metadata) != RELEASE_FIELDS | {"runtimes"}
         or not isinstance(metadata["runtimes"], list)
         or not metadata["runtimes"]
     ):
@@ -278,9 +279,7 @@ def package_release(
     cache = data_root(common.ROOT)
     snapshot = capture_public_sources(selected_data_root=cache)
     release = snapshot.release
-    archives = {
-        name: HostArchive(name, release.release_id) for name in sorted({h for _, h in selections})
-    }
+    archives = {name: HostArchive(name, release) for name in sorted({h for _, h in selections})}
     sources = project_source_files(snapshot)
     identities = {}
     native = HostPayloads(cache, jobs)

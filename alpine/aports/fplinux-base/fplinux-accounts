@@ -1,0 +1,29 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-2.0-only
+
+set -eu
+
+ensure_group() {
+	if ! grep -q "^$1:" /etc/group; then
+		addgroup -S -g "$2" "$1"
+	fi
+	if ! grep -q "^$1:[^:]*:$2:" /etc/group; then
+		printf 'fplinux-accounts: group %s must have GID %s\n' "$1" "$2" >&2
+		exit 1
+	fi
+}
+
+# Both system-card slots use the same numeric ownership for the shared home.
+ensure_group render 101
+ensure_group fplinux 102
+if ! id fplinux >/dev/null 2>&1; then
+	adduser -S -D -H -u 100 -h /home/fplinux -s /bin/sh -G fplinux fplinux
+fi
+if [ "$(id -u fplinux)" != 100 ] || [ "$(id -g fplinux)" != 102 ]; then
+	printf 'fplinux-accounts: user fplinux must have UID 100 and GID 102\n' >&2
+	exit 1
+fi
+case " $(id -nG fplinux) " in
+*" render "*) ;;
+*) addgroup fplinux render ;;
+esac

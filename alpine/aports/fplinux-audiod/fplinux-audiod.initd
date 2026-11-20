@@ -15,14 +15,11 @@ respawn_max=0
 retry="TERM/3/KILL/2"
 
 depend() {
-	need devfs
+	need devfs fplinux-devices
 	before fplinux-session
 }
 
 start_pre() {
-	# The rootfs is installed without scripts and the session creates its
-	# account later, but the sockets need the group now.
-	grep -q '^fplinux:' /etc/group || addgroup -S fplinux
 	# setgid, so that the sockets get group fplinux.
 	checkpath -d -o root:fplinux -m 2750 /run/fplinux-audio
 }

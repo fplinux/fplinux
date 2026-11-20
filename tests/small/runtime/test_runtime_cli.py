@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 from unittest import mock
 
 import pytest
-from fplinux_cli.runtime import cli
+from fplinux_cli.runtime import cli, workflow
 from fplinux_cli.runtime import live as live_runtime
 
 if TYPE_CHECKING:
@@ -40,7 +40,7 @@ def test_console_dispatches_to_saved_connection_without_starting_phone(
     )
     with (
         mock.patch.object(live_runtime, "console_bundle", return_value=7) as console,
-        mock.patch.object(cli, "run_phone", side_effect=AssertionError("fresh launch")),
+        mock.patch.object(workflow, "run_phone", side_effect=AssertionError("fresh launch")),
         pytest.raises(SystemExit) as stopped,
     ):
         cli.main(bundle_root=bundle)
@@ -56,6 +56,8 @@ def test_console_dispatches_to_saved_connection_without_starting_phone(
         pull=None,
         phone_data=None,
         verify_only=False,
+        shutdown=False,
+        connection=None,
     )
 
 
@@ -75,7 +77,7 @@ def test_console_rejects_phone_data_with_diagnostic_policy_before_dispatch(
         cli.main(bundle_root=tmp_path)
 
     assert stopped.value.code == 2
-    assert "not allowed with argument" in capsys.readouterr().err
+    assert "--allow-other-build cannot be combined" in capsys.readouterr().err
     console.assert_not_called()
 
 
@@ -92,7 +94,7 @@ def test_verify_dispatches_only_to_strict_saved_connection(
     )
     with (
         mock.patch.object(live_runtime, "console_bundle", return_value=1) as console,
-        mock.patch.object(cli, "run_phone", side_effect=AssertionError("fresh launch")),
+        mock.patch.object(workflow, "run_phone", side_effect=AssertionError("fresh launch")),
         pytest.raises(SystemExit) as stopped,
     ):
         cli.main(bundle_root=tmp_path)
@@ -108,4 +110,37 @@ def test_verify_dispatches_only_to_strict_saved_connection(
         pull=None,
         phone_data=None,
         verify_only=True,
+        shutdown=False,
+        connection=None,
     )
+
+
+def test_fixed_bundle_console_dispatches_shutdown_as_a_live_action(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    state = tmp_path / "state"
+    logs = tmp_path / "logs"
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "fplinux.py",
+            "console",
+            "--shutdown",
+            "--data-root",
+            str(state),
+            "--log-root",
+            str(logs),
+        ],
+    )
+    with (
+        mock.patch.object(live_runtime, "console_bundle", return_value=1) as console,
+        mock.patch.object(workflow, "run_phone", side_effect=AssertionError("fresh launch")),
+        pytest.raises(SystemExit) as stopped,
+    ):
+        cli.main(bundle_root=tmp_path)
+
+    assert stopped.value.code == 1
+    assert console.call_args.args == (tmp_path, state, logs)
+    assert console.call_args.kwargs["shutdown"] is True
+    assert console.call_args.kwargs["verify_only"] is False

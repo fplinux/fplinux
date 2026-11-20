@@ -37,7 +37,9 @@ A public Release includes the full distribution and the dependency transport par
 
 Release validation requires the full published phone set for both hosts and matching dependency inputs. Native smoke jobs exercise model selection and launcher commands under ordinary Linux and Windows accounts without a phone. USB driver installation and loading a real phone require a device test.
 
-Publication runs only for a push to the canonical repository's `main` branch after the required check, build and native smoke jobs succeed. A manual workflow run checks the assets without publishing. The publisher uploads a private draft, verifies every remote asset's name, size and digest, then publishes an ordinary Release. A retry verifies an existing published set or uploads only missing matching draft assets. Release notes compare the current commit with the last actually published Release.
+The canonical repository publishes after the required check, build and native smoke jobs succeed. A push of a stable tag such as `v1.0.0` publishes FPLinux 1.0.0 as Latest. The tag must match the checkout's `VERSION` and resolve to the exact commit used for the verified distribution. Stable release notes compare with the previous published stable version. A push to `main` publishes a `build-<release_id>` prerelease. A manual workflow run checks the assets without publishing.
+
+The publisher uploads a private draft and verifies every remote asset's name, size and SHA-256 before making the Release public. A retry verifies an existing published set or uploads only missing matching draft assets.
 
 ## Prepare a main push
 
@@ -48,6 +50,7 @@ Follow [Prepare an exact commit before pushing](/fplinux/guides/dependencies/#pr
 ```sh title="PC"
 ./fplinux inspect source
 ./fplinux inspect bundle nokia-ta1618
+./fplinux inspect bundle nokia-ta1618 --path
 ./fplinux inspect bundle nokia-ta1618 --current-source
 ./fplinux inspect archive path/to/FPLinux-linux-x64-….zip
 ./fplinux inspect distribution path/to/distribution
@@ -55,7 +58,7 @@ Follow [Prepare an exact commit before pushing](/fplinux/guides/dependencies/#pr
 ```
 
 - `source` shows the current public source snapshot and release identity without building.
-- `bundle` lists the selected build's identity, files, sizes and SHA-256 hashes and checks them against its build manifest. Add `--current-source` to compare source, target workspace, environment receipt and signing identity separately. The receipt comparison does not probe installed environment content. Use `--without-device-data` or `--phone-data PATH` when the build used that selection. A stale bundle remains inspectable without the comparison.
+- `bundle` lists the selected build's identity, files, sizes and SHA-256 hashes and checks them against its build manifest. `--path` prints only the absolute path of the selected generation for the given profile and build type. This mode checks the current pointer and manifest identity. Add `--current-source` to a full inspection to compare source, target workspace, environment receipt and signing identity separately. The receipt comparison does not probe installed environment content. Use `--without-device-data` or `--phone-data PATH` when the build used that selection. A stale bundle remains inspectable without the comparison.
 - `archive` checks a runtime or corresponding-sources ZIP against its complete `SHA256SUMS` and manifest records. Source inspection also checks the source identity and selected build material. This establishes internal consistency, not authenticity or phone operation.
 - `distribution` checks a packaged directory against its selected models and hosts, including its runtime and source association and any attached dependency inputs.
 - `apk` shows a package's metadata and file list. It does not install the package, run its scripts or verify its signature.

@@ -50,16 +50,7 @@ keyboard_layouts() {
 	}
 }
 
-if ! id fplinux >/dev/null 2>&1; then
-	if ! grep -q '^fplinux:' /etc/group; then
-		addgroup -S fplinux
-	fi
-	adduser -S -D -h /home/fplinux -s /bin/sh -G fplinux fplinux
-fi
-case " $(id -nG fplinux) " in
-*" render "*) ;;
-*) addgroup fplinux render || exit 1 ;;
-esac
+/usr/libexec/fplinux/accounts
 
 # Correct existing private directories do not need metadata writes on startup.
 prepare_directory() {

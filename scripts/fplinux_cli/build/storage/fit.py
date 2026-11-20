@@ -205,7 +205,7 @@ def _verify_fit(fit: Path, plan: FitPlan, zimage: Path, dtb: Path, ramdisk: Path
         firmware_data != ramdisk.read_bytes()
         or regular_file_record(ramdisk, "FIT file", FitImageError) != plan.ramdisk
     ):
-        raise FitImageError("FIT early firmware payload differs from its recipe")
+        raise FitImageError("FIT initramfs payload differs from its recipe")
     for node, data in (("kernel", kernel_data), ("fdt", fdt_data), ("ramdisk", firmware_data)):
         digest = properties[f"/images/{node}/hash"]
         _string(digest, "algo", "sha256")
@@ -229,7 +229,7 @@ def _verify_fit(fit: Path, plan: FitPlan, zimage: Path, dtb: Path, ramdisk: Path
     _string(firmware, "os", "linux")
     _string(firmware, "compression", "none")
     if "load" in firmware or "entry" in firmware:
-        raise FitImageError("FIT early firmware must remain in the loaded FIT")
+        raise FitImageError("FIT initramfs must remain in the loaded FIT")
     _string(properties["/configurations"], "default", plan.target)
     _string(properties[configuration], "description", plan.display_name)
     _string(properties[configuration], "kernel", "kernel")
@@ -289,7 +289,7 @@ def build(  # noqa: PLR0913 -- tool and artifact paths remain explicit.
     if cache_hit(output, plan):
         return output / str(plan.spec["filename"])
     output.parent.mkdir(parents=True, exist_ok=True)
-    payloads = ((zimage, "zImage"), (dtb, "linux.dtb"), (ramdisk, "early-firmware.cpio"))
+    payloads = ((zimage, "zImage"), (dtb, "linux.dtb"), (ramdisk, "initramfs.cpio"))
     with tempfile.TemporaryDirectory(dir=output.parent, prefix=".fit-image.") as name:
         temporary = Path(name)
         for source, filename in payloads:

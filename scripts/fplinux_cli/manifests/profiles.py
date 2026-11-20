@@ -400,6 +400,9 @@ def load_profile(
             "block_size": storage["block_size"],
             "inode_size": storage["inode_size"],
         }
+        if uboot_boot:
+            # Reserve group descriptors through the last 512-byte DOS sector.
+            image["online_resize_bytes"] = 1 << 41
     return {
         "name": profile,
         "linux": {"root": root},

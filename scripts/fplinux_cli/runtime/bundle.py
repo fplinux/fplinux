@@ -15,6 +15,7 @@ from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any, NoReturn
 
 from fplinux_cli.artifacts.build_manifest import BUILD_MANIFEST_FIELDS
+from fplinux_cli.artifacts.release_identity import RELEASE_FIELDS, require_release_version
 from fplinux_cli.common import canonical_json_bytes, sha256_file
 from fplinux_cli.runtime.ssh.errors import fail as ssh_fail
 
@@ -206,9 +207,6 @@ def load_runtime_manifest(path: Path) -> dict[str, Any]:
             "target",
             "profile",
             "build_type",
-            "release_id",
-            "source_commit",
-            "source_snapshot",
             "identity",
             "transport",
             "image",
@@ -222,7 +220,8 @@ def load_runtime_manifest(path: Path) -> dict[str, Any]:
             "emmc",
             "device_data",
             "sha256",
-        },
+        }
+        | RELEASE_FIELDS,
         "runtime manifest",
     )
     root["target"] = require_string(root.get("target"), "runtime target")
@@ -230,6 +229,7 @@ def load_runtime_manifest(path: Path) -> dict[str, Any]:
     if root.get("build_type") not in ("release", "debug"):
         fail("runtime build type must be release or debug")
     root["release_id"] = require_string(root["release_id"], "runtime release ID")
+    root["release_version"] = require_release_version(root["release_version"])
     if root["source_commit"] is not None:
         root["source_commit"] = require_string(root["source_commit"], "runtime source commit")
     root["source_snapshot"] = require_string(root["source_snapshot"], "runtime source snapshot")
@@ -632,7 +632,7 @@ def bundle_identity(bundle: Path, runtime: dict[str, Any]) -> dict[str, str]:
         or manifest.get("build_type") != build_type
     ):
         ssh_fail("build manifest does not match the runtime target, profile or build type")
-    for field in ("release_id", "source_commit", "source_snapshot"):
+    for field in RELEASE_FIELDS:
         if field not in runtime or manifest[field] != runtime[field]:
             ssh_fail("build manifest does not match the runtime release identity")
     generation = manifest.get("generation")

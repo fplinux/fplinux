@@ -29,6 +29,7 @@ if TYPE_CHECKING:
 
 _BOARD_FILE = "./etc/fplinux/brightness"
 _BOARD_DATA = b"display=8\n"
+_FIT_BOOTSTRAP = b"fixed initramfs prefix".ljust(1024, b"\0")
 
 
 @pytest.fixture
@@ -51,7 +52,7 @@ def card_kit(tmp_path: Path) -> Path:
         + b"0000000b00000000"
         + b"TRAILER!!!\0"
     )
-    ramdisk = trailer.ljust(4096, b"\0")
+    ramdisk = _FIT_BOOTSTRAP + trailer.ljust(4096, b"\0")
     digest = hashlib.sha256(ramdisk).digest()
     fit = binary_tree(
         [("description", b"FPLinux release\0")],
@@ -73,6 +74,7 @@ def card_kit(tmp_path: Path) -> Path:
         "target": "inoi-240-modern-4g",
         "release_id": "test-release",
         "boot_offset": 1_048_576,
+        "disk_signature": 0x46504C58,
         "boot_size": 67_108_864,
         "root_offset": 68_157_440,
         "root_size": 67_108_864,
@@ -80,7 +82,7 @@ def card_kit(tmp_path: Path) -> Path:
         "root_sha256": "b" * 64,
         "fit_filename": "FPLINUX.ITB",
         "fit_ramdisk_offset": fit.index(ramdisk),
-        "fit_ramdisk_size": 4096,
+        "fit_ramdisk_size": 5120,
         "fit_hash_offset": fit.index(digest),
     }
     (card_dir / "layout.json").write_text(json.dumps(layout), encoding="utf-8")
@@ -89,6 +91,21 @@ def card_kit(tmp_path: Path) -> Path:
 
 def _firmware(destination: str, data: bytes) -> FirmwareInput:
     return FirmwareInput(destination, destination, data, hashlib.sha256(data).hexdigest())
+
+
+@pytest.mark.parametrize("signature", [None, True, -1, 0x100000000])
+def test_card_layout_requires_an_unsigned_mbr_disk_signature(
+    card_kit: Path, signature: int | None
+) -> None:
+    layout_path = card_kit / "layout.json"
+    record = json.loads(layout_path.read_text(encoding="utf-8"))
+    if signature is None:
+        del record["disk_signature"]
+    else:
+        record["disk_signature"] = signature
+    layout_path.write_text(json.dumps(record), encoding="utf-8")
+    with pytest.raises(CardMediaError, match="invalid disk_signature"):
+        read_card_layout(card_kit)
 
 
 def test_personalization_updates_only_fit_ramdisk_and_installs_private_firmware(
@@ -112,7 +129,16 @@ def test_personalization_updates_only_fit_ramdisk_and_installs_private_firmware(
     assert layout.target == "inoi-240-modern-4g"
     assert layout.release_id == "test-release"
     assert layout.capacity_bytes == 135_266_304
-    assert layout.writer_arguments() == ("1", "64", "65", "64", "a" * 64, "b" * 64, "FPLINUX.ITB")
+    assert layout.writer_arguments() == (
+        "1",
+        "64",
+        "65",
+        "64",
+        "a" * 64,
+        "b" * 64,
+        "inoi-240-modern-4g",
+        "test-release",
+    )
     assert (personal.name, checksums.name, fit.name) == (
         "personal.tar",
         "installed.sha256",
@@ -133,14 +159,15 @@ def test_personalization_updates_only_fit_ramdisk_and_installs_private_firmware(
     for path in ("/images/kernel", "/images/fdt", "/configurations"):
         assert after[path] == before[path]
     ramdisk = after["/images/ramdisk"]["data"]
-    assert len(ramdisk) == 4096
+    assert ramdisk[:1024] == _FIT_BOOTSTRAP
+    assert len(ramdisk) == 5120
     assert after["/images/ramdisk/hash"]["value"] == hashlib.sha256(ramdisk).digest()
     assert locate_fit_ramdisk(template, before["/images/ramdisk"]["data"]) == (
         template.index(before["/images/ramdisk"]["data"]),
         template.index(before["/images/ramdisk/hash"]["value"]),
     )
     early_files = {
-        item.name: (item.mode, item.data) for item in newc_entries(ramdisk) if item.data
+        item.name: (item.mode, item.data) for item in newc_entries(ramdisk[-4096:]) if item.data
     }
     assert early_files == {"lib/firmware/fplinux/audio.bin": (0o100600, b"sound settings")}
     expected = {
@@ -150,7 +177,7 @@ def test_personalization_updates_only_fit_ramdisk_and_installs_private_firmware(
     }
     with tarfile.open(personal, "r") as archive:
         assert set(archive.getnames()) == expected.keys()
-        lines = [f"{hashlib.sha256(_BOARD_DATA).hexdigest()}  {_BOARD_FILE}\n"]
+        lines = [f"{hashlib.sha256(_BOARD_DATA).hexdigest()}  system/a/root/{_BOARD_FILE}\n"]
         for member in archive:
             assert member.isfile()
             assert (member.mode, member.uid, member.gid) == (0o600, 0, 0)
@@ -159,7 +186,7 @@ def test_personalization_updates_only_fit_ramdisk_and_installs_private_firmware(
             contents = stored.read()
             data = lzma.decompress(contents) if member.name.endswith(".xz") else contents
             assert data == expected[member.name]
-            lines.append(f"{hashlib.sha256(contents).hexdigest()}  {member.name}\n")
+            lines.append(f"{hashlib.sha256(contents).hexdigest()}  data/{member.name}\n")
     assert checksums.read_bytes() == "".join(lines).encode("ascii")
 
 
@@ -174,19 +201,21 @@ def test_card_without_phone_firmware_retains_the_fit_and_checks_only_board_files
     assert fit.read_bytes() == (card_kit / "fit.itb").read_bytes()
     assert (
         checksums.read_bytes()
-        == f"{hashlib.sha256(_BOARD_DATA).hexdigest()}  {_BOARD_FILE}\n".encode()
+        == f"{hashlib.sha256(_BOARD_DATA).hexdigest()}  system/a/root/{_BOARD_FILE}\n".encode()
     )
     with tarfile.open(personal, "r") as archive:
         assert archive.getnames() == []
 
 
+@pytest.mark.parametrize("damaged_field", ["initramfs", "hash"])
 def test_fit_hash_mismatch_preserves_release_and_does_not_stage_phone_data(
-    card_kit: Path, tmp_path: Path
+    card_kit: Path, tmp_path: Path, damaged_field: str
 ) -> None:
     layout = read_card_layout(card_kit)
     fit = card_kit / "fit.itb"
     damaged = bytearray(fit.read_bytes())
-    damaged[layout.fit_hash_offset] ^= 0xFF
+    offset = layout.fit_ramdisk_offset if damaged_field == "initramfs" else layout.fit_hash_offset
+    damaged[offset] ^= 0xFF
     fit.write_bytes(damaged)
     stage = tmp_path / "stage"
     stage.mkdir()

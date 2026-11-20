@@ -37,6 +37,7 @@ def source_checkout(tmp_path: Path) -> Path:
     root.mkdir()
     for relative, contents in (
         ("README.md", b"Project\n"),
+        ("VERSION", b"1.0.0\n"),
         ("scripts/main.py", b"print('source')\n"),
         ("targets/first/target.toml", b'platform = "first"\n'),
         ("targets/second/target.toml", b'platform = "second"\n'),
@@ -63,6 +64,7 @@ def test_clean_sources_use_full_commit_prefix_for_every_target(source_checkout: 
     commit = git(source_checkout, "rev-parse", "HEAD")
     captured = capture_public_sources(source_checkout)
     assert captured.release.release_id == commit[:12]
+    assert captured.release.release_version == "1.0.0"
     assert captured.release.source_commit == commit
     assert current_release_context(source_checkout) == captured.release
 
@@ -92,6 +94,36 @@ def test_source_mode_changes_common_content_id(source_checkout: Path) -> None:
     dirty = capture_public_sources(source_checkout)
     assert dirty.release.release_id != clean.release.release_id
     assert dirty.release.source_snapshot != clean.release.source_snapshot
+
+
+def test_version_edit_uses_captured_bytes_and_changes_source_snapshot(
+    source_checkout: Path,
+) -> None:
+    first = capture_public_sources(source_checkout)
+    (source_checkout / "VERSION").write_bytes(b"1.0.1\n")
+    second = capture_public_sources(source_checkout)
+
+    assert first.release.release_version == "1.0.0"
+    assert second.release.release_version == "1.0.1"
+    assert second.release.source_commit == first.release.source_commit
+    assert second.release.source_snapshot != first.release.source_snapshot
+    assert second.release.release_id == second.release.source_snapshot[:12]
+
+
+@pytest.mark.parametrize(
+    ("contents", "message"),
+    [(b"01.0.0\n", r"MAJOR\.MINOR\.PATCH"), (None, "lack the release version declaration")],
+)
+def test_capture_rejects_an_invalid_release_declaration(
+    source_checkout: Path, contents: bytes | None, message: str
+) -> None:
+    path = source_checkout / "VERSION"
+    if contents is None:
+        path.unlink()
+    else:
+        path.write_bytes(contents)
+    with pytest.raises(SystemExit, match=message):
+        capture_public_sources(source_checkout)
 
 
 def test_group_write_mode_keeps_the_canonical_clean_git_identity(source_checkout: Path) -> None:
@@ -195,8 +227,9 @@ def test_source_export_retains_identity_without_git_until_public_sources_change(
     restored = capture_public_sources(exported)
     assert restored.files == captured.files
     assert restored.release == captured.release
-    (exported / "targets/first/target.toml").write_bytes(b'platform = "changed"\n')
+    (exported / "VERSION").write_bytes(b"1.2.3\n")
     changed = current_release_context(exported)
     assert changed.release_id != captured.release.release_id
     assert changed.release_id == changed.source_snapshot[:12]
     assert changed.source_commit == captured.release.source_commit
+    assert changed.release_version == "1.2.3"

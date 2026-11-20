@@ -22,6 +22,7 @@ path = [
   "alpine.lock.toml",
   "alpine/**",
   "THIRD_PARTY_NOTICES.md",
+  "VERSION",
   "_typos.toml",
   "bootstrap/**",
   "commitlint.config.mjs",

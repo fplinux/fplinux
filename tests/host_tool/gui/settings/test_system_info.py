@@ -30,7 +30,7 @@ def test_system_identity_reads_release_fields_and_model(tmp_path: Path) -> None:
         name="compile system identity harness",
     )
     release = tmp_path / "os-release"
-    release.write_text('NAME="FPLinux"\nVERSION_ID=1\nBUILD_ID="012345abcdef"\n')
+    release.write_text('NAME="FPLinux"\nVERSION_ID=1.0.0\nBUILD_ID="012345abcdef"\n')
     version = tmp_path / "version"
     version.write_text("NAME=FPLinux\nVERSION_ID=1\nVERSION='Rolling'\n")
     missing = tmp_path / "missing"

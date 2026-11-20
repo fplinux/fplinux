@@ -8,7 +8,8 @@ import tarfile
 from typing import TYPE_CHECKING, Any
 
 from fplinux_cli.artifacts.footprint import FootprintError, compare_footprints, inspect_footprint
-from fplinux_cli.artifacts.release import current_release_context, release_context_from_fields
+from fplinux_cli.artifacts.release import current_release_context
+from fplinux_cli.artifacts.release_identity import release_context_from_fields
 from fplinux_cli.common import display_text, fail, sha256_file
 from fplinux_cli.runtime.bundle_session import resolve_target_bundle
 
@@ -20,6 +21,7 @@ if TYPE_CHECKING:
 def _print_release(manifest: Mapping[str, object]) -> None:
     release = release_context_from_fields(manifest)
     print(f"release_id: {release.release_id}")
+    print(f"release_version: {release.release_version}")
     print(f"source_commit: {release.source_commit or '-'}")
     print(f"source_snapshot: {release.source_snapshot}")
 
@@ -46,14 +48,18 @@ def inspect_bundle(  # noqa: PLR0913 -- build context and phone data selection s
     *,
     profile: str | None = None,
     build_type: str = "release",
+    path_only: bool = False,
     current_source: bool = False,
     include_device_data: bool = True,
     phone_data: Path | None = None,
 ) -> None:
-    """Read the selected current generation and compare its files to its build manifest."""
+    """Resolve the current generation and optionally verify its payload files."""
     if not current_source and (not include_device_data or phone_data is not None):
         fail("--phone-data and --without-device-data require --current-source")
     bundle, manifest = resolve_target_bundle(target, profile, build_type=build_type)
+    if path_only:
+        print(bundle.path)
+        return
     files = manifest.get("files")
     if not isinstance(files, dict) or not files:
         fail("build manifest has no file records")
@@ -258,7 +264,8 @@ def inspect_archive(path: Path) -> None:
             print(f"runtime: {name} {digest}")
     else:
         print("kind: universal runtime")
-        print(f"release: {report.release_id}")
+        print(f"release: {report.release.release_id}")
+        print(f"release_version: {report.release.release_version}")
         for target in report.targets:
             print(f"target: {target}")
     print("SIZE SHA256 PATH")

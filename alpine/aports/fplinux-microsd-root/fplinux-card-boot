@@ -1,0 +1,55 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-2.0-only
+
+set -eu
+
+fail() {
+	printf '%s\n' "$*" >&2
+	exit 1
+}
+
+[ "$#" -eq 1 ] || fail "Expected a system-card boot action"
+case "$1" in
+inspect | confirm) ;;
+*) fail "Unknown system-card boot action" ;;
+esac
+backing=/run/fplinux-card
+chosen=/sys/firmware/devicetree/base/chosen/fplinux,slot
+if printf 'a\000' | busybox cmp -s "$chosen" -; then
+	slot=a
+elif printf 'b\000' | busybox cmp -s "$chosen" -; then
+	slot=b
+else
+	fail "The running system has no valid microSD slot"
+fi
+
+busybox awk -v backing="$backing" -v root="/system/$slot/root" '
+	$5 == "/" || $5 == backing {
+		for (i = 7; i < NF && $i != "-"; i++)
+			continue
+		if ($(i + 1) == "ext4") {
+			if ($5 == "/" && $4 == root) {
+				active = $3
+				roots++
+			} else if ($5 == backing && $4 == "/") {
+				device = $3
+				cards++
+			}
+		}
+	}
+	END { exit !(roots == 1 && cards == 1 && active == device) }
+' /proc/self/mountinfo || fail "The mounted root does not match the microSD slot"
+
+printf '%s\n' "$slot" | busybox cmp -s "$backing/system/active" - ||
+	fail "The active microSD slot differs from the running root"
+
+if [ "$1" = inspect ]; then
+	printf 'slot=%s\n' "$slot"
+	exit 0
+fi
+
+printf 'ready\n' | busybox cmp -s /run/fplinux-gui/ready - ||
+	fail "The graphical phone session has not become ready"
+target=$(busybox cat "$backing/system/target")
+build_id=$(busybox sed -n 's/^BUILD_ID=//p' /etc/os-release)
+exec sh /usr/libexec/fplinux/card-slots.sh "$backing" "$target" confirm "$build_id"

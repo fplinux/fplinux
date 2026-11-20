@@ -9,8 +9,10 @@ import shutil
 import subprocess
 import urllib.request
 from dataclasses import dataclass
+from email.message import Message
 from pathlib import Path
 from typing import TYPE_CHECKING
+from urllib.error import HTTPError
 
 import tomlkit
 from fplinux_cli import common
@@ -26,6 +28,8 @@ from fplinux_cli.dependencies.workflow import (
 from fplinux_cli.reporting import run as reporting
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     import pytest
 
 _ABC_SHA256 = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
@@ -78,6 +82,7 @@ def make_release_checkout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Re
     """Use real selection and source capture, while all declared originals contain abc."""
     root = tmp_path / "checkout"
     shutil.copytree(Path(__file__).parents[2] / "fixtures/dependencies/checkout", root)
+    (root / "VERSION").write_bytes(b"1.0.0\n")
     (root / "sources.lock.toml.fixture").rename(root / "sources.lock.toml")
     for path in root.rglob("*.toml"):
         text = re.sub(r"[a-f0-9]{64}", _ABC_SHA256, path.read_text())
@@ -131,18 +136,22 @@ def make_release_checkout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Re
 
 
 def serve_release_bytes(
-    monkeypatch: pytest.MonkeyPatch, directory: Path, release_id: str
+    monkeypatch: pytest.MonkeyPatch, releases: Mapping[str, Path]
 ) -> list[str]:
     """Replace only HTTP response bytes; downloads retain hashing and atomic publication."""
     requested: list[str] = []
-    base = f"https://github.com/fplinux/fplinux/releases/download/build-{release_id}/"
+    base = "https://github.com/fplinux/fplinux/releases/download/"
 
     def open_url(request: urllib.request.Request, *, timeout: int) -> io.BytesIO:
         assert timeout == 60
         assert request.full_url.startswith(base)
         assert not request.has_header("Authorization")
-        name = request.full_url.removeprefix(base)
-        requested.append(name)
+        asset = request.full_url.removeprefix(base)
+        tag, name = asset.split("/", 1)
+        requested.append(asset)
+        directory = releases.get(tag)
+        if directory is None:
+            raise HTTPError(request.full_url, 404, "Not Found", Message(), None)
         return io.BytesIO((directory / name).read_bytes())
 
     monkeypatch.setattr(urllib.request, "urlopen", open_url)

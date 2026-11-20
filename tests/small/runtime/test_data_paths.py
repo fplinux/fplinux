@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
-from fplinux_cli.runtime import cli
+from fplinux_cli.runtime import cli, workflow
 from fplinux_cli.runtime.data_paths import (
     archive_runtime_root,
     checkout_runtime_root,
@@ -80,7 +80,7 @@ def selected_runtime(
         return observed[-1]
 
     monkeypatch.setattr(sys, "argv", base_args)
-    monkeypatch.setattr(cli, "run_phone", phone)
+    monkeypatch.setattr(workflow, "run_phone", phone)
     return options, select
 
 

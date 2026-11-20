@@ -63,10 +63,15 @@ class AlpineRecipesTests:
             alpine_source.packages[0], "1" * 64, alpine_source.signing_key, alpine_source.root
         )
 
+    @pytest.mark.parametrize(
+        ("release_id", "release_version"),
+        [("abcdef012345", "1.0.0"), ("012345abcdef", "1.0.1")],
+        ids=["build-id", "release-version"],
+    )
     def test_release_change_recomposes_rootfs_and_preserves_package_recipe(
-        self, alpine_source: AlpineSourceContext
+        self, alpine_source: AlpineSourceContext, release_id: str, release_version: str
     ) -> None:
-        """A new displayed build ID misses rootfs while unchanged APK inputs stay reusable."""
+        """Changing either image stamp misses rootfs while unchanged APK inputs stay reusable."""
         first = alpine_source.recipe(release_id="012345abcdef")
         package = alpine_recipes.alpine_package_recipe(
             alpine_source.packages[0], "1" * 64, alpine_source.signing_key, alpine_source.root
@@ -76,7 +81,7 @@ class AlpineRecipesTests:
         (output / "rootfs.cpio").write_bytes(b"root filesystem\n")
         alpine_rootfs_state.write_receipt(output, first)
         assert alpine_rootfs_state.receipt_matches(output, first)
-        changed = alpine_source.recipe(release_id="abcdef012345")
+        changed = alpine_source.recipe(release_id=release_id, release_version=release_version)
         assert changed != first
         assert not alpine_rootfs_state.receipt_matches(output, changed)
         assert package == alpine_recipes.alpine_package_recipe(

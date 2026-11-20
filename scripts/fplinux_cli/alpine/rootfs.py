@@ -35,7 +35,7 @@ from .recipes import alpine_rootfs_recipe
 from .rootfs_files import (
     _install_display_brightness,
     _normalize_rootfs,
-    _stamp_build_id,
+    _stamp_release,
     _write_ramroot_initramfs,
     _write_rootfs_cpio,
 )
@@ -45,6 +45,7 @@ from .signing import _ensure_apk_signing_key
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
+    from typing import Literal
 
 _ROOTFS_BUILD_LOCK = ".build.lock"
 _alpine_tar_filter = partial(alpine_tar_filter, on_error=fail)
@@ -187,13 +188,14 @@ def build_rootfs(  # noqa: PLR0913 -- rootfs content and optional image output s
     *,
     firmware: Sequence[firmware_inputs.FirmwareInput] = (),
     display_brightness: dict[str, Any] | None = None,
+    root_kind: Literal["initramfs", "external"] = "initramfs",
     external_image: dict[str, Any] | None = None,
     external_output: Path | None = None,
     ram_base_packages: tuple[str, ...] | None = None,
 ) -> tuple[Path, Path, str, dict[str, Path]]:
     """Build a rootfs and its APKs, caching any ext4 image without an explicit output."""
     environment_recipe = os.environ.get("FPLINUX_ENVIRONMENT_ARTIFACT_RECIPE", "")
-    release_id = current_release_context().release_id
+    release = current_release_context()
     signing_private_key, signing_public_key, signing_key_identity = _ensure_apk_signing_key()
     ram_base_recipe = None
     ram_base_initramfs = None
@@ -204,10 +206,10 @@ def build_rootfs(  # noqa: PLR0913 -- rootfs content and optional image output s
         environment_recipe,
         signing_key_identity,
         packages,
-        release_id=release_id,
+        release=release,
         firmware_inputs=firmware,
         display_brightness=display_brightness,
-        root_kind="external" if external_image is not None else "initramfs",
+        root_kind=root_kind,
     )
     recipe = rootfs_state.layered_rootfs_recipe(recipe, ram_base_recipe)
     overlap = set(packages) & set(bundle_packages)
@@ -224,6 +226,8 @@ def build_rootfs(  # noqa: PLR0913 -- rootfs content and optional image output s
     ext4_hit = external_image is None
     if external_image is None and external_output is not None:
         fail("external root output requires an image specification")
+    if external_image is not None and root_kind != "external":
+        fail("ext4 image requires an external root filesystem")
     cached_ext4 = external_image is not None and external_output is None
     if cached_ext4:
         external_output = output / rootfs_state.EXT4_IMAGE_DIRECTORY
@@ -352,7 +356,7 @@ def build_rootfs(  # noqa: PLR0913 -- rootfs content and optional image output s
 
             firmware_inputs.install_firmware_inputs(root, firmware)
             _install_display_brightness(root, display_brightness)
-            _stamp_build_id(root, release_id)
+            _stamp_release(root, release)
             _verify_alpine_rootfs(
                 root,
                 packages,
@@ -365,7 +369,7 @@ def build_rootfs(  # noqa: PLR0913 -- rootfs content and optional image output s
             _normalize_rootfs(root)
             if not rootfs_hit:
                 _write_rootfs_cpio(root, staging / rootfs_state.ROOTFS_NAME)
-                if external_image is None:
+                if root_kind == "initramfs":
                     _write_ramroot_initramfs(root, staging, base_initramfs=ram_base_initramfs)
                 rootfs_state.write_receipt(staging, recipe)
                 rootfs_receipt = rootfs_state.trusted_receipt_identity(staging, recipe)

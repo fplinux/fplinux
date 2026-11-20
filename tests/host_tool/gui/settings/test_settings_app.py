@@ -137,7 +137,7 @@ def test_settings_about_displays_build_id_separately_from_system_version(
 ) -> None:
     """The whole About form displays the stamped release ID through the file reader."""
     os_release = tmp_path / "os-release"
-    os_release.write_text('NAME=FPLinux\nVERSION_ID=1\nBUILD_ID="012345abcdef"\n')
+    os_release.write_text('NAME=FPLinux\nVERSION_ID=1.0.0\nBUILD_ID="012345abcdef"\n')
     environment = os.environ.copy()
     environment["FPLINUX_TEST_OS_RELEASE"] = str(os_release)
     result = run_process(
@@ -154,7 +154,7 @@ def test_settings_about_displays_build_id_separately_from_system_version(
         check=True,
     )
     facts = dict(line.split(": ", 1) for line in result.stdout.splitlines()[:-1])
-    assert facts["System"] == "FPLinux 1"
+    assert facts["System"] == "FPLinux 1.0.0"
     assert facts["Build"] == "012345abcdef"
 
 

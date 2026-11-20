@@ -31,7 +31,7 @@
 		};
 	};
 	configurations {
-		default = "bq-2830l-tank-connect-max";
-		bq-2830l-tank-connect-max { kernel = "kernel"; fdt = "fdt"; ramdisk = "ramdisk"; };
+		default = "TARGET";
+		TARGET { kernel = "kernel"; fdt = "fdt"; ramdisk = "ramdisk"; };
 	};
 };

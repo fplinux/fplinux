@@ -124,7 +124,8 @@ def test_release_launcher_and_reconstructed_runtime_work_without_the_checkout(
         timeout=10,
     )
     assert help_result.returncode == 0, help_result.stderr
-    assert "--target" in help_result.stdout
+    assert "TARGET" in help_result.stdout
+    assert "--target" not in help_result.stdout
     assert "--from-dump" in help_result.stdout
     assert "--loader-trace" in help_result.stdout
     assert "--loader-inputs" not in help_result.stdout

@@ -140,7 +140,9 @@ class CliCacheLockTests:
         assert "--allow-other-build cannot be combined" in capsys.readouterr().err
         lock.assert_not_called()
 
-    @pytest.mark.parametrize("option", [["--exec", "id"], ["--allow-other-build"], ["--json"]])
+    @pytest.mark.parametrize(
+        "option", [["--exec", "id"], ["--allow-other-build"], ["--json"], ["--shutdown"]]
+    )
     def test_verify_rejects_actions_and_diagnostic_options(
         self, option: list[str], capsys: pytest.CaptureFixture[str]
     ) -> None:
@@ -155,6 +157,34 @@ class CliCacheLockTests:
 
         assert stopped.value.code == 2
         assert "error:" in capsys.readouterr().err
+        lock.assert_not_called()
+
+    def test_console_forwards_shutdown_to_expected_target(self, dispatch_root: Path) -> None:
+        """The checkout forwards explicit shutdown without changing the selected target."""
+        _events, console = run_dispatch(
+            dispatch_root,
+            ["console", "target", "--shutdown"],
+            "fplinux_cli.cli.runtime.console_target",
+        )
+
+        assert console.call_args.args == ("target",)
+        assert console.call_args.kwargs["shutdown"] is True
+
+    @pytest.mark.parametrize("option", [("--exec", "id"), ("--allow-other-build",)])
+    def test_shutdown_refuses_console_action_or_build_bypass_before_locking(
+        self, option: tuple[str, ...], capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """A rejected shutdown does not acquire the cache lock or reach the console."""
+        with (
+            mock.patch.object(sys, "argv", ["fplinux", "console", "--shutdown", *option]),
+            mock.patch("fplinux_cli.manifests.paths.discover_targets", return_value=("target",)),
+            mock.patch.object(lifecycle, "cache_lock") as lock,
+            pytest.raises(SystemExit) as stopped,
+        ):
+            cli.main()
+
+        assert stopped.value.code == 2
+        assert "--shutdown" in capsys.readouterr().err
         lock.assert_not_called()
 
     def test_console_forwards_the_explicit_lock_timeout(self, dispatch_root: Path) -> None:
@@ -1110,11 +1140,14 @@ class CliCacheLockTests:
             test_workers=None,
         )
 
-    def test_verify_forwards_the_selected_profile(self, dispatch_root: Path) -> None:
+    @pytest.mark.parametrize("selection", [("--profile", "microsd-uboot"), ("--boot", "microsd")])
+    def test_verify_forwards_the_selected_profile(
+        self, dispatch_root: Path, selection: tuple[str, str]
+    ) -> None:
         """A microSD verification cannot silently resolve the default bundle."""
         events, verify = run_dispatch(
             dispatch_root,
-            ["verify", "target", "--profile", "microsd-uboot"],
+            ["verify", "target", *selection],
             "fplinux_cli.cli.runtime.verify_booted",
         )
         assert (events) == (

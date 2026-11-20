@@ -15,9 +15,9 @@ from fplinux_cli.alpine import selection
 from fplinux_cli.artifacts.bundles import CurrentBundle
 from fplinux_cli.artifacts.release import (
     PublicSourceSnapshot,
-    ReleaseContext,
     public_source_digest,
 )
+from fplinux_cli.artifacts.release_identity import ReleaseContext
 from fplinux_cli.build import workflow
 from fplinux_cli.build.host_tools import linux_host, windows_driver
 from fplinux_cli.build.host_tools import windows as windows_build
@@ -283,11 +283,12 @@ def build_archive_inputs(
     project = (
         WorkspaceFile("LICENSE", b"project license\n", 0o644),
         WorkspaceFile("THIRD_PARTY_NOTICES.md", b"project notices\n", 0o644),
+        WorkspaceFile("VERSION", b"1.0.0\n", 0o644),
         WorkspaceFile("fplinux", b"#!/bin/sh\nexit 0\n", 0o755),
         WorkspaceFile(target_manifest, (tmp_path / target_manifest).read_bytes(), 0o644),
     )
     context = ReleaseContext(
-        "1234567890ab", "1234567890ab" + "0" * 28, public_source_digest(project)
+        "1234567890ab", "1.0.0", "1234567890ab" + "0" * 28, public_source_digest(project)
     )
     snapshot = PublicSourceSnapshot(project, context)
     build_calls: list[tuple[str, int, bool, ReleaseContext]] = []

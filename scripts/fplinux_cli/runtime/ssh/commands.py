@@ -6,12 +6,15 @@ from __future__ import annotations
 import os
 import re
 import shutil
+import subprocess
+import tempfile
 from typing import TYPE_CHECKING, Any
 
 from .errors import fail
 
 if TYPE_CHECKING:
-    from typing import BinaryIO
+    from collections.abc import Callable
+    from typing import IO, BinaryIO
 
 SSH_PORT = 22
 _REMOTE_PATH = re.compile(r"/(?:[A-Za-z0-9._-]+/)*[A-Za-z0-9._-]+")
@@ -137,6 +140,43 @@ def ssh_argv(
     if command is not None:
         argv.append(command)
     return argv
+
+
+def run_with_input(
+    argv: list[str], write: Callable[[IO[bytes]], None], *, creationflags: int = 0
+) -> subprocess.CompletedProcess[str]:
+    """Send a generated binary stream while collecting command diagnostics separately."""
+    with (
+        tempfile.TemporaryFile() as stdout,
+        tempfile.TemporaryFile() as stderr,
+        subprocess.Popen(
+            [argv[0], "-T", *argv[1:]],
+            stdin=subprocess.PIPE,
+            stdout=stdout,
+            stderr=stderr,
+            creationflags=creationflags,
+        ) as process,
+    ):
+        try:
+            if process.stdin is None:
+                fail("SSH input pipe is unavailable")
+            with process.stdin:
+                write(process.stdin)
+        except BrokenPipeError:
+            # A reader that rejects the card can close the channel before taking input.
+            pass
+        except BaseException:
+            process.kill()
+            raise
+        status = process.wait()
+        stdout.seek(0)
+        stderr.seek(0)
+        return subprocess.CompletedProcess(
+            argv,
+            status,
+            stdout.read().decode(errors="replace"),
+            stderr.read().decode(errors="replace"),
+        )
 
 
 def remote_path(value: str, name: str) -> str:

@@ -16,6 +16,8 @@ if TYPE_CHECKING:
 
     from .inputs import FirmwareInput
 
+FIT_AUDIO_CPIO_BYTES = 4096
+
 
 def create_device_data_initramfs(
     groups: Mapping[str, Sequence[FirmwareInput]],

@@ -148,6 +148,179 @@ def test_summary_reports_nested_stage_exits_without_log_contents(logs_cli: LogsC
     assert "STAGE STATUS EXIT\n" in result.stdout
     assert "source failed -\n" in result.stdout
     assert "containers/source/python failed 17\n" in result.stdout
+
+
+def test_grep_searches_complete_parent_and_child_logs_before_limiting_matches(
+    logs_cli: LogsCli,
+) -> None:
+    parent = logs_cli.journal("test/run", status="failed", stages=(("pytest", "failed"),))
+    child = logs_cli.journal(
+        "test/run/containers/selected-1/tool",
+        parent="test/run/containers/selected-1",
+        stages=(("render", "success"),),
+    )
+    (parent / "01-pytest.log").write_bytes(
+        b"unrelated\nERROR: omitted\nERROR: retained\n" + b"another line\n" * 70
+    )
+    (child / "01-render.log").write_bytes(b"ERROR: render\n" + b"clean\n" * 70)
+
+    result = logs_cli.run_logs("show", "test/run", "--grep", "^ERROR:", "--tail", "1")
+    failure = logs_cli.run_logs("show", "test/run", "--grep", "^ERROR:", "--failed")
+    selected = logs_cli.run_logs(
+        "show", "test/run", "--stage", "containers/selected-1/tool/render", "--grep", "^ERROR:"
+    )
+    missing = logs_cli.run_logs("show", "test/run", "--grep", "unmatched")
+
+    assert result.returncode == 0, result.stderr
+    assert failure.returncode == 0, failure.stderr
+    assert selected.returncode == 0, selected.stderr
+    assert missing.returncode == 0, missing.stderr
+    assert result.stdout.splitlines() == [
+        "test/run: failed",
+        "pytest:3:ERROR: retained",
+        "containers/selected-1/tool/render:1:ERROR: render",
+        "log matches truncated by --tail (1 omitted)",
+    ]
+    assert failure.stdout.splitlines() == [
+        "test/run: failed",
+        "pytest:2:ERROR: omitted",
+        "pytest:3:ERROR: retained",
+    ]
+    assert selected.stdout.splitlines() == [
+        "test/run: failed",
+        "containers/selected-1/tool/render:1:ERROR: render",
+    ]
+    assert missing.stdout.splitlines() == ["test/run: failed", "no matching log lines"]
+
+
+def test_grep_byte_limit_preserves_complete_numbered_matches(logs_cli: LogsCli) -> None:
+    run = logs_cli.journal("test/run", stages=(("one", "success"), ("two", "success")))
+    (run / "01-one.log").write_text("ñ\n", encoding="utf-8")
+    (run / "02-two.log").write_text("longer\n")
+
+    result = logs_cli.run_logs("show", "test/run", "--grep", ".", "--max-bytes", "4")
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines() == [
+        "test/run: success",
+        "one:1:ñ",
+        "log matches truncated by --max-bytes",
+    ]
+
+
+def test_summary_json_preserves_selected_nested_stage_state_without_reading_logs(
+    logs_cli: LogsCli,
+) -> None:
+    logs_cli.journal("check/example", status="interrupted", stages=(("source", "success"),))
+    logs_cli.journal(
+        "check/example/containers/source",
+        status="running",
+        parent="check/example/containers",
+        stages=(("python", "running"),),
+    )
+
+    result = logs_cli.run_logs("show", "check/example", "--summary", "--failed", "--json")
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    assert payload["run"]["id"] == "check/example"
+    assert payload["run"]["status"] == "interrupted"
+    assert payload["stages"] == [
+        {
+            "id": "containers/source/python",
+            "status": "running",
+            "exit_code": None,
+            "unfinished_parent_status": "interrupted",
+        }
+    ]
+
+
+def test_artifacts_lists_absolute_paths_in_an_unfinished_run_only(logs_cli: LogsCli) -> None:
+    run = logs_cli.journal("test/example/active", status="running")
+    child = logs_cli.journal(
+        "test/example/active/containers/selected-1/pytest",
+        status="running",
+        parent="test/example/active/containers/selected-1",
+        stages=(("host-tool", "running"),),
+    )
+    other = logs_cli.journal("test/example/other")
+    unrelated = logs_cli.journal("test/example/active/unrelated")
+    for directory in (other, unrelated):
+        (directory / "ignored.xml").touch()
+    captures = child / "frames/profile with spaces"
+    captures.mkdir(parents=True)
+    artifacts = sorted([run / "pytest-1.xml", captures / "capture.log", captures / "frame.ppm"])
+    for path in artifacts:
+        path.touch()
+    (child / "01-host-tool.log").touch()
+    (child / ".run.json.temporary").touch()
+    (child / "external").symlink_to(other, target_is_directory=True)
+    (child / "escaped.xml").symlink_to(other / "ignored.xml")
+    before = (run / "run.json").read_bytes()
+
+    result = logs_cli.run_logs("artifacts", "test/example/active")
+    machine = logs_cli.run_logs("artifacts", "test/example/active", "--json")
+
+    assert result.returncode == machine.returncode == 0, (result.stderr, machine.stderr)
+    assert result.stdout.splitlines() == [
+        "test/example/active: running",
+        *(str(path) for path in artifacts),
+    ]
+    payload = json.loads(machine.stdout)
+    assert payload["run"]["id"] == "test/example/active"
+    assert payload["run"]["status"] == "running"
+    assert payload["artifacts"] == [str(path) for path in artifacts]
+    assert (run / "run.json").read_bytes() == before
+
+
+def test_artifacts_empty_result_keeps_run_status(logs_cli: LogsCli) -> None:
+    logs_cli.journal("test/run", status="failed")
+
+    result = logs_cli.run_logs("artifacts", "run")
+    machine = logs_cli.run_logs("artifacts", "run", "--json")
+
+    assert result.returncode == machine.returncode == 0, (result.stderr, machine.stderr)
+    assert result.stdout.splitlines() == ["test/run: failed", "no artifacts in this run"]
+    payload = json.loads(machine.stdout)
+    assert payload["run"]["status"] == "failed"
+    assert payload["artifacts"] == []
+
+
+def test_artifacts_rejects_traversal_and_symlinked_run_directories(logs_cli: LogsCli) -> None:
+    outside = LogsCli(logs_cli.root, logs_cli.logs.parent / "outside")
+    run = outside.journal("test/run")
+    (run / "ignored.xml").touch()
+    logs_cli.logs.mkdir()
+    (logs_cli.logs / "test").symlink_to(run.parent, target_is_directory=True)
+
+    for selector in ("test/run", "../outside/test/run", str(run), "run"):
+        result = logs_cli.run_logs("artifacts", selector, "--json")
+        assert result.returncode == 1, result.stderr
+        assert "no matching log run:" in result.stderr
+        assert result.stdout == ""
+
+
+@pytest.mark.parametrize(
+    ("arguments", "exit_code", "error"),
+    [
+        (("show", "missing", "--grep", "x"), 1, "no matching log run"),
+        (("show", "same", "--grep", "x"), 1, "ambiguous run ID"),
+        (("show", "test/same", "--stage", "missing", "--grep", "x"), 1, "stage not found"),
+        (("show", "test/same", "--grep", "["), 2, "invalid regular expression"),
+        (("show", "test/same", "--grep", "x", "--json"), 2, "requires --summary"),
+        (("list", "--json"), 2, "unrecognized arguments"),
+    ],
+)
+def test_log_diagnostics_reject_invalid_selections_and_modes(
+    logs_cli: LogsCli, arguments: tuple[str, ...], exit_code: int, error: str
+) -> None:
+    logs_cli.journal("test/same")
+    logs_cli.journal("check/same")
+
+    result = logs_cli.run_logs(*arguments)
+
+    assert result.returncode == exit_code, result.stderr
+    assert error in result.stderr
     assert "long command output" not in result.stdout
     assert "private diagnostic output" not in result.stdout
 

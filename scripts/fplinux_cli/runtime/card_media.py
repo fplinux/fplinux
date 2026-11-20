@@ -13,18 +13,27 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from fplinux_cli.common import is_sha256, read_json_object, sha256_bytes
-from fplinux_cli.device_data.cpio import create_device_data_initramfs
+from fplinux_cli.device_data.cpio import FIT_AUDIO_CPIO_BYTES, create_device_data_initramfs
 from fplinux_cli.device_data.inputs import firmware_storage, rootfs_firmware_inputs
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Iterable, Mapping, Sequence
     from typing import TextIO
 
     from fplinux_cli.device_data.inputs import FirmwareInput
 
 CARD_WRITER = Path(__file__).with_name("install-card.sh")
-CARD_ASSETS = ("boot.xz", "root.ext4.xz", "board.tar", "fit.itb", "layout.json")
-CARD_FIT_RAMDISK_SIZE = 4096
+CARD_APK_INDEX = "apks/Packages.adb"
+CARD_APK_KEY = "apks/fplinux-build.rsa.pub"
+CARD_ASSETS = (
+    "boot.xz",
+    "root.ext4.xz",
+    "board.tar",
+    "fit.itb",
+    "layout.json",
+    CARD_APK_INDEX,
+    CARD_APK_KEY,
+)
 _MIB = 1024 * 1024
 _FDT_MAGIC = 0xD00DFEED
 _FDT_HEADER_SIZE = 40
@@ -37,6 +46,17 @@ class CardMediaError(RuntimeError):
     """A release card kit or its personalized contents are invalid."""
 
 
+def card_package_members(paths: Iterable[str]) -> tuple[str, ...]:
+    """Read the exact optional APK members admitted by the card build."""
+    return tuple(
+        sorted(
+            name
+            for name in paths
+            if name.startswith("card/apks/") and name.endswith(".apk") and name.count("/") == 2
+        )
+    )
+
+
 @dataclass(frozen=True)
 class CardLayout:
     """The target's fixed FAT and ext4 ranges, raw digests and inline FIT slot."""
@@ -47,9 +67,9 @@ class CardLayout:
     boot_size: int
     root_offset: int
     root_size: int
+    disk_signature: int
     boot_sha256: str
     root_sha256: str
-    fit_filename: str
     fit_ramdisk_offset: int
     fit_ramdisk_size: int
     fit_hash_offset: int
@@ -68,7 +88,8 @@ class CardLayout:
             str(self.root_size // _MIB),
             self.boot_sha256,
             self.root_sha256,
-            self.fit_filename,
+            self.target,
+            self.release_id,
         )
 
 
@@ -100,6 +121,9 @@ def read_card_layout(card_dir: Path) -> CardLayout:
         or not release_id
     ):
         raise CardMediaError("Card layout lacks a phone model or release identity")
+    disk_signature = record.get("disk_signature")
+    if type(disk_signature) is not int or not 0 <= disk_signature <= 0xFFFFFFFF:
+        raise CardMediaError("Card layout has an invalid disk_signature")
     layout = CardLayout(
         target=target,
         release_id=release_id,
@@ -107,11 +131,11 @@ def read_card_layout(card_dir: Path) -> CardLayout:
         boot_size=_layout_integer(record, "boot_size", alignment=_MIB),
         root_offset=_layout_integer(record, "root_offset", alignment=_MIB),
         root_size=_layout_integer(record, "root_size", alignment=_MIB),
+        disk_signature=disk_signature,
         boot_sha256=_layout_digest(record, "boot_sha256"),
         root_sha256=_layout_digest(record, "root_sha256"),
-        fit_filename=_FIT_FILENAME,
         fit_ramdisk_offset=_layout_integer(record, "fit_ramdisk_offset", alignment=4),
-        fit_ramdisk_size=_layout_integer(record, "fit_ramdisk_size", alignment=4),
+        fit_ramdisk_size=_layout_integer(record, "fit_ramdisk_size", alignment=512),
         fit_hash_offset=_layout_integer(record, "fit_hash_offset", alignment=4),
     )
     if layout.boot_offset + layout.boot_size != layout.root_offset:
@@ -120,7 +144,7 @@ def read_card_layout(card_dir: Path) -> CardLayout:
         raise CardMediaError("Card layout exceeds the supported system image size")
     if (
         record.get("fit_filename") != _FIT_FILENAME
-        or layout.fit_ramdisk_size != CARD_FIT_RAMDISK_SIZE
+        or layout.fit_ramdisk_size <= FIT_AUDIO_CPIO_BYTES
     ):
         raise CardMediaError("Card layout has an unsupported FIT filename or ramdisk size")
     return layout
@@ -169,21 +193,24 @@ def _personalize_fit(
     template: bytes, layout: CardLayout, firmware: Mapping[str, Sequence[FirmwareInput]]
 ) -> bytes:
     data_offset, hash_offset = layout.fit_ramdisk_offset, layout.fit_hash_offset
-    slot_size = layout.fit_ramdisk_size
-    empty = create_device_data_initramfs({}).ljust(slot_size, b"\0")
-    _verify_fit_slot(template, empty, data_offset, hash_offset)
+    data_end = data_offset + layout.fit_ramdisk_size
+    audio_offset = data_end - FIT_AUDIO_CPIO_BYTES
+    ramdisk = template[data_offset:data_end]
+    _verify_fit_slot(template, ramdisk, data_offset, hash_offset)
+    empty = create_device_data_initramfs({}).ljust(FIT_AUDIO_CPIO_BYTES, b"\0")
+    if template[audio_offset:data_end] != empty:
+        raise CardMediaError("Release FIT has no empty early audio archive")
     audio = create_device_data_initramfs({"audio-profile": firmware.get("audio-profile", ())})
-    if len(audio) > slot_size:
+    if len(audio) > FIT_AUDIO_CPIO_BYTES:
         raise CardMediaError("Prepared audio firmware exceeds the release FIT ramdisk slot")
-    ramdisk = audio.ljust(slot_size, b"\0")
-    digest = hashlib.sha256(ramdisk).digest()
     fit = bytearray(template)
-    fit[data_offset : data_offset + slot_size] = ramdisk
+    fit[audio_offset:data_end] = audio.ljust(FIT_AUDIO_CPIO_BYTES, b"\0")
+    digest = hashlib.sha256(memoryview(fit)[data_offset:data_end]).digest()
     fit[hash_offset : hash_offset + len(digest)] = digest
     return bytes(fit)
 
 
-def _write_board_checksums(archive: Path, records: TextIO) -> None:
+def _write_board_checksums(archive: Path, records: TextIO, *, prefix: str) -> None:
     try:
         with tarfile.open(archive, "r:") as board:
             for member in board:
@@ -194,7 +221,7 @@ def _write_board_checksums(archive: Path, records: TextIO) -> None:
                     raise CardMediaError(f"Cannot read board archive file {member.name}")
                 with contents:
                     digest = sha256_bytes(contents.read())
-                records.write(f"{digest}  {member.name}\n")
+                records.write(f"{digest}  {prefix}{member.name}\n")
     except tarfile.TarError as error:
         raise CardMediaError(f"Cannot read the board archive: {error}") from error
 
@@ -215,7 +242,7 @@ def _write_personal_archive(
             member.mode = 0o600
             member.size = len(contents)
             output.addfile(member, BytesIO(contents))
-            records.write(f"{sha256_bytes(contents)}  {path}\n")
+            records.write(f"{sha256_bytes(contents)}  data/{path}\n")
 
 
 def prepare_card_media(
@@ -230,6 +257,21 @@ def prepare_card_media(
     fit = destination / "fit.itb"
     fit.write_bytes(_personalize_fit((card_dir / "fit.itb").read_bytes(), layout, firmware))
     with checksums.open("x", encoding="utf-8", newline="\n") as records:
-        _write_board_checksums(card_dir / "board.tar", records)
+        _write_board_checksums(card_dir / "board.tar", records, prefix="system/a/root/")
         _write_personal_archive(archive, records, firmware)
     return archive, checksums, fit
+
+
+def prepare_card_update_media(
+    card_dir: Path,
+    destination: Path,
+    layout: CardLayout,
+    firmware: Mapping[str, Sequence[FirmwareInput]],
+) -> tuple[Path, Path]:
+    """Personalize the new FIT and check the board layer relative to either slot."""
+    checksums = destination / "board.sha256"
+    fit = destination / "fit.itb"
+    fit.write_bytes(_personalize_fit((card_dir / "fit.itb").read_bytes(), layout, firmware))
+    with checksums.open("x", encoding="utf-8", newline="\n") as records:
+        _write_board_checksums(card_dir / "board.tar", records, prefix="")
+    return checksums, fit

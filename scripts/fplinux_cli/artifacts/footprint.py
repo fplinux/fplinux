@@ -402,6 +402,7 @@ def inspect_footprint(bundle: CurrentBundle) -> dict[str, Any]:
                     "build_type",
                     "generation",
                     "release_id",
+                    "release_version",
                     "source_commit",
                     "source_snapshot",
                 )

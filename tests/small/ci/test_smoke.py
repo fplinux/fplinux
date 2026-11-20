@@ -32,7 +32,7 @@ def _bundle_recipe(
 ) -> dict[str, object]:
     runtime = json_bytes(
         {
-            "release_id": RELEASE_ID,
+            **release_fields(),
             "target": target,
             "device_data": {} if prepare_device_data else None,
         }
@@ -40,7 +40,7 @@ def _bundle_recipe(
     digest = hashlib.sha256(runtime).hexdigest()
     manifest = json_bytes(
         {
-            "release_id": RELEASE_ID,
+            **release_fields(),
             "target": target,
             "files": {
                 "runtime-manifest.json": {"mode": 0o644, "size": len(runtime), "sha256": digest}
@@ -76,7 +76,7 @@ def _write_distribution(directory: Path, files: dict[str, bytes]) -> Path:
             )
             for target in target_ids
         }
-        archive_files["targets.json"] = json_bytes({"release_id": RELEASE_ID, "targets": targets})
+        archive_files["targets.json"] = json_bytes({**release_fields(), "targets": targets})
         archive_files["menu.txt"] = "".join(
             f"  {number}. Test {target} ({target})\n"
             for number, target in enumerate(target_ids, start=1)

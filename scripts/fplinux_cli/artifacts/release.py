@@ -6,22 +6,26 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import re
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from fplinux_cli import common
+from fplinux_cli.artifacts.release_identity import (
+    RELEASE_FIELDS,
+    ReleaseContext,
+    release_context_from_fields,
+    require_release_version,
+)
 from fplinux_cli.common import canonical_json_bytes, fail, sha256_bytes
 from fplinux_cli.data_paths import DATA_DIR_NAME, PRIVATE_DIR_NAME, data_root
 from fplinux_cli.source_paths import git_source_excludes, source_path_excluded
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
-
     from fplinux_cli.workspace.capture import WorkspaceFile
 
+RELEASE_VERSION_NAME = "VERSION"
 SOURCE_IDENTITY_NAME = ".fplinux-release.json"
 BUILD_IDENTITY_NAME = ".fplinux-build-release.json"
 _SOURCE_DIRECTORIES = frozenset(
@@ -58,6 +62,7 @@ _ROOT_FILES = frozenset(
         "README.md",
         "REUSE.toml",
         "THIRD_PARTY_NOTICES.md",
+        RELEASE_VERSION_NAME,
         "_typos.toml",
         "commitlint.config.mjs",
         "fplinux",
@@ -92,51 +97,11 @@ _EXCLUDED_COMPONENTS = frozenset(
 
 
 @dataclass(frozen=True)
-class ReleaseContext:
-    """One public build ID and the complete source identity shared by all targets."""
-
-    release_id: str
-    source_commit: str | None
-    source_snapshot: str
-
-    @property
-    def tag(self) -> str:
-        """Name the GitHub Release used by publication and dependency restoration."""
-        return f"build-{self.release_id}"
-
-    def fields(self) -> dict[str, str | None]:
-        """Return the release fields carried by build and distribution manifests."""
-        return {
-            "release_id": self.release_id,
-            "source_commit": self.source_commit,
-            "source_snapshot": self.source_snapshot,
-        }
-
-
-@dataclass(frozen=True)
 class PublicSourceSnapshot:
     """Exact corresponding source bytes and modes, captured before any build."""
 
     files: tuple[WorkspaceFile, ...]
     release: ReleaseContext
-
-
-def release_context_from_fields(fields: Mapping[str, Any]) -> ReleaseContext:
-    """Read the common manifest identity without accepting partial old metadata."""
-    release_id = fields.get("release_id")
-    commit = fields.get("source_commit")
-    snapshot = fields.get("source_snapshot")
-    if not isinstance(release_id, str) or re.fullmatch(r"[0-9a-f]{12}", release_id) is None:
-        fail("release ID must contain twelve lowercase hexadecimal characters")
-    if commit is not None and (
-        not isinstance(commit, str) or re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", commit) is None
-    ):
-        fail("release source commit is invalid")
-    if not isinstance(snapshot, str) or re.fullmatch(r"[0-9a-f]{64}", snapshot) is None:
-        fail("release source snapshot is invalid")
-    if release_id not in {snapshot[:12], commit[:12] if commit is not None else None}:
-        fail("release ID does not match its source identity")
-    return ReleaseContext(release_id, commit, snapshot)
 
 
 def _public_source(relative: str) -> bool:
@@ -252,8 +217,8 @@ def _read_identity(path: Path) -> ReleaseContext:
         fields = json.loads(path.read_bytes())
     except (OSError, ValueError) as error:
         fail(f"release identity cannot be read: {path}: {error}")
-    if not isinstance(fields, dict):
-        fail(f"release identity must be an object: {path}")
+    if not isinstance(fields, dict) or set(fields) != RELEASE_FIELDS:
+        fail(f"release identity has unsupported fields: {path}")
     return release_context_from_fields(fields)
 
 
@@ -271,6 +236,18 @@ def public_source_digest(files: tuple[WorkspaceFile, ...]) -> str:
         for source in sorted(files, key=lambda source: source.path)
     ]
     return sha256_bytes(canonical_json_bytes(records))
+
+
+def source_release_version(files: tuple[WorkspaceFile, ...]) -> str:
+    """Read the release declaration from the same bytes used for the source digest."""
+    for source in files:
+        if source.path == RELEASE_VERSION_NAME:
+            try:
+                value = source.contents.decode("ascii").removesuffix("\n")
+            except UnicodeDecodeError:
+                fail(f"{RELEASE_VERSION_NAME} must contain an ASCII release version")
+            return require_release_version(value)
+    return fail(f"public sources lack the release version declaration: {RELEASE_VERSION_NAME}")
 
 
 def capture_public_sources(
@@ -296,18 +273,21 @@ def capture_public_sources(
         for source in captured
     )
     digest = public_source_digest(files)
-    commit = None
+    version = source_release_version(files)
     if git_checkout:
         commit, clean = _clean_commit(root, files, selected_data_root=selected_data_root)
-        release = ReleaseContext(commit[:12] if clean else digest[:12], commit, digest)
+        release = ReleaseContext(commit[:12] if clean else digest[:12], version, commit, digest)
     else:
         retained_path = root / SOURCE_IDENTITY_NAME
         retained = _read_identity(retained_path) if retained_path.is_file() else None
-        release = (
-            retained
-            if retained is not None and retained.source_snapshot == digest
-            else ReleaseContext(digest[:12], retained.source_commit if retained else None, digest)
-        )
+        if retained is not None and retained.source_snapshot == digest:
+            if retained.release_version != version:
+                fail(f"release identity does not match the declaration in {RELEASE_VERSION_NAME}")
+            release = retained
+        else:
+            release = ReleaseContext(
+                digest[:12], version, retained.source_commit if retained else None, digest
+            )
     return PublicSourceSnapshot(files, release)
 
 

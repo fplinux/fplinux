@@ -57,7 +57,7 @@ Python and OpenSSH are bundled; no separate installation is needed. On Linux, th
 
 Private connection keys and launcher logs are kept under `.data/` beside the extracted launcher. `FPLINUX_DATA_DIR` selects another [working data directory](/fplinux/start/build/#working-data-directory), with relative paths anchored to the archive. It must allow execution of the selected bundle's host tools. Each archive and selected model has separate session state. Keep the archive location and selected directory unchanged while reconnecting.
 
-Backups and prepared data use the separate [personal store](/fplinux/guides/device-data/#where-phone-data-is-stored), which survives replacing the archive. Use each store with one physical phone. For another handset of the same model, select its store with `run --target TARGET --phone-data PATH`.
+Backups and prepared data use the separate [personal store](/fplinux/guides/device-data/#where-phone-data-is-stored), which survives replacing the archive. Use each store with one physical phone. For another handset of the same model, select its store with `run TARGET --phone-data PATH`.
 
 Each launch prints the exact path to its `runtime.log`, with `run.json` metadata beside it. The log includes launcher and USB loader diagnostics, but does not record your interactive SSH commands or terminal output. If preparation cannot verify that storage is safe to disconnect, it retains reader-session keys in the same working data directory. Keep the phone powered and retain that directory. Run the launcher again to repeat the storage check. `console` selects a running FPLinux session after preparation.
 
@@ -67,7 +67,7 @@ Use the same `sh Run.sh` on Linux or `Run.cmd` on Windows for every later launch
 
 If SSH loses its connection during an interactive shell and the phone stays powered, the launcher waits for the same phone to return, verifies its connection and opens a new shell. It does not repeat commands from the interrupted shell. Reconnect USB if disconnected before the wait times out, or open the launcher again afterward. Ctrl+C cancels the wait. Interactive SSH status 255 starts this recovery; use `exit 0` to close the shell unconditionally.
 
-Type `exit` or press Ctrl+D to close the shell. Linux keeps running on the phone. Select the model again in the launcher, or use `sh Run.sh console --target TARGET` or `Run.cmd console --target TARGET` to [reconnect or run a command](/fplinux/use/connect/). Use the target ID shown beside the model in the menu. One interactive session per model can use that archive's saved connection at a time. Ctrl+C cancels loading or waiting, but does not power the phone off.
+Type `exit` or press Ctrl+D to close the shell. Linux keeps running on the phone. Select the model again in the launcher or use `console` to [reconnect or run a command](/fplinux/use/connect/). One interactive session per model can use that archive's saved connection at a time. Ctrl+C cancels loading or waiting, but does not power the phone off.
 
 The matching `FPLinux-<release_id>-sources.zip` contains the project sources, selected upstream originals and host rebuild material. Both hosts use the source ZIP from the same distribution. Follow the filename in `README.txt`. Component licenses remain in the runnable archive. Dependency inputs for rebuilding are separate Release assets; see [Dependency snapshots](/fplinux/guides/dependencies/).
 
@@ -76,13 +76,13 @@ The matching `FPLinux-<release_id>-sources.zip` contains the project sources, se
 For UMS9117, you can select a complete physical NAND backup of the same phone for a RAM launch. On Linux:
 
 ```sh title="PC"
-sh Run.sh run --target nokia-ta1618 --from-dump /path/to/nand.bin
+sh Run.sh run nokia-ta1618 --from-dump /path/to/nand.bin
 ```
 
 On Windows, open a terminal in the extracted directory:
 
 ```bat title="PC"
-Run.cmd run --target nokia-ta1618 --from-dump "C:\path\to\nand.bin"
+Run.cmd run nokia-ta1618 --from-dump "C:\path\to\nand.bin"
 ```
 
 Replace `nokia-ta1618` with your model's target ID. Keep the backup's `nand.bin.json` receipt beside it. The launcher preserves both input files and prepares the data in your personal store before booting. Keep the phone disconnected until the loader asks for it. Use `prepare` in place of `run` to prepare data and stop there.

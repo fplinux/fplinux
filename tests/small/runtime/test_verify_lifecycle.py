@@ -123,10 +123,11 @@ def test_clean_snapshot_can_match_when_device_data_snapshot_differs(
     assert actions == ["verified"]
 
 
-def test_verify_uses_the_selected_profile_and_propagates_failure(
-    command_bundle: CommandBundleContext,
+@pytest.mark.parametrize("shutdown", [False, True], ids=["verify", "shutdown"])
+def test_system_card_actions_use_the_expected_build_and_propagate_failure(
+    command_bundle: CommandBundleContext, *, shutdown: bool
 ) -> None:
-    """Verification selects the profile's bundle and returns a failed reconnect status."""
+    """Checkout shutdown infers the declared card profile and retains strict admission."""
     profile = "microsd-uboot"
     bundle = command_bundle.create_generation("b" * 64, profile=profile)
     publish_current_bundle(command_bundle.output, "phone", bundle, profile)
@@ -139,14 +140,25 @@ def test_verify_uses_the_selected_profile_and_propagates_failure(
         assert isinstance(selected, ValidatedBundle)
         assert selected.root == bundle
         assert logs == command_bundle.cache / "logs/run/phone/profiles/microsd-uboot"
+        assert options["shutdown"] is shutdown
+        assert options["verify_only"] is not shutdown
         revalidate = options["revalidate"]
         assert callable(revalidate)
         revalidate()
         return 7
 
+    def run() -> None:
+        if shutdown:
+            runtime.console_target(
+                "phone", keyboard=None, exec_command=None, upload=None, pull=None, shutdown=True
+            )
+        else:
+            runtime.verify_booted("phone", profile=profile)
+
     with (
         mock.patch.object(common, "ROOT", command_bundle.root),
         mock.patch.object(ssh_transport, "usb_present", return_value=True),
+        mock.patch.object(runtime, "discover_profiles", return_value=("default", profile)),
         mock.patch.object(runtime, "admit_bundle", return_value=admitted),
         mock.patch.object(live_runtime, "console_connection", side_effect=execute),
         mock.patch.object(
@@ -155,6 +167,6 @@ def test_verify_uses_the_selected_profile_and_propagates_failure(
         mock.patch.object(definition, "environment_recipe_digest", return_value="e" * 64),
         pytest.raises(SystemExit) as error,
     ):
-        runtime.verify_booted("phone", profile=profile)
+        run()
 
     assert error.value.code == 7

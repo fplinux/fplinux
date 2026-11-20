@@ -42,6 +42,7 @@ def bundle(tmp_path: Path) -> Path:
         "target": TARGET,
         "release_id": RELEASE,
         "boot_offset": MIB,
+        "disk_signature": 0x46504C58,
         "boot_size": MIB,
         "root_offset": 2 * MIB,
         "root_size": MIB,
@@ -49,13 +50,25 @@ def bundle(tmp_path: Path) -> Path:
         "root_sha256": "b" * 64,
         "fit_filename": "FPLINUX.ITB",
         "fit_ramdisk_offset": 64,
-        "fit_ramdisk_size": 4096,
+        "fit_ramdisk_size": 5120,
         "fit_hash_offset": 4192,
     }
-    members = dict.fromkeys(("boot.xz", "root.ext4.xz", "board.tar", "fit.itb"), b"staged asset")
+    members = dict.fromkeys(
+        (
+            "boot.xz",
+            "root.ext4.xz",
+            "board.tar",
+            "fit.itb",
+            "apks/Packages.adb",
+            "apks/fplinux-build.rsa.pub",
+            "apks/fplinux-notes.apk",
+        ),
+        b"staged asset",
+    )
     members["layout.json"] = json.dumps(layout).encode()
     records = {}
     for name, contents in members.items():
+        (kit / name).parent.mkdir(exist_ok=True)
         (kit / name).write_bytes(contents)
         records[f"card/{name}"] = {
             "size": len(contents),
@@ -67,15 +80,19 @@ def bundle(tmp_path: Path) -> Path:
     return tmp_path
 
 
+@pytest.mark.parametrize(
+    "asset",
+    ["board.tar", "apks/Packages.adb", "apks/fplinux-build.rsa.pub", "apks/fplinux-notes.apk"],
+)
 def test_card_kit_damage_fails_before_opening_reader(
-    bundle: Path, monkeypatch: pytest.MonkeyPatch
+    bundle: Path, monkeypatch: pytest.MonkeyPatch, asset: str
 ) -> None:
-    board = bundle / "card/board.tar"
-    board.write_bytes(board.read_bytes().replace(b"staged", b"broken"))
+    (bundle / "card" / asset).write_bytes(b"broken asset")
     monkeypatch.setattr(card, "run_phone", lambda *_args, **_kwargs: pytest.fail("started reader"))
 
-    with pytest.raises(SystemExit, match=r"differs from its build manifest: board\.tar"):
+    with pytest.raises(SystemExit, match="differs from its build manifest") as captured:
         card.run_card(bundle, bundle / "data", bundle / "logs", erase_card=CID)
+    assert str(captured.value).endswith(asset)
 
 
 def test_checkout_card_inspect_builds_and_resolves_only_the_ram_profile(
@@ -117,7 +134,7 @@ def test_checkout_card_inspect_builds_and_resolves_only_the_ram_profile(
         assert bundle == ram
         assert data.is_relative_to(tmp_path)
         assert logs == tmp_path / "logs/run" / TARGET
-        assert options["inspect_only"] is True
+        assert options["action"] == "inspect"
         assert options.get("card_bundle") is None
         assert options["from_dump"] == tmp_path / "nand.bin"
         assert options["phone_data"] == tmp_path / "phone"
@@ -127,7 +144,7 @@ def test_checkout_card_inspect_builds_and_resolves_only_the_ram_profile(
     monkeypatch.setattr(checkout_card, "data_root", lambda _root: tmp_path)
     monkeypatch.setattr(checkout_card, "build", build)
     monkeypatch.setattr(checkout_card, "resolve_target_bundle", resolve)
-    monkeypatch.setattr(checkout_card, "run_card", inspect)
+    monkeypatch.setattr(card, "run_card", inspect)
     command_action(args, check_parser)()
 
     assert calls == ["build", "resolve", "inspect"]
@@ -175,7 +192,7 @@ def test_card_actions_report_capacity_and_only_install_calls_writer(
         bundle,
         bundle / "data",
         bundle / "logs",
-        inspect_only=inspect_only,
+        action="inspect" if inspect_only else "install",
         erase_card=None if inspect_only else CID,
     )
 
@@ -252,7 +269,7 @@ def test_card_inspect_requires_the_retained_authenticated_reader(
         phone_data, "finish_reader", lambda *_args, **_kwargs: pytest.fail("finished reader")
     )
 
-    status = card.run_card(ram, data, tmp_path / "logs", inspect_only=True, phone_data=store)
+    status = card.run_card(ram, data, tmp_path / "logs", action="inspect", phone_data=store)
 
     output = capsys.readouterr()
     if reader_present:
@@ -272,7 +289,7 @@ def test_card_inspect_requires_the_retained_authenticated_reader(
         (
             f"/dev/mmcblk0 {CID} 8192\n/dev/mmcblk1 {'a' * 32} 8192\n",
             None,
-            "Select the card to erase with --erase-card CID",
+            "Select the card with --erase-card CID",
         ),
         ("", CID, "No microSD card was found"),
         (f"/dev/mmcblk0 {CID} 8192\n", None, "Card installation cancelled"),
@@ -368,6 +385,12 @@ def test_card_enrollment_uses_reader_pin_and_preserves_keys_once_writing_starts(
                 )
             writer_started = True
             assert arguments[2:5] == ["/dev/mmcblk0", CID, remote_staging]
+            assert arguments[5:13] == ["1", "1", "2", "1", "a" * 64, "b" * 64, TARGET, RELEASE]
+            assert arguments[13:17] == [
+                hashlib.sha256(uploaded[f"{remote_staging}/{name}"]).hexdigest()
+                for name in ("board.tar", "personal.tar", "installed.sha256", "fit.itb")
+            ]
+            assert uploaded[f"{remote_staging}/card-slots.sh"]
             assert arguments[-1] == HOST_KEY
             device_id = uploaded[f"{remote_staging}/device-id"]
             assert len(device_id) == 32

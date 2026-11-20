@@ -46,7 +46,7 @@ def _current_rootfs_recipes(cache: Path) -> frozenset[str] | None:
     """Return every currently valid rootfs recipe, or ``None`` if that is unknown."""
     try:
         signing_key = signing_key_identity(cache)
-        release_id = current_release_context().release_id
+        release = current_release_context()
         environment_source_recipe = environment_recipe_digest()
         environment_state = load_environment_state(cache, environment_source_recipe)
         if environment_state is None:
@@ -73,7 +73,7 @@ def _current_rootfs_recipes(cache: Path) -> frozenset[str] | None:
             base_packages = shared_ram_packages(platform, target_config)
             if root_kind == "initramfs" and base_packages is not None:
                 ram_base_recipe = alpine_rootfs_recipe(
-                    environment_recipe, signing_key, base_packages, release_id=release_id
+                    environment_recipe, signing_key, base_packages, release=release
                 )
                 recipes.add(ram_base_recipe)
             card_base_packages = shared_card_packages(platform, target_config)
@@ -83,7 +83,7 @@ def _current_rootfs_recipes(cache: Path) -> frozenset[str] | None:
                         environment_recipe,
                         signing_key,
                         card_base_packages,
-                        release_id=release_id,
+                        release=release,
                         root_kind="external",
                     )
                 )
@@ -93,7 +93,7 @@ def _current_rootfs_recipes(cache: Path) -> frozenset[str] | None:
                     environment_recipe,
                     signing_key,
                     packages,
-                    release_id=release_id,
+                    release=release,
                     firmware_inputs=selected_firmware,
                     display_brightness=target_config.get("display_brightness"),
                     root_kind=root_kind,

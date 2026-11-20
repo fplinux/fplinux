@@ -9,7 +9,7 @@ from dataclasses import replace
 from typing import TYPE_CHECKING
 
 import pytest
-from fplinux_cli.artifacts.release import ReleaseContext
+from fplinux_cli.artifacts.release_identity import ReleaseContext
 from fplinux_cli.packaging import distribution
 
 from tests.distribution_support import read_zip
@@ -98,10 +98,13 @@ def test_linux_release_includes_sftp_in_the_shared_runtime_and_manifests(
         assert runtime["sha256"][relative] == digest
 
 
-def test_release_uses_the_runtime_from_the_admitted_build(archive_inputs: ArchiveInputs) -> None:
-    helper = "scripts/fplinux_cli/runtime/workflow.py"
+@pytest.mark.parametrize("script", ["workflow.py", "card-slots.sh"])
+def test_release_uses_the_runtime_from_the_admitted_build(
+    archive_inputs: ArchiveInputs, script: str
+) -> None:
+    helper = f"scripts/fplinux_cli/runtime/{script}"
     original = (archive_inputs.bundle / helper).read_bytes()
-    (archive_inputs.root / helper).write_bytes(b"changed checkout workflow\n")
+    (archive_inputs.root / helper).write_bytes(b"changed checkout runtime\n")
 
     files, _modes = read_zip(archive_inputs.package("linux"))
 
@@ -136,7 +139,7 @@ def test_release_rejects_changed_source_context_before_publication(
     archive_inputs: ArchiveInputs, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     initial = archive_inputs.snapshot
-    changed = replace(initial, release=ReleaseContext("b" * 12, None, "b" * 64))
+    changed = replace(initial, release=ReleaseContext("b" * 12, "1.0.0", None, "b" * 64))
     snapshots = iter((initial, changed))
     monkeypatch.setattr(distribution, "capture_public_sources", lambda **_options: next(snapshots))
 

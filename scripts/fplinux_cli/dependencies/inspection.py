@@ -14,8 +14,10 @@ from fplinux_cli.environment.setup import target_setup_inputs
 from fplinux_cli.environment.state import load_environment_state
 
 
-def inspect_inputs(target: str | None, *, host: str, site: bool, all_inputs: bool) -> None:
-    """Show every selected original and report readiness without executing its tools."""
+def inspect_inputs(
+    target: str | None, *, host: str, site: bool, all_inputs: bool, list_inputs: bool = False
+) -> None:
+    """Check selected originals and report readiness without executing installed tools."""
     cache = data_root(ROOT)
     if all_inputs:
         from fplinux_cli.dependencies.workflow import checkout_declarations  # noqa: PLC0415
@@ -42,11 +44,12 @@ def inspect_inputs(target: str | None, *, host: str, site: bool, all_inputs: boo
         digest = item.checksum or item.sha256
         if digest is None:
             fail(f"dependency input has no checksum: {item.key}")
-        status = locked_file_status(
-            cache / item.destination, digest, algorithm=item.algorithm, size=item.size
-        )
+        path = cache / item.destination
+        status = locked_file_status(path, digest, algorithm=item.algorithm, size=item.size)
         counts[status] += 1
-        if status != "present":
+        if list_inputs:
+            print(f"{status}: {item.key}: {path}")
+        elif status != "present":
             print(f"{status}: {item.key}: {item.destination}")
     print(
         f"inputs: {counts['present']} present, {counts['missing']} missing, "

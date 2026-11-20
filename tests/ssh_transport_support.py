@@ -40,6 +40,8 @@ def create_ready_session(
     state: dict[str, Any] = {
         "target": target,
         "runtime_root": str(root),
+        "bundle_generation": "b" * 64,
+        "prepared_data_sha256": None,
         "session_id": session_id.hex(),
         "usb_serial": usb_serial,
         "network": "10.23.45.0/30",

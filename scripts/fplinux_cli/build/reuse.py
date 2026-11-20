@@ -19,7 +19,7 @@ from fplinux_cli.data_paths import data_root
 from fplinux_cli.runtime.bundle_session import bundle_manifest
 
 if TYPE_CHECKING:
-    from fplinux_cli.artifacts.release import ReleaseContext
+    from fplinux_cli.artifacts.release_identity import ReleaseContext
     from fplinux_cli.environment.state import EnvironmentState
     from fplinux_cli.workspace.capture import WorkspaceSnapshot
 

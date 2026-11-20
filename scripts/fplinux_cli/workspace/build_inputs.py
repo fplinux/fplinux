@@ -61,7 +61,7 @@ if TYPE_CHECKING:
     from collections.abc import Collection, Iterator, Mapping
     from pathlib import Path
 
-    from fplinux_cli.artifacts.release import ReleaseContext
+    from fplinux_cli.artifacts.release_identity import ReleaseContext
     from fplinux_cli.manifests.linux import LinuxTarget
 
 STAGED_BUILD_SOURCES = (
@@ -87,6 +87,7 @@ STAGED_BUILD_SOURCES = (
     "scripts/fplinux_cli/artifacts/records.py",
     "scripts/fplinux_cli/artifacts/bundles.py",
     "scripts/fplinux_cli/artifacts/release.py",
+    "scripts/fplinux_cli/artifacts/release_identity.py",
     "scripts/fplinux_cli/common.py",
     "scripts/fplinux_cli/data_paths.py",
     "scripts/fplinux_cli/source_paths.py",

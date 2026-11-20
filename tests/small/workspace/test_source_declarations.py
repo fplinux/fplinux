@@ -23,7 +23,7 @@ from tests.small.workspace.workspace_fixtures import (
     empty_package_graph,
     workspace_root,
     write_registration_source,
-    write_source_lock_files,
+    write_source_declarations,
 )
 
 if TYPE_CHECKING:
@@ -56,7 +56,7 @@ class SourceDeclarationCheckout:
 def declaration_checkout(tmp_path: Path) -> Iterator[SourceDeclarationCheckout]:
     """Control config/package discovery while exercising real capture, selection and staging."""
     root = tmp_path
-    write_source_lock_files(root, "phone-a")
+    write_source_declarations(root, "phone-a")
     write_registration_source(root)
     sources = root / "sources.lock.toml"
     sources.write_text(

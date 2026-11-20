@@ -12,13 +12,18 @@ from dataclasses import dataclass
 from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Any, cast
 
-from fplinux_cli.artifacts.release import public_source_digest, release_context_from_fields
+from fplinux_cli.artifacts.release import (
+    RELEASE_VERSION_NAME,
+    public_source_digest,
+    source_release_version,
+)
+from fplinux_cli.artifacts.release_identity import RELEASE_FIELDS, release_context_from_fields
 from fplinux_cli.common import canonical_json_bytes, display_text, fail, sha256_bytes, sha256_file
 from fplinux_cli.dependencies.distribution import read_dependency_distribution
 from fplinux_cli.packaging.card_kit import CARD_MEMBERS
 from fplinux_cli.packaging.universal import release_archive_name
 from fplinux_cli.runtime.bundle import MICROSD_BOOT_PROFILE
-from fplinux_cli.runtime.release_catalog import parse_catalog
+from fplinux_cli.runtime.release_catalog import parse_catalog, read_bundle_manifest
 from fplinux_cli.workspace.capture import WorkspaceFile
 
 from .distribution import distribution_records, require_public_runtime_files, source_distribution
@@ -27,7 +32,7 @@ if TYPE_CHECKING:
     from collections.abc import Collection
     from pathlib import Path
 
-    from fplinux_cli.artifacts.release import ReleaseContext
+    from fplinux_cli.artifacts.release_identity import ReleaseContext
 
 
 @dataclass(frozen=True)
@@ -43,7 +48,7 @@ class SourceArchive:
 class RuntimeArchive:
     """Verified runtime identity, target selections and members."""
 
-    release_id: str
+    release: ReleaseContext
     targets: tuple[str, ...]
     files: dict[str, tuple[int, str]]
 
@@ -92,7 +97,12 @@ def _verify_source_archive(
     data = archive.read(prefix + "DISTRIBUTION.json")
     records = distribution_records(data)
     context = release_context_from_fields(source_distribution(data))
-    required = {"project/LICENSE", "project/THIRD_PARTY_NOTICES.md", "project/fplinux"}
+    required = {
+        "project/LICENSE",
+        "project/THIRD_PARTY_NOTICES.md",
+        "project/fplinux",
+        f"project/{RELEASE_VERSION_NAME}",
+    }
     members = {item.filename.removeprefix(prefix) for item in archive.infolist()}
     if not required <= members or not any(name.startswith("upstream/") for name in members):
         fail("corresponding sources lack project sources, notices or upstream material")
@@ -112,8 +122,10 @@ def _verify_source_archive(
     )
     if (
         not isinstance(retained, dict)
+        or set(retained) != RELEASE_FIELDS
         or release_context_from_fields(retained) != context
         or public_source_digest(sources) != context.source_snapshot
+        or source_release_version(sources) != context.release_version
     ):
         fail("corresponding project sources differ from their release identity")
     for record in records:
@@ -177,7 +189,7 @@ def _archive_payload(archive: zipfile.ZipFile, prefix: str, parts: tuple[str, ..
 
 def _universal_manifests(
     archive: zipfile.ZipFile, prefix: str, checksums: dict[str, str]
-) -> tuple[str, dict[str, dict[str, Any]]]:
+) -> tuple[ReleaseContext, dict[str, dict[str, Any]]]:
     """Verify each reconstructed RAM and microSD runtime against its build manifest."""
     catalog = parse_catalog(archive.read(prefix + "targets.json"))
     require_public_runtime_files(checksums, archive.filename or "release")
@@ -185,22 +197,33 @@ def _universal_manifests(
     used_objects = set()
     for target, board in catalog.targets.items():
         card_members = set(CARD_MEMBERS) & board.files.keys()
-        if card_members != (set(CARD_MEMBERS) if board.microsd is not None else set()):
+        if (
+            card_members != (set(CARD_MEMBERS) if board.microsd is not None else set())
+            or (board.microsd is None and any(name.startswith("card/") for name in board.files))
+        ):
             fail(f"release board has incomplete card installation files: {target}")
         for recipe, profile in ((board, None), (board.microsd, MICROSD_BOOT_PROFILE)):
             if recipe is None:
                 continue
             require_public_runtime_files(recipe.files, target)
-            manifest = json.loads(
-                _archive_payload(archive, prefix, recipe.files["build-manifest.json"])
+            build_manifest = "build-manifest.json"
+            manifest = read_bundle_manifest(
+                _archive_payload(archive, prefix, recipe.files[build_manifest]),
+                build_manifest,
+                target=target,
+                release=catalog.release,
+                profile=profile,
             )
-            if not isinstance(manifest, dict) or (
-                manifest.get("target") != target
-                or manifest.get("release_id") != catalog.release_id
-                or manifest.get("build_type") != "release"
-                or manifest.get("profile") != profile
-            ):
+            if manifest.get("build_type") != "release":
                 fail(f"release board manifest has a different identity: {target}")
+            runtime_manifest = "runtime-manifest.json"
+            read_bundle_manifest(
+                _archive_payload(archive, prefix, recipe.files[runtime_manifest]),
+                runtime_manifest,
+                target=target,
+                release=catalog.release,
+                profile=profile,
+            )
             records = manifest.get("files")
             if not isinstance(records, dict) or set(records) != set(recipe.files) - {
                 "build-manifest.json",
@@ -236,16 +259,11 @@ def _universal_manifests(
                     fail(f"release shared file has the wrong executable mode: {parts[0]}")
             if profile is None:
                 manifests[target] = manifest
-            else:
-                if release_context_from_fields(manifest) != release_context_from_fields(
-                    manifests[target]
-                ):
-                    fail(f"microSD boot and RAM use different releases: {target}")
-                if set(CARD_MEMBERS) & recipe.files.keys():
-                    fail(f"installed card runtime includes installation files: {target}")
+            elif any(name.startswith("card/") for name in recipe.files):
+                fail(f"installed card runtime includes installation files: {target}")
     if used_objects != {name for name in checksums if name.startswith("objects/")}:
         fail("release contains unreferenced objects")
-    return catalog.release_id, manifests
+    return catalog.release, manifests
 
 
 def verify_archive(path: Path) -> SourceArchive | RuntimeArchive:
@@ -261,8 +279,8 @@ def verify_archive(path: Path) -> SourceArchive | RuntimeArchive:
                 release, records = _verify_source_archive(archive, prefix, checksums)
                 return SourceArchive(release, records, files)
             if prefix + "targets.json" in members:
-                release_id, manifests = _universal_manifests(archive, prefix, checksums)
-                return RuntimeArchive(release_id, tuple(sorted(manifests)), files)
+                release, manifests = _universal_manifests(archive, prefix, checksums)
+                return RuntimeArchive(release, tuple(sorted(manifests)), files)
             fail("archive has no FPLinux release catalog or corresponding source inventory")
     except (zipfile.BadZipFile, KeyError, ValueError) as error:
         fail(f"cannot inspect archive {display_text(path)}: {error}")
@@ -277,26 +295,22 @@ def verify_distribution(
     """Check paired assets, optionally requiring the publisher's target and host selections."""
     try:
         metadata = json.loads((directory / "RELEASE.json").read_bytes())
-        if not isinstance(metadata, dict) or set(metadata) != {
-            "release_id",
-            "source_commit",
-            "source_snapshot",
+        if not isinstance(metadata, dict) or set(metadata) != RELEASE_FIELDS | {
             "runtimes",
             "sources",
             "dependencies",
         }:
             fail("distribution has invalid release association metadata")
         release = release_context_from_fields(metadata)
-        context = release.fields()
         dependency_files: tuple[str, ...] = ()
         if metadata["dependencies"] == "DEPENDENCIES.json":
             dependency = read_dependency_distribution(directory)
-            if dependency.release.fields() != context:
+            if dependency.release != release:
                 fail("distribution dependency inputs belong to another release")
             dependency_files = tuple(dependency.files)
         elif require_inputs or metadata["dependencies"] is not None:
             fail("distribution has no valid dependency transport")
-        source_name = f"FPLinux-{context['release_id']}-sources.zip"
+        source_name = f"FPLinux-{release.release_id}-sources.zip"
         if metadata["sources"] != {
             "archive": source_name,
             "sha256": sha256_file(directory / source_name),
@@ -340,14 +354,11 @@ def verify_distribution(
                 fail(f"distribution runtime name or pairing hash differs: {expected}")
             with zipfile.ZipFile(runtime) as archive:
                 prefix, checksums, _files = _verify_archive(archive)
-                release_id, manifests = _universal_manifests(archive, prefix, checksums)
-                if release_id != context["release_id"] or set(manifests) != set(selected):
+                runtime_release, manifests = _universal_manifests(archive, prefix, checksums)
+                if runtime_release != release or set(manifests) != set(selected):
                     fail(f"distribution runtime selection differs: {runtime.name}")
                 for target, manifest in manifests.items():
-                    if (
-                        manifest.get("device_identity") != selected[target]["identity"]
-                        or release_context_from_fields(manifest).fields() != context
-                    ):
+                    if manifest.get("device_identity") != selected[target]["identity"]:
                         fail(f"distribution runtime identity differs: {runtime.name}/{target}")
                 readme = archive.read(prefix + "README.txt").decode("utf-8")
                 if f"\n  {source.name}\n" not in readme:

@@ -7,12 +7,13 @@ import os
 import shutil
 import struct
 import subprocess
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any
 
 import pytest
 from fplinux_cli.build.storage import ext4 as ext4_root
 from fplinux_cli.common import sha256_file
+from fplinux_cli.manifests.targets import load_target
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -60,7 +61,7 @@ class Ext4Inputs:
 @pytest.fixture
 def ext4_inputs(tmp_path: Path) -> Ext4Inputs:
     """Create one small normalized root tree and ext4 profile."""
-    required = ("mke2fs", "e2fsck", "debugfs")
+    required = ("mke2fs", "e2fsck", "debugfs", "dumpe2fs")
     missing = [name for name in required if shutil.which(name) is None]
     if missing:
         pytest.fail("quality image lacks required ext4 tools: " + ", ".join(missing))
@@ -107,6 +108,25 @@ class Ext4RootTests:
         assert (checked.returncode) == (0), checked.stderr or checked.stdout
         assert (ext4_inputs.dump_os_release(image)) == (ext4_inputs.os_release.read_bytes())
         assert ext4_root.cache_hit(ext4_inputs.output, plan)
+
+    def test_uboot_card_can_grow_without_relocating_group_descriptors(
+        self, ext4_inputs: Ext4Inputs
+    ) -> None:
+        """The initial ext4 artifact can keep the same descriptor layout up to the DOS limit."""
+        profile = load_target("inoi-240-modern-4g", "microsd-uboot")
+        image = replace(ext4_inputs, spec=profile["image"]).build()
+
+        superblock = subprocess.run(
+            ["dumpe2fs", "-h", str(image)],
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=30,
+        ).stdout
+        values = dict(line.split(":", 1) for line in superblock.splitlines() if ":" in line)
+        assert "resize_inode" in values["Filesystem features"].split()
+        # Each 4096-byte descriptor block describes 64 groups of 128 MiB.
+        assert int(values["Reserved GDT blocks"]) >= 255
 
     def test_changed_rootfs_identity_misses_then_replaces_the_receipt(
         self, ext4_inputs: Ext4Inputs

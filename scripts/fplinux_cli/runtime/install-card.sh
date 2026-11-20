@@ -23,7 +23,7 @@ if [ "$#" -eq 2 ] && [ "$1" = prepare-access ]; then
 	exit 0
 fi
 
-[ "$#" -eq 15 ] || fail "Invalid release card writer arguments"
+[ "$#" -eq 16 ] || fail "Invalid release card writer arguments"
 device=$1
 cid=$2
 staging=$3
@@ -33,12 +33,13 @@ root_start=$6
 root_mib=$7
 boot_hash=$8
 root_hash=$9
-fit_name=${10}
-board_hash=${11}
-personal_hash=${12}
-checksums_hash=${13}
-fit_hash=${14}
-host_key_body=${15}
+target=${10}
+build_id=${11}
+board_hash=${12}
+personal_hash=${13}
+checksums_hash=${14}
+fit_hash=${15}
+host_key_body=${16}
 
 case "$device" in
 /dev/mmcblk[0-9] | /dev/mmcblk[0-9][0-9]) ;;
@@ -52,10 +53,17 @@ for mib in "$boot_start" "$boot_mib" "$root_start" "$root_mib"; do
 	case "$mib" in
 	'' | 0* | *[!0-9]*) fail "Invalid release card layout" ;;
 	esac
+	[ "${#mib}" -le 4 ] || fail "Invalid release card layout"
 done
 [ "$((boot_start + boot_mib))" -eq "$root_start" ] &&
 	[ "$((root_start + root_mib))" -le 4096 ] || fail "Invalid release card layout"
-[ "$fit_name" = FPLINUX.ITB ] || fail "Invalid release card FIT filename"
+case "$target" in
+'' | [!a-z0-9]* | *[!a-z0-9-]*) fail "Invalid system card target" ;;
+esac
+case "$build_id" in
+'' | *[!0-9a-f]*) fail "Invalid system card build identity" ;;
+esac
+[ "${#build_id}" -eq 12 ] || fail "Invalid system card build identity"
 
 slot=/sys/block/${device##*/}
 boot_partition=${device}p1
@@ -158,9 +166,10 @@ check_stream_digest() {
 		[ "${digest_line%% *}" = "$1" ]
 }
 
-mount_partition() {
+mount_root() {
 	mounted=$work/mount
-	busybox mount "$@" "$mounted" || fail "Cannot mount the system card partition"
+	busybox mount -t ext4 -o "$1,nosuid,nodev,noexec" "$root_partition" "$mounted" ||
+		fail "Cannot mount the system card partition"
 }
 
 unmount_partition() {
@@ -175,17 +184,15 @@ verify_installed_files() (
 	fi
 	busybox tar -tf "$staging/personal.tar" >"$work/result" || exit 1
 	while IFS= read -r path; do
-		[ "$(busybox stat -c %a:%u:%g "$path")" = 600:0:0 ] || exit 1
+		verify_private_root_file "data/$path" || exit 1
 	done <"$work/result"
 )
 
-verify_card_access_file() {
+verify_private_root_file() {
 	[ -f "$1" ] && [ ! -L "$1" ] && [ "$(busybox stat -c %a:%u:%g "$1")" = 600:0:0 ]
 }
 
 install_card_access() {
-	access_dir=$mounted/etc/fplinux/card-access
-	mkdir -m 0700 "$access_dir"
 	for access_file in device-id usb-network client-key host-key; do
 		busybox cp "$staging/$access_file" "$access_dir/$access_file"
 		chmod 0600 "$access_dir/$access_file"
@@ -193,11 +200,10 @@ install_card_access() {
 }
 
 verify_card_access() {
-	access_dir=$mounted/etc/fplinux/card-access
 	[ -d "$access_dir" ] && [ ! -L "$access_dir" ] &&
 		[ "$(busybox stat -c %a:%u:%g "$access_dir")" = 700:0:0 ] || return 1
 	for access_file in device-id usb-network client-key host-key; do
-		verify_card_access_file "$access_dir/$access_file" &&
+		verify_private_root_file "$access_dir/$access_file" &&
 			busybox cmp -s "$staging/$access_file" "$access_dir/$access_file" || return 1
 	done
 }
@@ -220,7 +226,7 @@ check_digest "$staging/fit.itb" "$fit_hash" || fail "The personalized FIT failed
 [ "$(wc -c <"$staging/device-id")" -eq 32 ] &&
 	[ "$(wc -c <"$staging/usb-network")" -eq 256 ] &&
 	[ "$(wc -c <"$staging/client-key")" -eq 68 ] || fail "Invalid system card access files"
-verify_card_access_file "$staging/host-key" && [ "${#host_key_body}" -eq 68 ] &&
+verify_private_root_file "$staging/host-key" && [ "${#host_key_body}" -eq 68 ] &&
 	[ "$(card_host_public_key "$staging/host-key")" = "$host_key_body" ] || fail "The card SSH host key failed verification"
 start_stream busybox xzcat "$staging/boot.xz"
 check_stream_digest "$boot_hash" || fail "The boot image failed verification"
@@ -252,35 +258,45 @@ card_progress card-verifying "$((root_start + root_mib))"
 
 busybox blockdev --rereadpt "$device" || fail "Cannot reread the SD card partition table"
 check_partitions
-mount_partition -t ext4 -o rw,nosuid,nodev,noexec "$root_partition"
+mount_root rw
+slot_root=$mounted/system/a/root
+slot_fit=$mounted/system/a/FPLINUX.ITB
+access_dir=$mounted/data/etc/fplinux/card-access
+[ -d "$slot_root" ] && [ -d "$access_dir" ] && [ ! -L "$access_dir" ] ||
+	fail "The release ext4 image lacks the initial system and data directories"
+for path in "$mounted/system/active" "$mounted/system/target" "$slot_fit"; do
+	[ ! -e "$path" ] && [ ! -L "$path" ] ||
+		fail "The release ext4 image already contains a system card record or FIT"
+done
 (
 	# Tar can create leading directories. Use the normal rootfs directory mode.
 	umask 022
-	busybox tar --numeric-owner -xpf "$staging/board.tar" -C "$mounted" ||
+	busybox tar --numeric-owner -xpf "$staging/board.tar" -C "$slot_root" ||
 		fail "Cannot install the board files on the SD card"
-	busybox tar --numeric-owner -xkpf "$staging/personal.tar" -C "$mounted" ||
+	busybox tar --numeric-owner -xkpf "$staging/personal.tar" -C "$mounted/data" ||
 		fail "Cannot install this phone's firmware on the SD card"
 )
+busybox cp "$staging/fit.itb" "$slot_fit" || fail "Cannot write the FIT to the SD card"
+world=$slot_root/etc/apk/world
+base_world=$mounted/system/a/base-world
+[ -f "$world" ] && [ ! -L "$world" ] || fail "The system card root has no base package selections"
+busybox cp "$world" "$base_world" || fail "Cannot record the system card base package selections"
+chmod 0644 "$base_world"
 install_card_access
 busybox sync
 unmount_partition
 check_partitions
 busybox blockdev --flushbufs "$root_partition" || fail "Cannot flush the SD card root filesystem"
-mount_partition -t ext4 -o ro,noload,nosuid,nodev,noexec "$root_partition"
+mount_root ro,noload
 verify_installed_files || fail "The SD card root files or firmware permissions do not match"
 verify_card_access || fail "The SD card SSH access files or permissions do not match"
+check_digest "$slot_fit" "$fit_hash" || fail "The SD card FIT does not match the phone's FIT"
+busybox cmp -s "$base_world" "$world" || fail "The system card base package selections differ"
 unmount_partition
 
 check_partitions
-mount_partition -t vfat -o rw,nosuid,nodev,noexec "$boot_partition"
-[ ! -e "$mounted/$fit_name" ] || fail "The release boot filesystem already contains a FIT"
-busybox cp "$staging/fit.itb" "$mounted/$fit_name" || fail "Cannot write the FIT to the SD card"
-busybox sync
-unmount_partition
-check_partitions
-busybox blockdev --flushbufs "$boot_partition" || fail "Cannot flush the SD card boot filesystem"
-mount_partition -t vfat -o ro,nosuid,nodev,noexec "$boot_partition"
-check_digest "$mounted/$fit_name" "$fit_hash" || fail "The SD card FIT does not match the phone's FIT"
+mount_root rw
+sh "$staging/card-slots.sh" "$mounted" "$target" initialize "$build_id"
 unmount_partition
 check_card
 card_writing=0

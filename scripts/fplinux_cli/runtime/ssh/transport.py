@@ -30,6 +30,7 @@ from .commands import (
     SSH_PORT,
     remote_path,
     require_tool,
+    run_with_input,
     ssh_argv,
     ssh_options,
     stream_stderr_detail,
@@ -42,7 +43,7 @@ from .session import mark_current, validate_session
 if TYPE_CHECKING:
     from collections.abc import Callable
     from types import FrameType
-    from typing import BinaryIO
+    from typing import IO, BinaryIO
 
 
 def _usb_devices(session: dict[str, Any], *, require_absence_proof: bool = False) -> list[Path]:
@@ -402,6 +403,13 @@ def run_remote(
         timeout=timeout,
         check=False,
     )
+
+
+def send_remote(
+    session: dict[str, Any], command: str, write: Callable[[IO[bytes]], None]
+) -> subprocess.CompletedProcess[str]:
+    """Send input to one authenticated SSH command and capture its result."""
+    return run_with_input(ssh_argv(validate_session(session), command), write)
 
 
 def require_device_identity(

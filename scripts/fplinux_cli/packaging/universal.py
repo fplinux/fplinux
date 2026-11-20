@@ -7,11 +7,14 @@ import json
 from dataclasses import dataclass, field
 from pathlib import Path
 from textwrap import dedent
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from fplinux_cli.common import canonical_json_bytes, fail, sha256_bytes
 from fplinux_cli.packaging.boot_components import BOOT_COMPONENTS, exact_component_offset
 from fplinux_cli.packaging.readme import append_source_companion
+
+if TYPE_CHECKING:
+    from fplinux_cli.artifacts.release_identity import ReleaseContext
 
 CATALOG_NAME = "targets.json"
 _LAUNCHERS = Path(__file__).with_name("release-launcher")
@@ -57,13 +60,15 @@ def _readme(host: str, source_stem: str) -> bytes:
         Choose Start from microSD to boot the installed system over USB.
 
         Commands for scripts, with the exact model ID from the menu:
-          {launcher} run --target TARGET
-          {launcher} run --target TARGET --boot microsd
-          {launcher} console --target TARGET
-          {launcher} verify --target TARGET
+          {launcher} run TARGET
+          {launcher} run TARGET --boot microsd
+          {launcher} console [TARGET]
+          {launcher} verify [TARGET]
           {launcher} nand identify --target TARGET
-          {launcher} card inspect --target TARGET
-          {launcher} card install --target TARGET --erase-card CID
+          {launcher} card inspect TARGET
+          {launcher} card install TARGET --erase-card CID
+          {launcher} card update TARGET --card CID
+          {launcher} card rollback TARGET --card CID --build-id ID
 
         Your PC stores the phone backup separately for each model. Use the
         same --phone-data PATH for all commands when keeping separate stores
@@ -95,7 +100,7 @@ class HostArchive:
     """Collect the board views and immutable shared files for one host OS."""
 
     host: str
-    release_id: str
+    release: ReleaseContext
     files: dict[str, bytes] = field(default_factory=dict)
     executables: set[str] = field(default_factory=set)
     targets: dict[str, Any] = field(default_factory=dict)
@@ -197,7 +202,7 @@ class HostArchive:
     def finish(self, source_stem: str) -> None:
         """Add the catalog, instructions and native launcher at the ZIP root."""
         self.files[CATALOG_NAME] = canonical_json_bytes(
-            {"release_id": self.release_id, "targets": self.targets}
+            {**self.release.fields(), "targets": self.targets}
         )
         self.files["README.txt"] = _readme(self.host, source_stem)
         self.files["fplinux.py"] = (_LAUNCHERS / "release_entry.py").read_bytes()

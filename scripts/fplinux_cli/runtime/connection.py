@@ -37,25 +37,37 @@ class RunningBuild:
 
     kernel_release: str
     build_id: str
+    card_slot: str | None = None
 
 
-def read_running_build(connection: tuple[Any, dict[str, Any]]) -> RunningBuild:
+def read_running_build(
+    connection: tuple[Any, dict[str, Any]], *, inspect_card: bool = False
+) -> RunningBuild:
     """Read existing system metadata with a bounded SSH request."""
     transport, session = connection
+    command = "uname -r; sed -n 's/^BUILD_ID=//p' /etc/os-release"
+    if inspect_card:
+        command += " && /usr/libexec/fplinux/card-boot inspect"
     result = transport.run_remote(
         session,
-        "uname -r; sed -n 's/^BUILD_ID=//p' /etc/os-release",
+        command,
         capture_output=True,
         shared=True,
         timeout=min(session.get("wait_seconds", 10), 10),
     )
     if result.returncode:
-        fail(f"Cannot read the running phone build (exit {result.returncode})")
+        detail = result.stderr.strip()
+        fail(detail or f"Cannot read the running phone build (exit {result.returncode})")
     lines = result.stdout.splitlines()
     if not lines or not lines[0].strip():
         fail("Cannot read the running phone kernel release")
     build_id = lines[1].strip() if len(lines) > 1 and lines[1].strip() else "unknown"
-    return RunningBuild(lines[0].strip(), build_id)
+    card_slot = None
+    if inspect_card:
+        if len(lines) != 3 or lines[2] not in {"slot=a", "slot=b"}:
+            fail("Cannot verify the running microSD slot")
+        card_slot = lines[2][-1]
+    return RunningBuild(lines[0].strip(), build_id, card_slot)
 
 
 class ConnectionLostError(Exception):

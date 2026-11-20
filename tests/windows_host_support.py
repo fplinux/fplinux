@@ -261,6 +261,7 @@ def archive_files(directory: Path, *, platform: str = "ums9117") -> Path:
         "workspace_digest": None,
         "release_id": "aaaaaaaaaaaa",
         "source_commit": "a" * 40,
+        "release_version": "1.0.0",
         "source_snapshot": "b" * 64,
     }
     canonical = (json.dumps(manifest, sort_keys=True, separators=(",", ":")) + "\n").encode()

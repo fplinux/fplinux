@@ -20,12 +20,17 @@ from fplinux_cli.common import fail, sha256_file
 from .bundle import require_file
 from .card_access import CARD_CID, prepare_card_access
 from .card_media import (
+    CARD_APK_INDEX,
+    CARD_APK_KEY,
     CARD_ASSETS,
     CARD_WRITER,
     CardMediaError,
+    card_package_members,
     prepare_card_media,
+    prepare_card_update_media,
     read_card_layout,
 )
+from .operations import card_selection_error
 from .phone_data import preparation_progress
 from .state import private_directory
 from .workflow import run_phone
@@ -37,6 +42,7 @@ if TYPE_CHECKING:
 
     from .card_media import CardLayout
     from .events import RunLog
+    from .operations import CardAction
 
 _CARD_DEVICE = re.compile(r"/dev/mmcblk[0-9]{1,2}")
 _REMOTE_STAGING = re.compile(r"/tmp/fplinux-card\.[A-Za-z0-9]+")  # noqa: S108 -- remote mktemp.
@@ -88,17 +94,22 @@ def _read_cards(output: str, log: RunLog) -> list[SdCard]:
 
 
 def _select_card(
-    cards: list[SdCard], erase_card: str | None, confirm: Callable[[SdCard], bool] | None
+    cards: list[SdCard],
+    cid: str | None,
+    confirm: Callable[[SdCard], bool] | None,
+    *,
+    action: CardAction,
 ) -> SdCard:
-    if erase_card is not None:
-        matching = [card for card in cards if card.cid == erase_card]
+    option = "--erase-card" if action == "install" else "--card"
+    if cid is not None:
+        matching = [card for card in cards if card.cid == cid]
         if len(matching) != 1:
-            fail("--erase-card must match exactly one SD card in the phone")
+            fail(f"{option} must match exactly one SD card in the phone")
         return matching[0]
     if len(cards) != 1 or confirm is None:
-        fail("Select the card to erase with --erase-card CID")
+        fail(f"Select the card with {option} CID")
     if not confirm(cards[0]):
-        fail("Card installation cancelled")
+        fail("Card installation cancelled" if action == "install" else f"Card {action} cancelled")
     return cards[0]
 
 
@@ -117,15 +128,16 @@ def load_verified_card_kit(bundle: Path, card_bundle: Path) -> CardLayout:
     files = _manifest(card_bundle).get("files")
     if not isinstance(files, dict):
         fail("The microSD kit has no build file inventory")
-    for name in CARD_ASSETS:
-        path = card_bundle / "card" / name
+    for relative in (*(f"card/{name}" for name in CARD_ASSETS), *card_package_members(files)):
+        path = card_bundle / relative
         require_file(path)
-        record = files.get(f"card/{name}")
+        record = files.get(relative)
         if (
             not isinstance(record, dict)
             or path.stat().st_size != record.get("size")
             or sha256_file(path) != record.get("sha256")
         ):
+            name = relative.removeprefix("card/")
             fail(f"The microSD asset differs from its build manifest: {name}")
     layout = read_card_layout(card_bundle / "card")
     if layout.target != build.get("target") or layout.release_id != build.get("release_id"):
@@ -155,6 +167,7 @@ def _write_card(  # noqa: PLR0913 -- admitted inputs and selected transport stay
             card_dir / "board.tar",
             *generated,
             CARD_WRITER,
+            CARD_WRITER.with_name("card-slots.sh"),
         )
         result = transport.run_remote(
             session, "mktemp -d /tmp/fplinux-card.XXXXXXXX", capture_output=True, shared=True
@@ -250,11 +263,57 @@ def _install_card(  # noqa: PLR0913 -- the kit and consent inputs stay explicit.
     confirm: Callable[[SdCard], bool] | None,
 ) -> None:
     cards = _list_cards(connection, log)
-    card = _select_card(cards, erase_card, confirm)
+    card = _select_card(cards, erase_card, confirm, action="install")
     if card.bytes < layout.capacity_bytes:
         fail("The selected SD card is too small")
     with preparation_progress(connection, log, initial="card-sending"):
         _write_card(connection, card, card_dir, layout=layout, firmware=firmware, log=log)
+
+
+def _change_card(  # noqa: PLR0913 -- selected assets, consent and transport stay independent.
+    connection: tuple[Any, dict[str, Any]],
+    firmware: dict[str, tuple[FirmwareInput, ...]],
+    log: RunLog,
+    *,
+    bundle: Path,
+    layout: CardLayout,
+    action: CardAction,
+    cid: str | None,
+    confirm: Callable[[SdCard], bool] | None,
+    build_id: str | None,
+) -> None:
+    from .card_update import rollback_card, update_card  # noqa: PLC0415 -- write actions only.
+
+    card = _select_card(_list_cards(connection, log), cid, confirm, action=action)
+    if card.bytes < layout.capacity_bytes:
+        fail("The selected SD card is too small")
+    if build_id is not None:
+        rollback_card(connection, card, layout, build_id=build_id, log=log)
+        return
+
+    card_dir = bundle / "card"
+    apk_members = card_package_members(_manifest(bundle)["files"])
+    with tempfile.TemporaryDirectory(prefix="card-media-", dir=log.path.parent) as temporary:
+        destination = private_directory(Path(temporary))
+        try:
+            checksums, fit = prepare_card_update_media(card_dir, destination, layout, firmware)
+        except CardMediaError as error:
+            fail(str(error))
+        update_card(
+            connection,
+            card,
+            layout,
+            assets={
+                "root.ext4.xz": card_dir / "root.ext4.xz",
+                "board.tar": card_dir / "board.tar",
+                checksums.name: checksums,
+                fit.name: fit,
+                CARD_APK_INDEX: card_dir / CARD_APK_INDEX,
+                CARD_APK_KEY: card_dir / CARD_APK_KEY,
+                **{name.removeprefix("card/"): bundle / name for name in apk_members},
+            },
+            log=log,
+        )
 
 
 def run_card(  # noqa: PLR0913 -- input selection, session and consent are independent.
@@ -263,8 +322,10 @@ def run_card(  # noqa: PLR0913 -- input selection, session and consent are indep
     logs: Path,
     *,
     card_bundle: Path | None = None,
-    inspect_only: bool = False,
+    action: CardAction = "install",
     erase_card: str | None = None,
+    card_cid: str | None = None,
+    build_id: str | None = None,
     confirm: Callable[[SdCard], bool] | None = None,
     phone_data: Path | None = None,
     from_dump: Path | None = None,
@@ -272,7 +333,12 @@ def run_card(  # noqa: PLR0913 -- input selection, session and consent are indep
     loader_trace: bool = False,
 ) -> int:
     """Start or reuse one RAM reader for card discovery, preparation and writing."""
-    if inspect_only:
+    error = card_selection_error(
+        action, erase_card, card_cid, build_id, may_confirm=confirm is not None
+    )
+    if error is not None:
+        fail(error)
+    if action == "inspect":
         return run_phone(
             bundle,
             data,
@@ -283,15 +349,29 @@ def run_card(  # noqa: PLR0913 -- input selection, session and consent are indep
             loader_trace=loader_trace,
             inspect_card=_inspect_card,
         )
-    if erase_card is not None and CARD_CID.fullmatch(erase_card) is None:
-        fail("--erase-card must be a 32-digit lowercase SD card CID")
-    if erase_card is None and confirm is None:
-        fail("card install requires --erase-card CID")
     assets = bundle if card_bundle is None else card_bundle
     try:
         layout = load_verified_card_kit(bundle, assets)
     except (OSError, ValueError, CardMediaError) as error:
         fail(str(error))
+    if action == "install":
+        write = partial(
+            _install_card,
+            card_dir=assets / "card",
+            layout=layout,
+            erase_card=erase_card,
+            confirm=confirm,
+        )
+    else:
+        write = partial(
+            _change_card,
+            bundle=assets,
+            layout=layout,
+            action=action,
+            cid=card_cid,
+            confirm=confirm,
+            build_id=build_id,
+        )
     return run_phone(
         bundle,
         data,
@@ -300,11 +380,5 @@ def run_card(  # noqa: PLR0913 -- input selection, session and consent are indep
         from_dump=from_dump,
         events=events,
         loader_trace=loader_trace,
-        install_card=partial(
-            _install_card,
-            card_dir=assets / "card",
-            layout=layout,
-            erase_card=erase_card,
-            confirm=confirm,
-        ),
+        install_card=write,
     )

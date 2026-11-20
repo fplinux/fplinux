@@ -24,7 +24,7 @@ from tests.small.device_data.firmware_fixtures import (
 from tests.small.workspace.workspace_fixtures import (
     empty_package_graph,
     write_registration_source,
-    write_source_lock_files,
+    write_source_declarations,
 )
 
 if TYPE_CHECKING:
@@ -38,18 +38,21 @@ class RootfsBoundaryReachedError(Exception):
 
 
 @pytest.fixture
-def firmware_workspace(qin_firmware: QinFirmwareContext, platform: str, root_kind: str) -> Path:
+def firmware_workspace(
+    qin_firmware: QinFirmwareContext, platform: str, profile: str | None, root_kind: str
+) -> Path:
     """Capture with the case's delivery policy and controlled source declarations."""
     root = qin_firmware.root
     inventory = [
         write_registration_source(root),
         *(
             (relative.replace("platforms/demo/", f"platforms/{platform}/"), source)
-            for relative, source in write_source_lock_files(root, qin_firmware.target)
+            for relative, source in write_source_declarations(root, qin_firmware.target)
         ),
     ]
     target = {
         "platform": platform,
+        "profile": profile,
         "linux": {"root": {"kind": root_kind}},
         "uboot": {"kind": "none"},
         "device_data": {"groups": qin_firmware.groups},
@@ -67,7 +70,7 @@ def firmware_workspace(qin_firmware: QinFirmwareContext, platform: str, root_kin
         ),
         empty_package_graph(),
     ):
-        snapshot = build_inputs.target_workspace_snapshot(qin_firmware.target)
+        snapshot = build_inputs.target_workspace_snapshot(qin_firmware.target, profile)
         workspace = staging.stage_workspace_snapshot(snapshot)
     # A later valid selection must not alter an already staged build's inputs.
     qin_firmware.publish(system_calibration=b"system calibration B\x00")
@@ -75,10 +78,10 @@ def firmware_workspace(qin_firmware: QinFirmwareContext, platform: str, root_kin
 
 
 @pytest.mark.parametrize(
-    ("platform", "root_kind", "rootfs_delivery"),
+    ("platform", "profile", "root_kind", "rootfs_delivery"),
     [
-        pytest.param("sc9820e", "initramfs", False, id="qin-ram-runtime-data"),
-        pytest.param("sc9820e", "external", True, id="qin-external-rootfs"),
+        pytest.param("sc9820e", None, "initramfs", False, id="qin-ram-runtime-data"),
+        pytest.param("sc9820e", "microsd-root", "external", True, id="qin-external-rootfs"),
     ],
 )
 def test_build_stage_delivers_snapshot_bytes_at_the_selected_loader_boundary(  # noqa: PLR0913 -- owned fixtures and explicit delivery policies.
@@ -86,6 +89,7 @@ def test_build_stage_delivers_snapshot_bytes_at_the_selected_loader_boundary(  #
     firmware_workspace: Path,
     monkeypatch: pytest.MonkeyPatch,
     platform: str,
+    profile: str | None,
     root_kind: str,
     *,
     rootfs_delivery: bool,
@@ -122,6 +126,7 @@ def test_build_stage_delivers_snapshot_bytes_at_the_selected_loader_boundary(  #
     assert current_calibration.read_bytes() == b"system calibration B\x00"
     target = {
         "platform": platform,
+        "profile": profile,
         "device_data": {"groups": qin_firmware.groups},
         "linux": {"root": {"kind": root_kind}},
         "image": (
@@ -184,7 +189,8 @@ def test_build_stage_delivers_snapshot_bytes_at_the_selected_loader_boundary(  #
             "inode_size": 256,
         }
         assert rootfs.call_args.kwargs["external_output"] == (
-            qin_firmware.root / "out/xiaomi-qin-1s-plus/builds/release/work/rootfs-image"
+            qin_firmware.root
+            / "out/xiaomi-qin-1s-plus/profiles/microsd-root/builds/release/work/rootfs-image"
         )
         assert capsules == []
         return

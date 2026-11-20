@@ -40,6 +40,7 @@ def preflight_repository(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Pre
     shutil.copyfile(Path(__file__).parent / "fixtures/preflight/fplinux.py", entry)
     entry.chmod(0o755)
     (root / "README.md").write_bytes(b"committed source tree\n")
+    (root / "VERSION").write_bytes(b"1.0.0\n")
     for arguments in (
         ("init", "--quiet"),
         ("config", "user.name", "Test Author"),
@@ -55,6 +56,7 @@ def preflight_repository(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Pre
         text=True,
     ).stdout.strip()
     (root / "README.md").write_bytes(b"dirty source tree\n")
+    (root / "VERSION").write_bytes(b"1.0.1\n")
     cached = root / ".data/downloads/shared-original"
     cached.parent.mkdir(parents=True)
     cached.write_bytes(b"existing cache must not enter clean preparation")
@@ -90,6 +92,7 @@ def test_explicit_preparation_archives_the_exact_commit_and_records_only_complet
     receipt = require_preflight(repository.root, repository.commit)
     assert receipt["source_commit"] == repository.commit
     assert receipt["release_id"] == repository.commit[:12]
+    assert receipt["release_version"] == "1.0.0"
     assert (
         receipt["snapshot"] == "363e25cc2c7c33c5cad19cb52c53de0c36f3d72c6ee3915f107258ef99f3ed1a"
     )

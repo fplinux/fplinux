@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 from unittest import mock
 
 from fplinux_cli.alpine import recipes, rootfs_state, signing
-from fplinux_cli.artifacts.release import ReleaseContext
+from fplinux_cli.artifacts.release_identity import ReleaseContext
 from fplinux_cli.cache.prune import alpine as prune_alpine
 from fplinux_cli.cache.prune.operations import discard_obsolete_rootfs
 from fplinux_cli.device_data.inputs import capture_external_device_data
@@ -39,11 +39,11 @@ def test_prune_retains_qin_system_root_variants_and_expires_changed_inputs(
     publish_environment_state(cache, EnvironmentState("a" * 64, "b" * 64, "b" * 64))
     environment_recipe = environment_artifact_recipe_digest("a" * 64, "b" * 64)
     signing_key = signing.signing_key_identity(cache)
-    release_context = ReleaseContext("012345abcdef", "012345abcdef" + "a" * 28, "b" * 64)
+    release_context = ReleaseContext("012345abcdef", "1.0.0", "012345abcdef" + "a" * 28, "b" * 64)
     rootfs_recipe = partial(
         recipes.alpine_rootfs_recipe,
         root=alpine_source.root,
-        release_id=release_context.release_id,
+        release=release_context,
     )
 
     def selected_recipe() -> str:

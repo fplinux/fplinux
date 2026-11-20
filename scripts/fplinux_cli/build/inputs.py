@@ -181,6 +181,8 @@ def selected_build_sources(target_config: dict[str, Any]) -> tuple[str, ...]:
             )
         )
     if target_config["fit"]["kind"] == "sha256":
+        sources.add("alpine/card-data-directories")
+        sources.add("alpine/cardroot-init.sh")
         sources.add("scripts/fplinux_cli/build/storage/card.py")
         sources.add("scripts/fplinux_cli/build/storage/fit.py")
         sources.add("scripts/fplinux_cli/build/storage/linux.its.in")

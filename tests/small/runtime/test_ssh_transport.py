@@ -35,7 +35,6 @@ from tests.ssh_transport_support import create_ready_session
             {"bundle_generation": "current", "prepared_data_sha256": "old"},
             "different prepared phone data",
         ),
-        ({"bundle_generation": "current"}, "different prepared phone data"),
     ],
 )
 def test_reconnect_reports_which_saved_binding_differs(
@@ -72,6 +71,7 @@ def write_bundle(bundle: Path) -> tuple[dict[str, Any], str]:
         "build_type": "release",
         "release_id": "aaaaaaaaaaaa",
         "source_commit": "a" * 40,
+        "release_version": "1.0.0",
         "source_snapshot": "b" * 64,
         "image": "image/ramboot.bin",
         "sha256": {"image/ramboot.bin": hashlib.sha256(image.read_bytes()).hexdigest()},
@@ -99,6 +99,7 @@ def write_bundle(bundle: Path) -> tuple[dict[str, Any], str]:
         "workspace_digest": "d" * 64,
         "release_id": "aaaaaaaaaaaa",
         "source_commit": "a" * 40,
+        "release_version": "1.0.0",
         "source_snapshot": "b" * 64,
     }
     canonical = (
@@ -194,6 +195,21 @@ class SavedSessionDiscoveryTests:
             ssh_session.load_saved_session("phone", runtime_root=saved_session.root)
             == saved_session.state
         )
+
+    def test_saved_session_requires_the_recorded_build_and_phone_data(
+        self, saved_session: SavedSession
+    ) -> None:
+        """Reject an unbound ready record and leave the saved bytes intact."""
+        state = saved_session.state.copy()
+        del state["bundle_generation"]
+        del state["prepared_data_sha256"]
+        old_record = json.dumps(state).encode()
+        saved_session.current_path.write_bytes(old_record)
+
+        with pytest.raises(SystemExit, match="current SSH session state has unexpected fields"):
+            ssh_session.load_saved_session("phone", runtime_root=saved_session.root)
+
+        assert saved_session.current_path.read_bytes() == old_record
 
     def test_saved_session_returns_none_without_current_pointer(
         self,
@@ -357,6 +373,7 @@ class SshTransportSmallTests:
         "changed",
         [
             pytest.param({"release_id": "cccccccccccc"}, id="release-id"),
+            pytest.param({"release_version": "1.0.1"}, id="release-version"),
             pytest.param({"source_commit": None}, id="source-commit"),
             pytest.param({"source_snapshot": "c" * 64}, id="source-snapshot"),
         ],
@@ -698,6 +715,8 @@ class SshTransportSmallTests:
                 "phone",
                 {"vendor_id": 0x0525, "product_id": 0xA4A6, "wait_seconds": 1},
                 runtime_root=ssh_runtime.root,
+                bundle_generation="b" * 64,
+                prepared_data_sha256=None,
             )
 
         assert ssh_session.load_saved_session("phone", runtime_root=ssh_runtime.root) == prior

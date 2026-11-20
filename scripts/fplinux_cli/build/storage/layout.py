@@ -149,20 +149,14 @@ memory@{layout["ram_base"]:x} {{
 """.encode("ascii")
 
 
-def genimage_config(
-    fit: Mapping[str, Any] | None, storage: Mapping[str, Any], *, cold_boot: bool = False
-) -> bytes:
+def genimage_config(storage: Mapping[str, Any], *, cold_boot: bool = False) -> bytes:
     """Return one deterministic MBR/FAT/ext4 genimage configuration."""
     template = Path(__file__).with_name("genimage.cfg.in").read_text(encoding="ascii")
     boot_files = (
-        f'\t\tfile {fit["filename"]} {{\n\t\t\timage = "{fit["filename"]}"\n\t\t}}'
-        if fit is not None
+        '\t\tfile "fpbin_t117/fpmain.bin" {\n\t\t\timage = "cold-stage0.bin"\n\t\t}'
+        if cold_boot
         else ""
     )
-    if cold_boot:
-        boot_files += (
-            '\n\t\tfile "fpbin_t117/fpmain.bin" {\n\t\t\timage = "cold-stage0.bin"\n\t\t}'
-        )
     return substitute_template(
         template,
         {

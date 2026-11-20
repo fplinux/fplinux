@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, cast
 
 from fplinux_cli.common import fail
 from fplinux_cli.quality.scopes import CHECK_SCOPES
+from fplinux_cli.runtime.bundle_session import selected_context_profile
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -69,6 +70,7 @@ def command_action(
                 host=args.host or "linux",
                 site=args.site,
                 all_inputs=args.all_inputs,
+                list_inputs=args.list,
             )
         elif args.inspect_kind == "source":
             from fplinux_cli.cli.inspect import (  # noqa: PLC0415 -- selected backend.
@@ -86,6 +88,7 @@ def command_action(
                 args.target,
                 profile=args.profile,
                 build_type=args.build_type,
+                path_only=args.path,
                 current_source=args.current_source,
                 include_device_data=args.include_device_data,
             )
@@ -326,25 +329,24 @@ def command_action(
         action = partial(
             console_target,
             args.target,
-            profile=args.profile,
+            profile=selected_context_profile(args.target, profile=args.profile, boot=args.boot),
             build_type=args.build_type,
             keyboard=args.keyboard,
             exec_command=args.exec_command,
             upload=args.upload,
             pull=args.pull,
             allow_other_build=args.allow_other_build,
+            shutdown=args.shutdown,
         )
     elif args.command == "card":
         from fplinux_cli.cli.card import run_target_card  # noqa: PLC0415 -- selected backend.
+        from fplinux_cli.runtime.cli import card_request  # noqa: PLC0415 -- selected backend.
 
-        action = partial(
+        return partial(
             run_target_card,
-            args.target,
+            card_request(args),
             jobs=args.jobs,
             build_type=args.build_type,
-            erase_card=getattr(args, "erase_card", None),
-            from_dump=args.from_dump,
-            inspect_only=args.card_command == "inspect",
         )
     elif args.command == "nand":
         if args.nand_command == "backup":
@@ -405,7 +407,10 @@ def command_action(
         from fplinux_cli.cli.runtime import verify_booted  # noqa: PLC0415 -- selected backend.
 
         action = partial(
-            verify_booted, args.target, profile=args.profile, build_type=args.build_type
+            verify_booted,
+            args.target,
+            profile=selected_context_profile(args.target, profile=args.profile, boot=args.boot),
+            build_type=args.build_type,
         )
     else:
         raise AssertionError(f"unhandled command: {args.command}")

@@ -4,12 +4,13 @@
 #include <bootm.h>
 #include <command.h>
 #include <env.h>
-#include <fs.h>
+#include <ext4fs.h>
 #include <image.h>
 #include <linux/libfdt.h>
 #include <linux/types.h>
 #include <log.h>
 #include <mmc.h>
+#include <part.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
@@ -20,7 +21,8 @@
 
 #include <fplinux-uboot-target.h>
 
-#define UMS9117_SDBOOT_FIT_PATH "FPLINUX.ITB"
+#define UMS9117_SDBOOT_ROOT_PARTITION "0:2"
+#define UMS9117_SDBOOT_ACTIVE_PATH "/system/active"
 #define UMS9117_SDBOOT_CONFIG FPLINUX_UBOOT_TARGET
 #define UMS9117_SDBOOT_KERNEL "kernel"
 #define UMS9117_SDBOOT_FDT "fdt"
@@ -34,24 +36,63 @@ static int range_contains(uint32_t base, uint32_t limit, uint32_t address,
 	       bytes <= limit - (address - base);
 }
 
-static int load_whole_fit(const struct fplinux_uboot_handoff *handoff,
-			  uint32_t *fit_bytes)
+static int load_selected_fit(const struct fplinux_uboot_handoff *handoff,
+			     uint32_t *fit_bytes, char *slot)
 {
+	struct disk_partition partition;
+	struct blk_desc *device;
+	const char *path;
+	char active[2];
 	loff_t actual;
 	loff_t size;
+	int ret;
 
-	if (fs_set_blk_dev("mmc", "0:1", FS_TYPE_FAT) ||
-	    fs_size(UMS9117_SDBOOT_FIT_PATH, &size) || size <= 0)
+	if (blk_get_device_part_str("mmc", UMS9117_SDBOOT_ROOT_PARTITION,
+				    &device, &partition, 0) < 0)
 		return -EINVAL;
-	if (size > handoff->fit_limit)
-		return -EFBIG;
-	if (fs_set_blk_dev("mmc", "0:1", FS_TYPE_FAT) ||
-	    fs_read(UMS9117_SDBOOT_FIT_PATH, handoff->fit_phys, 0, size,
-		    &actual) ||
+	ext4fs_set_blk_dev(device, &partition);
+	if (!ext4fs_mount_clean()) {
+		ret = -EIO;
+		goto close;
+	}
+
+	ret = -EINVAL;
+	if (ext4fs_open_nofollow(UMS9117_SDBOOT_ACTIVE_PATH, &size) ||
+	    size != sizeof(active) ||
+	    ext4fs_read(active, 0, sizeof(active), &actual) ||
+	    actual != sizeof(active) || active[1] != '\n')
+		goto close;
+	switch (active[0]) {
+	case 'a':
+		path = "/system/a/FPLINUX.ITB";
+		break;
+	case 'b':
+		path = "/system/b/FPLINUX.ITB";
+		break;
+	default:
+		goto close;
+	}
+
+	ret = ext4fs_open_nofollow(path, &size);
+	if (ret)
+		goto close;
+	if (size <= 0 || size > handoff->fit_limit) {
+		ret = size > handoff->fit_limit ? -EFBIG : -EINVAL;
+		goto close;
+	}
+
+	ret = -EIO;
+	if (ext4fs_read((void *)(uintptr_t)handoff->fit_phys, 0, size,
+			&actual) ||
 	    actual != size)
-		return -EIO;
+		goto close;
 	*fit_bytes = size;
-	return 0;
+	*slot = active[0];
+	ret = 0;
+
+close:
+	ext4fs_close();
+	return ret;
 }
 
 static int has_sha256_hash(const void *fit, int image)
@@ -62,7 +103,7 @@ static int has_sha256_hash(const void *fit, int image)
 	int length;
 
 	hash = fdt_subnode_offset(fit, image, FIT_HASH_NODENAME);
-	if (hash < 0)
+	if (hash < 0 || fdt_getprop(fit, hash, FIT_IGNORE_PROP, NULL))
 		return 0;
 	algorithm = fdt_getprop(fit, hash, FIT_ALGO_PROP, &length);
 	if (!algorithm || length != sizeof("sha256") ||
@@ -241,11 +282,12 @@ static int validate_bootm_selection(const struct fplinux_uboot_handoff *handoff,
 }
 
 static int pack_prepared_fdt(const struct fplinux_uboot_handoff *handoff,
-			     const struct bootm_headers *images,
+			     const struct bootm_headers *images, char slot,
 			     uint32_t *dtb_bytes)
 {
 	bool autonomous = handoff->entry == FPLINUX_UBOOT_ENTRY_SD;
 	const char *entry = autonomous ? "sd" : "usb";
+	const char slot_name[] = { slot, '\0' };
 	int chosen;
 	int size;
 
@@ -263,7 +305,9 @@ static int pack_prepared_fdt(const struct fplinux_uboot_handoff *handoff,
 	    fdt_setprop_string(images->ft_addr, chosen, "fplinux,uboot-sha256",
 			       handoff->uboot_sha256) ||
 	    fdt_setprop_string(images->ft_addr, chosen, "fplinux,boot-entry",
-			       entry))
+			       entry) ||
+	    fdt_setprop_string(images->ft_addr, chosen, "fplinux,slot",
+			       slot_name))
 		return -EINVAL;
 	if (autonomous) {
 		int session =
@@ -285,7 +329,7 @@ static int pack_prepared_fdt(const struct fplinux_uboot_handoff *handoff,
 }
 
 static int prepare_fit(const struct fplinux_uboot_handoff *handoff,
-		       uint32_t fit_bytes, uint32_t *zimage_bytes,
+		       uint32_t fit_bytes, char slot, uint32_t *zimage_bytes,
 		       uint32_t *dtb_bytes)
 {
 	char fit_spec[2 * sizeof(handoff->fit_phys) +
@@ -340,7 +384,7 @@ static int prepare_fit(const struct fplinux_uboot_handoff *handoff,
 	ret = bootm_run_states(&bmi, BOOTM_STATE_OS_PREP);
 	if (ret)
 		return ret;
-	return pack_prepared_fdt(handoff, bmi.images, dtb_bytes);
+	return pack_prepared_fdt(handoff, bmi.images, slot, dtb_bytes);
 }
 
 static int do_ums9117_sdboot(struct cmd_tbl *cmdtp, int flag, int argc,
@@ -353,6 +397,7 @@ static int do_ums9117_sdboot(struct cmd_tbl *cmdtp, int flag, int argc,
 	uint32_t fit_bytes;
 	uint32_t zimage_bytes;
 	uint32_t dtb_bytes;
+	char slot;
 	int ret;
 	enum fplinux_sdboot_failure_detail stage =
 		FPLINUX_SDBOOT_FAILURE_HANDOFF;
@@ -371,7 +416,7 @@ static int do_ums9117_sdboot(struct cmd_tbl *cmdtp, int flag, int argc,
 	if (mmc_init(mmc))
 		goto fail_release;
 	stage = FPLINUX_SDBOOT_FAILURE_LOAD;
-	ret = load_whole_fit(handoff, &fit_bytes);
+	ret = load_selected_fit(handoff, &fit_bytes, &slot);
 	if (ret) {
 		if (ret == -EFBIG)
 			stage = FPLINUX_SDBOOT_FAILURE_BOOTM;
@@ -379,7 +424,7 @@ static int do_ums9117_sdboot(struct cmd_tbl *cmdtp, int flag, int argc,
 	}
 	ops->checkpoint(FPLINUX_STAGE0_CHECKPOINT_FIT_LOADED, fit_bytes);
 	stage = FPLINUX_SDBOOT_FAILURE_BOOTM;
-	ret = prepare_fit(handoff, fit_bytes, &zimage_bytes, &dtb_bytes);
+	ret = prepare_fit(handoff, fit_bytes, slot, &zimage_bytes, &dtb_bytes);
 	if (ret)
 		goto fail_release;
 	stage = FPLINUX_SDBOOT_FAILURE_RELEASE;

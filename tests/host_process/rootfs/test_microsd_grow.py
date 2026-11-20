@@ -1,14 +1,11 @@
 # SPDX-License-Identifier: GPL-2.0-only
-"""Host-process tests for the microSD growth decision boundary."""
+"""Exercise system-card growth and shutdown as processes with controlled kernel and tool peers."""
 
 from __future__ import annotations
 
 import os
 import shutil
-import tempfile
-from contextlib import ExitStack
 from dataclasses import dataclass
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
@@ -18,106 +15,316 @@ from tests.process import run_process
 
 if TYPE_CHECKING:
     import subprocess
-    from collections.abc import Iterator
+    from pathlib import Path
 
 GROW = ROOT / "alpine/aports/fplinux-microsd-root/fplinux-microsd-grow"
+FIXTURES = ROOT / "tests/host_process/rootfs/fixtures"
+SLOTTED_MOUNTS = (
+    "39 1 179:10 /system/b/root / rw,relatime - ext4 /dev/mmcblk1p2 rw\n"
+    "40 39 0:26 / /run rw,nosuid,nodev - tmpfs tmpfs rw\n"
+    "41 40 179:10 / /run/fplinux-card rw,nosuid,nodev - ext4 /dev/mmcblk1p2 rw\n"
+    "42 39 179:10 /data/home/fplinux /home/fplinux rw - ext4 /dev/mmcblk1p2 rw\n"
+    "43 39 179:2 / /media/other rw - ext4 /dev/mmcblk0p2 rw\n"
+)
+SWAPS = "Filename Type Size Used Priority\n/dev/zram0 partition 65532 3312 -2\n"
 
 
 @dataclass(frozen=True)
-class GrowthContext:
-    """Controlled filesystem-tool peers and their recorded calls for one case."""
+class CardContext:
+    """Files reported by the kernel and actions recorded by the process peers."""
 
     directory: Path
+    mountinfo: Path
+    card_type: Path
+    compatible: Path
     calls: Path
 
     def run(
-        self, growpart_status: int, resize2fs_status: int = 0
+        self,
+        *args: str,
+        growpart_status: int = 0,
+        resize2fs_status: int = 0,
+        mount_status: int = 0,
+        stop_status: int = 0,
+        super_readonly: bool = True,
     ) -> subprocess.CompletedProcess[str]:
-        """Run the growth script with controlled external-tool exit statuses."""
+        """Run the production program with selected external-tool results."""
         environment = os.environ.copy()
         environment.update(
             {
                 "PATH": f"{self.directory}:/usr/bin:/bin",
+                "FPLINUX_CARD_FILES": str(self.directory),
                 "FPLINUX_GROW_CALLS": str(self.calls),
                 "FPLINUX_GROWPART_STATUS": str(growpart_status),
                 "FPLINUX_RESIZE2FS_STATUS": str(resize2fs_status),
+                "FPLINUX_MOUNT_STATUS": str(mount_status),
+                "FPLINUX_STOP_STATUS": str(stop_status),
+                "FPLINUX_SUPER_READONLY": str(super_readonly).lower(),
             }
         )
         return run_process(
-            [str(GROW)],
-            name="microSD growth policy",
+            [str(GROW), *args],
+            name="system-card filesystem lifetime",
             timeout=5,
             env=environment,
         )
 
     def recorded_calls(self) -> list[str]:
-        """Read the filesystem-tool actions observed by this case's executable peers."""
+        """Return filesystem actions observed by the executable peers."""
         if not self.calls.exists():
             return []
         return self.calls.read_text(encoding="utf-8").splitlines()
 
 
 @pytest.fixture
-def growth() -> Iterator[GrowthContext]:
-    """Create fake growpart and resize2fs process boundaries."""
-    with ExitStack() as cleanup:
-        temporary = tempfile.TemporaryDirectory()
-        cleanup.enter_context(temporary)
-        directory = Path(temporary.name)
-        for name, fixture in (("growpart", "growpart.sh"), ("resize2fs", "resize2fs.sh")):
-            path = directory / name
-            shutil.copyfile(ROOT / "tests/host_process/rootfs/fixtures" / fixture, path)
-            path.chmod(0o755)
-        yield GrowthContext(directory, directory / "calls")
+def card(tmp_path: Path) -> CardContext:
+    """Model booting the second slot from a removable SD on the second MMC index."""
+    for name in ("growpart", "resize2fs"):
+        peer = tmp_path / name
+        shutil.copyfile(FIXTURES / f"{name}.sh", peer)
+        peer.chmod(0o755)
+    boundary = tmp_path / "system-card-boundary"
+    shutil.copyfile(FIXTURES / "system-card-boundary.sh", boundary)
+    boundary.chmod(0o755)
+    for name in ("awk", "cat", "mount", "poweroff", "rc-service", "sync"):
+        (tmp_path / name).symlink_to(boundary)
+
+    mountinfo = tmp_path / "mountinfo"
+    mountinfo.write_text(SLOTTED_MOUNTS, encoding="utf-8")
+    (tmp_path / "partitions").write_text(
+        "major minor #blocks name\n\n"
+        "179 0 15728640 mmcblk0\n179 2 15646720 mmcblk0p2\n"
+        "179 8 15728640 mmcblk1\n179 9 65536 mmcblk1p1\n179 10 15646720 mmcblk1p2\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "swaps").write_text(SWAPS, encoding="utf-8")
+    uevent = tmp_path / "uevent"
+    uevent.write_text(
+        "MAJOR=179\nMINOR=10\nDEVNAME=mmcblk1p2\nDEVTYPE=partition\nPARTN=2\n",
+        encoding="utf-8",
+    )
+    card_type = tmp_path / "type"
+    card_type.write_text("SD\n", encoding="utf-8")
+    compatible = tmp_path / "compatible"
+    compatible.write_bytes(b"inoi,240-modern-4g\0sprd,ums9117\0")
+    return CardContext(tmp_path, mountinfo, card_type, compatible, tmp_path / "calls")
 
 
-class MicroSDGrowTests:
-    """Exercise the installed script with controlled external filesystem tools."""
+@pytest.mark.parametrize("growpart_status", [0, 1], ids=["grow", "nochange"])
+def test_slot_growth_uses_mounted_sd_partition(card: CardContext, growpart_status: int) -> None:
+    result = card.run(growpart_status=growpart_status)
 
-    def test_grown_partition_is_followed_by_filesystem_growth(self, growth: GrowthContext) -> None:
-        """A successful partition change proceeds to filesystem growth."""
-        result = growth.run(0)
+    assert result.returncode == 0, result.stderr
+    assert card.recorded_calls() == [
+        "growpart:--update=on /dev/mmcblk1 2",
+        "resize2fs:/dev/mmcblk1p2",
+    ]
 
-        assert (result.returncode) == (0), result.stderr
-        assert (growth.recorded_calls()) == (
-            [
-                "growpart:--update=on /dev/mmcblk0 2",
-                "resize2fs:/dev/mmcblk0p2",
-            ]
-        )
 
-    def test_nochange_is_success_and_still_repairs_filesystem_size(
-        self, growth: GrowthContext
-    ) -> None:
-        """Growpart NOCHANGE still lets resize2fs repair an interrupted run."""
-        result = growth.run(1)
+def test_partition_failure_prevents_filesystem_growth(card: CardContext) -> None:
+    result = card.run(growpart_status=2)
 
-        assert (result.returncode) == (0), result.stderr
-        assert (growth.recorded_calls()) == (
-            [
-                "growpart:--update=on /dev/mmcblk0 2",
-                "resize2fs:/dev/mmcblk0p2",
-            ]
-        )
+    assert result.returncode == 2
+    assert result.stderr == "growpart failed\n"
+    assert card.recorded_calls() == ["growpart:--update=on /dev/mmcblk1 2"]
 
-    def test_partition_error_prevents_filesystem_growth(self, growth: GrowthContext) -> None:
-        """A real partition failure is returned before resize2fs can run."""
-        result = growth.run(2)
 
-        assert (result.returncode) == (2)
-        assert (result.stderr) == ("growpart failed\n")
-        assert (growth.recorded_calls()) == (["growpart:--update=on /dev/mmcblk0 2"])
+def test_filesystem_growth_failure_is_reported(card: CardContext) -> None:
+    result = card.run(resize2fs_status=3)
 
-    def test_resize_failure_is_reported_after_partition_success(
-        self, growth: GrowthContext
-    ) -> None:
-        """A resize2fs failure is visible after successful partition handling."""
-        result = growth.run(0, resize2fs_status=3)
+    assert result.returncode == 3
+    assert card.recorded_calls() == [
+        "growpart:--update=on /dev/mmcblk1 2",
+        "resize2fs:/dev/mmcblk1p2",
+    ]
 
-        assert (result.returncode) == (3)
-        assert (growth.recorded_calls()) == (
-            [
-                "growpart:--update=on /dev/mmcblk0 2",
-                "resize2fs:/dev/mmcblk0p2",
-            ]
-        )
+
+@pytest.mark.parametrize(
+    "mount_options",
+    ["rw,nosuid,nodev - ext4 /dev/mmcblk1p2 ro", "ro,nosuid,nodev - ext4 /dev/mmcblk1p2 rw"],
+    ids=["superblock", "per-mount"],
+)
+def test_read_only_backing_prevents_growth(card: CardContext, mount_options: str) -> None:
+    card.mountinfo.write_text(
+        SLOTTED_MOUNTS.replace("rw,nosuid,nodev - ext4 /dev/mmcblk1p2 rw", mount_options),
+        encoding="utf-8",
+    )
+
+    result = card.run()
+
+    assert result.returncode == 0, result.stderr
+    assert card.recorded_calls() == []
+
+
+@pytest.mark.parametrize(
+    "backing",
+    ["", "41 40 179:2 / /run/fplinux-card rw - ext4 /dev/mmcblk0p2 rw\n"],
+    ids=["missing", "different-device"],
+)
+def test_unassociated_backing_never_changes_the_partition(card: CardContext, backing: str) -> None:
+    card.mountinfo.write_text(
+        SLOTTED_MOUNTS.replace(
+            "41 40 179:10 / /run/fplinux-card rw,nosuid,nodev - ext4 /dev/mmcblk1p2 rw\n",
+            backing,
+        ),
+        encoding="utf-8",
+    )
+
+    assert card.run().returncode != 0
+    assert card.recorded_calls() == []
+
+
+def test_internal_mmc_card_is_never_resized(card: CardContext) -> None:
+    card.card_type.write_text("MMC\n", encoding="utf-8")
+
+    assert card.run().returncode != 0
+    assert card.recorded_calls() == []
+
+
+def test_qin_can_grow_direct_root_sd(card: CardContext) -> None:
+    card.compatible.write_bytes(b"xiaomi,qin1s-plus\0sprd,sc9820e\0")
+    card.mountinfo.write_text("39 1 179:10 / / rw - ext4 /dev/root rw\n", encoding="utf-8")
+
+    result = card.run()
+
+    assert result.returncode == 0, result.stderr
+    assert card.recorded_calls() == [
+        "growpart:--update=on /dev/mmcblk1 2",
+        "resize2fs:/dev/mmcblk1p2",
+    ]
+
+
+def test_ums9117_direct_root_is_not_a_stable_system_card(card: CardContext) -> None:
+    card.mountinfo.write_text("39 1 179:10 / / rw - ext4 /dev/mmcblk1p2 rw\n", encoding="utf-8")
+
+    assert card.run().returncode != 0
+    assert card.recorded_calls() == []
+
+
+def test_shutdown_flushes_and_remounts_the_actual_backing_filesystem(card: CardContext) -> None:
+    result = card.run("shutdown")
+    repeated = card.run("shutdown")
+
+    assert result.returncode == 0, result.stderr
+    assert repeated.returncode == 0, repeated.stderr
+    assert card.recorded_calls() == [
+        "sync:",
+        "mount:-o remount,ro /dev/mmcblk1p2 /run/fplinux-card",
+    ]
+
+
+def test_shutdown_reports_failed_backing_remount(card: CardContext) -> None:
+    result = card.run("shutdown", mount_status=32)
+
+    assert result.returncode == 32
+    assert card.recorded_calls() == [
+        "sync:",
+        "mount:-o remount,ro /dev/mmcblk1p2 /run/fplinux-card",
+    ]
+
+
+def test_shutdown_rejects_a_read_only_bind_with_a_writable_superblock(card: CardContext) -> None:
+    result = card.run("shutdown", super_readonly=False)
+
+    assert result.returncode != 0
+    assert "still writable" in result.stderr
+    assert card.recorded_calls() == [
+        "sync:",
+        "mount:-o remount,ro /dev/mmcblk1p2 /run/fplinux-card",
+    ]
+
+
+def test_shutdown_leaves_qin_direct_root_to_openrc(card: CardContext) -> None:
+    card.compatible.write_bytes(b"xiaomi,qin1s-plus\0sprd,sc9820e\0")
+    card.mountinfo.write_text("39 1 179:10 / / rw - ext4 /dev/root rw\n", encoding="utf-8")
+
+    assert card.run("shutdown").returncode == 0
+    assert card.recorded_calls() == []
+
+
+@pytest.mark.parametrize("mountpoint", ["/run/fplinux-card", "/"], ids=["slot", "qin-root"])
+def test_usb_poweroff_stops_the_session_and_releases_the_actual_system_card(
+    card: CardContext, mountpoint: str
+) -> None:
+    if mountpoint == "/":
+        card.compatible.write_bytes(b"xiaomi,qin1s-plus\0sprd,sc9820e\0")
+        card.mountinfo.write_text("39 1 179:10 / / rw - ext4 /dev/root rw\n", encoding="utf-8")
+
+    preparation = card.run("prepare-poweroff")
+    assert preparation.returncode == 0, preparation.stderr
+    assert preparation.stdout == f"readonly {mountpoint}\n"
+    assert card.recorded_calls() == [
+        "rc-service:fplinux-session stop",
+        "sync:",
+        f"mount:-o remount,ro /dev/mmcblk1p2 {mountpoint}",
+    ]
+
+    poweroff = card.run("poweroff")
+    assert poweroff.returncode == 0, poweroff.stderr
+    assert card.recorded_calls()[-1] == "poweroff:"
+
+
+def test_usb_shutdown_refuses_data_on_a_mounted_partition_by_device_number(
+    card: CardContext,
+) -> None:
+    card.mountinfo.write_text(
+        SLOTTED_MOUNTS + "44 39 179:9 / /media/boot rw - vfat /dev/alias rw\n",
+        encoding="utf-8",
+    )
+
+    result = card.run("prepare-poweroff")
+
+    assert result.returncode != 0
+    assert "Unmount the system card filesystem at /media/boot" in result.stderr
+    assert card.recorded_calls() == []
+
+
+@pytest.mark.parametrize("swap", ["/dev/mmcblk1p1 partition", "/var/swapfile file"])
+def test_usb_shutdown_refuses_disk_backed_swap_without_stopping_the_session(
+    card: CardContext, swap: str
+) -> None:
+    (card.directory / "swaps").write_text(SWAPS + f"{swap} 8192 0 -3\n", encoding="utf-8")
+
+    result = card.run("prepare-poweroff")
+
+    assert result.returncode != 0
+    assert f"Disable disk-backed swap {swap.split(maxsplit=1)[0]}" in result.stderr
+    assert card.recorded_calls() == []
+
+
+def test_usb_shutdown_refuses_when_stopping_the_graphical_session_fails(card: CardContext) -> None:
+    result = card.run("prepare-poweroff", stop_status=1)
+
+    assert result.returncode != 0
+    assert "Cannot stop the graphical session" in result.stderr
+    assert card.recorded_calls() == ["rc-service:fplinux-session stop"]
+
+
+@pytest.mark.parametrize("mount_status", [0, 32], ids=["writable-superblock", "busy-remount"])
+def test_usb_shutdown_cannot_confirm_read_only_card_or_power_off_after_remount_failure(
+    card: CardContext, mount_status: int
+) -> None:
+    result = card.run("prepare-poweroff", mount_status=mount_status, super_readonly=False)
+
+    assert result.returncode != 0
+    assert result.stdout == ""
+    assert card.run("poweroff").returncode != 0
+    assert card.recorded_calls() == [
+        "rc-service:fplinux-session stop",
+        "sync:",
+        "mount:-o remount,ro /dev/mmcblk1p2 /run/fplinux-card",
+    ]
+
+
+def test_usb_poweroff_refuses_storage_that_becomes_busy_after_preparation(
+    card: CardContext,
+) -> None:
+    assert card.run("prepare-poweroff").returncode == 0
+    with card.mountinfo.open("a", encoding="utf-8") as stream:
+        stream.write("44 39 179:9 / /media/boot rw - vfat /dev/mmcblk1p1 rw\n")
+
+    result = card.run("poweroff")
+
+    assert result.returncode != 0
+    assert "Unmount the system card filesystem at /media/boot" in result.stderr
+    assert "poweroff:" not in card.recorded_calls()
