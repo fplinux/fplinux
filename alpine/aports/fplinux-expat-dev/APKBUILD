@@ -1,6 +1,6 @@
 # Maintainer: FPLinux contributors <fplinux@example.invalid>
 pkgname=fplinux-expat-dev
-pkgver=@version:aport_expat_2_9_0_tar_xz@
+pkgver=@version:aport_expat_2_10_0_tar_xz@
 pkgrel=0
 pkgdesc="Expat development headers for FPLinux"
 url="https://libexpat.github.io/"
@@ -9,7 +9,7 @@ license="MIT"
 depends="libexpat=$pkgver-r0"
 options="!check"
 source="
-	@source:aport_expat_2_9_0_tar_xz@
+	@source:aport_expat_2_10_0_tar_xz@
 "
 builddir="$srcdir/expat-$pkgver"
 

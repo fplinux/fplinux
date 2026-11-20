@@ -1,4 +1,4 @@
-release = "3.24.2"
+release = "3.24.4"
 branch = "v3.24"
 arch = "armv7"
 triplet = "armv7-alpine-linux-musleabihf"
@@ -15,8 +15,8 @@ packages = [
   "busybox-ifupdown-1.37.0-r31.apk",
   "libcap2-2.78-r0.apk",
   "libgcc-15.2.0-r5.apk",
-  "openssh-sftp-server-10.3_p1-r1.apk",
-  "zlib-1.3.2-r1.apk",
+  "openssh-sftp-server-10.3_p1-r2.apk",
+  "zlib-1.4-r0.apk",
 ]
 
 [runtime.additions]
@@ -24,7 +24,7 @@ fplinux-bluetooth = [
   "dbus-1.16.2-r2.apk",
   "dbus-libs-1.16.2-r2.apk",
   "dbus-openrc-1.16.2-r2.apk",
-  "libexpat-2.9.0-r0.apk",
+  "libexpat-2.10.0-r0.apk",
   "ncurses-terminfo-base-6.6_p20260516-r0.apk",
 ]
 fplinux-debug-tools = [
@@ -46,7 +46,7 @@ fplinux-libweston = [
   "mtdev-1.1.7-r0.apk",
   "pixman-0.46.4-r0.apk",
 ]
-fplinux-mesa = ["libexpat-2.9.0-r0.apk", "libstdc++-15.2.0-r5.apk"]
+fplinux-mesa = ["libexpat-2.10.0-r0.apk", "libstdc++-15.2.0-r5.apk"]
 fplinux-microsd-root = [
   "cloud-utils-growpart-0.33-r1.apk",
   "e2fsprogs-libs-1.47.4-r0.apk",
@@ -65,11 +65,11 @@ fplinux-mre = [
   "brotli-libs-1.2.1-r0.apk",
   "c-ares-1.34.9-r0.apk",
   "ca-certificates-bundle-20261020-r0.apk",
-  "libcrypto3-3.5.9-r0.apk",
+  "libcrypto3-3.5.9-r1.apk",
   "libcurl-8.23.0-r0.apk",
   "libidn2-2.3.8-r0.apk",
   "libpsl-0.21.5-r3.apk",
-  "libssl3-3.5.9-r0.apk",
+  "libssl3-3.5.9-r1.apk",
   "libunistring-1.4.2-r0.apk",
   "nghttp2-libs-1.70.0-r0.apk",
   "zstd-libs-1.5.7-r2.apk",
@@ -84,10 +84,10 @@ fplinux-wifi = [
   "dbus-libs-1.16.2-r2.apk",
   "hostapd-2.11-r4.apk",
   "iw-6.17-r0.apk",
-  "libcrypto3-3.5.9-r0.apk",
-  "libexpat-2.9.0-r0.apk",
+  "libcrypto3-3.5.9-r1.apk",
+  "libexpat-2.10.0-r0.apk",
   "libnl3-3.11.0-r0.apk",
-  "libssl3-3.5.9-r0.apk",
+  "libssl3-3.5.9-r1.apk",
   "pcsc-lite-libs-2.4.0-r4.apk",
   "wireless-regdb-2025.10.07-r0.apk",
   "wpa_supplicant-2.11-r4.apk",
@@ -102,7 +102,7 @@ packages = [
   "libpsl-dev-0.21.5-r3.apk",
   "libpsl-utils-0.21.5-r3.apk",
   "nghttp2-dev-1.70.0-r0.apk",
-  "openssl-dev-3.5.9-r0.apk",
+  "openssl-dev-3.5.9-r1.apk",
   "binutils-2.45.1-r1.apk",
   "brotli-libs-1.2.1-r0.apk",
   "bsd-compat-headers-0.7.2-r6.apk",
@@ -130,7 +130,7 @@ packages = [
   "libcap-dev-2.78-r0.apk",
   "libcap2-2.78-r0.apk",
   "libcom_err-1.47.4-r0.apk",
-  "libcrypto3-3.5.9-r0.apk",
+  "libcrypto3-3.5.9-r1.apk",
   "libcurl-8.23.0-r0.apk",
   "libdebuginfod-0.195-r0.apk",
   "libdisplay-info-0.3.0-r0.apk",
@@ -141,7 +141,7 @@ packages = [
   "libelf-0.195-r0.apk",
   "libevdev-1.13.6-r0.apk",
   "libevdev-dev-1.13.6-r0.apk",
-  "libexpat-2.9.0-r0.apk",
+  "libexpat-2.10.0-r0.apk",
   "libffi-3.5.2-r1.apk",
   "libffi-dev-3.5.2-r1.apk",
   "libformw-6.6_p20260516-r0.apk",
@@ -162,13 +162,13 @@ packages = [
   "libpcre2-16-10.49-r0.apk",
   "libpcre2-32-10.49-r0.apk",
   "libpsl-0.21.5-r3.apk",
-  "libssl3-3.5.9-r0.apk",
+  "libssl3-3.5.9-r1.apk",
   "libstdc++-15.2.0-r5.apk",
   "libstdc++-dev-15.2.0-r5.apk",
   "libunistring-1.4.2-r0.apk",
   "linux-headers-7.0.0-r1.apk",
-  "mbedtls3-3.6.7-r0.apk",
-  "mbedtls3-dev-3.6.7-r0.apk",
+  "mbedtls3-3.6.8-r0.apk",
+  "mbedtls3-dev-3.6.8-r0.apk",
   "mpc1-1.3.1-r1.apk",
   "mpfr4-4.2.2-r0.apk",
   "mtdev-1.1.7-r0.apk",
@@ -197,9 +197,9 @@ packages = [
   "xz-5.8.4-r0.apk",
   "xz-dev-5.8.4-r0.apk",
   "xz-libs-5.8.4-r0.apk",
-  "zlib-1.3.2-r1.apk",
-  "zlib-dev-1.3.2-r1.apk",
-  "zlib-static-1.3.2-r1.apk",
+  "zlib-1.4-r0.apk",
+  "zlib-dev-1.4-r0.apk",
+  "zlib-static-1.4-r0.apk",
   "zstd-1.5.7-r2.apk",
   "zstd-dev-1.5.7-r2.apk",
   "zstd-libs-1.5.7-r2.apk",
@@ -423,9 +423,9 @@ bytes = 5889
 
 [[package]]
 repository = "main"
-file = "libcrypto3-3.5.9-r0.apk"
-sha256 = "4bbfb11194ac706ff0c6997a2a4633cf238332f9a4b563d8435167ebd19aa8db"
-bytes = 1554077
+file = "libcrypto3-3.5.9-r1.apk"
+sha256 = "0a5d3a724fdc869c672256d0adb6e083c3bdfde674e5f0fb47578d5f4105a1ca"
+bytes = 1554218
 
 [[package]]
 repository = "main"
@@ -495,9 +495,9 @@ bytes = 23211
 
 [[package]]
 repository = "main"
-file = "libexpat-2.9.0-r0.apk"
-sha256 = "8d72afa72dd7e527507410ac3cf2fa7d2adb619a9dc21faa5bd634e51f20a840"
-bytes = 53162
+file = "libexpat-2.10.0-r0.apk"
+sha256 = "7e8e1e95c28a5b56498a16709e9bf9d3c9d18f6f63b17bc31d280e21763ddf32"
+bytes = 54580
 
 [[package]]
 repository = "main"
@@ -657,9 +657,9 @@ bytes = 50771
 
 [[package]]
 repository = "main"
-file = "libssl3-3.5.9-r0.apk"
-sha256 = "0236ecfa1a2a1fc819938d83709ecacb3c9f7ef131c29128226fd3fb68fb44eb"
-bytes = 341363
+file = "libssl3-3.5.9-r1.apk"
+sha256 = "183119c1b5ae6c75e8a73db6742cb154bf718f637c6ba32195df9f990e8b8d14"
+bytes = 341456
 
 [[package]]
 repository = "main"
@@ -693,15 +693,15 @@ bytes = 1945405
 
 [[package]]
 repository = "community"
-file = "mbedtls3-3.6.7-r0.apk"
-sha256 = "b027782696a0727d9fad881f107d333ef9e5d217961dcd1beab7f46786e9ef87"
-bytes = 370035
+file = "mbedtls3-3.6.8-r0.apk"
+sha256 = "71e6679bb0b87dcedce8540fcfa533a04ceba4c67ebc0eb3f066095026b36318"
+bytes = 372253
 
 [[package]]
 repository = "community"
-file = "mbedtls3-dev-3.6.7-r0.apk"
-sha256 = "610925061e46888c4f624e0dafa48caeee41382e7f97aa2e310f05fae0a6aba0"
-bytes = 439819
+file = "mbedtls3-dev-3.6.8-r0.apk"
+sha256 = "97b6e65f50caa9d3e679eb914f2b1cd197604624e6d36d0e53ca517330e2390c"
+bytes = 444249
 
 [[package]]
 repository = "main"
@@ -777,15 +777,15 @@ bytes = 56920
 
 [[package]]
 repository = "main"
-file = "openssh-sftp-server-10.3_p1-r1.apk"
-sha256 = "ece9cdb6d116665a7a6e8a2c29163b4f20099dce62cbb38853b1f13cd7b9f2e2"
-bytes = 56329
+file = "openssh-sftp-server-10.3_p1-r2.apk"
+sha256 = "0c2fc9496c805d60a0f5716824e47c22bc2123edf65e0b40838253fd051762df"
+bytes = 56328
 
 [[package]]
 repository = "main"
-file = "openssl-dev-3.5.9-r0.apk"
-sha256 = "fab70bde31f64e37aa3759452e44873a54700ef1ed634ebfaccd082acd4e3c3c"
-bytes = 366016
+file = "openssl-dev-3.5.9-r1.apk"
+sha256 = "dc64c076b6c7c029b9fa4b6911dd2e1ef95cd05cdcc99ba78549cf199c6db201"
+bytes = 366012
 
 [[package]]
 repository = "main"
@@ -927,21 +927,21 @@ bytes = 104175
 
 [[package]]
 repository = "main"
-file = "zlib-1.3.2-r1.apk"
-sha256 = "4a4077c3243a6dfd5e16df20ecbe100acd72ab24eab32c91790ec1eb32d23053"
-bytes = 43956
+file = "zlib-1.4-r0.apk"
+sha256 = "7ff3adec6ee811a8e7ac2c37e3119fa0923d087590ff52507362bbaa67b12b81"
+bytes = 44616
 
 [[package]]
 repository = "main"
-file = "zlib-dev-1.3.2-r1.apk"
-sha256 = "cd24f88dee17e03533990d1c478d30b921440e0a725dbb73e04b4707b5bbf38e"
-bytes = 34416
+file = "zlib-dev-1.4-r0.apk"
+sha256 = "d8fda7e4e6057aff0efab67b7336230318229ea881f6aba2e2481038bc555c97"
+bytes = 34769
 
 [[package]]
 repository = "main"
-file = "zlib-static-1.3.2-r1.apk"
-sha256 = "82ccd90ce5825395eb57f3bdc06cfc307b0747e3147f2e860bfedf8bcc6c13b4"
-bytes = 46851
+file = "zlib-static-1.4-r0.apk"
+sha256 = "565772d8ea16dc51831bd9e23749d5b1ad88a14a817575836f9d4ce8784a9fcf"
+bytes = 47519
 
 [[package]]
 repository = "main"

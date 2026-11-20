@@ -26,17 +26,17 @@ apk_groups = [
     "file=5.47-r2",
     "gawk=5.3.2-r2",
     "genimage=19-r0",
-    "git=2.54.0-r0",
-    "gzip=1.14-r3",
+    "git=2.54.1-r0",
+    "gzip=1.15-r0",
     "libtool=2.6.0-r1",
     "make=4.4.1-r4",
     "mtools=4.0.49-r0",
-    "openssh-client-default=10.3_p1-r1",
-    "openssh-server=10.3_p1-r1",
-    "patch=2.8-r0",
-    "perl=5.42.2-r1",
+    "openssh-client-default=10.3_p1-r2",
+    "openssh-server=10.3_p1-r2",
+    "patch=2.8.1-r0",
+    "perl=5.42.3-r0",
     "pkgconf=2.5.1-r0",
-    "rsync=3.5.0-r0",
+    "rsync=3.5.2-r1",
     "sed=4.9-r2",
     "squashfs-tools=4.7.5-r0",
     "tar=1.35-r5",
@@ -77,7 +77,7 @@ apk_groups = [
     "dtc=1.7.2-r1",
     "elfutils-dev=0.195-r0",
     "eudev-dev=3.2.14-r6",
-    "expat-dev=2.9.0-r0",
+    "expat-dev=2.10.0-r0",
     "flex=2.6.4-r8",
     "glib-dev=2.88.1-r1",
     "json-c-dev=0.18-r1",
@@ -86,13 +86,13 @@ apk_groups = [
     "libusb-dev=1.0.30-r0",
     "llvm22-dev=22.1.3-r1",
     "ncurses-dev=6.6_p20260516-r0",
-    "openssl-dev=3.5.9-r0",
+    "openssl-dev=3.5.9-r1",
     "pixman-dev=0.46.4-r0",
     "spirv-llvm-translator-dev=22.1.0-r0",
     "spirv-tools-dev=1.4.341.0-r0",
     "swig=4.4.1-r1",
     "xz-dev=5.8.4-r0",
-    "zlib-dev=1.3.2-r1",
+    "zlib-dev=1.4-r0",
   ],
   [
     "py3-dt-schema=2025.12-r1",
@@ -363,11 +363,11 @@ purpose = "environment-package"
 arch = "x86_64"
 
 [[input]]
-key = "environment:apk:x86_64:alpine-release-3.24.3-r0.apk"
-url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/alpine-release-3.24.3-r0.apk"
-sha256 = "439127256d34c9d51da3b90f9d68d4bf43342de994576a4c0e968d8228bd2f8c"
-bytes = 2087
-destination = "downloads/environment/apk/main/x86_64/alpine-release-3.24.3-r0.apk"
+key = "environment:apk:x86_64:alpine-release-3.24.4-r0.apk"
+url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/alpine-release-3.24.4-r0.apk"
+sha256 = "841c28049cdb0fd7d13387503ea49d229225f6ff66a4ef059ffe777e81ac0591"
+bytes = 2089
+destination = "downloads/environment/apk/main/x86_64/alpine-release-3.24.4-r0.apk"
 purpose = "environment-package"
 arch = "x86_64"
 
@@ -390,11 +390,11 @@ purpose = "environment-package"
 arch = "x86_64"
 
 [[input]]
-key = "environment:apk:x86_64:apk-tools-3.0.8-r0.apk"
-url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/apk-tools-3.0.8-r0.apk"
-sha256 = "91cb7303b27da01364550daa767b85cbe88fc5f7e37b9adae0f847ec7e0890d9"
-bytes = 55395
-destination = "downloads/environment/apk/main/x86_64/apk-tools-3.0.8-r0.apk"
+key = "environment:apk:x86_64:apk-tools-3.0.9-r0.apk"
+url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/apk-tools-3.0.9-r0.apk"
+sha256 = "11e164b878d143d9062ca28ffc72b17e9379e2db7724d5b0bad13d879f879445"
+bytes = 55597
+destination = "downloads/environment/apk/main/x86_64/apk-tools-3.0.9-r0.apk"
 purpose = "environment-package"
 arch = "x86_64"
 
@@ -876,20 +876,20 @@ purpose = "environment-package"
 arch = "x86_64"
 
 [[input]]
-key = "environment:apk:x86_64:expat-2.9.0-r0.apk"
-url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/expat-2.9.0-r0.apk"
-sha256 = "9cea76a1c8a31b28ca1e176e81ffcf617fc4d2bc04af2792f463f755446932f4"
-bytes = 12836
-destination = "downloads/environment/apk/main/x86_64/expat-2.9.0-r0.apk"
+key = "environment:apk:x86_64:expat-2.10.0-r0.apk"
+url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/expat-2.10.0-r0.apk"
+sha256 = "f6344485c6bde88611e8ce77c49ee12209de17468dedcca5e5fa767973bd6f37"
+bytes = 12952
+destination = "downloads/environment/apk/main/x86_64/expat-2.10.0-r0.apk"
 purpose = "environment-package"
 arch = "x86_64"
 
 [[input]]
-key = "environment:apk:x86_64:expat-dev-2.9.0-r0.apk"
-url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/expat-dev-2.9.0-r0.apk"
-sha256 = "c174b54affcc783bb413d21b68c78127bbfe80e9854a54d23cca96930b746621"
-bytes = 22138
-destination = "downloads/environment/apk/main/x86_64/expat-dev-2.9.0-r0.apk"
+key = "environment:apk:x86_64:expat-dev-2.10.0-r0.apk"
+url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/expat-dev-2.10.0-r0.apk"
+sha256 = "13eeeeaf7bb3260b156117559058ed12a491d5bc5516bcda7250e003fce1441d"
+bytes = 22196
+destination = "downloads/environment/apk/main/x86_64/expat-dev-2.10.0-r0.apk"
 purpose = "environment-package"
 arch = "x86_64"
 
@@ -1029,29 +1029,29 @@ purpose = "environment-package"
 arch = "x86_64"
 
 [[input]]
-key = "environment:apk:x86_64:git-2.54.0-r0.apk"
-url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/git-2.54.0-r0.apk"
-sha256 = "5a2c6782774d2e891fc2fc3fdc50c3c2743b8eb2dc7cda69b6b723af2eedcf78"
-bytes = 3546724
-destination = "downloads/environment/apk/main/x86_64/git-2.54.0-r0.apk"
+key = "environment:apk:x86_64:git-2.54.1-r0.apk"
+url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/git-2.54.1-r0.apk"
+sha256 = "a8d6464152f823b28d80876142649bfddd8ac7959b5c24be9f8f7f2b5e2421dc"
+bytes = 3548109
+destination = "downloads/environment/apk/main/x86_64/git-2.54.1-r0.apk"
 purpose = "environment-package"
 arch = "x86_64"
 
 [[input]]
-key = "environment:apk:x86_64:git-init-template-2.54.0-r0.apk"
-url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/git-init-template-2.54.0-r0.apk"
-sha256 = "e8094a47bfa6e66b7d550ae12a7a8bcab0bc4af502aacd5d2a6fc62d2c5e488d"
-bytes = 10825
-destination = "downloads/environment/apk/main/x86_64/git-init-template-2.54.0-r0.apk"
+key = "environment:apk:x86_64:git-init-template-2.54.1-r0.apk"
+url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/git-init-template-2.54.1-r0.apk"
+sha256 = "d64eeddb867cdb678944535e1e56d0438a9ca5114344cbf624abae31519f2afd"
+bytes = 10826
+destination = "downloads/environment/apk/main/x86_64/git-init-template-2.54.1-r0.apk"
 purpose = "environment-package"
 arch = "x86_64"
 
 [[input]]
-key = "environment:apk:x86_64:git-perl-2.54.0-r0.apk"
-url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/git-perl-2.54.0-r0.apk"
-sha256 = "69be2602c82886c58109f4849dee4e2e935710944240994e85a284082be928b8"
-bytes = 15304
-destination = "downloads/environment/apk/main/x86_64/git-perl-2.54.0-r0.apk"
+key = "environment:apk:x86_64:git-perl-2.54.1-r0.apk"
+url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/git-perl-2.54.1-r0.apk"
+sha256 = "dea581aa578a4197acaa88d71b05ae2580f4ce7aafd3b120e848991e05fee75f"
+bytes = 15295
+destination = "downloads/environment/apk/main/x86_64/git-perl-2.54.1-r0.apk"
 purpose = "environment-package"
 arch = "x86_64"
 
@@ -1083,11 +1083,11 @@ purpose = "environment-package"
 arch = "x86_64"
 
 [[input]]
-key = "environment:apk:x86_64:gzip-1.14-r3.apk"
-url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/gzip-1.14-r3.apk"
-sha256 = "ef53c932016484c9d5f8c53838161db0a5798b05f58827b81d3e512586268775"
-bytes = 66211
-destination = "downloads/environment/apk/main/x86_64/gzip-1.14-r3.apk"
+key = "environment:apk:x86_64:gzip-1.15-r0.apk"
+url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/gzip-1.15-r0.apk"
+sha256 = "ca33962d67fe6c218b96b5a5b012913f64fba1033535fcd6df17f1228d01b0a9"
+bytes = 65150
+destination = "downloads/environment/apk/main/x86_64/gzip-1.15-r0.apk"
 purpose = "environment-package"
 arch = "x86_64"
 
@@ -1155,20 +1155,20 @@ purpose = "environment-package"
 arch = "x86_64"
 
 [[input]]
-key = "environment:apk:x86_64:libapk-3.0.8-r0.apk"
-url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/libapk-3.0.8-r0.apk"
-sha256 = "e7f59edfee903d17291eb67b8ce86eae87370b0ffb6902384d2e096c64962cc7"
-bytes = 133918
-destination = "downloads/environment/apk/main/x86_64/libapk-3.0.8-r0.apk"
+key = "environment:apk:x86_64:libapk-3.0.9-r0.apk"
+url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/libapk-3.0.9-r0.apk"
+sha256 = "24c6116eac6162e74be22026087de1a45bb43351a89f2914f62243b6d1deb76c"
+bytes = 134348
+destination = "downloads/environment/apk/main/x86_64/libapk-3.0.9-r0.apk"
 purpose = "environment-package"
 arch = "x86_64"
 
 [[input]]
-key = "environment:apk:x86_64:libarchive-3.8.10-r0.apk"
-url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/libarchive-3.8.10-r0.apk"
-sha256 = "cbdf763a628f0c2cfbb77696ec08bc3c7e9e121c7bf9058a26b4045791c8af38"
-bytes = 325236
-destination = "downloads/environment/apk/main/x86_64/libarchive-3.8.10-r0.apk"
+key = "environment:apk:x86_64:libarchive-3.8.11-r0.apk"
+url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/libarchive-3.8.11-r0.apk"
+sha256 = "275ca3b65a540656c91f776a7e0f3ceee5240982218d16b6acba7d040f765599"
+bytes = 325544
+destination = "downloads/environment/apk/main/x86_64/libarchive-3.8.11-r0.apk"
 purpose = "environment-package"
 arch = "x86_64"
 
@@ -1245,11 +1245,11 @@ purpose = "environment-package"
 arch = "x86_64"
 
 [[input]]
-key = "environment:apk:x86_64:libcrypto3-3.5.9-r0.apk"
-url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/libcrypto3-3.5.9-r0.apk"
-sha256 = "6632d758d8f5e9ea3b650fe966f23bbf9a202f8b8dceecac93da135dec5e3689"
-bytes = 1980198
-destination = "downloads/environment/apk/main/x86_64/libcrypto3-3.5.9-r0.apk"
+key = "environment:apk:x86_64:libcrypto3-3.5.9-r1.apk"
+url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/libcrypto3-3.5.9-r1.apk"
+sha256 = "042026082cc9bc7872d1baa81755c50efa70b05f03b5369fdc5f0a1303009720"
+bytes = 1980117
+destination = "downloads/environment/apk/main/x86_64/libcrypto3-3.5.9-r1.apk"
 purpose = "environment-package"
 arch = "x86_64"
 
@@ -1353,11 +1353,11 @@ purpose = "environment-package"
 arch = "x86_64"
 
 [[input]]
-key = "environment:apk:x86_64:libexpat-2.9.0-r0.apk"
-url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/libexpat-2.9.0-r0.apk"
-sha256 = "32b127f31e0a919110a18a7f0bb3780d8fb66ba4d8d61b2d301d633f0e319d0e"
-bytes = 62175
-destination = "downloads/environment/apk/main/x86_64/libexpat-2.9.0-r0.apk"
+key = "environment:apk:x86_64:libexpat-2.10.0-r0.apk"
+url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/libexpat-2.10.0-r0.apk"
+sha256 = "e7e7408ea787ed06d00159b0ff1f9b65a63cf634f36d9e0fa7512ce2c489a503"
+bytes = 63634
+destination = "downloads/environment/apk/main/x86_64/libexpat-2.10.0-r0.apk"
 purpose = "environment-package"
 arch = "x86_64"
 
@@ -1650,11 +1650,11 @@ purpose = "environment-package"
 arch = "x86_64"
 
 [[input]]
-key = "environment:apk:x86_64:libssl3-3.5.9-r0.apk"
-url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/libssl3-3.5.9-r0.apk"
-sha256 = "05e3393fb95aa5751ca2f9d242f659f6cff82c1cc7767cc2df4a086f7ad01877"
-bytes = 381860
-destination = "downloads/environment/apk/main/x86_64/libssl3-3.5.9-r0.apk"
+key = "environment:apk:x86_64:libssl3-3.5.9-r1.apk"
+url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/libssl3-3.5.9-r1.apk"
+sha256 = "18c5778cbe52e1991303f8531970b05d4e6e036ea08349322f7422f42a689dc7"
+bytes = 382098
+destination = "downloads/environment/apk/main/x86_64/libssl3-3.5.9-r1.apk"
 purpose = "environment-package"
 arch = "x86_64"
 
@@ -1848,11 +1848,11 @@ purpose = "environment-package"
 arch = "x86_64"
 
 [[input]]
-key = "environment:apk:x86_64:libxslt-1.1.43-r3.apk"
-url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/libxslt-1.1.43-r3.apk"
-sha256 = "b8ea65dc36b982bba434e0c71a8cb39d16b49f80c2f80847c0f25f0cb356f38f"
-bytes = 129636
-destination = "downloads/environment/apk/main/x86_64/libxslt-1.1.43-r3.apk"
+key = "environment:apk:x86_64:libxslt-1.1.43-r4.apk"
+url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/libxslt-1.1.43-r4.apk"
+sha256 = "40e6cc7d09ce1e69421c2b37e1da4e9afef486843f21c3a79339cd6d93c1c617"
+bytes = 129876
+destination = "downloads/environment/apk/main/x86_64/libxslt-1.1.43-r4.apk"
 purpose = "environment-package"
 arch = "x86_64"
 
@@ -2136,74 +2136,74 @@ purpose = "environment-package"
 arch = "x86_64"
 
 [[input]]
-key = "environment:apk:x86_64:openssh-client-common-10.3_p1-r1.apk"
-url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/openssh-client-common-10.3_p1-r1.apk"
-sha256 = "b56b7fca470d627ff80bdff9267533abb13ccab1246c932032b190bd7dffa4d9"
-bytes = 728641
-destination = "downloads/environment/apk/main/x86_64/openssh-client-common-10.3_p1-r1.apk"
+key = "environment:apk:x86_64:openssh-client-common-10.3_p1-r2.apk"
+url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/openssh-client-common-10.3_p1-r2.apk"
+sha256 = "a9ebee31a425b91bd8b83e0228e365c6a256a67a50773420a8cc983c6e51eaaa"
+bytes = 728647
+destination = "downloads/environment/apk/main/x86_64/openssh-client-common-10.3_p1-r2.apk"
 purpose = "environment-package"
 arch = "x86_64"
 
 [[input]]
-key = "environment:apk:x86_64:openssh-client-default-10.3_p1-r1.apk"
-url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/openssh-client-default-10.3_p1-r1.apk"
-sha256 = "14132eba5d98eda8c57c103aad9ead0de982ba14a67bfadd15f56130f6a73634"
-bytes = 350769
-destination = "downloads/environment/apk/main/x86_64/openssh-client-default-10.3_p1-r1.apk"
+key = "environment:apk:x86_64:openssh-client-default-10.3_p1-r2.apk"
+url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/openssh-client-default-10.3_p1-r2.apk"
+sha256 = "efef3c1719e2d399f5194151004712e6e107d4daa6dce2474b62573cec8854d3"
+bytes = 350772
+destination = "downloads/environment/apk/main/x86_64/openssh-client-default-10.3_p1-r2.apk"
 purpose = "environment-package"
 arch = "x86_64"
 
 [[input]]
-key = "environment:apk:x86_64:openssh-keygen-10.3_p1-r1.apk"
-url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/openssh-keygen-10.3_p1-r1.apk"
-sha256 = "a7a197dd781fd25d127fe7815db3d69130f0772655f421b4a88c7e4f7bb2ecf7"
-bytes = 172185
-destination = "downloads/environment/apk/main/x86_64/openssh-keygen-10.3_p1-r1.apk"
+key = "environment:apk:x86_64:openssh-keygen-10.3_p1-r2.apk"
+url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/openssh-keygen-10.3_p1-r2.apk"
+sha256 = "36514ce00e23687be640ce57e40a963539538ddc49980b7fe9fb0b2058c4a8fb"
+bytes = 172179
+destination = "downloads/environment/apk/main/x86_64/openssh-keygen-10.3_p1-r2.apk"
 purpose = "environment-package"
 arch = "x86_64"
 
 [[input]]
-key = "environment:apk:x86_64:openssh-server-10.3_p1-r1.apk"
-url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/openssh-server-10.3_p1-r1.apk"
-sha256 = "2818d1c4ba1cc279e226632aceea3ada2c7652977fce364f75c0d2ad058ea57f"
-bytes = 880349
-destination = "downloads/environment/apk/main/x86_64/openssh-server-10.3_p1-r1.apk"
+key = "environment:apk:x86_64:openssh-server-10.3_p1-r2.apk"
+url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/openssh-server-10.3_p1-r2.apk"
+sha256 = "7dc84afcffa8596df65bbfc80a0615a9bc0a6c3ae959e1491b558712ec3ecbf5"
+bytes = 880603
+destination = "downloads/environment/apk/main/x86_64/openssh-server-10.3_p1-r2.apk"
 purpose = "environment-package"
 arch = "x86_64"
 
 [[input]]
-key = "environment:apk:x86_64:openssh-server-common-10.3_p1-r1.apk"
-url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/openssh-server-common-10.3_p1-r1.apk"
-sha256 = "d91b68c19d02f61587eb3e6b6b5a30c9658f22b655e412adbd25eddd503229bd"
-bytes = 3190
-destination = "downloads/environment/apk/main/x86_64/openssh-server-common-10.3_p1-r1.apk"
+key = "environment:apk:x86_64:openssh-server-common-10.3_p1-r2.apk"
+url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/openssh-server-common-10.3_p1-r2.apk"
+sha256 = "43a7d4f5ca2d4fc743ef7cdded0789d603433f0e9392c0d3a8b3e098cf335a99"
+bytes = 3183
+destination = "downloads/environment/apk/main/x86_64/openssh-server-common-10.3_p1-r2.apk"
 purpose = "environment-package"
 arch = "x86_64"
 
 [[input]]
-key = "environment:apk:x86_64:openssl-3.5.9-r0.apk"
-url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/openssl-3.5.9-r0.apk"
-sha256 = "9358e8f38eb19a1e035355626570c76bda1e5a49084c768fb0edc1e607251e99"
-bytes = 340119
-destination = "downloads/environment/apk/main/x86_64/openssl-3.5.9-r0.apk"
+key = "environment:apk:x86_64:openssl-3.5.9-r1.apk"
+url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/openssl-3.5.9-r1.apk"
+sha256 = "ed11241475e5757ce8eb9788b18116a804a579395d4813605df12989a2acbabf"
+bytes = 340122
+destination = "downloads/environment/apk/main/x86_64/openssl-3.5.9-r1.apk"
 purpose = "environment-package"
 arch = "x86_64"
 
 [[input]]
-key = "environment:apk:x86_64:openssl-dev-3.5.9-r0.apk"
-url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/openssl-dev-3.5.9-r0.apk"
-sha256 = "2479885dfc1414b44cf0f2578b014b70a3ce671d7607db62c8366e46f5b77ca6"
-bytes = 365997
-destination = "downloads/environment/apk/main/x86_64/openssl-dev-3.5.9-r0.apk"
+key = "environment:apk:x86_64:openssl-dev-3.5.9-r1.apk"
+url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/openssl-dev-3.5.9-r1.apk"
+sha256 = "6a5734c3a00cf03aaa9cb0f4ff8c6d12d3b0c0c5f1490a3491eaf13a16ae044c"
+bytes = 365989
+destination = "downloads/environment/apk/main/x86_64/openssl-dev-3.5.9-r1.apk"
 purpose = "environment-package"
 arch = "x86_64"
 
 [[input]]
-key = "environment:apk:x86_64:patch-2.8-r0.apk"
-url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/patch-2.8-r0.apk"
-sha256 = "723c061ea3e2c3e61b457f8f614f0b87724aeae37564ba4c1bdd41c722118187"
-bytes = 69750
-destination = "downloads/environment/apk/main/x86_64/patch-2.8-r0.apk"
+key = "environment:apk:x86_64:patch-2.8.1-r0.apk"
+url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/patch-2.8.1-r0.apk"
+sha256 = "9ea3be7dca8efce2031dbf3f885a54ad75515f2afe9a19e238d79e2ffbbe4240"
+bytes = 69631
+destination = "downloads/environment/apk/main/x86_64/patch-2.8.1-r0.apk"
 purpose = "environment-package"
 arch = "x86_64"
 
@@ -2226,11 +2226,11 @@ purpose = "environment-package"
 arch = "x86_64"
 
 [[input]]
-key = "environment:apk:x86_64:perl-5.42.2-r1.apk"
-url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/perl-5.42.2-r1.apk"
-sha256 = "0c57f655954b9183711d850b9ccb369f22aabd70f3ce617fe9f67eac2ef2afa7"
-bytes = 10169062
-destination = "downloads/environment/apk/main/x86_64/perl-5.42.2-r1.apk"
+key = "environment:apk:x86_64:perl-5.42.3-r0.apk"
+url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/perl-5.42.3-r0.apk"
+sha256 = "6bb4d744425b1689d54feece20bdd51f71508c4d23d1af5f66298f03f8310df7"
+bytes = 10175617
+destination = "downloads/environment/apk/main/x86_64/perl-5.42.3-r0.apk"
 purpose = "environment-package"
 arch = "x86_64"
 
@@ -2244,11 +2244,11 @@ purpose = "environment-package"
 arch = "x86_64"
 
 [[input]]
-key = "environment:apk:x86_64:perl-git-2.54.0-r0.apk"
-url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/perl-git-2.54.0-r0.apk"
-sha256 = "fe5ede50ae53f41b9561d12ff1035a8f57813ae38b3b8a11f80ccab54a1d1491"
-bytes = 33201
-destination = "downloads/environment/apk/main/x86_64/perl-git-2.54.0-r0.apk"
+key = "environment:apk:x86_64:perl-git-2.54.1-r0.apk"
+url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/perl-git-2.54.1-r0.apk"
+sha256 = "6973668f0b032b532bf8447c0eaee4afcba231977f39d5d561f20840b0831991"
+bytes = 33197
+destination = "downloads/environment/apk/main/x86_64/perl-git-2.54.1-r0.apk"
 purpose = "environment-package"
 arch = "x86_64"
 
@@ -2910,11 +2910,11 @@ purpose = "environment-package"
 arch = "x86_64"
 
 [[input]]
-key = "environment:apk:x86_64:rsync-3.5.0-r0.apk"
-url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/rsync-3.5.0-r0.apk"
-sha256 = "235ea081ba99bba06f6a6928e103f86ca8b314a1e97e247055eefcf99e742b5e"
-bytes = 230820
-destination = "downloads/environment/apk/main/x86_64/rsync-3.5.0-r0.apk"
+key = "environment:apk:x86_64:rsync-3.5.2-r1.apk"
+url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/rsync-3.5.2-r1.apk"
+sha256 = "08e7f65811882db0197a373b6a36df62d53880d74bc542a6b3749a519f7db433"
+bytes = 238498
+destination = "downloads/environment/apk/main/x86_64/rsync-3.5.2-r1.apk"
 purpose = "environment-package"
 arch = "x86_64"
 
@@ -3324,20 +3324,20 @@ purpose = "environment-package"
 arch = "x86_64"
 
 [[input]]
-key = "environment:apk:x86_64:zlib-1.3.2-r1.apk"
-url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/zlib-1.3.2-r1.apk"
-sha256 = "63aeea03c15a2f9018f81805cfc8aa926bdf5cd68921f22149c2fbb5d0ee9f47"
-bytes = 56210
-destination = "downloads/environment/apk/main/x86_64/zlib-1.3.2-r1.apk"
+key = "environment:apk:x86_64:zlib-1.4-r0.apk"
+url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/zlib-1.4-r0.apk"
+sha256 = "7b05bc778b8b25cd880835b40114182bd4d1581717504d0129c810c0a14291cb"
+bytes = 56761
+destination = "downloads/environment/apk/main/x86_64/zlib-1.4-r0.apk"
 purpose = "environment-package"
 arch = "x86_64"
 
 [[input]]
-key = "environment:apk:x86_64:zlib-dev-1.3.2-r1.apk"
-url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/zlib-dev-1.3.2-r1.apk"
-sha256 = "50e47b778d894841a9c8ace7640edc1e585269963f29d6e4fdc008c8d6364890"
-bytes = 34429
-destination = "downloads/environment/apk/main/x86_64/zlib-dev-1.3.2-r1.apk"
+key = "environment:apk:x86_64:zlib-dev-1.4-r0.apk"
+url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/zlib-dev-1.4-r0.apk"
+sha256 = "889ed6014fc9acb815a7755732d4099bd84b1176b4845853bb050361d8b876b2"
+bytes = 34787
+destination = "downloads/environment/apk/main/x86_64/zlib-dev-1.4-r0.apk"
 purpose = "environment-package"
 arch = "x86_64"
 

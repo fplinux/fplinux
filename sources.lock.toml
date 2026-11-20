@@ -1,18 +1,18 @@
 # SPDX-License-Identifier: GPL-2.0-only
 [alpine_environment]
-version = "3.24.2"
+version = "3.24.4"
 name = "alpine-minirootfs.tar.gz"
-url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/releases/x86_64/alpine-minirootfs-3.24.2-x86_64.tar.gz"
+url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/releases/x86_64/alpine-minirootfs-3.24.4-x86_64.tar.gz"
 algorithm = "sha256"
-checksum = "c5ca053cfe1d85c5b96dff8b9bc57045f7f184a30ffb6b65776409ca90388677"
+checksum = "cdaa38cb8de3537967ee5b6c9b6cd00cc962da2b018e6eea48696bb274923012"
 
 [alpine_target]
-version = "3.24.2"
-name = "alpine-minirootfs-3.24.2-armv7.tar.gz"
-url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/releases/armv7/alpine-minirootfs-3.24.2-armv7.tar.gz"
+version = "3.24.4"
+name = "alpine-minirootfs-3.24.4-armv7.tar.gz"
+url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/releases/armv7/alpine-minirootfs-3.24.4-armv7.tar.gz"
 algorithm = "sha256"
-checksum = "5552f1ef2398cee46ef2cf733f8f1258f39a77ad065dfd47282fc0df9fe1976c"
-bytes = 3180242
+checksum = "2054061dafea7fe4cd38015701ee77119e780dd0382d0c32fad56986fe31b699"
+bytes = 3183087
 
 [aport_0001_awk_fix_handling_of_literal_backslashes_in_replaceme_patch]
 version = "dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763"
@@ -588,12 +588,12 @@ url = "https://www.kernel.org/pub/linux/kernel/people/tytso/e2fsprogs/v1.47.4/e2
 algorithm = "sha512"
 checksum = "c316ce38d73786fb45b3728cd31991fe81b14a1e61dae645f3471c3f35983c4394e4606b47194c3e607897b7ae5a5ef1d376adb204383afa8c4219db8617d970"
 
-[aport_expat_2_9_0_tar_xz]
-version = "2.9.0"
-name = "expat-2.9.0.tar.xz"
-url = "https://distfiles.alpinelinux.org/distfiles/v3.24/expat-2.9.0.tar.xz"
+[aport_expat_2_10_0_tar_xz]
+version = "2.10.0"
+name = "expat-2.10.0.tar.xz"
+url = "https://distfiles.alpinelinux.org/distfiles/v3.24/expat-2.10.0.tar.xz"
 algorithm = "sha512"
-checksum = "677b5a39ea47aa238813412061eefba0ff2e819597efee69452eab7fd63b1387537eda0dfd4e5891b938be202dc87df4b5115bdae75c6b81643ac2363bb99b34"
+checksum = "bd61f361d823f67586dad246fa4d4abbe3d22f5a0f9a28401e7a2fc96753d5bae33fbe4068fae72f016998d0da9d8c92edc4abd2fe8a8e4aafc775a8ab547c44"
 
 [aport_ffmpeg_9_0_2_tar_xz]
 version = "9.0.2"
@@ -1018,9 +1018,9 @@ algorithm = "sha512"
 checksum = "2c24f9cca97b8863ff2e71fc3780e9c3e22e4486c80d45022e2208d559bdb40824bdb8a4037e0d5690900b6e080ddef4eacfc8bff843e04ba5ab86940f1fb6ea"
 
 [aport_zlib_license]
-version = "1.3.2"
+version = "1.4"
 name = "zlib-LICENSE"
-url = "https://raw.githubusercontent.com/madler/zlib/v1.3.2/LICENSE"
+url = "https://raw.githubusercontent.com/madler/zlib/v1.4/LICENSE"
 algorithm = "sha512"
 checksum = "98fdcd0e962849a7d132c964745a8ff3b902ffc50d80c7af72378e848bc94228ad7a569f9d8a5b7c5484478709932a2c0988dba613e19a35cb208ad56a987f5f"
 
@@ -1148,11 +1148,11 @@ algorithm = "sha256"
 checksum = "ab5a03176ee106d3f0fa90e381da478ddae405918153cca248e682cd0c4a2269"
 
 [linux_host_expat]
-version = "2.9.0"
-name = "expat-2.9.0.tar.xz"
-url = "https://github.com/libexpat/libexpat/releases/download/R_2_9_0/expat-2.9.0.tar.xz"
+version = "2.10.0"
+name = "expat-2.10.0.tar.xz"
+url = "https://github.com/libexpat/libexpat/releases/download/R_2_10_0/expat-2.10.0.tar.xz"
 algorithm = "sha256"
-checksum = "1e6371862cc31999b368c3b89b49994f0677e1bab5f1b2b85ae3741f5d803051"
+checksum = "c624ba2998fc65df1163a49641ff3f9ab73138b11641d92c86bee0fb01b1bc7f"
 
 [linux_host_libedit]
 version = "20260508.3.1"
@@ -1225,11 +1225,11 @@ algorithm = "sha256"
 checksum = "b6b34c52e672e810d339db14e0c10b5b6f5f67a30d8d05cdac5d8cb4d82f78d5"
 
 [linux_host_zlib]
-version = "1.3.2"
-name = "zlib-1.3.2.tar.gz"
-url = "https://github.com/madler/zlib/releases/download/v1.3.2/zlib-1.3.2.tar.gz"
+version = "1.4"
+name = "zlib-1.4.tar.gz"
+url = "https://github.com/madler/zlib/releases/download/v1.4/zlib-1.4.tar.gz"
 algorithm = "sha256"
-checksum = "bb329a0a2cd0274d05519d61c667c062e06990d72e125ee2dfa8de64f0119d16"
+checksum = "02dd159783677a749c04adbdd02b55b8a2bcc7e054f51b76b549199a916ad584"
 
 [lvgl]
 version = "9.6.0"
@@ -1316,25 +1316,25 @@ algorithm = "sha512"
 checksum = "bdc7a1b74fff864e06ca65a274ed9040bc5dac919a91d8b8e60f6f43500f01f49069744274bfa5da14e83fb90b562ff29d19e5f874075d600abb3008a0092b8e"
 
 [phoneme_jdk]
-version = "8.492.09-r0"
-name = "x86_64-openjdk8-jdk-8.492.09-r0.apk"
-url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/community/x86_64/openjdk8-jdk-8.492.09-r0.apk"
+version = "8.512.01-r0"
+name = "x86_64-openjdk8-jdk-8.512.01-r0.apk"
+url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/community/x86_64/openjdk8-jdk-8.512.01-r0.apk"
 algorithm = "sha512"
-checksum = "bc770501b54c1d3446206aa0277a958c6103939aad2d10aeb67c2a2d019b0f90efed7a54a981adc3eaffd261c60984e44e02c9db69bff80ccce7ad5b84071ff4"
+checksum = "403c38a39c73072dc15cf7ccd8863bba2d491891beb23ea00199fa13dc6e4ce489d0a7fd5edef8aac23ee456c5c4a60f5396071c4cb196c7328edece2e25e63c"
 
 [phoneme_jre]
-version = "8.492.09-r0"
-name = "x86_64-openjdk8-jre-base-8.492.09-r0.apk"
-url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/community/x86_64/openjdk8-jre-base-8.492.09-r0.apk"
+version = "8.512.01-r0"
+name = "x86_64-openjdk8-jre-base-8.512.01-r0.apk"
+url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/community/x86_64/openjdk8-jre-base-8.512.01-r0.apk"
 algorithm = "sha512"
-checksum = "c8094861534687fdf5b96e7b434578c6a1b6b30a3d2d55af1893bf3f27676384ef2bdbb7c7eb329bee21f82438d813ee22ee712d0e884e998098eaa6abae391d"
+checksum = "65fe8e8a3c1f6503e21b42e2c0e2815dc2aeae34394e5f80898519652da3a0425effdaf852a8a74a1317a85297aa8e8d7d568a39f9c8803c8c3ad3c599fd9329"
 
 [phoneme_jre_classes]
-version = "8.492.09-r0"
-name = "x86_64-openjdk8-jre-lib-8.492.09-r0.apk"
-url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/community/x86_64/openjdk8-jre-lib-8.492.09-r0.apk"
+version = "8.512.01-r0"
+name = "x86_64-openjdk8-jre-lib-8.512.01-r0.apk"
+url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/community/x86_64/openjdk8-jre-lib-8.512.01-r0.apk"
 algorithm = "sha512"
-checksum = "6f929c97c4c263bb73a435bb361da4e9a0efd321d776c3d63118cc97b0a717168118e5077c1294844b3c4fc11b6f7e502e1079c3feb1fb909eb70b2918bb0659"
+checksum = "d2e5a526e739d235cb69f91d880adf55d1f90f4a847a0c08432097a790229a03a1dbf85d6019d593e677816c5243c586b96ef441a67c9b170199f14993c8834c"
 
 [phoneme_mascotme]
 version = "6cf53aadbbd5038d17059adef79afb416bd92b31"
@@ -1499,7 +1499,7 @@ checksum = "aca6b5d546307092b8d0a8e0a89dd80f9da51f2f7617c5e45c5607c1684ffbf2"
 [u_boot]
 version = "2026.07"
 name = "u-boot-2026.07.tar.bz2"
-url = "https://ftp.denx.de/pub/u-boot/u-boot-2026.07.tar.bz2"
+url = "https://distfiles.alpinelinux.org/distfiles/edge/u-boot-2026.07.tar.bz2"
 algorithm = "sha256"
 checksum = "78e8bfc382fe388f9b55aa1daf8c563522a037779b5d4c349d1415e381f1243e"
 
