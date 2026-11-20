@@ -259,7 +259,7 @@ static void choose_value(struct capture *capture, size_t row, size_t current,
 
 static void open_global_settings(struct capture *capture)
 {
-	wait_label(capture, capture->mre ? "Open VXP" : "Open JAR");
+	wait_label(capture, capture->mre ? "Open VXP" : "Open");
 	press(capture, KEY_DOWN);
 	press(capture, KEY_DOWN);
 	press(capture, KEY_ENTER);
@@ -406,7 +406,7 @@ static void capture_menus(struct capture *capture, const char *document)
 	wait_label(capture,
 		   strstr(document, ".vxp") ?
 			   translated(capture, "Open VXP", "Открыть VXP") :
-			   translated(capture, "Open JAR", "Открыть JAR"));
+			   translated(capture, "Open", "Открыть"));
 	save_frame(capture, "home");
 	press(capture, KEY_DOWN);
 	press(capture, KEY_DOWN);

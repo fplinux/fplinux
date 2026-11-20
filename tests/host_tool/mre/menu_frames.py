@@ -96,9 +96,9 @@ def capture_menu_frames(  # noqa: PLR0913 -- peer, geometry and scenario inputs 
     scale = "Масштаб" if locale == "ru" else "Scale"
     assert f"|{scale}|" in (directory / "settings-global.labels").read_text(encoding="utf-8")
     home_rows = (
-        ("Открыть VXP" if application == "mre" else "Открыть JAR", "Недавние", "Настройки")
+        ("Открыть VXP" if application == "mre" else "Открыть", "Недавние", "Настройки")
         if locale == "ru"
-        else ("Open VXP" if application == "mre" else "Open JAR", "Recent", "Settings")
+        else ("Open VXP" if application == "mre" else "Open", "Recent", "Settings")
     )
     settings_rows = (
         ("Масштаб", "Поворот", "Указатель" if application == "mre" else "Размер")
