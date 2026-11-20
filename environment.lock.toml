@@ -79,6 +79,7 @@ apk_groups = [
     "expat-dev=2.10.0-r0",
     "flex=2.6.4-r8",
     "glib-dev=2.88.1-r1",
+    "glib-static=2.88.1-r1",
     "json-c-dev=0.18-r1",
     "libevdev-dev=1.13.6-r0",
     "libffi-dev=3.5.2-r1",
@@ -86,12 +87,14 @@ apk_groups = [
     "llvm22-dev=22.1.3-r1",
     "ncurses-dev=6.6_p20260516-r0",
     "openssl-dev=3.5.9-r1",
+    "pcre2-static=10.49-r0",
     "pixman-dev=0.46.4-r0",
     "spirv-llvm-translator-dev=22.1.0-r0",
     "spirv-tools-dev=1.4.341.0-r0",
     "swig=4.4.1-r1",
     "xz-dev=5.8.4-r0",
     "zlib-dev=1.4-r0",
+    "zlib-static=1.4-r0",
   ],
   [
     "py3-attrs=26.1.0-r0",
@@ -105,8 +108,11 @@ apk_groups = [
     "py3-magic=0.4.27-r4",
     "py3-mako=1.3.12-r0",
     "py3-pathspec=1.1.1-r0",
+    "py3-pip=26.1.2-r0",
     "py3-rfc3987=1.3.8-r7",
     "py3-ruamel.yaml=0.19.1-r0",
+    "py3-setuptools=82.0.1-r1",
+    "py3-wheel=0.47.0-r0",
     "python3-dev=3.14.10-r1",
     "python3=3.14.10-r1",
     "shellcheck=0.11.0-r1",
@@ -1044,6 +1050,15 @@ purpose = "environment-package"
 arch = "x86_64"
 
 [[input]]
+key = "environment:apk:x86_64:gettext-static-1.0-r0.apk"
+url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/gettext-static-1.0-r0.apk"
+sha256 = "c1395a2aaa8a8732e87d4918a8c2c501a89c5d8e90e9a353e76702e9b52dc9a8"
+bytes = 4891959
+destination = "downloads/environment/apk/main/x86_64/gettext-static-1.0-r0.apk"
+purpose = "environment-package"
+arch = "x86_64"
+
+[[input]]
 key = "environment:apk:x86_64:git-2.54.1-r0.apk"
 url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/git-2.54.1-r0.apk"
 sha256 = "a8d6464152f823b28d80876142649bfddd8ac7959b5c24be9f8f7f2b5e2421dc"
@@ -1085,6 +1100,15 @@ url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/glib-dev-2.88.1-r
 sha256 = "ad1c0a360a2effd1e2d905f2e4e90de53b05ff012cb9e900f49d7ba20f33161d"
 bytes = 1876587
 destination = "downloads/environment/apk/main/x86_64/glib-dev-2.88.1-r1.apk"
+purpose = "environment-package"
+arch = "x86_64"
+
+[[input]]
+key = "environment:apk:x86_64:glib-static-2.88.1-r1.apk"
+url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/glib-static-2.88.1-r1.apk"
+sha256 = "04653e33b0adbaadff1f70b615291a49859a61eb29e1e2c387931bc5ecab89e9"
+bytes = 11228511
+destination = "downloads/environment/apk/main/x86_64/glib-static-2.88.1-r1.apk"
 purpose = "environment-package"
 arch = "x86_64"
 
@@ -2232,6 +2256,15 @@ purpose = "environment-package"
 arch = "x86_64"
 
 [[input]]
+key = "environment:apk:x86_64:pcre2-static-10.49-r0.apk"
+url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/pcre2-static-10.49-r0.apk"
+sha256 = "1a0fefb8441d9a08d1bd140649830c0a3391f0a74fbbf258377cd63f2c70c885"
+bytes = 1022642
+destination = "downloads/environment/apk/main/x86_64/pcre2-static-10.49-r0.apk"
+purpose = "environment-package"
+arch = "x86_64"
+
+[[input]]
 key = "environment:apk:x86_64:perl-5.42.3-r0.apk"
 url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/perl-5.42.3-r0.apk"
 sha256 = "6bb4d744425b1689d54feece20bdd51f71508c4d23d1af5f66298f03f8310df7"
@@ -2601,6 +2634,24 @@ purpose = "environment-package"
 arch = "x86_64"
 
 [[input]]
+key = "environment:apk:x86_64:py3-pip-26.1.2-r0.apk"
+url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/py3-pip-26.1.2-r0.apk"
+sha256 = "8ab13441fd0abfd625ac4e91eed5648d90a6422359d45469307bd78ad4f1b223"
+bytes = 1671707
+destination = "downloads/environment/apk/main/x86_64/py3-pip-26.1.2-r0.apk"
+purpose = "environment-package"
+arch = "x86_64"
+
+[[input]]
+key = "environment:apk:x86_64:py3-pip-pyc-26.1.2-r0.apk"
+url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/py3-pip-pyc-26.1.2-r0.apk"
+sha256 = "b7a66a9b68224468f9398220df4620f74747ee98e7526c2968c469c09a04cc37"
+bytes = 2242420
+destination = "downloads/environment/apk/main/x86_64/py3-pip-pyc-26.1.2-r0.apk"
+purpose = "environment-package"
+arch = "x86_64"
+
+[[input]]
 key = "environment:apk:x86_64:py3-referencing-0.37.0-r1.apk"
 url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/community/x86_64/py3-referencing-0.37.0-r1.apk"
 sha256 = "ef61fdf2892c547dbfff81e68eda7357956ac3036b74217aa02781bd93cf84d3"
@@ -2682,6 +2733,24 @@ purpose = "environment-package"
 arch = "x86_64"
 
 [[input]]
+key = "environment:apk:x86_64:py3-setuptools-82.0.1-r1.apk"
+url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/py3-setuptools-82.0.1-r1.apk"
+sha256 = "4ae3a2ed2da6c2885a37b20353c2b1a52ec9a58343a2d1135e420349bc66ffe4"
+bytes = 837725
+destination = "downloads/environment/apk/main/x86_64/py3-setuptools-82.0.1-r1.apk"
+purpose = "environment-package"
+arch = "x86_64"
+
+[[input]]
+key = "environment:apk:x86_64:py3-setuptools-pyc-82.0.1-r1.apk"
+url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/py3-setuptools-pyc-82.0.1-r1.apk"
+sha256 = "d62729210ad51491270dd5587276dc1136a84e9f9858db9b4c5050c95e3c4952"
+bytes = 1557258
+destination = "downloads/environment/apk/main/x86_64/py3-setuptools-pyc-82.0.1-r1.apk"
+purpose = "environment-package"
+arch = "x86_64"
+
+[[input]]
 key = "environment:apk:x86_64:py3-typing-extensions-4.15.0-r1.apk"
 url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/py3-typing-extensions-4.15.0-r1.apk"
 sha256 = "c1e358e03b0a3fbdab40ed836a536c1bace757cb86f559849145434c2b048123"
@@ -2696,6 +2765,24 @@ url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/py3-typing-extens
 sha256 = "a5687a88e3ae06b9601d8527cbf226037093192edd343fc22cb2613fab68ae76"
 bytes = 72217
 destination = "downloads/environment/apk/main/x86_64/py3-typing-extensions-pyc-4.15.0-r1.apk"
+purpose = "environment-package"
+arch = "x86_64"
+
+[[input]]
+key = "environment:apk:x86_64:py3-wheel-0.47.0-r0.apk"
+url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/py3-wheel-0.47.0-r0.apk"
+sha256 = "f95c41140bda16e059a572aa7f98fe9ffa4ee8c4ee0521f437abe94b452682ef"
+bytes = 30096
+destination = "downloads/environment/apk/main/x86_64/py3-wheel-0.47.0-r0.apk"
+purpose = "environment-package"
+arch = "x86_64"
+
+[[input]]
+key = "environment:apk:x86_64:py3-wheel-pyc-0.47.0-r0.apk"
+url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/py3-wheel-pyc-0.47.0-r0.apk"
+sha256 = "60687281322f1cd4d8a33c77e0d5d598e4e185fadfe257fd7aa8f65b2d62c672"
+bytes = 56512
+destination = "downloads/environment/apk/main/x86_64/py3-wheel-pyc-0.47.0-r0.apk"
 purpose = "environment-package"
 arch = "x86_64"
 
@@ -3191,6 +3278,15 @@ url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/zlib-dev-1.4-r0.a
 sha256 = "889ed6014fc9acb815a7755732d4099bd84b1176b4845853bb050361d8b876b2"
 bytes = 34787
 destination = "downloads/environment/apk/main/x86_64/zlib-dev-1.4-r0.apk"
+purpose = "environment-package"
+arch = "x86_64"
+
+[[input]]
+key = "environment:apk:x86_64:zlib-static-1.4-r0.apk"
+url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/zlib-static-1.4-r0.apk"
+sha256 = "3e02130f63e764b969f14ae62fe1f50b58436f709895c9d9fa2b7496c98a03b5"
+bytes = 62214
+destination = "downloads/environment/apk/main/x86_64/zlib-static-1.4-r0.apk"
 purpose = "environment-package"
 arch = "x86_64"
 

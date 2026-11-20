@@ -1,6 +1,6 @@
 # Maintainer: FPLinux contributors <fplinux@example.invalid>
 pkgname=fplinux-glib
-pkgver=@version:aport_glib_2_88_1_tar_xz@
+pkgver=@version:aport_glib_2_90_1_tar_xz@
 pkgrel=0
 pkgdesc="GLib core library for BlueZ without GIO, GObject and introspection"
 url="https://gitlab.gnome.org/GNOME/glib"
@@ -11,7 +11,7 @@ makedepends_host="libffi-dev musl-dev musl-libintl pcre2-dev pcre2-static zlib-d
 subpackages="$pkgname-static-dev:static_dev"
 options="!check"
 source="
-	@source:aport_glib_2_88_1_tar_xz@
+	@source:aport_glib_2_90_1_tar_xz@
 	install-static-dev.py
 "
 builddir="$srcdir/glib-$pkgver"

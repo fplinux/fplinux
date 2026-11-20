@@ -1,19 +1,28 @@
 # Maintainer: FPLinux contributors <fplinux@example.invalid>
 pkgname=fplinux-busybox
-pkgver=@version:aport_busybox_1_37_0_tar_bz2@
+pkgver=@version:aport_busybox_1_38_0_tar_bz2@
 pkgrel=0
 pkgdesc="BusyBox toolbox with DHCP server for FPLinux"
 url="https://busybox.net/"
 arch="armv7"
 license="GPL-2.0-only AND ISC"
-provides="busybox=$pkgver-r31 busybox-binsh=$pkgver-r31 /bin/sh"
+# Alpine 3.24 companion packages depend on the exact BusyBox package version.
+provides="busybox=1.37.0-r31 busybox-binsh=1.37.0-r31 /bin/sh"
 provider_priority=100
 replaces="busybox busybox-binsh busybox-initscripts"
 makedepends_build="clang22 lld22 make perl llvm22"
 makedepends_host="musl-dev linux-headers utmps-dev utmps-static skalibs-static"
 options="!check"
 source="
-	@source:aport_busybox_1_37_0_tar_bz2@
+	@source:aport_busybox_1_38_0_tar_bz2@
+	@source:aport_0012_ash_exec_busybox_static_patch@
+	@source:aport_0001_awk_fix_handling_of_literal_backslashes_in_replaceme_patch@
+	@source:aport_0001_blkdiscard_ship_link_to_sbin_instead_of_usr_bin_patch@
+	@source:aport_0001_hexdump_fix_regression_with_n4_e_u_patch@
+	@source:aport_0001_init_add_support_for_separate_reboot_action_patch@
+	@source:aport_0001_mount_fix_parsing_proc_mounts_with_long_lines_patch@
+	@source:aport_0001_tar_fix_toctou_symlink_race_condition_patch@
+	@source:aport_0001_tunctl_fix_segfault_on_ioctl_failure_patch@
 	@source:aport_0001_wget_add_header_accept_patch@
 	@source:aport_0002_adduser_default_to_sbin_nologin_as_shell_for_system_patch@
 	@source:aport_0003_ash_add_built_in_bb_ash_version_variable_patch@
@@ -25,7 +34,6 @@ source="
 	@source:aport_0009_properly_fix_wget_https_support_patch@
 	@source:aport_0010_fsck_resolve_label_uuid_spec_to_device_patch@
 	@source:aport_0011_nslookup_sanitize_all_printed_strings_with_printable_patch@
-	@source:aport_0012_ash_exec_busybox_static_patch@
 	@source:aport_0013_app_location_for_cpio_vi_and_lspci_patch@
 	@source:aport_0014_udhcpc_set_default_discover_retries_to_5_patch@
 	@source:aport_0015_ping_make_ping_work_without_root_privileges_patch@
@@ -41,23 +49,12 @@ source="
 	@source:aport_0025_find_fix_xdev_depth_and_delete_patch@
 	@source:aport_0026_awk_c_fix_cve_2023_42366_bug_15874_patch@
 	@source:aport_0027_awk_mark_test_for_handling_of_start_of_word_pattern_patch@
-	@source:aport_0028_od_skip_od_b_on_big_endian_patch@
-	@source:aport_0029_ash_reject_unknown_long_options_patch@
-	@source:aport_0030_hexdump_skip_a_single_test_on_big_endian_systems_patch@
 	@source:aport_0031_syslogd_fix_wrong_opt_locallog_flag_detection_patch@
-	@source:aport_0032_lineedit_fix_some_tab_completions_written_to_stdout_patch@
-	@source:aport_0033_lineedit_use_stdout_for_shell_history_builtin_patch@
-	@source:aport_0034_adduser_remove_preconfigured_gecos_full_name_field_patch@
-	@source:aport_0035_cpio_map_f_to_file_long_option_patch@
-	@source:aport_0001_hexdump_fix_regression_with_n4_e_u_patch@
-	@source:aport_0001_awk_fix_handling_of_literal_backslashes_in_replaceme_patch@
-	@source:aport_0001_tunctl_fix_segfault_on_ioctl_failure_patch@
-	@source:aport_0001_init_add_support_for_separate_reboot_action_patch@
-	@source:aport_0001_blkdiscard_ship_link_to_sbin_instead_of_usr_bin_patch@
-	@source:aport_0001_tar_fix_toctou_symlink_race_condition_patch@
 	@source:aport_0001_netstat_sanitize_process_names_patch@
-	@source:aport_0001_tar_fix_16018_masking_of_potentially_malicious_tar_cpio_content_patch@
-	@source:aport_0001_mount_fix_parsing_proc_mounts_with_long_lines_patch@
+	@source:aport_0030_hexdump_skip_a_single_test_on_big_endian_systems_patch@
+	@source:aport_0038_ash_clear_bb_got_signal_for_non_interactive_shell_patch@
+	@source:aport_0040_ash_fix_out_of_bounds_read_in_ifsbreakup_patch@
+	shell-history-limit.patch
 	busyboxconfig
 	@source:aport_dad_if_up@
 	@source:aport_default_script@
@@ -81,8 +78,8 @@ build() {
 	export RANLIB=/usr/lib/llvm22/bin/llvm-ranlib
 	local utmps_cflags utmps_libs
 	utmps_cflags=$(pkg-config --cflags --static libutmps)
-	# BusyBox treats bare linker inputs as library names.
-	utmps_libs="-Wl,$CBUILDROOT/usr/lib/libutmps.a -Wl,$CBUILDROOT/usr/lib/libskarnet.a"
+	# trylink takes one quoted Kconfig string and treats bare inputs as library names.
+	utmps_libs="\"-Wl,$CBUILDROOT/usr/lib/libutmps.a -Wl,$CBUILDROOT/usr/lib/libskarnet.a\""
 	make CC="$CC" LD="$CC -nostdlib -Wl,--thinlto-jobs=2" AR="$AR" RANLIB="$RANLIB" HOSTCC=cc CROSS_COMPILE="$CHOST-" silentoldconfig
 	make CC="$CC" LD="$CC -nostdlib -Wl,--thinlto-jobs=2" AR="$AR" RANLIB="$RANLIB" HOSTCC=cc CROSS_COMPILE="$CHOST-" \
 		CONFIG_EXTRA_CFLAGS="$CPPFLAGS $CFLAGS $utmps_cflags" \
@@ -113,5 +110,6 @@ package() {
 		"$pkgdir/usr/share/licenses/$pkgname/skalibs-COPYING"
 }
 sha512sums="
-ad4cb3200e1a236a0ca76872bea95a37230be70816f878cef0773d00451e96c10492bf12a9a8dc459eea75913b1beabcf2a54b2a97f67934671b1c85357d430f  busyboxconfig
+9d73bf7fe38343da506c1924bcf8f96efd7886ca9e56e611eba43ef06b0b85fae13a6a4f222c1bd8b09d038a29e15ec5c4e0214ce42e5a8dae98e0974d46392c  shell-history-limit.patch
+489dc93d57520668354efe28169f56d715f07f5fbb8af4759a547ecb7acda55e80dc54f7db6699412915bee9110250d41626bfd25500537496133186e64179f2  busyboxconfig
 "

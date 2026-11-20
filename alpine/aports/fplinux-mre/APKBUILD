@@ -2,6 +2,7 @@
 pkgname=fplinux-mre
 pkgver=1
 pkgrel=0
+_jpegver=@version:aport_libjpeg_turbo_3_2_1_tar_gz@
 pkgdesc="MRE runtime for native ARM VXP applications"
 url="https://github.com/fplinux/fplinux"
 arch="armv7"
@@ -14,7 +15,7 @@ source="
 	@source:mre_gif@
 	@source:mre_gif_license@
 	@source:mre_png_license@
-	@source:aport_libjpeg_turbo_3_2_0_tar_gz@
+	@source:aport_libjpeg_turbo_3_2_1_tar_gz@
 	subblock-length.patch
 	fplinux-mre.c
 	mre-selector-files.c
@@ -80,7 +81,7 @@ build() {
 		"${CHOST:?missing target CHOST}" "${CBUILDROOT:?missing target sysroot}"
 	local jpeg_ar
 	jpeg_ar="$(command -v "$CHOST-ar")"
-	cmake -S "$srcdir/libjpeg-turbo-3.2.0" -B jpeg-build -G Ninja \
+	cmake -S "$srcdir/libjpeg-turbo-$_jpegver" -B jpeg-build -G Ninja \
 		-DCMAKE_BUILD_TYPE=Release \
 		-DCMAKE_SYSTEM_NAME=Linux -DCMAKE_SYSTEM_PROCESSOR=armv7 \
 		-DCMAKE_C_COMPILER="$CC" -DCMAKE_ASM_COMPILER="$CC" \
@@ -106,7 +107,7 @@ build() {
 			-c "$startdir/$unit.c" -o "engine-objects/${unit##*/}.o"
 	done
 	"$CC" $CPPFLAGS $CFLAGS -marm -std=c11 -Wall -Wextra -Werror \
-		-I"$srcdir/libjpeg-turbo-3.2.0/src" -Ijpeg-build \
+		-I"$srcdir/libjpeg-turbo-$_jpegver/src" -Ijpeg-build \
 		$(pkg-config --cflags libpng) \
 		-c "$startdir/image/image-decode.c" -o engine-objects/image-decode.o
 	# The unchanged upstream header contains unused static helper functions.
@@ -153,9 +154,9 @@ package() {
 		"$pkgdir/usr/share/licenses/$pkgname/GIF-adapter-0BSD.txt"
 	install -Dm644 "$srcdir/libpng-LICENSE.txt" \
 		"$pkgdir/usr/share/licenses/$pkgname/libpng-LICENSE.txt"
-	install -Dm644 "$srcdir/libjpeg-turbo-3.2.0/LICENSE.md" \
+	install -Dm644 "$srcdir/libjpeg-turbo-$_jpegver/LICENSE.md" \
 		"$pkgdir/usr/share/licenses/$pkgname/libjpeg-turbo-LICENSE.md"
-	install -Dm644 "$srcdir/libjpeg-turbo-3.2.0/README.ijg" \
+	install -Dm644 "$srcdir/libjpeg-turbo-$_jpegver/README.ijg" \
 		"$pkgdir/usr/share/licenses/$pkgname/README.ijg"
 }
 

@@ -1,6 +1,6 @@
-Mesa 26.2.5 original source notices
+Mesa 26.3.1 original source notices
 
-The original copyright and license comment blocks below cover the Mesa core, utility, EGL, API dispatch, shader compiler, Panfrost and Gallium components used by this package, including their shared headers and generators. A component includes files for paths that may be disabled in this build; their notices are retained here without asserting that every listed file is installed or linked. Identical comment blocks are reproduced once with their source filenames. General license texts are installed alongside this file. This collection does not change the original copyrights or licenses of the quoted material.
+The original copyright and license comment blocks below cover the Mesa core, utility, EGL, GBM, API dispatch, shader compiler, Panfrost and Gallium components used by these packages, including their shared headers and generators. A component includes files for paths that may be disabled in this build; their notices are retained here without asserting that every listed file is installed or linked. Identical comment blocks are reproduced once with their source filenames. General license texts are installed alongside this file. This collection does not change the original copyrights or licenses of the quoted material.
 
 ========================================================================
 include/CL/cl.h
@@ -20729,4 +20729,520 @@ src/compiler/glsl/etc2_rgba_stitch.glsl
  * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
  * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
  * DEALINGS IN THE SOFTWARE.
+ */
+
+Additional notices from Mesa 26.3.1
+
+========================================================================
+include/vulkan/vk_icd.h
+include/vulkan/vk_layer.h
+
+/*
+ * Copyright 2015-2023 The Khronos Group Inc.
+ * Copyright 2015-2023 Valve Corporation
+ * Copyright 2015-2023 LunarG, Inc.
+ * SPDX-License-Identifier: Apache-2.0 OR MIT
+ */
+
+========================================================================
+include/vulkan/vk_platform.h
+
+/*
+** Copyright 2014-2026 The Khronos Group Inc.
+** SPDX-License-Identifier: Apache-2.0 OR MIT
+*/
+
+========================================================================
+src/compiler/nir/nir_opt_scalar_array_vars_to_vec.c
+src/compiler/nir/nir_opt_uadd_carry.c
+
+/*
+ * Copyright © 2026 Valve Corporation
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a
+ * copy of this software and associated documentation files (the "Software"),
+ * to deal in the Software without restriction, including without limitation
+ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
+ * and/or sell copies of the Software, and to permit persons to whom the
+ * Software is furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice (including the next
+ * paragraph) shall be included in all copies or substantial portions of the
+ * Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
+ * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+ * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+ * IN THE SOFTWARE.
+ */
+
+========================================================================
+src/compiler/nir/tests/opt_vectorize_tests.cpp
+
+/*
+ * Copyright © 2026 Pavel Ondračka
+ * SPDX-License-Identifier: MIT
+ */
+
+========================================================================
+src/compiler/rust/union_find.rs
+
+// Copyright © 2024 Mel Henning
+// SPDX-License-Identifier: MIT
+
+========================================================================
+src/gallium/drivers/panfrost/pan_blitter.c
+
+/*
+ * Copyright (C) 2014 Broadcom
+ * Copyright (C) 2019 Collabora, Ltd.
+ * Copyright (C) 2026 NXP
+ * SPDX-License-Identifier: MIT
+ */
+
+========================================================================
+src/gallium/drivers/panfrost/pan_blitter.h
+
+/*
+ * Copyright (C) 2026 Amazon.com, Inc. or its affiliates
+ * SPDX-License-Identifier: MIT
+ */
+
+========================================================================
+src/gallium/drivers/panfrost/pan_csf.c
+
+/*
+ * Copyright (C) 2023 Collabora Ltd.
+ * Copyright (C) 2026 Arm Ltd.
+ * Copyright (C) 2026 NXP
+ * SPDX-License-Identifier: MIT
+ */
+
+========================================================================
+src/gallium/drivers/panfrost/pan_resource.h
+
+/*
+ * © Copyright 2018-2019 Alyssa Rosenzweig
+ * SPDX-License-Identifier: MIT
+ */
+
+========================================================================
+src/gallium/winsys/panfrost/drm/panfrost_drm_public.h
+src/gallium/winsys/panfrost/drm/panfrost_drm_winsys.c
+
+/*
+ * Copyright © 2014 Broadcom
+ * Copyright © 2018 Alyssa Rosenzweig
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a
+ * copy of this software and associated documentation files (the "Software"),
+ * to deal in the Software without restriction, including without limitation
+ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
+ * and/or sell copies of the Software, and to permit persons to whom the
+ * Software is furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice (including the next
+ * paragraph) shall be included in all copies or substantial portions of the
+ * Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
+ * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+ * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+ * IN THE SOFTWARE.
+ */
+
+========================================================================
+src/gbm/backends/dri/gbm_dri.c
+src/gbm/backends/dri/gbm_driint.h
+src/gbm/main/backend.h
+src/gbm/main/gbm.c
+src/gbm/main/gbm.h
+
+/*
+ * Copyright © 2011 Intel Corporation
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a
+ * copy of this software and associated documentation files (the "Software"),
+ * to deal in the Software without restriction, including without limitation
+ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
+ * and/or sell copies of the Software, and to permit persons to whom the
+ * Software is furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice (including the next
+ * paragraph) shall be included in all copies or substantial portions of the
+ * Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+ * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+ * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+ * NONINFRINGEMENT.  IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
+ * HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+ * WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+ * DEALINGS IN THE SOFTWARE.
+ *
+ * Authors:
+ *    Benjamin Franzke <benjaminfranzke@googlemail.com>
+ */
+
+========================================================================
+src/gbm/main/backend.c
+src/gbm/main/gbm_backend_abi.h
+src/gbm/main/gbmint.h
+
+/*
+ * Copyright © 2011 Intel Corporation
+ * Copyright © 2021 NVIDIA Corporation
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a
+ * copy of this software and associated documentation files (the "Software"),
+ * to deal in the Software without restriction, including without limitation
+ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
+ * and/or sell copies of the Software, and to permit persons to whom the
+ * Software is furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice (including the next
+ * paragraph) shall be included in all copies or substantial portions of the
+ * Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+ * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+ * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+ * NONINFRINGEMENT.  IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
+ * HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+ * WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+ * DEALINGS IN THE SOFTWARE.
+ *
+ * Authors:
+ *    Benjamin Franzke <benjaminfranzke@googlemail.com>
+ *    James Jones <jajones@nvidia.com>
+ */
+
+========================================================================
+src/gbm/main/gbm_abi_check.c
+
+/*
+ * Copyright © 2021 NVIDIA Corporation
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a
+ * copy of this software and associated documentation files (the "Software"),
+ * to deal in the Software without restriction, including without limitation
+ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
+ * and/or sell copies of the Software, and to permit persons to whom the
+ * Software is furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice (including the next
+ * paragraph) shall be included in all copies or substantial portions of the
+ * Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+ * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+ * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+ * NONINFRINGEMENT.  IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
+ * HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+ * WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+ * DEALINGS IN THE SOFTWARE.
+ */
+
+========================================================================
+src/mesa/state_tracker/st_cb_drawtex.c
+
+/**************************************************************************
+ *
+ * Copyright 2008 VMware, Inc.
+ * All Rights Reserved.
+ *
+ * SPDX-License-Identifier: MIT
+ *
+ **************************************************************************/
+
+========================================================================
+src/mesa/state_tracker/st_cb_drawtex.h
+
+/**************************************************************************
+ *
+ * Copyright 2008 VMware, Inc.
+ * All Rights Reserved.
+ *
+ * SPDX-License-Identifier: MIT
+ *
+ **************************************************************************/
+
+========================================================================
+src/mesa/state_tracker/st_context.c
+
+/**************************************************************************
+ *
+ * Copyright 2007 VMware, Inc.
+ * Copyright 2026 NXP
+ * All Rights Reserved.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a
+ * copy of this software and associated documentation files (the
+ * "Software"), to deal in the Software without restriction, including
+ * without limitation the rights to use, copy, modify, merge, publish,
+ * distribute, sub license, and/or sell copies of the Software, and to
+ * permit persons to whom the Software is furnished to do so, subject to
+ * the following conditions:
+ *
+ * The above copyright notice and this permission notice (including the
+ * next paragraph) shall be included in all copies or substantial portions
+ * of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+ * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+ * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT.
+ * IN NO EVENT SHALL VMWARE AND/OR ITS SUPPLIERS BE LIABLE FOR
+ * ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+ * TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+ * SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ *
+ **************************************************************************/
+
+========================================================================
+src/panfrost/compiler/bifrost/bi_helper_invocations.c
+
+/*
+ * Copyright (C) 2019-2021 Collabora, Ltd.
+ * Copyright (C) 2026 Arm Ltd.
+ * SPDX-License-Identifier: MIT
+ */
+
+========================================================================
+src/panfrost/compiler/kraid/decode.rs
+src/panfrost/compiler/kraid/proc/isa/decoder.rs
+src/panfrost/compiler/kraid/tools/disassembler.rs
+
+// Copyright (c) 2026 Arm Ltd.
+// SPDX-License-Identifier: MIT
+
+========================================================================
+src/panfrost/compiler/kraid/dst_mod_prop.rs
+src/panfrost/compiler/kraid/foldable.rs
+src/panfrost/compiler/kraid/jump_thread.rs
+src/panfrost/compiler/kraid/lower_blend_call.rs
+src/panfrost/compiler/kraid/opt_exec_units.rs
+src/panfrost/compiler/kraid/opt_var.rs
+src/panfrost/compiler/kraid/phi.rs
+src/panfrost/compiler/kraid/reconvergence.rs
+src/panfrost/compiler/kraid/required_waits.rs
+src/panfrost/compiler/kraid/schedule.rs
+src/panfrost/compiler/kraid/spill.rs
+src/panfrost/compiler/kraid/stats.rs
+src/util/rust/lib.rs
+
+// Copyright © 2026 Collabora, Ltd.
+// SPDX-License-Identifier: MIT
+
+========================================================================
+src/panfrost/compiler/kraid/ir.rs
+src/panfrost/compiler/kraid/isa.rs
+src/panfrost/compiler/kraid/message_slots.rs
+src/panfrost/compiler/kraid/proc/isa/instr.rs
+src/panfrost/compiler/kraid/small_constants.rs
+
+// Copyright © 2026 Collabora, Ltd.
+// Copyright © 2026 Arm Ltd.
+// SPDX-License-Identifier: MIT
+
+========================================================================
+src/panfrost/compiler/kraid/opt_flow.rs
+
+// Copyright © 2026 Arm Ltd.
+// Copyright © 2026 Collabora, Ltd.
+// SPDX-License-Identifier: MIT
+
+========================================================================
+src/panfrost/compiler/kraid/opt_normalize_consts.rs
+src/panfrost/compiler/kraid/opt_promote_consts.rs
+
+// Copyright © 2026 Arm Ltd.
+// SPDX-License-Identifier: MIT
+
+========================================================================
+src/panfrost/compiler/kraid/repair_ssa.rs
+
+// Copyright © 2023 Collabora, Ltd.
+// SPDX-License-Identifier: MIT
+
+========================================================================
+src/panfrost/compiler/pan_nir_lower_divergent_scratch.c
+
+/*
+ * Copyright © 2026 Arm Ltd.
+ *
+ * Derived from nir_lower_mem_access_bit_sizes.c which is:
+ * Copyright © 2018 Intel Corporation
+ * Copyright © 2023 Collabora, Ltd.
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
+========================================================================
+src/panfrost/compiler/pan_nir_opt_push_ubo.c
+
+/*
+ * Copyright (C) 2021-2026 Collabora, Ltd.
+ * SPDX-License-Identifier: MIT
+ */
+
+========================================================================
+src/panfrost/compiler/pan_nir_xfb.c
+
+/*
+ * Copyright (c) 2026 Collabora, Ltd.
+ * SPDX-License-Identifier: MIT
+ */
+
+========================================================================
+src/panfrost/genxml/v11.xml
+
+<!--
+  Copyright (C) 2026 Collabora Ltd.
+  SPDX-License-Identifier: MIT
+-->
+
+========================================================================
+src/panfrost/lib/kmod/panfrost_kmod.h
+src/panfrost/lib/kmod/virtio/panfrost_proto.h
+
+/*
+ * Copyright 2025 Collabora Limited
+ * SPDX-License-Identifier: MIT
+ */
+
+========================================================================
+src/panfrost/lib/pan_layout.c
+
+/*
+ * Copyright (C) 2026 NXP
+ * Copyright (C) 2019-2022 Collabora, Ltd.
+ * Copyright (C) 2018-2019 Alyssa Rosenzweig
+ * SPDX-License-Identifier: MIT
+ */
+
+========================================================================
+src/panfrost/lib/pan_layout.h
+
+/*
+ * Copyright (C) 2026 NXP
+ * Copyright (C) 2008 VMware, Inc.
+ * Copyright (C) 2014 Broadcom
+ * Copyright (C) 2018-2019 Alyssa Rosenzweig
+ * Copyright (C) 2019-2020 Collabora, Ltd.
+ * Copyright (C) 2026 Google LLC
+ * SPDX-License-Identifier: MIT
+ */
+
+========================================================================
+src/panfrost/vulkan/csf/panvk_vX_cmd_event.c
+
+/*
+ * Copyright © 2024 Collabora Ltd.
+ * Copyright © 2026 Arm Ltd.
+ * SPDX-License-Identifier: MIT
+ */
+
+========================================================================
+src/panfrost/vulkan/panvk_async_bind.c
+src/panfrost/vulkan/panvk_bind_queue.c
+
+/*
+ * Copyright © 2026 NXP
+ *
+ * Copyright © 2024 Collabora Ltd.
+ * SPDX-License-Identifier: MIT
+ */
+
+========================================================================
+src/panfrost/vulkan/panvk_image.c
+
+/*
+ * Copyright (C) 2026 NXP
+ * Copyright © 2025 Arm Ltd.
+ * Copyright © 2021 Collabora Ltd.
+ * Copyright © 2026 Google LLC
+ *
+ * Derived from tu_image.c which is:
+ * Copyright © 2016 Red Hat.
+ * Copyright © 2016 Bas Nieuwenhuizen
+ * Copyright © 2015 Intel Corporation
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
+========================================================================
+src/panfrost/vulkan/panvk_nir.h
+
+/*
+ * Copyright © 2026 Google LLC.
+ * Copyright © 2025 Red Hat Inc.
+ * SPDX-License-Identifier: MIT
+ */
+
+========================================================================
+src/panfrost/vulkan/panvk_nir_lower_cooperative_matrix.c
+
+/*
+ * Copyright © 2023 Bas Nieuwenhuizen
+ * Copyright © 2024 Collabora, Ltd.
+ * Copyright © 2026 Google LLC.
+ * SPDX-License-Identifier: MIT
+ */
+
+========================================================================
+src/panfrost/vulkan/panvk_physical_device.h
+
+/*
+ * Copyright © 2021 Collabora Ltd.
+ * Copyright © 2026 Arm Ltd.
+ * SPDX-License-Identifier: MIT
+ */
+
+========================================================================
+src/util/tests/hash_table/clone_into.c
+
+/*
+ * Copyright © 2026 Jan Meisel
+ * SPDX-License-Identifier: MIT
+ */
+
+========================================================================
+src/util/tests/u_dynarray_test.cpp
+
+/*
+ * Copyright 2026 Jan Meisel
+ * SPDX-License-Identifier: MIT
+ */
+
+========================================================================
+src/util/u_gralloc/u_gralloc.h
+
+/*
+ * Mesa 3-D graphics library
+ *
+ * Copyright (C) 2026 NXP
+ * Copyright (C) 2022 Roman Stratiienko (r.stratiienko@gmail.com)
+ * SPDX-License-Identifier: MIT
+ */
+
+========================================================================
+src/util/u_gralloc/u_gralloc_imapper4_api.cpp
+src/util/u_gralloc/u_gralloc_imapper5_api.cpp
+
+/*
+ * Mesa 3-D graphics library
+ *
+ * Copyright (C) 2026 NXP
+ * Copyright (C) 2021 GlobalLogic Ukraine
+ * Copyright (C) 2021-2022 Roman Stratiienko (r.stratiienko@gmail.com)
+ * SPDX-License-Identifier: MIT
  */

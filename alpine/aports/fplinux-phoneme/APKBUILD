@@ -8,7 +8,8 @@ url="https://github.com/magicus/phoneME"
 arch="armv7"
 license="GPL-2.0-only AND MIT"
 depends="fplinux-ui fplinux-runtime-media libcrypto3"
-makedepends_build="clang22 lld22 llvm22 binutils make patch pkgconf python3 gettext"
+makedepends_build="clang22 lld22 llvm22 binutils gcc linux-headers make patch pkgconf python3 gettext
+	glib-dev glib-static pcre2-static py3-pip py3-setuptools py3-wheel samurai zlib-static"
 makedepends_host="musl-dev musl-libintl linux-headers gcc zlib-dev openssl-dev fplinux-ui-dev fplinux-runtime-media-dev"
 options="!check"
 
@@ -16,7 +17,7 @@ options="!check"
 _muslver=@version:phoneme_host_musl@
 _gccver=@version:phoneme_host_libstdcpp@
 _llvmver=@version:phoneme_host_compiler_rt@
-_qemuver=@version:phoneme_qemu_i386@
+_qemuver=@version:phoneme_qemu@
 _jdkver=@version:phoneme_jdk@
 _mascot_commit=@version:phoneme_mascotme@
 source="
@@ -28,8 +29,7 @@ source="
 	@source:phoneme_host_libstdcpp@
 	@source:phoneme_host_compiler_rt@
 	@source:phoneme_host_unwind@
-	@source:phoneme_qemu_i386@
-	@source:phoneme_qemu_arm@
+	@source:phoneme_qemu@
 	@source:phoneme_jdk@
 	@source:phoneme_jre@
 	@source:phoneme_jre_classes@
@@ -63,13 +63,26 @@ prepare() {
 	_unpack_tool x86-libstdc++-dev-$_gccver.apk "$srcdir/i386-root"
 	_unpack_tool x86-compiler-rt-$_llvmver.apk "$srcdir/i386-root"
 	_unpack_tool x86-llvm-libunwind-static-$_llvmver.apk "$srcdir/i386-root"
-	_unpack_tool x86_64-qemu-i386-$_qemuver.apk "$srcdir/qemu"
-	_unpack_tool x86_64-qemu-arm-$_qemuver.apk "$srcdir/qemu"
 	local jdk
 	for jdk in jdk jre-base jre-lib; do
 		_unpack_tool x86_64-openjdk8-$jdk-$_jdkver.apk "$srcdir/jdk"
 	done
 }
+
+_build_qemu() (
+	# Both emulators run in the x86_64 build environment.
+	unset AR AS CC CFLAGS CPP CPPFLAGS CXX CXXFLAGS LD LDFLAGS NM RANLIB STRIP
+	unset PKG_CONFIG_LIBDIR PKG_CONFIG_PATH PKG_CONFIG_SYSROOT_DIR
+	mkdir -p "$srcdir/qemu"
+	cd "$srcdir/qemu"
+	"$srcdir/qemu-$_qemuver/configure" \
+		--prefix=/usr --cc=/usr/bin/gcc --python=/usr/bin/python3 \
+		--target-list=arm-linux-user,i386-linux-user \
+		--static --enable-pie --without-default-features \
+		--disable-system --disable-guest-agent --disable-tools --disable-docs \
+		--disable-download --disable-werror --disable-debug-info
+	ninja -j"${JOBS:-1}" qemu-arm qemu-i386
+)
 
 _setup_tools() {
 	_jdk="$srcdir/jdk/usr/lib/jvm/java-1.8-openjdk"
@@ -100,7 +113,7 @@ _setup_tools() {
 
 	export FPLINUX_PM_I386_ROOT="$srcdir/i386-root"
 	export FPLINUX_PM_I386_RESOURCE_DIR="$resource"
-	export FPLINUX_PM_QEMU_I386="$srcdir/qemu/usr/bin/qemu-i386"
+	export FPLINUX_PM_QEMU_I386="$srcdir/qemu/qemu-i386"
 	export FPLINUX_PM_PRE_UAL_SED="$startdir/vm/pre-ual.sed"
 	export PATH="$_hostbin:$PATH"
 	export PKG_CONFIG_SYSROOT_DIR="$CBUILDROOT"
@@ -228,6 +241,7 @@ _build_app() {
 }
 
 build() {
+	_build_qemu
 	_setup_tools
 	make -C preverifier/build/linux
 	_build_cldc
@@ -238,7 +252,7 @@ build() {
 	local cldc="$srcdir/cldc-build/linux_arm_vfp"
 	FPLINUX_PM_JDK="$_jdk" \
 	FPLINUX_PM_PREVERIFY="$builddir/preverifier/build/linux/preverify" \
-	FPLINUX_PM_QEMU_ARM="$srcdir/qemu/usr/bin/qemu-arm" \
+	FPLINUX_PM_QEMU_ARM="$srcdir/qemu/qemu-arm" \
 	FPLINUX_PM_CLASSES="$srcdir/midp-build/classes.zip" \
 	FPLINUX_PM_CLDC_VM="$cldc/dist/bin/cldc_vm" \
 	FPLINUX_PM_HEADLESS="$srcdir/fplinux-phoneme-headless" \

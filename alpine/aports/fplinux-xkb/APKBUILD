@@ -1,6 +1,6 @@
 # Maintainer: FPLinux contributors <fplinux@example.invalid>
 pkgname=fplinux-xkb
-pkgver=@version:aport_xkeyboard_config_2_48_tar_xz@
+pkgver=@version:aport_xkeyboard_config_2_49_tar_bz2@
 pkgrel=0
 pkgdesc="US keyboard layout data for FPLinux applications"
 url="https://gitlab.freedesktop.org/xkeyboard-config/xkeyboard-config"
@@ -8,11 +8,11 @@ arch="noarch"
 license="HPND AND HPND-sell-variant AND X11 AND X11-distribute-modifications-variant AND MIT AND MIT-open-group AND xkeyboard-config-Zinoviev"
 options="!check"
 source="
-	@source:aport_xkeyboard_config_2_48_tar_xz@
+	@source:aport_xkeyboard_config_2_49_tar_bz2@
 	fplinux
 	fplinux.rules
 "
-builddir="$srcdir/xkeyboard-config-$pkgver"
+builddir="$srcdir/xkeyboard-config-xkeyboard-config-$pkgver"
 
 # Every file included by keycodes "evdev+aliases(qwerty)", types and compat
 # "complete", and symbols "pc+us+fplinux(function_keys)+group(alt_shift_toggle)" when the data root is

@@ -1,6 +1,6 @@
 # Maintainer: FPLinux contributors <fplinux@example.invalid>
 pkgname=fplinux-bluez
-pkgver=@version:aport_bluez_5_87_tar_xz@
+pkgver=@version:aport_bluez_5_88_tar_xz@
 pkgrel=0
 pkgdesc="Bluetooth profiles and object-push transfers for FPLinux"
 url="https://www.bluez.org/"
@@ -14,7 +14,7 @@ makedepends_host="dbus-dev fplinux-bluez-glib-dev linux-headers musl-dev readlin
 subpackages="$pkgname-libs:libs $pkgname-dev"
 options="!check"
 source="
-	@source:aport_bluez_5_87_tar_xz@
+	@source:aport_bluez_5_88_tar_xz@
 	bluetooth.initd
 	org.bluez.obex.service
 	modules-load.conf
@@ -23,6 +23,7 @@ source="
 	0001-obex-object-push-only.patch
 	0002-use-private-glib.patch
 	0003-object-push-filesystem.patch
+	0004-guard-hfp-media-endpoints.patch
 "
 builddir="$srcdir/bluez-$pkgver"
 
@@ -129,7 +130,8 @@ d6766a4992ed4141569d6d82a802a771a5cb4c08873bfb0fdbedeea4d738bf9b56d9e0452ec19b76
 e2135385add87b4156caf76edda5d7161d8ef4ba50b898ad7921ed09886e2df7f638eecd1a09604118d7cbd9d915c726c8b4d4064565c7adea6620fb59f9971e  modules-load.conf
 6ff76666bdea7cd4993834a39237f05a2d7def9af6035510e443af7aac67ffed8f5113af39694f830fb36c119d2a5eef2326e23e54c3a2057001c2362617865a  005-hostname-Use-phone-class-for-handhelds.patch
 4a0e61985a381a0902417ea88c0d867c9d714a098e802f728dbc4931af2e53ea3d6384a81c7b9df6d71cb5d968b011bf791a47a5c5e199fd68ff651101c01aa8  fix-endianness.patch
-b8e11fb4951d8d19a0529747c128cb29aff2d6c00d1da4bf396e2c36d5c83b251cffe42367f9f58d02de97b5230ad5123e074a196fe099fe84d1b61b3f16a9fc  0001-obex-object-push-only.patch
+d97c4a48b40ab1423c84924c30f1176870c85d4fd8c57ccd00a6dc4e0b65385f895c27d6e96727fd065ecfa674020ba1d82483c39adf24cb846cbefb90ad7580  0001-obex-object-push-only.patch
 cb4cc008336a03b6b3d6d006c133f53554a4ca6db2f86a6c3e737a221780da364e630f31a6b4138ec2d493d4088797fa717cc94a4d90f528c629082a92c44acb  0002-use-private-glib.patch
 452bf7bf06f58a1d0471d2b15f445c130720f76f3a016e5f082004b12a400f201c953245ba68c1df95e0ce35a5a56dcfefebc3418c9d3d82175cb45c399380df  0003-object-push-filesystem.patch
+534685122b04c061c50fae10ece77e55ff4b0fb8096599cc913877314e6730806d93e87fbcbbd84bf93b459ac89dcd71cc13539b8b65442e3ba4fe27e616b3e3  0004-guard-hfp-media-endpoints.patch
 "

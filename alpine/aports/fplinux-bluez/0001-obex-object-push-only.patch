@@ -2,7 +2,7 @@ Build the Bluetooth object-push client and server without phonebook profiles.
 
 --- a/Makefile.obexd
 +++ b/Makefile.obexd
-@@ -30,36 +30,8 @@
+@@ -30,37 +30,8 @@
  obexd_builtin_modules += bluetooth
  obexd_builtin_sources += obexd/plugins/bluetooth.c
 
@@ -24,6 +24,7 @@ Build the Bluetooth object-push client and server without phonebook profiles.
 -obexd_builtin_sources += obexd/plugins/pbap.c \
 -				obexd/plugins/vcard.h obexd/plugins/vcard.c \
 -				obexd/plugins/phonebook.h \
+-				obexd/plugins/phonebook.c \
 -				obexd/plugins/phonebook-@PLUGIN_PHONEBOOK@.c
 -EXTRA_DIST += obexd/plugins/phonebook-dummy.c obexd/plugins/phonebook-ebook.c \
 -				obexd/plugins/phonebook-tracker.c
@@ -39,7 +40,7 @@ Build the Bluetooth object-push client and server without phonebook profiles.
 
  pkglibexec_PROGRAMS += obexd/src/obexd
 
-@@ -78,23 +50,14 @@
+@@ -79,23 +50,14 @@
  			obexd/client/manager.h obexd/client/manager.c \
  			obexd/client/session.h obexd/client/session.c \
  			obexd/client/bluetooth.h obexd/client/bluetooth.c \
@@ -65,7 +66,7 @@ Build the Bluetooth object-push client and server without phonebook profiles.
 
  if EXTERNAL_PLUGINS
  obexd_src_obexd_LDFLAGS = $(AM_LDFLAGS) -Wl,--export-dynamic
-@@ -103,7 +66,7 @@
+@@ -104,7 +66,7 @@
  endif
 
  obexd_src_obexd_CPPFLAGS = $(AM_CPPFLAGS) $(GLIB_CFLAGS) $(DBUS_CFLAGS) \

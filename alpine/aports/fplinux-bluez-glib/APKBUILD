@@ -1,6 +1,6 @@
 # Maintainer: FPLinux contributors <fplinux@example.invalid>
 pkgname=fplinux-bluez-glib
-pkgver=@version:aport_glib_2_88_1_tar_xz@
+pkgver=@version:aport_glib_2_90_1_tar_xz@
 pkgrel=0
 pkgdesc="Private GLib core library for the BlueZ daemons and client"
 url="https://gitlab.gnome.org/GNOME/glib"
@@ -11,7 +11,7 @@ makedepends_host="libffi-dev musl-dev musl-libintl zlib-dev"
 subpackages="$pkgname-dev"
 options="!check"
 source="
-	@source:aport_glib_2_88_1_tar_xz@
+	@source:aport_glib_2_90_1_tar_xz@
 	0001-private-bluez-library.patch
 	bluez-glib.map
 	install-private-dev.py
@@ -78,6 +78,6 @@ dev() {
 
 sha512sums="
 1bad10ddd2d0513617010d1e89a24e4dd2a2f1b76c4deacbe67ef6274e1b58551fb59e29d03b1a417f81e31c0f6651a509943748ac4bdedafe578e2e7a40561c  0001-private-bluez-library.patch
-fc13c4b4f34940b3bfa3be83928ecffefbe1685875c7d76912cd70b298b75bcec82855d86c112ba2bd762aa03e6e011f4d75a24cb3183242468bef18eaf5a535  bluez-glib.map
+92237fbc23bee6630d9a427ed0967fc5cdce6a38246c95643da0731b95b8b2ea0aa390ab3263a164ed75cf9e16ac1898915d6628ea03dbe88a09a884794bbc45  bluez-glib.map
 ae7df61562020fc0b71f82520f9133a3705318403eec31be07f91d0ab16ae53152b62752e748f4b909b7fa31972fbe63eee83ce8b258d8b62e196468f36a5815  install-private-dev.py
 "

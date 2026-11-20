@@ -1,13 +1,15 @@
 # Maintainer: FPLinux contributors <fplinux@example.invalid>
 pkgname=fplinux-readline
-pkgver=@version:aport_readline_8_3_tar_gz@.3
+pkgver=@version:aport_readline83_006_patch@
 pkgrel=0
 _readlinever=${pkgver%.*}
+# Alpine's readline-dev depends on the exact versions of its runtime packages.
+_alpine_readlinever=8.3.3-r1
 pkgdesc="GNU Readline library linked with terminfo for FPLinux"
 url="https://tiswww.cwru.edu/php/chet/readline/rltop.html"
 arch="armv7"
 license="GPL-3.0-or-later"
-provides="readline=$pkgver-r1"
+provides="readline=$_alpine_readlinever"
 provider_priority=100
 replaces="readline"
 makedepends_build="chrpath clang22 lld22 make llvm22"
@@ -20,6 +22,9 @@ source="
 	@source:aport_readline83_001_patch@
 	@source:aport_readline83_002_patch@
 	@source:aport_readline83_003_patch@
+	@source:aport_readline83_004_patch@
+	@source:aport_readline83_005_patch@
+	@source:aport_readline83_006_patch@
 "
 patch_args="-p0"
 builddir="$srcdir/readline-$_readlinever"
@@ -60,14 +65,14 @@ package() {
 dev() {
 	default_dev
 	depends="$pkgname=$pkgver-r$pkgrel $pkgname-history=$pkgver-r$pkgrel"
-	provides="readline-dev=$pkgver-r1"
+	provides="readline-dev=$_alpine_readlinever"
 	replaces="readline-dev"
 }
 
 history() {
 	pkgdesc="GNU History library"
 	depends=""
-	provides="libhistory=$pkgver-r1"
+	provides="libhistory=$_alpine_readlinever"
 	replaces="libhistory"
 	amove usr/lib/libhistory.so.*
 }

@@ -126,6 +126,28 @@ def run_entry(root: Path, program: str, *args: str) -> CompletedProcess[str]:
     )
 
 
+def test_dhcp_service_invokes_the_server_in_the_foreground(card_root: Path) -> None:
+    """Source the shipped service in a root that also has its shared USB policy."""
+    provision_card(card_root)
+    service = card_root / "etc/init.d/fplinux-usb-dhcp"
+    service.parent.mkdir()
+    shutil.copyfile(GADGET / "fplinux-usb-dhcp.initd", service)
+    busybox = card_root / "bin/busybox"
+    busybox.unlink()
+    shutil.copyfile(ROOT / "tests/host_process/rootfs/fixtures/busybox_dhcp.sh", busybox)
+    busybox.chmod(0o755)
+    (card_root / "run/fplinux-udhcpd.conf").write_text("interface usb0\n")
+
+    result = run_entry(
+        card_root,
+        "/bin/sh",
+        "-c",
+        '. /etc/init.d/fplinux-usb-dhcp; exec "$command" $command_args',
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == "foreground DHCP started\n"
+
+
 @pytest.mark.parametrize("transport", ["ncm", "rndis"])
 def test_installed_card_configures_network_without_a_usb_host_or_keyboard(
     card_root: Path, transport: str

@@ -12,6 +12,7 @@ from unittest import mock
 
 import pytest
 from fplinux_cli.alpine.aports import materialize_aport_sources
+from fplinux_cli.alpine.sources import aport_declaration
 from fplinux_cli.manifests.source_catalog import ResolvedSource
 
 from tests import ROOT
@@ -34,7 +35,8 @@ def _stage_core(temporary: Path, *, arch: str) -> tuple[Path, ApkIdentity]:
             "fplinux-busybox", ROOT, temporary / "native-aport", cache=temporary / "cache"
         )
     sources = temporary / "src"
-    build = sources / "busybox-1.37.0"
+    version = aport_declaration(ROOT, "fplinux-busybox")["pkgver"]
+    build = sources / f"busybox-{version}"
     (build / "applets").mkdir(parents=True)
     shutil.copyfile(INSTALLER, build / "applets/install.sh")
     (build / ".config").write_text('CONFIG_PREFIX=""\n', encoding="utf-8")

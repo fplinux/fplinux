@@ -1,6 +1,6 @@
 # Maintainer: FPLinux contributors <fplinux@example.invalid>
 pkgname=fplinux-apk-tools
-pkgver=@version:aport_apk_tools_v3_0_8_tar_gz@
+pkgver=@version:aport_apk_tools_v3_0_9_tar_gz@
 pkgrel=0
 pkgdesc="Alpine Package Keeper for FPLinux built with Mbed TLS instead of OpenSSL"
 url="https://gitlab.alpinelinux.org/alpine/apk-tools"
@@ -11,7 +11,7 @@ makedepends_build="clang22 lld22 llvm22 meson samurai"
 makedepends_host="linux-headers fplinux-mbedtls-static-dev musl-dev zlib-dev"
 options="!check"
 source="
-	@source:aport_apk_tools_v3_0_8_tar_gz@
+	@source:aport_apk_tools_v3_0_9_tar_gz@
 	0001-static-mbedtls.patch
 "
 builddir="$srcdir/apk-tools-v$pkgver"

@@ -2,10 +2,15 @@
   global:
     g_ascii_strcasecmp;
     g_ascii_strup;
+    g_ascii_table;
     g_assertion_message_cmpint;
     g_assertion_message_expr;
     g_build_filename;
     g_build_pathv;
+    g_byte_array_append;
+    g_byte_array_new;
+    g_byte_array_remove_range;
+    g_byte_array_unref;
     g_checksum_free;
     g_checksum_get_digest;
     g_checksum_new;
@@ -106,6 +111,7 @@
     g_malloc;
     g_malloc0;
     g_malloc0_n;
+    g_markup_error_quark;
     g_markup_parse_context_free;
     g_markup_parse_context_new;
     g_markup_parse_context_parse;
@@ -185,8 +191,11 @@
     g_strdup_printf;
     g_strdupv;
     g_strfreev;
+    g_string_append_len;
     g_string_append_printf;
     g_string_free_and_steal;
+    g_string_insert_c;
+    g_string_insert_len;
     g_string_new;
     g_strndup;
     g_strrstr;

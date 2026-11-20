@@ -1,6 +1,6 @@
 {
   "_comment": "System alpha-mask glyphs and rounded application tiles. Profile colours and radii apply to every supported screen size. Styles use filled glyphs up to filled_max_size when available; an exception records a deliberate alternative. Tile glyph geometry gives the box and stroke in pixels.",
-  "tabler_version": "3.48.0",
+  "tabler_version": "3.52.0",
   "glyph_sizes": [12, 16, 20, 24],
   "filled_max_size": 16,
   "glyphs": {

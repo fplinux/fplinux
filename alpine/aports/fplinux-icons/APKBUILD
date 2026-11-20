@@ -2,7 +2,7 @@
 pkgname=fplinux-icons
 pkgver=1
 pkgrel=0
-_tablerver=@version:aport_tabler_icons_3_48_0_tgz@
+_tablerver=@version:aport_tabler_icons_3_52_0_tgz@
 pkgdesc="System glyphs and application tiles for the FPLinux graphical session"
 url="https://github.com/fplinux/fplinux"
 arch="noarch"
@@ -11,7 +11,7 @@ makedepends_build="nodejs python3"
 options="!check"
 # fplinux-ui-profile.json is copied from lib/fplinux by the build.
 source="
-	@source:aport_tabler_icons_3_48_0_tgz@
+	@source:aport_tabler_icons_3_52_0_tgz@
 	icons.json
 	no-sim.svg
 	tile.svg
@@ -42,7 +42,7 @@ package() {
 }
 
 sha512sums="
-3fd512eb2bdb67fa02735287039704d9a1b21deab142c8dd34f3bfc4515b72c8be1b16a8e5b6356cc38dfae7c7b70e13d016b88c50c7a7bee23da29d613cd34e  icons.json
+8b76a16a33282a1a422e3753d5e6c7b51119d46cbfeb5a74e8ce8622d95fc5ecd64694339517de5a36c4448b0a0e4b7d201ab65b41903d578be2f8c4a0681f87  icons.json
 2e55f7c171bf66dfc1e1d14f2b25f4ebeb59111e2382b88e953c452185dc9a385525e7b1b6606b0098944c151fb8fc7f686fc84fbce9cbdc9b319d76363cb76c  no-sim.svg
 bb1bf43051cc8948923591e26dafce9ffdec5812a2067b7d21797c83118065cb3268fcb4ec8bf6a5781d5d930a124abf3ca4faf8ed0005ac559c4eb5131df491  tile.svg
 c18fb9dbd879c0f824826d83f6094d2d2eb56fc722668ef67b4a0a98c2c0854d39ec58f40b1a97f2d67e4e3a4cc829eeb2ffd66e676c357be592951a0a438632  generate-icons.py

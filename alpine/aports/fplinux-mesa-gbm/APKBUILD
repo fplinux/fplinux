@@ -1,6 +1,6 @@
 # Maintainer: FPLinux contributors <fplinux@example.invalid>
 pkgname=fplinux-mesa-gbm
-pkgver=@version:aport_mesa_26_2_5_tar_xz@
+pkgver=@version:aport_mesa_26_3_1_tar_xz@
 pkgrel=0
 pkgdesc="GBM buffer management library for FPLinux"
 url="https://www.mesa3d.org"
@@ -13,7 +13,7 @@ makedepends_host="musl-dev linux-headers libstdc++-dev fplinux-libdrm-dev"
 subpackages="$pkgname-dev fplinux-mesa-headers:headers:noarch"
 options="!check"
 source="
-	@source:aport_mesa_26_2_5_tar_xz@
+	@source:aport_mesa_26_3_1_tar_xz@
 	neon-clang.patch
 	NOTICE
 "
@@ -68,5 +68,5 @@ headers() {
 
 sha512sums="
 1c83949f8904fa0d4cb189fc9bc5dd8910e6fd17009b95d46927713f228f4f81bf4dc74cc326bfd6752d969416e259d542e95e7e61b1aa11ca88acf5e8fd6988  neon-clang.patch
-8e47e57850393eb2be96a3fccd04e07092a61b42d94a60b3c2193de51ba95276d6553febb06b5075c6b311ef8f2a64d25e30920478e7109f28628bedb6740428  NOTICE
+1e6759fb5bd7a2cd646d43490dd5a1811f5c27063695cc4d223b411fbf23d8550b0a4b003edc54b27428c81f15f9ce001ebda1f703bcdc55820fdcfb9b3e9bdf  NOTICE
 "

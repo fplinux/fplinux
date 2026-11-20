@@ -1,6 +1,6 @@
 # Maintainer: FPLinux contributors <fplinux@example.invalid>
 pkgname=fplinux-mbedtls-static-dev
-pkgver=@version:aport_mbedtls_3_6_7_tar_bz2@
+pkgver=@version:aport_mbedtls_3_6_8_tar_bz2@
 pkgrel=0
 pkgdesc="Static Mbed TLS development files for FPLinux consumers"
 url="https://www.trustedfirmware.org/projects/mbed-tls/"
@@ -10,7 +10,7 @@ makedepends_build="clang22 lld22 llvm22 cmake python3 samurai"
 makedepends_host="musl-dev"
 options="!check"
 source="
-	@source:aport_mbedtls_3_6_7_tar_bz2@
+	@source:aport_mbedtls_3_6_8_tar_bz2@
 "
 builddir="$srcdir/mbedtls-$pkgver"
 

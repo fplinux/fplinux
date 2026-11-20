@@ -1424,6 +1424,9 @@ static void bluetooth_transfers(struct capture *capture)
 	press(capture, KEY_OK);
 	capture->stage = "send: await completion";
 	wait_label(capture, "Complete");
+	/* A long displayed path can push the count below the first page. */
+	if (!has_label(capture, "17 / 17 bytes"))
+		press(capture, KEY_RIGHT);
 	wait_label(capture, "17 / 17 bytes");
 	reap_obex(capture, obex);
 	press(capture, KEY_F14);

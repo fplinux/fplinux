@@ -10,10 +10,10 @@ makedepends_build="clang22 lld22 meson samurai expat-dev pkgconf"
 makedepends_host="musl-dev linux-headers libffi-dev"
 subpackages="$pkgname-dev $pkgname-cursor"
 options="!check"
-_protocolver=@version:aport_wayland_protocols_1_49_tar_xz@
+_protocolver=@version:aport_wayland_protocols_1_50_tar_xz@
 source="
 	@source:aport_wayland_1_26_0_tar_xz@
-	@source:aport_wayland_protocols_1_49_tar_xz@
+	@source:aport_wayland_protocols_1_50_tar_xz@
 "
 builddir="$srcdir/wayland-$pkgver"
 
