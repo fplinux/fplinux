@@ -181,9 +181,12 @@ enum clock_status clock_model_init(struct clock_model *model, int64_t wall_utc,
  * then ID, snoozes by deadline then ID, and the timer. Saving/enabling an alarm
  * chooses a strictly future occurrence after current wall or its last consumed
  * occurrence, whichever is later. Weekly schedules use the system UTC policy.
+ * On success, a non-NULL preferences_changed receives whether a scheduled
+ * occurrence changed the saved alarm state.
  */
 enum clock_status clock_model_tick(struct clock_model *model, int64_t wall_utc,
-				   uint64_t monotonic_ms);
+				   uint64_t monotonic_ms,
+				   bool *preferences_changed);
 enum clock_status clock_model_set_view(struct clock_model *model,
 				       enum clock_view view);
 enum clock_status clock_model_set_snooze(struct clock_model *model,

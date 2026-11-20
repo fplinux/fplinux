@@ -22,6 +22,7 @@
 #define APP_ID "org.fplinux.music"
 #define _(text) gettext(text)
 #define MUSIC_SEEK_MS 5000U
+#define MUSIC_REPLACE_QUEUE SIZE_MAX
 
 enum command_id {
 	CMD_BACK = 1,
@@ -51,7 +52,7 @@ struct music_app {
 	char target[FPLINUX_FILES_PATH_MAX];
 	char target_selected[FPLINUX_FILES_NAME_MAX + 1];
 	bool target_folder;
-	bool target_keep_queue;
+	size_t target_queue_index;
 	bool target_play;
 	uint64_t target_position_ms;
 	bool open_pending;
@@ -205,7 +206,6 @@ static void stopped(struct music_app *app)
 	app->close_pending = true;
 	app->open_pending = false;
 	app->seek_pending = false;
-	app->position_ms = 0;
 	app->base_frames = 0;
 	app->info.eof = false;
 	app->info.seeking = false;
@@ -279,7 +279,7 @@ static void cancel_load(struct fplinux_ui *ui, void *context)
 
 static bool begin_open(struct music_app *app, const char *path, bool folder,
 		       const char *selected, uint64_t position_ms, bool play,
-		       bool keep_queue)
+		       size_t queue_index)
 {
 	if (strlen(path) >= sizeof(app->target) ||
 	    (selected && strlen(selected) >= sizeof(app->target_selected))) {
@@ -293,12 +293,13 @@ static bool begin_open(struct music_app *app, const char *path, bool folder,
 			return false;
 		app->waiting = true;
 	}
+	app->position_ms = played_ms(app);
 	close_stream(app);
 	app->generation++;
 	strcpy(app->target, path);
 	strcpy(app->target_selected, selected ? selected : "");
 	app->target_folder = folder;
-	app->target_keep_queue = keep_queue;
+	app->target_queue_index = queue_index;
 	app->target_position_ms = position_ms;
 	app->target_play = play;
 	app->open_pending = true;
@@ -309,7 +310,6 @@ static bool begin_open(struct music_app *app, const char *path, bool folder,
 	app->playing = false;
 	app->error = 0;
 	app->output_error = 0;
-	app->position_ms = position_ms;
 	pump(app);
 	return true;
 }
@@ -322,11 +322,8 @@ static void open_queue_track(struct music_app *app, size_t selected, bool play)
 	if (fplinux_files_child_path(app->folder,
 				     app->queue.entries[selected].name, path,
 				     sizeof(path)) < 0 ||
-	    !begin_open(app, path, false, NULL, 0, play, true)) {
+	    !begin_open(app, path, false, NULL, 0, play, selected))
 		show_error(app, errno);
-		return;
-	}
-	app->selected = selected;
 }
 
 static void seek_to(struct music_app *app, uint64_t position_ms)
@@ -364,9 +361,12 @@ static void toggle_play(struct music_app *app)
 	if (app->loading)
 		return;
 	if (!app->loaded) {
+		size_t queue_index = app->queue.count ? app->selected :
+							MUSIC_REPLACE_QUEUE;
+
 		if (app->path[0] &&
 		    !begin_open(app, app->path, false, NULL, app->position_ms,
-				true, app->queue.count != 0))
+				true, queue_index))
 			show_error(app, errno);
 		return;
 	}
@@ -400,7 +400,7 @@ static void picker_result(struct fplinux_ui_file_picker *picker,
 	app->picker = NULL;
 	if (status == FPLINUX_UI_FILE_PICKER_SELECTED) {
 		if (!begin_open(app, selected, app->folder_picker, NULL, 0,
-				true, false))
+				true, MUSIC_REPLACE_QUEUE))
 			show_error(app, errno);
 	} else if (status == FPLINUX_UI_FILE_PICKER_ERROR) {
 		show_error(app, error);
@@ -456,8 +456,9 @@ static void child_command(struct fplinux_ui *ui,
 		fplinux_ui_pop_to(ui, app->view.screen);
 		if (app->queue.count)
 			open_queue_track(app, selected, true);
-		else if (app->path[0] && !begin_open(app, app->path, false,
-						     NULL, 0, true, false))
+		else if (app->path[0] &&
+			 !begin_open(app, app->path, false, NULL, 0, true,
+				     MUSIC_REPLACE_QUEUE))
 			show_error(app, errno);
 	}
 }
@@ -537,6 +538,7 @@ static void command(struct fplinux_ui *ui, struct fplinux_ui_screen *screen,
 		break;
 	case CMD_STOP:
 		stopped(app);
+		app->position_ms = 0;
 		save(app);
 		pump(app);
 		break;
@@ -728,9 +730,9 @@ static void loaded_result(struct music_app *app,
 	app->loaded = true;
 	app->playing = app->target_play;
 	app->base_frames = result->info.position_frames;
-	app->position_ms =
-		result->info.position_frames * 1000U / result->info.rate;
-	if (!app->target_keep_queue) {
+	if (!app->info.seeking)
+		app->position_ms = app->base_frames * 1000U / app->info.rate;
+	if (app->target_queue_index == MUSIC_REPLACE_QUEUE) {
 		fplinux_files_directory_free(&app->queue);
 		app->queue = result->directory;
 		result->directory = (struct fplinux_files_directory){ 0 };
@@ -738,6 +740,8 @@ static void loaded_result(struct music_app *app,
 		app->source_folder = app->target_folder;
 		strcpy(app->source, app->target);
 		strcpy(app->folder, app->target_folder ? app->target : "");
+	} else {
+		app->selected = app->target_queue_index;
 	}
 	if (app->target_folder) {
 		fplinux_files_child_path(app->target,
@@ -762,7 +766,8 @@ static void collect(struct music_app *app)
 		fplinux_files_directory_free(&result.directory);
 		return;
 	}
-	if (result.error && result.error != EAGAIN) {
+	if (result.error &&
+	    (result.action == MUSIC_PLAYER_OPEN || result.error != EAGAIN)) {
 		app->position_ms = played_ms(app);
 		app->error = result.error;
 		app->playing = false;
@@ -1001,9 +1006,7 @@ static void storage_result(struct fplinux_ui *ui,
 		    volume->mount_id == app->mount_id)
 			return;
 	}
-	uint64_t position_ms = played_ms(app);
 	stopped(app);
-	app->position_ms = position_ms;
 	app->error = ENODEV;
 	pump(app);
 	redraw(app);
@@ -1019,7 +1022,8 @@ document(struct fplinux_ui *ui,
 		return (struct fplinux_ui_document_result){
 			.status = FPLINUX_UI_DOCUMENT_ERROR, .error = EBUSY
 		};
-	if (!begin_open(app, request->path, false, NULL, 0, true, false))
+	if (!begin_open(app, request->path, false, NULL, 0, true,
+			MUSIC_REPLACE_QUEUE))
 		return (struct fplinux_ui_document_result){
 			.status = FPLINUX_UI_DOCUMENT_ERROR, .error = errno
 		};
@@ -1143,9 +1147,9 @@ int main(int argc, char **argv)
 			} else {
 				strcpy(app.path, source);
 			}
-			begin_open(&app, source, folder, track,
-				   position > 0 ? (uint64_t)position : 0, false,
-				   false);
+			app.position_ms = position > 0 ? (uint64_t)position : 0;
+			begin_open(&app, source, folder, track, app.position_ms,
+				   false, MUSIC_REPLACE_QUEUE);
 		}
 	} else {
 		struct fplinux_ui_screen *alert = fplinux_ui_alert_new(

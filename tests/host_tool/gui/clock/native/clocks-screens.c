@@ -836,8 +836,8 @@ static void timer_actions(struct capture *capture)
 	assert(capture->owner.timer.state == CLOCK_TIMER_RUNNING);
 	assert(capture->owner.timer.deadline_ms == 91000);
 	wait_legends(capture, "Stop", "Pause", "Back");
-	assert(clock_model_tick(&capture->owner, INT64_C(1704067210), 11500) ==
-	       CLOCK_OK);
+	assert(clock_model_tick(&capture->owner, INT64_C(1704067210), 11500,
+				NULL) == CLOCK_OK);
 	press(capture, 1, KEY_OK);
 	expect_request(capture, CLOCK_REQUEST_TIMER_PAUSE);
 	apply_request(capture);
@@ -857,8 +857,8 @@ static void timer_actions(struct capture *capture)
 	press(capture, 1, KEY_OK);
 	expect_request(capture, CLOCK_REQUEST_TIMER_START);
 	apply_request(capture);
-	assert(clock_model_tick(&capture->owner, INT64_C(1704067221), 22000) ==
-	       CLOCK_OK);
+	assert(clock_model_tick(&capture->owner, INT64_C(1704067221), 22000,
+				NULL) == CLOCK_OK);
 	press(capture, 1, KEY_OK);
 	expect_request(capture, CLOCK_REQUEST_TIMER_PAUSE);
 	apply_request(capture);
@@ -950,7 +950,8 @@ static void activation_preserves_running_clocks(struct capture *capture)
 	assert(capture->owner.stopwatch.running);
 	assert(capture->owner.stopwatch.elapsed_ms == stopwatch_elapsed);
 	assert(capture->owner.stopwatch.lap_count == laps && laps == 1);
-	assert(clock_model_tick(&capture->owner, 1704067202, 3000) == CLOCK_OK);
+	assert(clock_model_tick(&capture->owner, 1704067202, 3000, NULL) ==
+	       CLOCK_OK);
 	/* The home keeps Timer focused, so the same row opens its ticking state. */
 	press(capture, 1, KEY_OK);
 	wait_label(capture, "00:01:28");
@@ -1171,20 +1172,20 @@ static void prepare_missed_events(struct capture *capture)
 
 	assert(clock_model_timer_set(&capture->owner, 1) == CLOCK_OK);
 	assert(clock_model_timer_start(&capture->owner) == CLOCK_OK);
-	assert(clock_model_tick(&capture->owner, INT64_C(1704067201), 2000) ==
-	       CLOCK_OK);
+	assert(clock_model_tick(&capture->owner, INT64_C(1704067201), 2000,
+				NULL) == CLOCK_OK);
 	assert(capture->owner.active.kind == CLOCK_EVENT_TIMER);
-	assert(clock_model_tick(&capture->owner, INT64_C(1704067261), 62000) ==
-	       CLOCK_OK);
+	assert(clock_model_tick(&capture->owner, INT64_C(1704067261), 62000,
+				NULL) == CLOCK_OK);
 	assert(capture->owner.missed_count == 1);
 	assert(capture->owner.missed[0].missed_reason == CLOCK_MISSED_EXPIRED);
 	assert(clock_model_alarm_add(&capture->owner, &alarm, &id) == CLOCK_OK);
-	assert(clock_model_tick(&capture->owner, INT64_C(1704067320), 121000) ==
-	       CLOCK_OK);
+	assert(clock_model_tick(&capture->owner, INT64_C(1704067320), 121000,
+				NULL) == CLOCK_OK);
 	assert(capture->owner.active.kind == CLOCK_EVENT_ALARM);
 	assert(capture->owner.active.source_id == id);
-	assert(clock_model_tick(&capture->owner, INT64_C(1704067380), 181000) ==
-	       CLOCK_OK);
+	assert(clock_model_tick(&capture->owner, INT64_C(1704067380), 181000,
+				NULL) == CLOCK_OK);
 	assert(capture->owner.missed_count == 2);
 	assert(capture->owner.missed[1].missed_reason == CLOCK_MISSED_EXPIRED);
 }
@@ -1606,8 +1607,8 @@ static void active_confirmation_keeps_original_revision(struct capture *capture,
 	assert(!capture->operation.cancel_active);
 	if (changed)
 		enter_alarm_hour(capture, KEY_NUMERIC_9);
-	assert(clock_model_tick(&capture->owner, INT64_C(1704092400),
-				25201000) == CLOCK_OK);
+	assert(clock_model_tick(&capture->owner, INT64_C(1704092400), 25201000,
+				NULL) == CLOCK_OK);
 	assert(capture->owner.active.kind == CLOCK_EVENT_ALARM);
 	assert(clock_wire_request_apply(&capture->owner, &capture->operation) ==
 	       CLOCK_ACTIVE_EVENT);
@@ -1904,8 +1905,8 @@ static void stopwatch_actions(struct capture *capture)
 	press(capture, 1, KEY_OK);
 	expect_request(capture, CLOCK_REQUEST_STOPWATCH_START);
 	apply_request(capture);
-	assert(clock_model_tick(&capture->owner, INT64_C(1704067223), 24000) ==
-	       CLOCK_OK);
+	assert(clock_model_tick(&capture->owner, INT64_C(1704067223), 24000,
+				NULL) == CLOCK_OK);
 	wait_label(capture, "00:02.00");
 	assert(fplinux_ui_session_send(capture->session, &message));
 	expect_quiet(capture, "hidden");
@@ -1936,16 +1937,16 @@ static void stopwatch_actions(struct capture *capture)
 	wait_label(capture, "1  00:02.00");
 	assert(capture->owner.stopwatch.running);
 	assert(!capture->has_request);
-	assert(clock_model_tick(&capture->owner, INT64_C(1704067223), 24500) ==
-	       CLOCK_OK);
+	assert(clock_model_tick(&capture->owner, INT64_C(1704067223), 24500,
+				NULL) == CLOCK_OK);
 	press(capture, 1, KEY_F14);
 	wait_label(capture, "00:02.50");
 	wait_label(capture, "Lap 1 · 00:02.00");
 	wait_legends(capture, "Lap", "Pause", "Back");
 	assert(capture->owner.stopwatch.running &&
 	       capture->owner.stopwatch.lap_count == 1);
-	assert(clock_model_tick(&capture->owner, INT64_C(1704067223), 24750) ==
-	       CLOCK_OK);
+	assert(clock_model_tick(&capture->owner, INT64_C(1704067223), 24750,
+				NULL) == CLOCK_OK);
 	press(capture, 1, KEY_OK);
 	expect_request(capture, CLOCK_REQUEST_STOPWATCH_PAUSE);
 	apply_request(capture);
@@ -2010,8 +2011,8 @@ static void open_selected_offset(struct capture *capture, const char *name,
 static void set_world_time(struct capture *capture, int64_t wall_utc,
 			   uint64_t monotonic_ms)
 {
-	assert(clock_model_tick(&capture->owner, wall_utc, monotonic_ms) ==
-	       CLOCK_OK);
+	assert(clock_model_tick(&capture->owner, wall_utc, monotonic_ms,
+				NULL) == CLOCK_OK);
 	refresh_snapshot(capture);
 }
 
@@ -2322,7 +2323,7 @@ int main(int argc, char **argv)
 			assert(clock_model_stopwatch_start(&capture.owner) ==
 			       CLOCK_OK);
 			assert(clock_model_tick(&capture.owner, 1704070861,
-						3662230) == CLOCK_OK);
+						3662230, NULL) == CLOCK_OK);
 			assert(clock_model_stopwatch_pause(&capture.owner) ==
 			       CLOCK_OK);
 		}
@@ -2334,7 +2335,7 @@ int main(int argc, char **argv)
 			assert(clock_model_stopwatch_start(&capture.owner) ==
 			       CLOCK_OK);
 			assert(clock_model_tick(&capture.owner, 1704067201,
-						2000) == CLOCK_OK);
+						2000, NULL) == CLOCK_OK);
 			assert(clock_model_stopwatch_lap(&capture.owner) ==
 			       CLOCK_OK);
 		}
@@ -2344,7 +2345,7 @@ int main(int argc, char **argv)
 			assert(clock_model_timer_start(&capture.owner) ==
 			       CLOCK_OK);
 			assert(clock_model_tick(&capture.owner, 1704067380,
-						180877) == CLOCK_OK);
+						180877, NULL) == CLOCK_OK);
 			assert(clock_model_timer_pause(&capture.owner) ==
 			       CLOCK_OK);
 			assert(capture.owner.timer.remaining_ms == 420123);
@@ -2361,7 +2362,7 @@ int main(int argc, char **argv)
 			assert(clock_model_alarm_add(&capture.owner, &spec,
 						     NULL) == CLOCK_OK);
 			assert(clock_model_tick(&capture.owner, 1704067260,
-						61000) == CLOCK_OK);
+						61000, NULL) == CLOCK_OK);
 			assert(clock_model_snooze(&capture.owner,
 						  capture.owner.active.id,
 						  5) == CLOCK_OK);

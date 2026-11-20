@@ -12,6 +12,7 @@ from tests import ROOT
 from tests.c_harness import c_build_directory
 from tests.host_tool.mre.menu_frames import (
     capture_menu_frames,
+    check_rotation_only_inherits_global_settings,
     check_settings_cross_scope,
     check_settings_roundtrip,
     check_settings_save_retry,
@@ -73,6 +74,14 @@ def test_actual_phoneme_settings_survive_reopen_and_reset_to_global_values(
     document = tmp_path / "example.jar"
     write_jar(document)
     check_settings_roundtrip(phoneme_native, tmp_path, "phoneme", document)
+
+
+def test_actual_phoneme_rotation_only_inherits_changed_global_settings_on_reopen(
+    phoneme_native: Path, tmp_path: Path
+) -> None:
+    document = tmp_path / "example.jar"
+    write_jar(document)
+    check_rotation_only_inherits_global_settings(phoneme_native, tmp_path, "phoneme", document)
 
 
 @pytest.mark.parametrize("operation", ["file", "directory"])

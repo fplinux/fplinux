@@ -153,6 +153,24 @@ static void saved_calculation_continues(void)
 	expect_display(&restored, '.', "5");
 }
 
+static void small_operand_stays_editable(void)
+{
+	struct fplinux_calculator calculator = { 0 };
+
+	type(&calculator, "0.00001+<2");
+	expect_display(&calculator, '.', "0.000012");
+	type(&calculator, "C0.00001#+<2");
+	expect_display(&calculator, '.', "-0.000012");
+	type(&calculator, "C0.00000000001+<");
+	assert(fplinux_calculator_input(&calculator, '2') ==
+	       FPLINUX_CALCULATOR_DIGIT_LIMIT);
+	expect_display(&calculator, '.', "0.00000000001");
+	type(&calculator, "C0.000001*0.000001=+<");
+	assert(fplinux_calculator_get_state(&calculator) ==
+	       FPLINUX_CALCULATOR_RESULT);
+	expect_display(&calculator, '.', "1e-12");
+}
+
 static void number_formatting(void)
 {
 	static const struct {
@@ -184,6 +202,7 @@ int main(void)
 	divide_by_zero_and_recovery();
 	overflow_and_recovery();
 	limits_delete_and_reset();
+	small_operand_stays_editable();
 	saved_calculation_continues();
 	number_formatting();
 	puts("calculator-model: arithmetic, editing and saved continuation passed");

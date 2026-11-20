@@ -14,6 +14,7 @@ from tests import ROOT
 from tests.c_harness import c_build_directory
 from tests.host_tool.mre.menu_frames import (
     capture_menu_frames,
+    check_rotation_only_inherits_global_settings,
     check_settings_cross_scope,
     check_settings_roundtrip,
     check_settings_save_retry,
@@ -47,6 +48,14 @@ def test_actual_mre_settings_survive_reopen_and_reset_to_global_values(
     document = tmp_path / "first.vxp"
     document.write_bytes(b"A execution-peer fixture")
     check_settings_roundtrip(mre_native, tmp_path, "mre", document)
+
+
+def test_actual_mre_rotation_only_inherits_changed_global_settings_on_reopen(
+    mre_native: Path, tmp_path: Path
+) -> None:
+    document = tmp_path / "first.vxp"
+    document.write_bytes(b"A execution-peer fixture")
+    check_rotation_only_inherits_global_settings(mre_native, tmp_path, "mre", document)
 
 
 @pytest.mark.parametrize("operation", ["file", "directory"])

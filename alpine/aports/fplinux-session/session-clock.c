@@ -160,21 +160,26 @@ fplinux_session_clock_tick(struct fplinux_session_clock *clock,
 			   int64_t wall_utc, uint64_t mono_ms)
 {
 	struct clock_model candidate;
-	char before[CLOCK_WIRE_CAPACITY], after[CLOCK_WIRE_CAPACITY];
+	char configuration[CLOCK_WIRE_CAPACITY];
 	enum clock_status status;
+	bool preferences_changed;
 
 	if (!clock || !clock->preferences)
 		return result(clock, CLOCK_INVALID, false);
 	candidate = clock->model;
-	status = clock_model_tick(&candidate, wall_utc, mono_ms);
-	if (status == CLOCK_OK)
-		status = configurations(&clock->model, &candidate, before,
-					after);
+	status = clock_model_tick(&candidate, wall_utc, mono_ms,
+				  &preferences_changed);
 	if (status != CLOCK_OK)
 		return result(clock, status, false);
+	if (preferences_changed) {
+		status = clock_wire_preferences_encode(
+			&candidate, configuration, sizeof(configuration));
+		if (status != CLOCK_OK)
+			return result(clock, status, false);
+	}
 	clock->model = candidate;
-	if (strcmp(before, after))
-		saved(clock, save_configuration(clock, after), mono_ms);
+	if (preferences_changed)
+		saved(clock, save_configuration(clock, configuration), mono_ms);
 	else if (clock->retry_at_ms && mono_ms >= clock->retry_at_ms)
 		fplinux_session_clock_retry(clock, mono_ms);
 	return result(clock, CLOCK_OK, true);

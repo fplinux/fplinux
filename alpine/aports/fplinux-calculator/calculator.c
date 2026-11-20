@@ -173,6 +173,19 @@ static void edit_accumulator(struct fplinux_calculator *calculator)
 		return;
 	snprintf(text, sizeof(text), "%.*g", FPLINUX_CALCULATOR_DIGIT_COUNT,
 		 calculator->accumulator);
+	if (strstr(text, "e-")) {
+		/* The leading zero uses one of the editable digits. */
+		snprintf(text, sizeof(text), "%.*f",
+			 FPLINUX_CALCULATOR_DIGIT_COUNT - 1,
+			 calculator->accumulator);
+		if (strtod(text, NULL) != calculator->accumulator) {
+			calculator->result = true;
+			return;
+		}
+		length = strlen(text);
+		while (text[length - 1] == '0')
+			text[--length] = '\0';
+	}
 	length = strlen(text);
 	if (strchr(text, 'e') ||
 	    count_digits(text) > FPLINUX_CALCULATOR_DIGIT_COUNT ||

@@ -51,13 +51,33 @@ static bool read_field(struct json_object *object, const char *name,
 	return false;
 }
 
+static struct json_object *parse_settings(const char *text)
+{
+	struct json_tokener *tokener = json_tokener_new();
+	struct json_object *object;
+	enum json_tokener_error error;
+
+	if (!tokener)
+		return NULL;
+	json_tokener_set_flags(tokener, JSON_TOKENER_STRICT);
+	object = json_tokener_parse_ex(tokener, text, -1);
+	error = json_tokener_get_error(tokener);
+	json_tokener_free(tokener);
+	if (error != json_tokener_success || !object ||
+	    !json_object_is_type(object, json_type_object)) {
+		json_object_put(object);
+		errno = error == json_tokener_error_memory ? ENOMEM : EINVAL;
+		return NULL;
+	}
+	return object;
+}
+
 bool fplinux_ui_view_settings_load(
 	struct fplinux_ui_view_settings *settings,
 	const struct fplinux_ui_prefs *prefs,
 	const struct fplinux_ui_view_settings *defaults)
 {
 	struct fplinux_ui_view_settings loaded;
-	struct json_tokener *tokener;
 	struct json_object *object;
 	const char *text;
 	int scale, rotation;
@@ -73,19 +93,14 @@ bool fplinux_ui_view_settings_load(
 		*settings = loaded;
 		return true;
 	}
-	tokener = json_tokener_new();
-	if (!tokener)
+	object = parse_settings(text);
+	if (!object)
 		return false;
-	json_tokener_set_flags(tokener, JSON_TOKENER_STRICT);
-	object = json_tokener_parse_ex(tokener, text, -1);
 	scale = loaded.scale;
 	rotation = loaded.rotation;
-	ok = json_tokener_get_error(tokener) == json_tokener_success &&
-	     object && json_object_is_type(object, json_type_object) &&
-	     read_field(object, "scale", scale_values, &scale) &&
+	ok = read_field(object, "scale", scale_values, &scale) &&
 	     read_field(object, "rotation", rotation_values, &rotation);
 	json_object_put(object);
-	json_tokener_free(tokener);
 	if (!ok) {
 		errno = EINVAL;
 		return false;
@@ -96,20 +111,68 @@ bool fplinux_ui_view_settings_load(
 	return true;
 }
 
+/* A negative index omits the field so it continues to inherit. */
+static bool store_fields(struct fplinux_ui_prefs *prefs, int scale,
+			 int rotation)
+{
+	char value[80];
+
+	if (scale < 0)
+		snprintf(value, sizeof(value), "{\"rotation\":\"%s\"}",
+			 rotation_values[rotation]);
+	else if (rotation < 0)
+		snprintf(value, sizeof(value), "{\"scale\":\"%s\"}",
+			 scale_values[scale]);
+	else
+		snprintf(value, sizeof(value),
+			 "{\"scale\":\"%s\",\"rotation\":\"%s\"}",
+			 scale_values[scale], rotation_values[rotation]);
+	return fplinux_ui_prefs_set(prefs, VIEW_KEY, value);
+}
+
 bool fplinux_ui_view_settings_store(
 	const struct fplinux_ui_view_settings *settings,
 	struct fplinux_ui_prefs *prefs)
 {
-	char value[80];
-
 	if (!valid(settings) || !prefs) {
 		errno = EINVAL;
 		return false;
 	}
-	snprintf(value, sizeof(value), "{\"scale\":\"%s\",\"rotation\":\"%s\"}",
-		 scale_values[settings->scale],
-		 rotation_values[settings->rotation]);
-	return fplinux_ui_prefs_set(prefs, VIEW_KEY, value);
+	return store_fields(prefs, settings->scale, settings->rotation);
+}
+
+bool fplinux_ui_view_settings_store_one(struct fplinux_ui_prefs *prefs,
+					enum fplinux_ui_view_setting setting,
+					size_t selected)
+{
+	struct json_object *object = NULL;
+	const char *text;
+	int scale = -1, rotation = -1;
+
+	if (!prefs || (unsigned int)setting > FPLINUX_UI_VIEW_ROTATION ||
+	    selected >= 3) {
+		errno = EINVAL;
+		return false;
+	}
+	text = fplinux_ui_prefs_get(prefs, VIEW_KEY, NULL);
+	if (text) {
+		object = parse_settings(text);
+		/* Allow an edit to replace invalid data. */
+		if (!object && errno != EINVAL)
+			return false;
+	}
+	if (setting == FPLINUX_UI_VIEW_SCALE) {
+		scale = selected;
+		if (object)
+			read_field(object, "rotation", rotation_values,
+				   &rotation);
+	} else {
+		rotation = selected;
+		if (object)
+			read_field(object, "scale", scale_values, &scale);
+	}
+	json_object_put(object);
+	return store_fields(prefs, scale, rotation);
 }
 
 bool fplinux_ui_view_settings_reset(struct fplinux_ui_prefs *prefs)

@@ -31,6 +31,10 @@ bool fplinux_ui_view_settings_load(
 bool fplinux_ui_view_settings_store(
 	const struct fplinux_ui_view_settings *settings,
 	struct fplinux_ui_prefs *prefs);
+/* Store one override, preserving the other field's explicit value or absence. */
+bool fplinux_ui_view_settings_store_one(struct fplinux_ui_prefs *prefs,
+					enum fplinux_ui_view_setting setting,
+					size_t selected);
 bool fplinux_ui_view_settings_reset(struct fplinux_ui_prefs *prefs);
 
 /* The first two rows are indexed by fplinux_ui_view_setting. */

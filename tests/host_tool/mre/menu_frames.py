@@ -138,6 +138,27 @@ def preference_values(path: Path) -> dict[str, str]:
     return dict(line.split("=", 1) for line in path.read_text(encoding="utf-8").splitlines())
 
 
+def check_rotation_only_inherits_global_settings(
+    native: Path, directory: Path, application: str, document: Path
+) -> None:
+    for scenario in ("rotation-only", "rotation-reopen"):
+        capture_menu_frames(
+            native,
+            directory,
+            (240, 320),
+            "en",
+            "light",
+            application=application,
+            document=document,
+            scenario=scenario,
+        )
+    root = directory / f"state/fplinux/org.fplinux.{application}"
+    (program,) = (root / "programs").glob("*/preferences")
+    values = preference_values(program)
+    assert json.loads(values["view-settings"]) == {"rotation": "270"}
+    assert ("pointer-mode" if application == "mre" else "canvas-size") not in values
+
+
 def check_settings_roundtrip(
     native: Path, directory: Path, application: str, document: Path
 ) -> None:
@@ -226,7 +247,4 @@ def check_settings_cross_scope(
         assert json.loads(global_values["view-settings"]) == {"scale": "fit", "rotation": "0"}
         assert len(programs) == 1
         program_values = preference_values(programs[0])
-        assert json.loads(program_values["view-settings"]) == {
-            "scale": "integer",
-            "rotation": "90",
-        }
+        assert json.loads(program_values["view-settings"]) == {"rotation": "90"}

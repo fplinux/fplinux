@@ -35,6 +35,7 @@ global:
 	fplinux_ui_view_settings_defaults;
 	fplinux_ui_view_settings_load;
 	fplinux_ui_view_settings_store;
+	fplinux_ui_view_settings_store_one;
 	fplinux_ui_view_settings_reset;
 	fplinux_ui_view_settings_list_new;
 	fplinux_ui_view_settings_choice_new;

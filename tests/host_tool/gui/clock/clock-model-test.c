@@ -9,6 +9,7 @@
 static void countdown_and_stopwatch_use_monotonic_time(void)
 {
 	struct clock_model model, before;
+	bool preferences_changed = true;
 
 	assert(clock_model_init(&model, 1704067200, 1000) == CLOCK_OK);
 	assert(model.alarm_count == 0 && model.world_count == 0);
@@ -16,7 +17,9 @@ static void countdown_and_stopwatch_use_monotonic_time(void)
 	assert(clock_model_timer_set(&model, 10) == CLOCK_OK);
 	assert(clock_model_timer_start(&model) == CLOCK_OK);
 	assert(clock_model_stopwatch_start(&model) == CLOCK_OK);
-	assert(clock_model_tick(&model, 1704153600, 3500) == CLOCK_OK);
+	assert(clock_model_tick(&model, 1704153600, 3500,
+				&preferences_changed) == CLOCK_OK);
+	assert(!preferences_changed);
 	assert(clock_model_timer_remaining(&model) == 7500);
 	assert(clock_model_stopwatch_elapsed(&model) == 2500);
 	assert(clock_model_stopwatch_lap(&model) == CLOCK_OK);
@@ -24,21 +27,23 @@ static void countdown_and_stopwatch_use_monotonic_time(void)
 	assert(model.stopwatch.laps[0].difference_ms == 2500);
 	assert(clock_model_timer_pause(&model) == CLOCK_OK);
 	assert(clock_model_stopwatch_pause(&model) == CLOCK_OK);
-	assert(clock_model_tick(&model, 1704067200, 9000) == CLOCK_OK);
+	assert(clock_model_tick(&model, 1704067200, 9000, NULL) == CLOCK_OK);
 	assert(clock_model_timer_remaining(&model) == 7500);
 	assert(clock_model_stopwatch_elapsed(&model) == 2500);
 	assert(clock_model_timer_resume(&model) == CLOCK_OK);
 	assert(clock_model_stopwatch_start(&model) == CLOCK_OK);
-	assert(clock_model_tick(&model, 1704067100, 10000) == CLOCK_OK);
+	assert(clock_model_tick(&model, 1704067100, 10000, NULL) == CLOCK_OK);
 	assert(clock_model_timer_remaining(&model) == 6500);
 	assert(clock_model_stopwatch_lap(&model) == CLOCK_OK);
 	assert(model.stopwatch.laps[1].elapsed_ms == 3500);
 	assert(model.stopwatch.laps[1].difference_ms == 1000);
 	before = model;
-	assert(clock_model_tick(&model, 1704067200, 9999) ==
+	assert(clock_model_tick(&model, 1704067200, 9999, NULL) ==
 	       CLOCK_TIME_BACKWARD);
 	assert(!memcmp(&model, &before, sizeof(model)));
-	assert(clock_model_tick(&model, 1704067100, 16500) == CLOCK_OK);
+	assert(clock_model_tick(&model, 1704067100, 16500,
+				&preferences_changed) == CLOCK_OK);
+	assert(!preferences_changed);
 	assert(model.timer.state == CLOCK_TIMER_FINISHED);
 	assert(model.active.kind == CLOCK_EVENT_TIMER);
 	assert(!model.active.label[0]);
@@ -76,7 +81,7 @@ static void scheduled_alarms_do_not_replay_after_wall_adjustment(void)
 	assert(clock_model_alarm_add(&model, &monday, &monday_id) == CLOCK_OK);
 	assert(once_id == 1 && monday_id == 2);
 	assert(model.alarms[0].next_due_utc == 1704067260);
-	assert(clock_model_tick(&model, 1704067260, 2000) == CLOCK_OK);
+	assert(clock_model_tick(&model, 1704067260, 2000, NULL) == CLOCK_OK);
 	first_event = model.active.id;
 	assert(model.active.source_id == 1 && model.queue_count == 1);
 	assert(!model.alarms[0].spec.enabled);
@@ -89,13 +94,13 @@ static void scheduled_alarms_do_not_replay_after_wall_adjustment(void)
 	assert(clock_model_dismiss(&model, model.active.id) == CLOCK_OK);
 	assert(clock_model_alarm_delete(&model, once_id, false) == CLOCK_OK);
 	assert(model.alarms[0].id == monday_id);
-	assert(clock_model_tick(&model, 1704067200, 3000) == CLOCK_OK);
+	assert(clock_model_tick(&model, 1704067200, 3000, NULL) == CLOCK_OK);
 	assert(clock_model_alarm_edit(&model, monday_id, &monday, false) ==
 	       CLOCK_OK);
 	assert(model.alarms[0].next_due_utc == 1704672060);
-	assert(clock_model_tick(&model, 1704067260, 4000) == CLOCK_OK);
+	assert(clock_model_tick(&model, 1704067260, 4000, NULL) == CLOCK_OK);
 	assert(model.active.kind == CLOCK_EVENT_NONE && model.queue_count == 0);
-	assert(clock_model_tick(&model, 1704672060, 5000) == CLOCK_OK);
+	assert(clock_model_tick(&model, 1704672060, 5000, NULL) == CLOCK_OK);
 	assert(model.active.source_id == monday_id);
 	assert(model.active.due_wall_utc == 1704672060);
 }
@@ -108,17 +113,22 @@ static void snooze_uses_deadline_and_rejects_stale_actions(void)
 					 .once_utc = 1704067260,
 					 .enabled = true };
 	uint64_t first_event;
+	bool preferences_changed;
 
 	assert(clock_model_init(&model, 1704067200, 0) == CLOCK_OK);
 	assert(clock_model_alarm_add(&model, &spec, NULL) == CLOCK_OK);
-	assert(clock_model_tick(&model, 1704067260, 1000) == CLOCK_OK);
+	assert(clock_model_tick(&model, 1704067260, 1000,
+				&preferences_changed) == CLOCK_OK);
+	assert(preferences_changed);
 	first_event = model.active.id;
 	assert(clock_model_set_snooze(&model, 1) == CLOCK_OK);
 	assert(clock_model_snooze(&model, first_event, 0) == CLOCK_OK);
 	assert(model.alarms[0].snooze_deadline_ms == 61000);
-	assert(clock_model_tick(&model, 1704153600, 60999) == CLOCK_OK);
+	assert(clock_model_tick(&model, 1704153600, 60999, NULL) == CLOCK_OK);
 	assert(model.active.kind == CLOCK_EVENT_NONE);
-	assert(clock_model_tick(&model, 1704067200, 61000) == CLOCK_OK);
+	assert(clock_model_tick(&model, 1704067200, 61000,
+				&preferences_changed) == CLOCK_OK);
+	assert(!preferences_changed);
 	assert(model.active.kind == CLOCK_EVENT_ALARM && model.active.snoozed);
 	assert(model.active.source_id == 1 && model.active.id != first_event);
 	assert(clock_model_snooze(&model, first_event, 1) == CLOCK_STALE_EVENT);
@@ -140,10 +150,10 @@ static void late_alarms_and_bounded_queue_record_misses(void)
 
 	assert(clock_model_init(&model, 1704067200, 0) == CLOCK_OK);
 	assert(clock_model_alarm_add(&model, &spec, NULL) == CLOCK_OK);
-	assert(clock_model_tick(&model, 1704067320, 1000) == CLOCK_OK);
+	assert(clock_model_tick(&model, 1704067320, 1000, NULL) == CLOCK_OK);
 	assert(model.active.kind == CLOCK_EVENT_ALARM);
 	assert(clock_model_dismiss(&model, model.active.id) == CLOCK_OK);
-	assert(clock_model_tick(&model, 1704240121, 2000) == CLOCK_OK);
+	assert(clock_model_tick(&model, 1704240121, 2000, NULL) == CLOCK_OK);
 	assert(model.active.kind == CLOCK_EVENT_NONE);
 	assert(model.missed_count == 1 && model.missed_total == 1);
 	assert(model.missed[0].due_wall_utc == 1704153660);
@@ -153,22 +163,22 @@ static void late_alarms_and_bounded_queue_record_misses(void)
 	assert(clock_model_init(&model, 1704067200, 0) == CLOCK_OK);
 	for (unsigned int index = 0; index < 8; index++)
 		assert(clock_model_alarm_add(&model, &spec, NULL) == CLOCK_OK);
-	assert(clock_model_tick(&model, 1704067260, 1000) == CLOCK_OK);
+	assert(clock_model_tick(&model, 1704067260, 1000, NULL) == CLOCK_OK);
 	assert(model.active.source_id == 1 && model.queue_count == 7);
 	assert(model.queue[0].source_id == 2 && model.queue[6].source_id == 8);
-	assert(clock_model_tick(&model, 1704153660, 2000) == CLOCK_OK);
+	assert(clock_model_tick(&model, 1704153660, 2000, NULL) == CLOCK_OK);
 	assert(model.queue_count == 8 && model.missed_total == 7);
 	assert(model.queue[7].source_id == 1 && model.queue[7].id == 9);
 	assert(model.missed[0].source_id == 2 &&
 	       model.missed[6].source_id == 8);
 	assert(model.missed[0].missed_reason == CLOCK_MISSED_QUEUE_FULL);
-	assert(clock_model_tick(&model, 1704153660, 61000) == CLOCK_OK);
+	assert(clock_model_tick(&model, 1704153660, 61000, NULL) == CLOCK_OK);
 	assert(model.active.source_id == 2 &&
 	       model.active.ring_started_ms == 61000);
 	assert(model.queue_count == 7 && model.missed_total == 8);
 	assert(model.missed[7].id == 1);
 	assert(model.missed[7].missed_reason == CLOCK_MISSED_EXPIRED);
-	assert(clock_model_tick(&model, 1704153660, 121000) == CLOCK_OK);
+	assert(clock_model_tick(&model, 1704153660, 121000, NULL) == CLOCK_OK);
 	assert(model.missed_total == 9 && model.missed_count == 8);
 	assert(model.missed[0].source_id == 3);
 	clock_model_clear_missed(&model);
@@ -320,7 +330,7 @@ static void explicit_dates_and_weekdays_choose_absolute_utc_minutes(void)
 	assert(clock_model_alarm_edit(&model, 1, &once, false) ==
 	       CLOCK_INVALID);
 	assert(!memcmp(&before, &model, sizeof(model)));
-	assert(clock_model_tick(&model, 1709191800, 1000) == CLOCK_OK);
+	assert(clock_model_tick(&model, 1709191800, 1000, NULL) == CLOCK_OK);
 	assert(!model.alarms[0].spec.enabled);
 	assert(model.alarms[0].spec.once_utc == 1709191800);
 	assert(clock_model_dismiss(&model, model.active.id) == CLOCK_OK);
@@ -347,7 +357,8 @@ static void cancelling_snooze_preserves_regular_alarm_schedule(void)
 
 		assert(clock_model_init(&model, 1704067200, 1000) == CLOCK_OK);
 		assert(clock_model_alarm_add(&model, &spec, NULL) == CLOCK_OK);
-		assert(clock_model_tick(&model, 1704067260, 61000) == CLOCK_OK);
+		assert(clock_model_tick(&model, 1704067260, 61000, NULL) ==
+		       CLOCK_OK);
 		assert(clock_model_snooze(&model, model.active.id, 5) ==
 		       CLOCK_OK);
 		assert(model.alarms[0].snoozed);
@@ -360,12 +371,12 @@ static void cancelling_snooze_preserves_regular_alarm_schedule(void)
 		assert(model.alarms[0].next_due_utc == next);
 		assert(model.alarms[0].generation == generation);
 		assert(model.alarms[0].spec.enabled == (bool)weekly);
-		assert(clock_model_tick(&model, 1704067560, 361000) ==
+		assert(clock_model_tick(&model, 1704067560, 361000, NULL) ==
 		       CLOCK_OK);
 		assert(!model.active.id);
 		if (weekly) {
 			assert(next == 1704153660);
-			assert(clock_model_tick(&model, next, 86461000) ==
+			assert(clock_model_tick(&model, next, 86461000, NULL) ==
 			       CLOCK_OK);
 			assert(model.active.kind == CLOCK_EVENT_ALARM);
 		}

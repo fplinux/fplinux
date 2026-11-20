@@ -345,9 +345,9 @@ static void settings_scenario(struct capture *capture, const char *document,
 				capture->mre ? "On" : "176x208");
 		press(capture, KEY_ESC);
 		open_running_settings(capture, document, true);
+		choose_value(capture, 2, capture->mre ? 1 : 3, 0);
 		choose_value(capture, 0, 2, 1);
 		choose_value(capture, 1, 1, 2);
-		choose_value(capture, 2, capture->mre ? 1 : 3, 0);
 		assert_settings(capture, "1:1", "270°",
 				capture->mre ? "Off" : "Auto");
 	} else if (!strcmp(scenario, "roundtrip-reset")) {
@@ -364,6 +364,28 @@ static void settings_scenario(struct capture *capture, const char *document,
 	} else if (!strcmp(scenario, "roundtrip-inherit")) {
 		open_running_settings(capture, document, true);
 		assert_settings(capture, "Integer", "90°",
+				capture->mre ? "On" : "176x208");
+	} else if (!strcmp(scenario, "rotation-only")) {
+		open_running_settings(capture, document, true);
+		choose_value(capture, 1, 0, 2);
+		assert_settings(capture, "Fit", "270°",
+				capture->mre ? "Off" : "Auto");
+		press(capture, KEY_ESC);
+		press(capture, KEY_DOWN);
+		press(capture, KEY_ENTER);
+		wait_label(capture, third_label(capture));
+		capture->setting_row = 0;
+		choose_value(capture, 0, 0, 2);
+		choose_value(capture, 2, 0, capture->mre ? 1 : 3);
+		assert_settings(capture, "Integer", "0°",
+				capture->mre ? "On" : "176x208");
+	} else if (!strcmp(scenario, "rotation-reopen")) {
+		open_running_settings(capture, document, true);
+		if (!has_label(capture, "Integer"))
+			fprintf(stderr,
+				"expected inherited Integer scale, actual %s\n",
+				capture->text);
+		assert_settings(capture, "Integer", "270°",
 				capture->mre ? "On" : "176x208");
 	} else if (!strncmp(scenario, "retry-", 6)) {
 		char operation = scenario[6];

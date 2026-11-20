@@ -308,7 +308,8 @@ enum clock_status clock_model_init(struct clock_model *model, int64_t wall_utc,
 	return CLOCK_OK;
 }
 
-static enum clock_status tick_alarms(struct clock_model *model, bool snoozed)
+static enum clock_status tick_alarms(struct clock_model *model, bool snoozed,
+				     bool *preferences_changed)
 {
 	size_t processed;
 
@@ -367,6 +368,7 @@ static enum clock_status tick_alarms(struct clock_model *model, bool snoozed)
 			due->snooze_deadline_ms = 0;
 		} else {
 			due->last_due_utc = due->next_due_utc;
+			*preferences_changed = true;
 			if (due->spec.schedule == CLOCK_ALARM_ONCE) {
 				due->spec.enabled = false;
 				due->next_due_utc = 0;
@@ -385,9 +387,11 @@ static enum clock_status tick_alarms(struct clock_model *model, bool snoozed)
 }
 
 enum clock_status clock_model_tick(struct clock_model *model, int64_t wall_utc,
-				   uint64_t monotonic_ms)
+				   uint64_t monotonic_ms,
+				   bool *preferences_changed)
 {
 	enum clock_status status;
+	bool changed = false;
 	uint64_t elapsed;
 
 	if (!model || !valid_wall(wall_utc))
@@ -407,10 +411,10 @@ enum clock_status clock_model_tick(struct clock_model *model, int64_t wall_utc,
 		memset(&model->active, 0, sizeof(model->active));
 		promote_event(model);
 	}
-	status = tick_alarms(model, false);
+	status = tick_alarms(model, false, &changed);
 	if (status != CLOCK_OK)
 		return status;
-	status = tick_alarms(model, true);
+	status = tick_alarms(model, true, &changed);
 	if (status != CLOCK_OK)
 		return status;
 	if (model->timer.state == CLOCK_TIMER_RUNNING) {
@@ -426,6 +430,8 @@ enum clock_status clock_model_tick(struct clock_model *model, int64_t wall_utc,
 			submit_event(model, event, false);
 		}
 	}
+	if (preferences_changed)
+		*preferences_changed = changed;
 	return CLOCK_OK;
 }
 

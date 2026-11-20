@@ -1268,8 +1268,15 @@ static void save_settings(struct pm_app *app, bool reset, size_t selected)
 			settings.rotation = selected;
 		else
 			size = selected;
-		ok = ok && fplinux_ui_view_settings_store(&settings, prefs) &&
-		     fplinux_ui_prefs_set_int(prefs, "canvas-size", size);
+		if (!app->program_settings)
+			ok = ok &&
+			     fplinux_ui_view_settings_store(&settings, prefs);
+		else if (app->setting_row < 2)
+			ok = ok && fplinux_ui_view_settings_store_one(
+					   prefs, app->setting_row, selected);
+		if (!app->program_settings || app->setting_row == 2)
+			ok = ok && fplinux_ui_prefs_set_int(
+					   prefs, "canvas-size", size);
 	}
 	if (ok && !vm_only) {
 		fplinux_pm_keys_cancel(FPLINUX_UI_KEY_PHONE);

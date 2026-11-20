@@ -4,9 +4,12 @@
 from __future__ import annotations
 
 import base64
+import os
 import shlex
 import struct
+import wave
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING
 
 import pytest
@@ -278,3 +281,69 @@ def test_music_worker_folder_queue_seek_and_file_lifetime(
         [str(executable), str(folder)], name="run the Music file worker", timeout=10, check=True
     )
     assert result.stdout == "music worker: ok\n"
+
+
+@pytest.fixture(scope="module")
+def music_application(
+    tmp_path_factory: pytest.TempPathFactory, ui_host_inputs: Path, native_mpg123: Path
+) -> Iterator[Path]:
+    build = ROOT / "tests/host_tool/gui/music/native/build-state.sh"
+    with c_build_directory(tmp_path_factory, "music-state") as directory:
+        run_process(
+            ["sh", str(build), str(directory), str(ui_host_inputs), str(native_mpg123)],
+            name="build Music and its native Wayland and session peer",
+            timeout=120,
+            check=True,
+        )
+        yield directory
+
+
+@pytest.mark.parametrize(
+    ("repair", "track", "position"),
+    [
+        pytest.param(False, "a.wav", "1250", id="failed"),
+        pytest.param(True, "b.wav", "0", id="retry"),
+    ],
+)
+def test_music_resume_follows_successful_queue_selection(
+    music_application: Path, tmp_path: Path, *, repair: bool, track: str, position: str
+) -> None:
+    tracks = tmp_path / "tracks"
+    tracks.mkdir()
+    first = tracks / "a.wav"
+    with wave.open(str(first), "wb") as audio:
+        audio.setparams((1, 2, 8000, 0, "NONE", "not compressed"))
+        audio.writeframes(b"\0" * 32000)
+    broken = tracks / "b.wav"
+    broken.write_bytes(b"broken audio")
+    replacement = tmp_path / "replacement.wav"
+    if repair:
+        replacement.write_bytes(first.read_bytes())
+    state = tmp_path / "state"
+    preferences = state / "fplinux/org.fplinux.music/preferences"
+    preferences.parent.mkdir(mode=0o700, parents=True)
+    preferences.write_text(f"source={tracks}\ntrack=a.wav\nfolder=1\nposition_ms=1250\n")
+    keypad = ROOT / "tests/host_tool/gui/screens/keypad.xkb"
+    with TemporaryDirectory(prefix="fpmusic-") as temporary:
+        run_process(
+            [
+                str(music_application / "music-state-peer"),
+                str(music_application / "music"),
+                str(Path(temporary) / "session.sock"),
+                str(keypad),
+                str(replacement) if repair else "-",
+                str(broken),
+            ],
+            name="open Music, select the neighboring track, and close",
+            env=os.environ | {"HOME": str(tmp_path), "XDG_STATE_HOME": str(state)},
+            timeout=12,
+            check=True,
+        )
+    saved = dict(line.split("=", 1) for line in preferences.read_text().splitlines())
+    assert saved == {
+        "source": str(tracks),
+        "track": track,
+        "folder": "1",
+        "position_ms": position,
+        "repeat": "0",
+    }

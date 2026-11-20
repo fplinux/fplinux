@@ -208,7 +208,7 @@ static void disabled_once_saves_retain_the_date_without_enabling(void)
 					 sizeof(disabled_save) - 1,
 					 &request) == CLOCK_OK);
 	/* The date was future while editing, but passed before owner acceptance. */
-	assert(clock_model_tick(&model, 1704067320, 1000) == CLOCK_OK);
+	assert(clock_model_tick(&model, 1704067320, 1000, NULL) == CLOCK_OK);
 	assert(clock_wire_request_apply(&model, &request) == CLOCK_OK);
 	assert(model.alarm_count == 1 && model.alarms[0].id == 1);
 	assert(!model.alarms[0].spec.enabled && !model.alarms[0].next_due_utc);
@@ -231,7 +231,7 @@ static void disabled_once_saves_retain_the_date_without_enabling(void)
 	request.alarm.once_utc = 1704067380; /* 2024-01-01 00:03 UTC */
 	request.alarm.enabled = true;
 	assert(clock_wire_request_apply(&model, &request) == CLOCK_OK);
-	assert(clock_model_tick(&model, 1704067380, 2000) == CLOCK_OK);
+	assert(clock_model_tick(&model, 1704067380, 2000, NULL) == CLOCK_OK);
 	assert(model.active.source_id == 2 && !model.alarms[1].spec.enabled);
 	request = (struct clock_request){
 		.op = CLOCK_REQUEST_ALARM_ENABLE,
@@ -271,7 +271,7 @@ static void preferences_restore_configuration_without_replaying_runtime(void)
 	assert(clock_model_timer_set(&model, 10) == CLOCK_OK);
 	assert(clock_model_timer_start(&model) == CLOCK_OK);
 	assert(clock_model_stopwatch_start(&model) == CLOCK_OK);
-	assert(clock_model_tick(&model, 1704153600, 17000) == CLOCK_OK);
+	assert(clock_model_tick(&model, 1704153600, 17000, NULL) == CLOCK_OK);
 	assert(model.active.kind == CLOCK_EVENT_TIMER);
 	assert(clock_wire_preferences_decode(configuration,
 					     sizeof(configuration) - 1,
@@ -349,7 +349,7 @@ static void preferences_restore_configuration_without_replaying_runtime(void)
 					     &end_range) == CLOCK_OK);
 	assert(!end_range.alarms[2].spec.enabled);
 	assert(end_range.alarms[2].next_due_utc == 0);
-	assert(clock_model_tick(&end_range, 4102444799, 2) == CLOCK_OK);
+	assert(clock_model_tick(&end_range, 4102444799, 2, NULL) == CLOCK_OK);
 	assert(end_range.active.kind == CLOCK_EVENT_NONE &&
 	       end_range.missed_total == 0);
 }

@@ -159,6 +159,7 @@ configuration_survives_restart_without_transient_activity(const char *directory)
 		       .status == CLOCK_OK);
 	assert(restored.model.timer.state == CLOCK_TIMER_RUNNING);
 	assert(restored.model.timer.deadline_ms == 90000);
+	saved_count = file_sync_count;
 	assert(fplinux_session_clock_tick(&restored, 1704067262, 1000).status ==
 	       CLOCK_OK);
 	assert(clock_model_timer_remaining(&restored.model) == 89000);
@@ -168,8 +169,52 @@ configuration_survives_restart_without_transient_activity(const char *directory)
 	assert(fplinux_session_clock_tick(&restored, 1704067260, 2000).status ==
 	       CLOCK_OK);
 	assert(!restored.model.active.id);
+	assert(fplinux_session_clock_tick(&restored, 1704067350, 90000).status ==
+	       CLOCK_OK);
+	assert(restored.model.timer.state == CLOCK_TIMER_FINISHED);
+	assert(restored.model.active.kind == CLOCK_EVENT_TIMER);
+	assert(file_sync_count == saved_count);
 	fplinux_session_clock_cleanup(&restored);
 	fplinux_session_clock_cleanup(&owner);
+}
+
+static void missed_weekly_occurrence_survives_restart(const char *directory)
+{
+	struct fplinux_session_clock owner, restored;
+	const struct clock_request request = {
+		.op = CLOCK_REQUEST_ALARM_ADD,
+		.alarm = {
+			.schedule = CLOCK_ALARM_WEEKLY,
+			.minute = 1,
+			.repeat_days = 1,
+			.enabled = true,
+		},
+	};
+	unsigned int saved_count;
+	char path[4096];
+	int written;
+
+	written = snprintf(path, sizeof(path), "%s/missed-weekly", directory);
+	assert(written > 0 && (size_t)written < sizeof(path));
+	assert(fplinux_session_clock_init(&owner, 1704067200, 0, path).applied);
+	assert(fplinux_session_clock_apply(&owner, &request, 1704067200, 0)
+		       .status == CLOCK_OK);
+	saved_count = file_sync_count;
+	assert(fplinux_session_clock_tick(&owner, 1704067321, 121000).status ==
+	       CLOCK_OK);
+	assert(owner.model.active.kind == CLOCK_EVENT_NONE);
+	assert(owner.model.missed_total == 1 &&
+	       owner.model.missed[0].missed_reason == CLOCK_MISSED_LATE);
+	assert(file_sync_count == saved_count + 1);
+	fplinux_session_clock_cleanup(&owner);
+
+	assert(fplinux_session_clock_init(&restored, 1704067321, 0, path)
+		       .applied);
+	assert(restored.model.alarms[0].spec.enabled);
+	assert(restored.model.alarms[0].last_due_utc == 1704067260);
+	assert(restored.model.alarms[0].next_due_utc == 1704672060);
+	assert(!restored.model.missed_total);
+	fplinux_session_clock_cleanup(&restored);
 }
 
 static void signed_offsets_and_deleted_ids_survive_a_real_preferences_restart(
@@ -452,6 +497,7 @@ int main(int argc, char **argv)
 {
 	assert(argc == 3);
 	configuration_survives_restart_without_transient_activity(argv[1]);
+	missed_weekly_occurrence_survives_restart(argv[1]);
 	signed_offsets_and_deleted_ids_survive_a_real_preferences_restart(
 		argv[1], argv[2]);
 	pending_checkpoint_keeps_time_and_ring_controls_available(argv[1]);
