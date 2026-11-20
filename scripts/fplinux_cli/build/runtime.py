@@ -24,6 +24,7 @@ _RUNTIME_MODULES = (
     "device_data/formats.py",
     "device_data/cpio.py",
     "device_data/inputs.py",
+    "device_data/nand_backup.py",
     "device_data/nand_geometry.py",
     "device_data/store.py",
     "manifests/__init__.py",
@@ -45,6 +46,7 @@ _RUNTIME_MODULES = (
     "runtime/update-card.sh",
     "runtime/data_paths.py",
     "runtime/live.py",
+    "runtime/screenshot.py",
     "runtime/workflow.py",
     "runtime/bundle.py",
     "runtime/boot.py",
@@ -167,6 +169,8 @@ def preparation_source_files(
     if not groups:
         return {}
     selected = list(_PREPARATION_MODULES)
+    if config.get("nand") is not None:
+        selected.append("device_data/nand_backup.py")
     if config.get("emmc") is not None:
         selected.extend(_EMMC_MODULES)
     if {"bluetooth", "fm-radio"} & groups.keys():
@@ -209,14 +213,16 @@ def runtime_source_files(
         f"scripts/fplinux_cli/{name}": source_root / "scripts/fplinux_cli" / name
         for name in selected
     }
-    files["fplinux.py"] = source_root / "common/runtime.py"
+    files["fplinux.py"] = source_root / "scripts/fplinux_cli/runtime/bundle_entry.py"
     files["60-fplinux.rules"] = source_root / "common/60-fplinux.rules"
     for launcher in ("Run.sh", "Run.cmd", "Run-debug.cmd"):
         files[launcher] = source_root / "common" / launcher
     adapter = f"platforms/{config['platform']}/host/adapter.py"
     files[adapter] = source_root / adapter
-    for source in sorted((source_root / "common/windows").rglob("*.ps1")):
-        files[source.relative_to(source_root).as_posix()] = source
+    powershell = source_root / "scripts/fplinux_cli/runtime/windows/powershell"
+    for source in sorted(powershell.rglob("*.ps1")):
+        relative = source.relative_to(powershell).as_posix()
+        files[f"common/windows/{relative}"] = source
     if descriptor is not None:
         files.update(preparation_source_files(target, config, root=source_root))
     return files

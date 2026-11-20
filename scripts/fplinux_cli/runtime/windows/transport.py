@@ -24,6 +24,7 @@ from fplinux_cli.runtime.connection import (
     ConnectionLostError,
     observed_device_identity,
 )
+from fplinux_cli.runtime.events import LoaderTimeout
 from fplinux_cli.runtime.ssh import commands, material
 
 from .host import (
@@ -56,17 +57,20 @@ class WindowsTransport:
     def _ssh_arguments(
         self, session: dict[str, Any], command: str | None = None, *, connect_timeout: int = 5
     ) -> list[str]:
+        key, pin = session["private_key"], str(session["known_hosts"]).replace("\\", "/")
+        if session.get("card_access"):
+            key, pin = key.replace("%", "%%"), pin.replace("%", "%%")
         options = [
             *commands.ssh_policy_options(
                 usb_serial=session["usb_serial"],
-                known_hosts=str(session["known_hosts"]).replace("\\", "/"),
+                known_hosts=pin,
                 host_address=session["host_address"],
                 connect_timeout=connect_timeout,
             ),
             ("HostKeyAlgorithms", "ssh-ed25519"),
             ("GlobalKnownHostsFile", "NUL"),
         ]
-        argv = [str(self.tools["ssh"]), "-4", "-F", "NUL", "-i", session["private_key"]]
+        argv = [str(self.tools["ssh"]), "-4", "-F", "NUL", "-i", key]
         for name, value in options:
             rendered = commands.ssh_config_value(value)
             if name in {"IdentityAgent", "ProxyCommand", "ProxyJump"}:
@@ -106,7 +110,8 @@ class WindowsTransport:
             if device.rsplit("\\", 1)[-1].lower() == session["usb_serial"].lower()
         ]
         if len(matching) > 1:
-            fail("Multiple USB devices match this saved RAM session")
+            name = "system card" if session.get("card_access") else "saved RAM session"
+            fail(f"Multiple USB devices match this {name}")
         return bool(matching)
 
     def run_remote(
@@ -292,17 +297,31 @@ class WindowsTransport:
         expected_device_identity: str,
         timeout: float,
         scan_host_key: bool = True,
+        events: Callable[[str], None] | None = None,
     ) -> None:
         """Pin a key only after USB binding, then verify RAM and kernel identities."""
         deadline = time.monotonic() + timeout
         pinned = not scan_host_key
+        rndis_seen = False
+        network_ready = False
+
+        def report_rndis() -> None:
+            nonlocal rndis_seen
+            if events is not None and not rndis_seen:
+                rndis_seen = True
+                events("linux-usb")
 
         def current_interface() -> int | None:
+            nonlocal network_ready
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 return None
             snapshot = self.host.network_snapshot(session, timeout=min(20, remaining))
-            return bound_interface(snapshot, session)
+            index = bound_interface(snapshot, session, on_rndis=report_rndis)
+            if events is not None and index is not None and not network_ready:
+                network_ready = True
+                events("linux-network")
+            return index
 
         while time.monotonic() < deadline:
             try:
@@ -392,10 +411,13 @@ class WindowsTransport:
                 session["status"] = "ready"
                 write_session(self.host, Path(session["directory"]), session)
             return
-        fail(
+        message = (
             "The exact USB RNDIS and authenticated SSH endpoint "
             "did not become ready before the deadline"
         )
+        if events is None:
+            fail(message)
+        raise LoaderTimeout(f"FPLinux: {message}")
 
     def _validate_saved_session(
         self, value: object, directory: Path, *, target: str

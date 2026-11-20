@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from fplinux_cli.common import is_sha256, sha256_file
+from fplinux_cli.runtime.card_access import require_enrollment_path
 from fplinux_cli.runtime.connection import (
     BOOT_IDENTITY_COMMAND,
     ConnectionLostError,
@@ -100,7 +101,7 @@ def _driver_is_cdc_ncm(path: Path, usb_device: Path) -> bool:
     return False
 
 
-def _ncm_interface(usb_device: Path, expected_mac: str) -> str | None:
+def _ncm_interface(usb_device: Path, expected_mac: str | None) -> str | None:
     matches: list[str] = []
     for netdev in Path("/sys/class/net").iterdir():
         try:
@@ -110,11 +111,14 @@ def _ncm_interface(usb_device: Path, expected_mac: str) -> str | None:
             continue
         if usb_device not in (device, *device.parents):
             continue
-        if address != expected_mac or not _driver_is_cdc_ncm(device, usb_device):
+        if expected_mac is not None and address != expected_mac:
+            continue
+        if not _driver_is_cdc_ncm(device, usb_device):
             continue
         matches.append(netdev.name)
     if len(matches) > 1:
-        fail("more than one matching cdc_ncm interface belongs to the RAM session")
+        name = "system card" if expected_mac is None else "RAM session"
+        fail(f"more than one matching cdc_ncm interface belongs to the {name}")
     return matches[0] if matches else None
 
 
@@ -322,8 +326,32 @@ def usb_present(session: dict[str, Any], *, cancelled: Callable[[], bool] | None
         return False
     devices = _usb_devices(session, require_absence_proof=True)
     if len(devices) > 1:
-        fail("more than one USB device matches this RAM session")
+        name = "system card" if session.get("card_access") else "RAM session"
+        fail(f"more than one USB device matches this {name}")
     return bool(devices)
+
+
+def _require_command_endpoint(session: dict[str, Any]) -> dict[str, Any]:
+    """Keep existing RAM checks and bind enrolled SSH to the NCM device and route."""
+    if not session.get("card_access"):
+        return validate_session(session)
+    require_enrollment_path(Path(session["directory"]), directory=True, windows=None)
+    for field in ("private_key", "known_hosts"):
+        require_enrollment_path(Path(session[field]), directory=False, windows=None)
+    devices = _usb_devices(session, require_absence_proof=True)
+    interface = _ncm_interface(devices[0], None) if len(devices) == 1 else None
+    if interface is None or not _network_ready(interface, session):
+        fail("the enrolled microSD USB-NCM network is not ready")
+    route = _ip_json(["route", "get", session["phone_address"], "from", session["host_address"]])
+    if (
+        not isinstance(route, list)
+        or len(route) != 1
+        or not isinstance(route[0], dict)
+        or route[0].get("dev") != interface
+        or route[0].get("gateway") is not None
+    ):
+        fail("the route to the enrolled microSD does not use its USB-NCM interface")
+    return session
 
 
 def reacquire_bound_session(
@@ -338,7 +366,7 @@ def reacquire_bound_session(
 
 def run_shell(session: dict[str, Any]) -> int:
     """Run interactive SSH with inherited terminal streams and reap it on cancellation."""
-    session = validate_session(session)
+    session = _require_command_endpoint(session)
     if not os.isatty(0):
         fail("interactive SSH requires a terminal; use --exec for a non-interactive command")
     argv = ssh_argv(session)
@@ -394,7 +422,7 @@ def run_remote(
     timeout: float | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Run a command; shared metadata operations leave caller input untouched."""
-    session = validate_session(session)
+    session = _require_command_endpoint(session)
     return subprocess.run(
         ssh_argv(session, command),
         stdin=subprocess.DEVNULL if shared else None,
@@ -463,7 +491,7 @@ def stream_remote(
     if timeout <= 0:
         message = "SSH stream timeout must be positive"
         raise ValueError(message)
-    session = validate_session(session)
+    session = _require_command_endpoint(session)
     initial_position = 0
     if progress is not None:
         destination.flush()
@@ -530,6 +558,8 @@ def _sftp_quote(value: str) -> str:
 
 
 def _sftp(session: dict[str, Any], command: str) -> subprocess.CompletedProcess[str]:
+    if session.get("card_access"):
+        _require_command_endpoint(session)
     argv = [
         require_tool("sftp"),
         "-S",
@@ -566,7 +596,7 @@ def _remote_metadata(session: dict[str, Any], remote: str) -> tuple[int, str]:
 
 def upload(session: dict[str, Any], local_name: str, remote_name: str) -> None:
     """Upload through SFTP, then verify and atomically publish on the phone."""
-    session = validate_session(session)
+    session = _require_command_endpoint(session)
     remote = remote_path(remote_name, "upload destination")
     local = Path(local_name)
     try:
@@ -621,7 +651,7 @@ def upload(session: dict[str, Any], local_name: str, remote_name: str) -> None:
 
 def pull(session: dict[str, Any], remote_name: str, local_name: str) -> None:
     """Download through SFTP and publish locally only after end-to-end verification."""
-    session = validate_session(session)
+    session = _require_command_endpoint(session)
     remote = remote_path(remote_name, "pull source")
     expected_size, expected_hash = _remote_metadata(session, remote)
     destination = Path(local_name)

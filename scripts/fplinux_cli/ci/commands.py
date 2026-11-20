@@ -28,9 +28,9 @@ def run_ci(args: argparse.Namespace) -> None:
 
         prepare_push(args.commit, args.directory)
     elif args.ci_command == "site-install":
-        from fplinux_cli.dependencies.site_install import install_site  # noqa: PLC0415
+        from fplinux_cli.environment.setup import prepare_setup  # noqa: PLC0415
 
-        install_site()
+        prepare_setup(site=True, offline=True)
     elif args.ci_command == "attach-inputs":
         from fplinux_cli.packaging.distribution import (  # noqa: PLC0415
             attach_inputs,

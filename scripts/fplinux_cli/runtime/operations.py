@@ -44,6 +44,7 @@ class LiveRequest:
 
     target: str | None = None
     boot: str | None = None
+    card_cid: str | None = None
     phone_data: Path | None = None
     verify_only: bool = False
     allow_other_build: bool = False
@@ -51,6 +52,7 @@ class LiveRequest:
     exec_command: str | None = None
     upload: list[str] | None = None
     pull: list[str] | None = None
+    screenshot: Path | None = None
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -101,7 +103,7 @@ class BundlePaths:
 class SelectedConnection:
     """A saved binding and the expected build policy supplied by the checkout."""
 
-    connection: tuple[Any, dict[str, Any]]
+    connection: tuple[Any, dict[str, Any]] | None
     data: Path
     logs: Path
     admitted: ValidatedBundle | None
@@ -114,7 +116,8 @@ def session_selection_error(
     """Validate the selection before a frontend acquires state or a USB session."""
     if isinstance(request, LiveRequest):
         actions = int(request.shutdown) + sum(
-            action is not None for action in (request.exec_command, request.upload, request.pull)
+            action is not None
+            for action in (request.exec_command, request.upload, request.pull, request.screenshot)
         )
         if request.verify_only and (request.allow_other_build or actions):
             return "Verification requires a selected build and no remote action"
@@ -126,11 +129,22 @@ def session_selection_error(
             request.boot is not None or request.phone_data is not None
         ):
             return "--allow-other-build cannot be combined with --boot or --phone-data"
-    if (request.boot == MICROSD_BOOT_MODE or system_card_profile) and (
+    card_cid = request.card_cid if isinstance(request, LiveRequest) else None
+    if (request.boot == MICROSD_BOOT_MODE or system_card_profile or card_cid is not None) and (
         request.phone_data is not None
         or (isinstance(request, RunRequest) and request.from_dump is not None)
     ):
         return "system microSD boot uses the phone data already on the card"
+    return _enrolled_card_selection_error(request.target, card_cid)
+
+
+def _enrolled_card_selection_error(target: str | None, cid: str | None) -> str | None:
+    if cid is None:
+        return None
+    if target is None:
+        return "--card requires an explicit TARGET"
+    if CARD_CID.fullmatch(cid) is None:
+        return "--card must be a 32-digit lowercase SD card CID"
     return None
 
 
@@ -180,7 +194,11 @@ def execute_operation(
     if isinstance(request, LiveRequest):
         from . import live  # noqa: PLC0415 -- selected runtime action.
 
+        if request.card_cid is not None:
+            return live.console_card(request, paths)
         if isinstance(paths, SelectedConnection):
+            if paths.connection is None:
+                fail("No saved phone connection was selected")
             return live.console_connection(
                 paths.connection,
                 paths.data,
@@ -191,6 +209,7 @@ def execute_operation(
                 exec_command=request.exec_command,
                 upload=request.upload,
                 pull=request.pull,
+                screenshot=request.screenshot,
                 verify_only=request.verify_only,
                 shutdown=request.shutdown,
             )
@@ -203,6 +222,7 @@ def execute_operation(
             exec_command=request.exec_command,
             upload=request.upload,
             pull=request.pull,
+            screenshot=request.screenshot,
             verify_only=request.verify_only,
             shutdown=request.shutdown,
             connection=paths.connection,

@@ -20,10 +20,12 @@ from unittest import mock
 import pytest
 from fplinux_cli import common
 from fplinux_cli.cli import nand
+from fplinux_cli.device_data import nand_backup
 from fplinux_cli.device_data.nand_geometry import NandGeometry
 from fplinux_cli.device_data.prepare import dump_page_bytes
-from fplinux_cli.runtime import bundle_session, nand_backup
+from fplinux_cli.runtime import bundle_session
 from fplinux_cli.runtime.data_paths import checkout_runtime_root
+from fplinux_cli.runtime.nand_backup import backup_nand, parse_geometry_report
 
 from tests import ROOT
 from tests.small.command_fixtures import (
@@ -150,7 +152,7 @@ class NandDestination:
     ) -> str:
         """Publish a controlled phone stream to this case's local backup destination."""
         with contextlib.redirect_stdout(io.StringIO()) as stdout:
-            nand_backup.backup_nand(
+            backup_nand(
                 lambda: (phone, {"session_id": "selected"}),
                 self.destination,
                 target="demo-phone",
@@ -203,7 +205,7 @@ class NandBackupTests:
         report = ONE_PAGE_64_OOB.partition("feature_a0=")[0]
 
         with pytest.raises(SystemExit, match="lacks: feature_a0, feature_b0, feature_c0"):
-            nand_backup.parse_geometry_report(report)
+            parse_geometry_report(report)
 
     @pytest.mark.parametrize("complete", [True, False])
     def test_backup_progress_completes_only_after_checked_publication(
@@ -221,7 +223,7 @@ class NandBackupTests:
                 assert json.loads(nand_destination.receipt.read_text())["raw_bytes"] == 2176
 
         def execute() -> None:
-            nand_backup.backup_nand(
+            backup_nand(
                 lambda: (phone, {"session_id": "selected"}),
                 nand_destination.destination,
                 target="demo-phone",
@@ -458,7 +460,7 @@ class NandBackupTests:
         missing_parent = nand_destination.directory / "missing" / "nand.raw"
 
         with pytest.raises(SystemExit, match="output directory is missing or invalid"):
-            nand_backup.backup_nand(
+            backup_nand(
                 connect,
                 missing_parent,
                 target="demo-phone",
@@ -696,7 +698,7 @@ class BackupReceiptTests:
             mock.patch("fplinux_cli.reporting.run.ROOT", backup_receipt.directory),
             contextlib.redirect_stdout(io.StringIO()),
         ):
-            nand_backup.backup_nand(
+            backup_nand(
                 lambda: (FakePhone(ONE_PAGE_64_OOB, payload), {}),
                 backup_receipt.backup,
                 target="demo-phone",

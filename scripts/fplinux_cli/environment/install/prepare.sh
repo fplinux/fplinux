@@ -14,7 +14,7 @@ printf '%.32s\n' "$environment_recipe" >/etc/machine-id
 # The base rootfs has no Python interpreter; the complete local APK closure supplies it.
 apk add --no-network --no-cache "$@"
 
-exec python3 -B "$environment_resources/scripts/fplinux_cli/environment/install.py" \
+PYTHONPATH="$environment_resources/scripts" exec python3 -B -m fplinux_cli.environment.install \
 	--lock "$environment_lock" \
 	--inputs "$environment_inputs" \
 	--resources "$environment_resources" \

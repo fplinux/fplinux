@@ -15,8 +15,11 @@ from importlib.metadata import Distribution
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from .archives import extract_archive
+from .node_runtime import install_node_runtime, populate_npm_cache
+
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Mapping
 
 
 @dataclass(frozen=True)
@@ -41,26 +44,6 @@ def _install_file(source: Path, destination: Path, *, mode: int = 0o644) -> None
     destination.parent.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(source, destination)
     destination.chmod(mode)
-
-
-def _extract_archive(
-    archive: Path, destination: Path, *members: str, strip_components: int = 0
-) -> None:
-    destination.mkdir(parents=True, exist_ok=True)
-    subprocess.run(
-        [
-            "tar",
-            "--warning=no-unknown-keyword",
-            "--extract",
-            "--file",
-            archive,
-            "--directory",
-            destination,
-            f"--strip-components={strip_components}",
-            *members,
-        ],
-        check=True,
-    )
 
 
 def _prepare_system(declarations: dict[str, Any]) -> None:
@@ -135,7 +118,7 @@ def _install_dtschema_commands(packages: Path) -> None:
 def _install_dtc(tool: ToolInput, temporary: Path) -> None:
     source = temporary / "dtc"
     build = temporary / "dtc-build"
-    _extract_archive(tool.archive, source, strip_components=1)
+    extract_archive(tool.archive, source, strip_components=1)
     subprocess.run(
         [
             "meson",
@@ -166,37 +149,6 @@ def _install_dtc(tool: ToolInput, temporary: Path) -> None:
     if version != f"Version: DTC {tool.identity}":
         message = "installed dtc version does not match the environment lock"
         raise SystemExit(message)
-
-
-def install_node_runtime(node_archive: Path, npm_archive: Path, destination: Path) -> None:
-    """Install one pinned Node archive with the npm original selected by its consumer."""
-    _extract_archive(node_archive, destination, strip_components=1)
-    npm_root = destination / "lib/node_modules/npm"
-    shutil.rmtree(npm_root)
-    _extract_archive(npm_archive, npm_root, strip_components=1)
-    for executable, script in (("npm", "npm-cli.js"), ("npx", "npx-cli.js")):
-        link = destination / "bin" / executable
-        link.unlink(missing_ok=True)
-        link.symlink_to(f"../lib/node_modules/npm/bin/{script}")
-
-
-def populate_npm_cache(npm: Path, cache: Path, archives: Sequence[Path]) -> None:
-    """Import verified registry originals through npm's supported offline cache boundary."""
-    for archive in archives:
-        subprocess.run(
-            [
-                npm.with_name("node"),
-                npm,
-                "cache",
-                "add",
-                "--offline",
-                "--ignore-scripts",
-                "--cache",
-                cache,
-                archive,
-            ],
-            check=True,
-        )
 
 
 def _install_node(tools: Mapping[str, ToolInput], resources: Path, temporary: Path) -> None:
@@ -267,26 +219,26 @@ def _install_quality_tools(tools: Mapping[str, ToolInput], temporary: Path) -> N
     binaries.mkdir(parents=True, exist_ok=True)
     sparse = tools["sparse"]
     sparse_root = temporary / "sparse"
-    _extract_archive(sparse.archive, sparse_root)
+    extract_archive(sparse.archive, sparse_root)
     sparse_source = sparse_root / f"sparse-{sparse.identity}"
     subprocess.run(["make", "-C", sparse_source, "sparse"], check=True)
     _install_file(sparse_source / "sparse", binaries / "sparse", mode=0o755)
 
     ruff_root = temporary / "ruff"
-    _extract_archive(tools["ruff"].archive, ruff_root)
+    extract_archive(tools["ruff"].archive, ruff_root)
     _install_file(ruff_root / "ruff-x86_64-unknown-linux-musl/ruff", binaries / "ruff", mode=0o755)
     _install_file(tools["shfmt"].archive, binaries / "shfmt", mode=0o755)
-    _extract_archive(tools["typos"].archive, binaries, "./typos")
-    _extract_archive(tools["vale"].archive, binaries, "vale")
+    extract_archive(tools["typos"].archive, binaries, "./typos")
+    extract_archive(tools["vale"].archive, binaries, "vale")
     google = tools["vale-google"]
-    _extract_archive(
+    extract_archive(
         google.archive,
         Path("/opt/quality/vale-styles/Google"),
         f"Google-{google.identity}/Google",
         strip_components=2,
     )
     gitleaks_root = temporary / "gitleaks"
-    _extract_archive(tools["gitleaks"].archive, gitleaks_root, "gitleaks")
+    extract_archive(tools["gitleaks"].archive, gitleaks_root, "gitleaks")
     _install_file(gitleaks_root / "gitleaks", binaries / "gitleaks", mode=0o755)
     selftest = temporary / "gitleaks-selftest"
     selftest.mkdir()
@@ -317,7 +269,7 @@ def _install_gui_headers(tools: Mapping[str, ToolInput], temporary: Path) -> Non
     include.mkdir(parents=True, exist_ok=True)
     lvgl = tools["lvgl"]
     lvgl_root = temporary / "lvgl"
-    _extract_archive(lvgl.archive, lvgl_root)
+    extract_archive(lvgl.archive, lvgl_root)
     lvgl_source = lvgl_root / f"lvgl-{lvgl.identity}"
     shutil.copytree(lvgl_source / "include/lvgl", include / "lvgl")
     _install_file(
@@ -327,7 +279,7 @@ def _install_gui_headers(tools: Mapping[str, ToolInput], temporary: Path) -> Non
 
     weston = tools["weston"]
     weston_root = temporary / "weston"
-    _extract_archive(weston.archive, weston_root)
+    extract_archive(weston.archive, weston_root)
     weston_source = weston_root / f"weston-{weston.identity}"
     major, minor, micro = weston.identity.split(".")
     weston_headers = include / f"libweston-{major}/libweston"
@@ -343,7 +295,7 @@ def _install_gui_headers(tools: Mapping[str, ToolInput], temporary: Path) -> Non
         version_header = version_header.replace(f"@{name}@", value)
     (weston_headers / "version.h").write_text(version_header, encoding="utf-8")
     _install_file(weston_source / "frontend/weston.h", include / "weston/weston.h")
-    _extract_archive(
+    extract_archive(
         tools["mesa-headers"].archive,
         include,
         "usr/include/EGL",
@@ -357,7 +309,7 @@ def _install_gui_headers(tools: Mapping[str, ToolInput], temporary: Path) -> Non
 
 def _install_libtsm(tool: ToolInput, resources: Path, temporary: Path) -> None:
     source_root = temporary / "libtsm"
-    _extract_archive(tool.archive, source_root)
+    extract_archive(tool.archive, source_root)
     source = source_root / f"libtsm-{tool.identity}"
     subprocess.run(
         [
@@ -428,7 +380,7 @@ def _install_libtsm(tool: ToolInput, resources: Path, temporary: Path) -> None:
 def _install_mpg123_headers(tool: ToolInput, temporary: Path) -> None:
     """Prepare matching decoder headers and the original used by host tests."""
     source_root = temporary / "mpg123"
-    _extract_archive(tool.archive, source_root)
+    extract_archive(tool.archive, source_root)
     source = source_root / f"mpg123-{tool.identity}"
     subprocess.run(
         [
@@ -450,7 +402,7 @@ def _install_mpg123_headers(tool: ToolInput, temporary: Path) -> None:
 def _install_ffmpeg_amr_nb(tool: ToolInput, resources: Path, temporary: Path) -> None:
     """Prepare the pinned native FFmpeg decoders for host tests and analysis."""
     source = temporary / "ffmpeg"
-    _extract_archive(tool.archive, source, strip_components=1)
+    extract_archive(tool.archive, source, strip_components=1)
     configure = resources / "alpine/aports/fplinux-amr-nb/configure-amr-nb.sh"
     subprocess.run(["sh", configure, "--disable-x86asm"], cwd=source, check=True)
     subprocess.run(["make"], cwd=source, check=True)
@@ -494,7 +446,7 @@ def _install_terminal_font(resources: Path, temporary: Path, destination: Path) 
     source = temporary / "terminus"
     source.mkdir()
     for archive in sorted((resources / "quality/terminus").iterdir()):
-        _extract_archive(archive, source)
+        extract_archive(archive, source)
     aport = resources / "quality/terminus-aport/APKBUILD"
     subprocess.run(
         [

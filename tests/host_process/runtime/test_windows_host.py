@@ -28,6 +28,7 @@ from fplinux_cli.runtime.connection import (
     SessionResumedError,
     read_running_build,
 )
+from fplinux_cli.runtime.events import record_events
 from fplinux_cli.runtime.windows import boot as windows_boot
 from fplinux_cli.runtime.windows import bundle as windows_bundle
 from fplinux_cli.runtime.windows import host as windows_host
@@ -1378,8 +1379,9 @@ def test_windows_loader_processes_receive_private_capsule_and_retain_one_archive
         *,
         expected_device_identity: str,
         timeout: int,
+        events: Callable[[str], None] | None = None,
     ) -> None:
-        del expected_device_identity, timeout
+        del expected_device_identity, timeout, events
         selected["status"] = "ready"
 
     monkeypatch.setattr(windows_boot, "prepare_session", prepared_session)
@@ -1600,6 +1602,7 @@ class Sc9820eWindowsBoot:
     capsule: Path
     trace: Path
     canonical: dict[str, bytes]
+    snapshot: dict[str, Any]
     events: list[str]
     progress: Callable[[str], None]
 
@@ -1630,6 +1633,9 @@ def sc9820e_windows_boot(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Sc9
     monkeypatch.setenv("FPLINUX_TEST_SC9820E_UPLOADS", str(trace))
     monkeypatch.setenv("FPLINUX_TEST_KERNEL", "6.12.0-fplinux-1212121212121212")
     events: list[str] = []
+    snapshot = endpoint_snapshot()
+    adapter = snapshot["adapters"][0]
+    address = adapter["addresses"][0]
 
     class ArchiveWindowsHost(StubWindowsHost):
         """Supply the generated session's USB ancestry, DHCP lease and selected device."""
@@ -1657,14 +1663,12 @@ def sc9820e_windows_boot(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Sc9
                 return {"devices": devices}
             assert script == "network.ps1"
             session = json.loads(Path(active.read_text()).read_text())
-            snapshot = endpoint_snapshot()
-            adapter = snapshot["adapters"][0]
             adapter["mac"] = session["host_mac"]
             adapter["lineage"][-1] = (
                 f"USB\\VID_{session['vendor_id']:04X}&PID_{session['product_id']:04X}\\"
                 f"{session['usb_serial']}"
             )
-            adapter["addresses"][0]["address"] = session["host_address"]
+            address["address"] = session["host_address"]
             snapshot["routes"][0]["prefix"] = session["network"]
             return snapshot
 
@@ -1684,7 +1688,7 @@ def sc9820e_windows_boot(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Sc9
         relative: (archive / relative).read_bytes()
         for relative in (bundle.runtime["image"], *bundle.runtime["assets"].values())
     }
-    return Sc9820eWindowsBoot(bundle, capsule, trace, canonical, events, host.progress)
+    return Sc9820eWindowsBoot(bundle, capsule, trace, canonical, snapshot, events, host.progress)
 
 
 def test_sc9820e_windows_boot_uploads_the_ordered_ram_chain_and_authenticates(
@@ -1793,7 +1797,13 @@ def test_sc9820e_windows_boot_uploads_the_ordered_ram_chain_and_authenticates(
     assert not (directory / "image.bin").exists()
     assert not (directory / "uploads").exists()
     assert not (directory / "payload").exists()
-    assert case.events[-3:] == ["linux-start", "linux-transition", "ssh-ready"]
+    assert case.events[case.events.index("linux-start") :] == [
+        "linux-start",
+        "linux-transition",
+        "linux-usb",
+        "linux-network",
+        "ssh-ready",
+    ]
     assert "bootstrap-handoff" not in case.events
     assert (root / "logs/run.log").read_text() == (
         "FPLINUX_BOOTROM_READY\nSC9820E RAM uploads acknowledged\n"
@@ -1801,6 +1811,101 @@ def test_sc9820e_windows_boot_uploads_the_ordered_ram_chain_and_authenticates(
     assert case.capsule.read_bytes() == capsule
     for relative, contents in case.canonical.items():
         assert (root / relative).read_bytes() == contents
+
+
+@pytest.mark.parametrize(
+    ("failure", "confirmed"),
+    [
+        ("adapter-missing", []),
+        ("dhcp-pending", ["linux-usb"]),
+        ("bad-route", ["linux-usb"]),
+        ("ssh-refused", ["linux-usb", "linux-network"]),
+        ("wrong-build", ["linux-usb", "linux-network"]),
+    ],
+)
+def test_windows_handoff_failure_records_last_confirmed_stage(
+    sc9820e_windows_boot: Sc9820eWindowsBoot,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failure: str,
+    confirmed: list[str],
+) -> None:
+    """Write the production event stream with controlled PnP and real SSH child results."""
+    case = sc9820e_windows_boot
+    root = case.bundle.root
+    event_path = tmp_path / "events.jsonl"
+    ssh_rejected = tmp_path / "ssh-rejected"
+    adapter = case.snapshot["adapters"][0]
+    cause = "timeout"
+    message = "did not become ready"
+    if failure == "adapter-missing":
+        case.snapshot["adapters"].clear()
+    elif failure == "dhcp-pending":
+        adapter["addresses"][0]["state"] = "Tentative"
+    elif failure == "bad-route":
+        case.snapshot["routes"][1]["index"] = adapter["index"]
+        cause = "command-failed"
+        message = "unexpectedly has a default route"
+    elif failure == "ssh-refused":
+        monkeypatch.setenv("FPLINUX_TEST_AUTH_REJECTED", str(ssh_rejected))
+    else:
+        monkeypatch.setenv("FPLINUX_TEST_KERNEL", "6.12.0-fplinux-ffffffffffffffff")
+        cause = "command-failed"
+        message = "another kernel build identity"
+
+    # Skip retry sleeps while real child execution still counts against the deadline.
+    skipped_wait = 0.0
+
+    def advance_clock(seconds: float) -> None:
+        nonlocal skipped_wait
+        skipped_wait += seconds
+
+    monkeypatch.setattr(
+        windows_transport,
+        "time",
+        SimpleNamespace(monotonic=lambda: time.monotonic() + skipped_wait, sleep=advance_clock),
+    )
+    case.bundle.runtime["usb"]["linux_gadget"]["wait_seconds"] = 2
+
+    def boot_with_events() -> None:
+        with record_events(
+            event_path,
+            target=case.bundle.runtime["target"],
+            profile=case.bundle.runtime["profile"],
+            build_type=case.bundle.runtime["build_type"],
+        ) as events:
+
+            def progress(stage: str) -> None:
+                case.progress(stage)
+                events.emit(stage)
+
+            windows_boot.boot_archive(
+                case.bundle,
+                case.capsule,
+                session_root=root / "data/session",
+                events=progress,
+                log=root / "logs/run.log",
+            )
+
+    with pytest.raises(SystemExit, match=message):
+        boot_with_events()
+
+    raw = event_path.read_text()
+    records = [json.loads(line) for line in raw.splitlines()]
+    stages = [record["event"] for record in records]
+    assert stages[stages.index("linux-transition") :] == [
+        "linux-transition",
+        *confirmed,
+        "failure",
+    ]
+    assert records[-1]["stage"] == (confirmed[-1] if confirmed else "linux-transition")
+    assert records[-1]["cause"] == cause
+    assert records[-1]["exit_status"] == 1
+    assert not list((root / "data/session").iterdir())
+    assert "id_ed25519" not in raw
+    assert "ssh-ed25519" not in raw
+    if failure == "ssh-refused":
+        assert ssh_rejected.read_text() not in raw
 
 
 @pytest.mark.parametrize("failure", ["loader", "authentication", "cancellation"])
@@ -1940,11 +2045,10 @@ def test_powershell_file_arguments_remain_literal_and_json_result_is_checked(
         "-ExecutionPolicy",
         "Bypass",
         "-File",
-        str(ROOT / "common/windows/acl.ps1"),
+        str(ROOT / "scripts/fplinux_cli/runtime/windows/powershell/acl.ps1"),
         "-Path",
         str(private_path),
     ]
-    assert (ROOT / "common/windows/acl.ps1").is_file()
 
 
 @pytest.mark.parametrize("module_path_name", ["PSModulePath", "PSMODULEPATH", "psmodulepath"])
@@ -2000,7 +2104,7 @@ def test_network_discovery_receives_the_exact_usb_session_identity(
     assert host.network_snapshot(session, timeout=3) == {"adapters": [], "routes": []}
 
     assert json.loads(arguments_file.read_text())[-9:] == [
-        str(ROOT / "common/windows/network.ps1"),
+        str(ROOT / "scripts/fplinux_cli/runtime/windows/powershell/network.ps1"),
         "-HostMac",
         "02:00:00:00:00:01",
         "-UsbSerial",

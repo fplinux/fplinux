@@ -7,13 +7,17 @@ import os
 import subprocess
 import sys
 from contextlib import nullcontext
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from . import boot
 from . import phone_data as phone_data_runtime
 from .bundle import admit_bundle, boots_system_card, fail, host_preflight, load_runtime_manifest
-from .connection import read_running_build
+from .card_access import enrolled_endpoints
+from .connection import RunningBuild, read_running_build, read_running_card
 from .events import RunLog
+from .operations import BundlePaths, LiveRequest, SelectedConnection
+from .screenshot import capture_screenshot
 from .ssh import session as ssh_session
 from .ssh import transport as ssh_transport
 from .state import exclusive_lock, private_directory
@@ -83,6 +87,84 @@ def select_connection(
     return live[0]
 
 
+@dataclass(frozen=True)
+class SelectedCard:
+    """An exact card endpoint or a launcher connection to check against enrolled card pins."""
+
+    connection: tuple[Any, dict[str, Any]]
+    cid: str
+    entry: str
+    pins: dict[str, str]
+
+
+def _select_card(
+    target: str,
+    cid: str,
+    session_root: Path,
+    bundle: Path | None,
+    runtime: dict[str, Any] | None,
+) -> SelectedCard:
+    windows = None
+    transport: Any = ssh_transport
+    if os.name == "nt":
+        from .windows.bundle import validate_connection_tools  # noqa: PLC0415
+        from .windows.host import WindowsHost  # noqa: PLC0415
+        from .windows.transport import WindowsTransport  # noqa: PLC0415
+
+        if bundle is None or runtime is None:
+            fail("Windows card access requires its archive and runtime metadata")
+        tools = validate_connection_tools(lambda name: bundle / name)
+        windows = WindowsHost()
+        transport = WindowsTransport(
+            windows, tools, wait_seconds=runtime["usb"]["linux_gadget"]["wait_seconds"]
+        )
+    profiles = enrolled_endpoints(target, cid, windows)
+    attached = [profile for profile in profiles if transport.usb_present(profile)]
+    if len(attached) > 1:
+        fail("More than one USB device matches the selected microSD enrollment")
+    if attached:
+        endpoint = attached[0]
+        return SelectedCard(
+            (transport, endpoint), cid, "sd", {endpoint["usb_serial"]: endpoint["host_key"]}
+        )
+
+    # USB-assisted startup uses the transient launcher binding, not the card keys.
+    if not session_root.is_dir():
+        sessions = []
+    elif windows is not None:
+        sessions = transport.load_saved_sessions(
+            target, session_root=session_root, shared_root=True
+        )
+    else:
+        session = ssh_session.load_saved_session(target, runtime_root=session_root)
+        sessions = [session] if session is not None else []
+    connected = [session for session in sessions if transport.usb_present(session)]
+    if not connected:
+        fail(f"No connected session for enrolled microSD {cid}; connect the running phone")
+    if len(connected) > 1:
+        fail("More than one saved USB-assisted phone session is connected")
+    pins = {profile["usb_serial"]: profile["host_key"] for profile in profiles}
+    return SelectedCard((transport, connected[0]), cid, "usb", pins)
+
+
+def _checked_card_build(
+    card: SelectedCard, connection: tuple[Any, dict[str, Any]], admitted: ValidatedBundle | None
+) -> RunningBuild:
+    observed = read_running_card(connection)
+    if observed.entry != card.entry or observed.target != connection[1]["target"]:
+        fail("The running phone uses a different boot entry or microSD target")
+    if observed.cid != card.cid:
+        fail("The running SD card CID does not match --card")
+    if observed.serial not in card.pins or observed.host_key != card.pins[observed.serial]:
+        fail("The running microSD does not match the saved card SSH enrollment")
+    if admitted is not None:
+        if observed.device_identity != admitted.device_identity:
+            fail("The running microSD has a different kernel identity or boot recipe")
+        if observed.build.build_id != admitted.runtime["release_id"]:
+            fail("The running microSD root has a different build identity")
+    return observed.build
+
+
 def _prepared_identity(admitted: ValidatedBundle, phone_data: Path | None) -> str | None:
     if boots_system_card(admitted.runtime):
         return None
@@ -101,19 +183,13 @@ def _prepared_identity(admitted: ValidatedBundle, phone_data: Path | None) -> st
 
 
 def _show_running_build(
-    connection: tuple[Any, dict[str, Any]],
+    target: str,
+    observed: RunningBuild,
     log: RunLog,
-    *,
-    expected_build: str | None,
-    inspect_card: bool,
 ) -> None:
-    observed = read_running_build(connection, inspect_card=inspect_card)
-    if expected_build is not None and observed.build_id != expected_build:
-        fail("The running microSD root has a different build identity")
     slot = f"; microSD slot: {observed.card_slot}" if observed.card_slot is not None else ""
     log.message(
-        f"Phone: {connection[1]['target']}; kernel: {observed.kernel_release}; "
-        f"BUILD_ID: {observed.build_id}{slot}"
+        f"Phone: {target}; kernel: {observed.kernel_release}; BUILD_ID: {observed.build_id}{slot}"
     )
 
 
@@ -180,16 +256,20 @@ def console_connection(  # noqa: PLR0913 -- selected session and action policies
     exec_command: str | None = None,
     upload: list[str] | None = None,
     pull: list[str] | None = None,
+    screenshot: Path | None = None,
     verify_only: bool = False,
     shutdown: bool = False,
     revalidate: Callable[[], None] | None = None,
     log: RunLog | None = None,
+    card: SelectedCard | None = None,
 ) -> int:
     """Authenticate one selected session and perform at most one remote action."""
     status = "failed"
     try:
         private_directory(data_root)
-        remote_action = any(value is not None for value in (exec_command, upload, pull))
+        remote_action = any(
+            value is not None for value in (exec_command, upload, pull, screenshot)
+        )
         lock = (
             nullcontext()
             if verify_only or remote_action
@@ -214,11 +294,15 @@ def console_connection(  # noqa: PLR0913 -- selected session and action policies
                 log.message("Diagnostic connection: the current build is not being verified.")
             identity: str | None = None
             identity_captured = False
+            card_build: RunningBuild | None = None
 
             def reconnect(current: tuple[Any, dict[str, Any]]) -> tuple[Any, dict[str, Any]]:
-                nonlocal identity, identity_captured
+                nonlocal identity, identity_captured, card_build
                 if revalidate is not None:
                     revalidate()
+                if card is not None and card.entry == "sd":
+                    card_build = _checked_card_build(card, current, admitted)
+                    return current
                 if admitted is not None:
                     if current[1]["target"] != admitted.runtime["target"]:
                         fail("The selected build belongs to another phone target")
@@ -226,21 +310,32 @@ def console_connection(  # noqa: PLR0913 -- selected session and action policies
                     if identity_captured and current_identity != identity:
                         fail("The selected phone data changed while the console was open")
                     identity, identity_captured = current_identity, True
-                    return boot.reconnect_saved_connection(
+                    current = boot.reconnect_saved_connection(
                         admitted, current, prepared_data_sha256=identity
                     )
-                transport, session = current
-                return transport, transport.reacquire_bound_session(
-                    session, expected_device_identity=None
-                )
+                else:
+                    transport, session = current
+                    current = (
+                        transport,
+                        transport.reacquire_bound_session(session, expected_device_identity=None),
+                    )
+                if card is not None:
+                    card_build = _checked_card_build(card, current, admitted)
+                return current
 
-            transport, session = connection
-            with log.capture():
-                session = transport.reacquire_bound_session(session, expected_device_identity=None)
-            connection = transport, session
-            if admitted is not None:
+            if card is not None:
                 with log.capture():
                     connection = reconnect(connection)
+            else:
+                transport, session = connection
+                with log.capture():
+                    session = transport.reacquire_bound_session(
+                        session, expected_device_identity=None
+                    )
+                connection = transport, session
+                if admitted is not None:
+                    with log.capture():
+                        connection = reconnect(connection)
             transport, session = connection
             inspect_card = (
                 (verify_only or shutdown)
@@ -252,9 +347,10 @@ def console_connection(  # noqa: PLR0913 -- selected session and action policies
                 if (inspect_card or shutdown) and admitted is not None
                 else None
             )
-            _show_running_build(
-                connection, log, expected_build=expected_build, inspect_card=inspect_card
-            )
+            observed = card_build or read_running_build(connection, inspect_card=inspect_card)
+            if expected_build is not None and observed.build_id != expected_build:
+                fail("The running microSD root has a different build identity")
+            _show_running_build(str(session["target"]), observed, log)
             if verify_only:
                 log.message("The running phone matches the selected build.")
             elif mountpoint is not None:
@@ -267,6 +363,9 @@ def console_connection(  # noqa: PLR0913 -- selected session and action policies
                 transport.upload(session, *upload)
             elif pull is not None:
                 transport.pull(session, *pull)
+            elif screenshot is not None:
+                capture_screenshot(transport, session, screenshot)
+                log.message(f"Screenshot saved: {screenshot}")
             else:
                 interactive_shell(connection, log, reconnect=reconnect)
             status = "success"
@@ -285,6 +384,56 @@ def console_connection(  # noqa: PLR0913 -- selected session and action policies
             log.close(status)
 
 
+def console_card(request: LiveRequest, paths: BundlePaths | SelectedConnection) -> int:
+    """Use one enrolled card through the same runtime from the checkout or a release."""
+    target, cid = request.target, request.card_cid
+    revalidate = None
+    bundle = None
+    runtime = None
+    try:
+        with cancellation_signals():
+            if target is None or cid is None:
+                fail("Select a TARGET and an enrolled microSD CID")
+            if isinstance(paths, SelectedConnection):
+                admitted = paths.admitted
+                revalidate = paths.revalidate
+                if admitted is not None:
+                    bundle, runtime = admitted.root, admitted.runtime
+            else:
+                host_preflight()
+                bundle = paths.bundle
+                runtime = load_runtime_manifest(bundle / "runtime-manifest.json")
+                admitted = None if request.allow_other_build else admit_bundle(bundle)
+            if runtime is not None and (
+                runtime["target"] != target or not boots_system_card(runtime)
+            ):
+                fail("The selected build does not match the target's system microSD profile")
+            card = _select_card(target, cid, paths.data / "session", bundle, runtime)
+    except (
+        KeyboardInterrupt,
+        OSError,
+        ValueError,
+        SystemExit,
+        subprocess.TimeoutExpired,
+    ) as error:
+        _, code = report_runtime_error(error, None)
+        return code
+    return console_connection(
+        card.connection,
+        paths.data,
+        paths.logs,
+        admitted=admitted,
+        revalidate=revalidate,
+        exec_command=request.exec_command,
+        upload=request.upload,
+        pull=request.pull,
+        screenshot=request.screenshot,
+        verify_only=request.verify_only,
+        shutdown=request.shutdown,
+        card=card,
+    )
+
+
 def console_bundle(  # noqa: PLR0913 -- archive selectors and remote actions are independent.
     bundle: Path,
     data_root: Path,
@@ -294,6 +443,7 @@ def console_bundle(  # noqa: PLR0913 -- archive selectors and remote actions are
     exec_command: str | None = None,
     upload: list[str] | None = None,
     pull: list[str] | None = None,
+    screenshot: Path | None = None,
     phone_data: Path | None = None,
     verify_only: bool = False,
     shutdown: bool = False,
@@ -341,6 +491,7 @@ def console_bundle(  # noqa: PLR0913 -- archive selectors and remote actions are
         exec_command=exec_command,
         upload=upload,
         pull=pull,
+        screenshot=screenshot,
         verify_only=verify_only,
         shutdown=shutdown,
         log=log,

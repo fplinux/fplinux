@@ -1,26 +1,31 @@
 # SPDX-License-Identifier: GPL-2.0-only
-"""Identify the fitted NAND and publish a complete read-only backup with its geometry."""
+"""Acquire a raw NAND backup over the selected authenticated SSH session."""
 
 from __future__ import annotations
 
-import json
-import os
 import re
 import shlex
 import tempfile
-from collections.abc import Callable
-from dataclasses import asdict, dataclass
-from pathlib import Path, PurePosixPath
-from typing import Any, BinaryIO, Protocol, cast
+from pathlib import PurePosixPath
+from typing import TYPE_CHECKING, Protocol, cast
 
-from fplinux_cli.common import (
-    canonical_json_bytes,
-    fail,
-    replace_file_atomically,
-    sha256_bytes,
-    sha256_file,
+from fplinux_cli.common import fail
+from fplinux_cli.device_data.nand_backup import (
+    backup_receipt_path,
+    require_backup_destination,
+    write_backup,
 )
-from fplinux_cli.device_data.nand_geometry import NandGeometry
+from fplinux_cli.device_data.nand_geometry import (
+    GEOMETRY_SIZE_KEYS,
+    NandGeometry,
+    require_consistent_geometry,
+    require_declared_chip,
+)
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+    from pathlib import Path
+    from typing import Any, BinaryIO
 
 BACKUP_TIMEOUT_SECONDS = 15 * 60
 GEOMETRY_TIMEOUT_SECONDS = 60
@@ -28,11 +33,7 @@ _GEOMETRY_REPORT_KEYS = frozenset(
     {
         "id_bytes",
         "chip",
-        "page_main_bytes",
-        "oob_bytes",
-        "pages_per_block",
-        "block_count",
-        "raw_bytes",
+        *GEOMETRY_SIZE_KEYS,
         "geometry_source",
         "feature_a0",
         "feature_b0",
@@ -40,19 +41,7 @@ _GEOMETRY_REPORT_KEYS = frozenset(
     }
 )
 _SPI_FEATURE_KEYS = ("feature_a0", "feature_b0", "feature_c0")
-_GEOMETRY_SIZE_KEYS = (
-    "page_main_bytes",
-    "oob_bytes",
-    "pages_per_block",
-    "block_count",
-    "raw_bytes",
-)
-_RECEIPT_KEYS = frozenset(
-    {"id_bytes", "chip", *_GEOMETRY_SIZE_KEYS, "sha256", "target", "acquisition_recipe"}
-)
-_ID_BYTES = re.compile(r"(?:[0-9a-f]{2})+")
 _DECIMAL = re.compile(r"[0-9]+")
-_SHA256 = re.compile(r"[0-9a-f]{64}")
 
 
 class SshTransport(Protocol):
@@ -70,44 +59,7 @@ class SshTransport(Protocol):
         """Write remote stdout directly into the supplied local file."""
 
 
-SessionFactory = Callable[[], tuple[SshTransport, dict[str, Any]]]
-
-
-@dataclass(frozen=True)
-class BackupRecord:
-    """Validated geometry and acquisition identity bound to exact backup bytes."""
-
-    geometry: NandGeometry
-    target: str
-    acquisition_recipe: str
-    sha256: str
-
-
-def backup_receipt_path(backup: Path) -> Path:
-    """Return the geometry receipt path that belongs beside one backup file."""
-    return backup.with_name(f"{backup.name}.json")
-
-
-def _checked_geometry(geometry: NandGeometry, source: str) -> NandGeometry:
-    """Require an identified chip whose total size matches its page layout."""
-    if _ID_BYTES.fullmatch(geometry.id_bytes) is None:
-        fail(f"{source} has invalid id_bytes: {geometry.id_bytes!r}")
-    if not geometry.chip:
-        fail(f"{source} has an empty chip name")
-    layout = (
-        geometry.page_main_bytes,
-        geometry.oob_bytes,
-        geometry.pages_per_block,
-        geometry.block_count,
-    )
-    expected_raw_bytes = geometry.raw_page_bytes * geometry.pages_per_block * geometry.block_count
-    if min(layout) < 1 or geometry.raw_bytes != expected_raw_bytes:
-        fail(
-            f"{source} is inconsistent: {geometry.page_main_bytes}+{geometry.oob_bytes}-byte "
-            f"pages, {geometry.pages_per_block} pages per block, {geometry.block_count} blocks, "
-            f"{geometry.raw_bytes} bytes"
-        )
-    return geometry
+type SessionFactory = Callable[[], tuple[SshTransport, dict[str, Any]]]
 
 
 def parse_geometry_report(report: str) -> NandGeometry:
@@ -138,7 +90,7 @@ def parse_geometry_report(report: str) -> NandGeometry:
         fail(f"NAND geometry report lacks: {', '.join(_SPI_FEATURE_KEYS)}")
     if values["geometry_source"] not in {"dt", "table"}:
         fail(f"NAND geometry report has an invalid geometry_source: {values['geometry_source']}")
-    for key in _GEOMETRY_SIZE_KEYS:
+    for key in GEOMETRY_SIZE_KEYS:
         if _DECIMAL.fullmatch(values[key]) is None:
             fail(f"NAND geometry report has a non-decimal {key}: {values[key]!r}")
     geometry = NandGeometry(
@@ -150,31 +102,7 @@ def parse_geometry_report(report: str) -> NandGeometry:
         block_count=int(values["block_count"]),
         raw_bytes=int(values["raw_bytes"]),
     )
-    return _checked_geometry(geometry, "NAND geometry report")
-
-
-def require_declared_chip(
-    geometry: NandGeometry,
-    *,
-    target: str,
-    declared_id: int | None,
-    declared_raw_page_bytes: int | None,
-    source: str,
-) -> None:
-    """Reject a reported chip that contradicts the target's optional declared expectation."""
-    if declared_id is None or declared_raw_page_bytes is None:
-        return
-    # The declared ID holds the manufacturer byte in bits 7:0 and the device byte in 15:8.
-    declared_id_bytes = declared_id.to_bytes(2, "little").hex()
-    if (geometry.id_bytes, geometry.raw_page_bytes) != (
-        declared_id_bytes,
-        declared_raw_page_bytes,
-    ):
-        fail(
-            f"{source} does not match target {target}: reported id_bytes={geometry.id_bytes} "
-            f"with {geometry.raw_page_bytes}-byte pages; target declares "
-            f"id_bytes={declared_id_bytes} with {declared_raw_page_bytes}-byte pages"
-        )
+    return require_consistent_geometry(geometry, "NAND geometry report")
 
 
 def read_geometry_report(ssh: SshTransport, session: dict[str, Any], raw_device: str) -> str:
@@ -197,143 +125,6 @@ def read_geometry_report(ssh: SshTransport, session: dict[str, Any], raw_device:
         fail("NAND geometry report is not ASCII text")
 
 
-def read_backup_record(backup: Path, raw: bytes) -> BackupRecord | None:
-    """Admit the acquisition receipt recorded for exactly these backup bytes."""
-    receipt = backup_receipt_path(backup)
-    if not receipt.exists() and not receipt.is_symlink():
-        return None
-    if receipt.is_symlink() or not receipt.is_file():
-        fail(f"NAND backup receipt is not a regular file: {receipt}")
-    try:
-        value = json.loads(receipt.read_text(encoding="utf-8"))
-    except (OSError, ValueError) as error:
-        fail(f"NAND backup receipt cannot be read: {receipt}: {error}")
-    if not isinstance(value, dict) or set(value) != _RECEIPT_KEYS:
-        fail(f"NAND backup receipt must contain exactly: {', '.join(sorted(_RECEIPT_KEYS))}")
-    for key in ("id_bytes", "chip", "sha256", "target", "acquisition_recipe"):
-        if not isinstance(value[key], str):
-            fail(f"NAND backup receipt {key} must be a string: {receipt}")
-    for key in _GEOMETRY_SIZE_KEYS:
-        if type(value[key]) is not int:
-            fail(f"NAND backup receipt {key} must be an integer: {receipt}")
-    for key in ("sha256", "acquisition_recipe"):
-        if _SHA256.fullmatch(value[key]) is None:
-            fail(f"NAND backup receipt {key} must be a lowercase SHA-256 digest: {receipt}")
-    geometry = _checked_geometry(
-        NandGeometry(
-            id_bytes=value["id_bytes"],
-            chip=value["chip"],
-            page_main_bytes=value["page_main_bytes"],
-            oob_bytes=value["oob_bytes"],
-            pages_per_block=value["pages_per_block"],
-            block_count=value["block_count"],
-            raw_bytes=value["raw_bytes"],
-        ),
-        f"NAND backup receipt {receipt}",
-    )
-    if geometry.raw_bytes != len(raw):
-        fail(
-            f"NAND backup receipt {receipt} describes a {geometry.raw_bytes}-byte backup; "
-            f"{backup} has {len(raw)} bytes"
-        )
-    if value["sha256"] != sha256_bytes(raw):
-        fail(f"NAND backup receipt {receipt} describes different backup bytes than {backup}")
-    return BackupRecord(geometry, value["target"], value["acquisition_recipe"], value["sha256"])
-
-
-def read_backup_geometry(backup: Path, raw: bytes) -> NandGeometry | None:
-    """Return the device-reported geometry recorded for exactly these backup bytes."""
-    record = read_backup_record(backup, raw)
-    return None if record is None else record.geometry
-
-
-def _require_backup_destination(output: Path, acquisition_recipe: str) -> None:
-    """Admit the raw destination and receipt before reading or importing an image."""
-    if _SHA256.fullmatch(acquisition_recipe) is None:
-        fail("NAND acquisition recipe must be a lowercase SHA-256 digest")
-    if output.name in {"", ".", ".."}:
-        fail("NAND backup output must name a file")
-    parent = output.parent
-    if parent.is_symlink() or not parent.is_dir():
-        fail(f"NAND backup output directory is missing or invalid: {parent}")
-    if output.is_symlink() or (output.exists() and not output.is_file()):
-        fail(f"NAND backup output is not a regular file: {output}")
-    receipt = backup_receipt_path(output)
-    if receipt.is_symlink() or (receipt.exists() and not receipt.is_file()):
-        fail(f"NAND backup receipt is not a regular file: {receipt}")
-
-
-def _publish_backup(
-    temporary: Path,
-    output: Path,
-    geometry: NandGeometry,
-    *,
-    target: str,
-    acquisition_recipe: str,
-) -> str:
-    """Synchronize one complete image and bind its receipt only after replacement."""
-    actual_size = temporary.stat().st_size
-    if actual_size != geometry.raw_bytes:
-        fail(f"incomplete raw NAND image: expected {geometry.raw_bytes} bytes, got {actual_size}")
-    digest = sha256_file(temporary)
-    record = {
-        **asdict(geometry),
-        "sha256": digest,
-        "target": target,
-        "acquisition_recipe": acquisition_recipe,
-    }
-    receipt = backup_receipt_path(output)
-    # Windows cannot open a directory through the POSIX descriptor API.
-    directory_descriptor = (
-        None if os.name == "nt" else os.open(output.parent, os.O_RDONLY | os.O_DIRECTORY)
-    )
-    try:
-        # A receipt must never describe bytes from the image being replaced.
-        receipt.unlink(missing_ok=True)
-        if directory_descriptor is not None:
-            os.fsync(directory_descriptor)
-        temporary.replace(output)
-        if directory_descriptor is not None:
-            os.fsync(directory_descriptor)
-        replace_file_atomically(receipt, canonical_json_bytes(record), 0o600)
-        if directory_descriptor is not None:
-            os.fsync(directory_descriptor)
-    finally:
-        if directory_descriptor is not None:
-            os.close(directory_descriptor)
-    return digest
-
-
-def save_backup_bytes(
-    output: Path,
-    raw: bytes,
-    geometry: NandGeometry,
-    *,
-    target: str,
-    acquisition_recipe: str,
-) -> Path:
-    """Publish explicitly admitted backup bytes under the selected physical contract."""
-    _require_backup_destination(output, acquisition_recipe)
-    _checked_geometry(geometry, "imported NAND geometry")
-    temporary: Path | None = None
-    try:
-        with tempfile.NamedTemporaryFile(
-            dir=output.parent, prefix=f".{output.name}.", mode="w+b", delete=False
-        ) as stream:
-            temporary = Path(stream.name)
-            temporary.chmod(0o600)
-            stream.write(raw)
-            stream.flush()
-            os.fsync(stream.fileno())
-        _publish_backup(
-            temporary, output, geometry, target=target, acquisition_recipe=acquisition_recipe
-        )
-    finally:
-        if temporary is not None:
-            temporary.unlink(missing_ok=True)
-    return output
-
-
 def backup_nand(  # noqa: PLR0913 -- the reader and the declared chip are distinct inputs.
     connect: SessionFactory,
     output: Path,
@@ -346,7 +137,7 @@ def backup_nand(  # noqa: PLR0913 -- the reader and the declared chip are distin
     progress: Callable[[int, int], None] | None = None,
 ) -> Path:
     """Acquire one exact session and publish a complete physical NAND image and its receipt."""
-    _require_backup_destination(output, acquisition_recipe)
+    require_backup_destination(output, acquisition_recipe)
     ssh, session = connect()
     geometry = parse_geometry_report(read_geometry_report(ssh, session, raw_device))
     require_declared_chip(
@@ -362,40 +153,23 @@ def backup_nand(  # noqa: PLR0913 -- the reader and the declared chip are distin
         if progress is not None and completed < geometry.raw_bytes:
             progress(completed, geometry.raw_bytes)
 
-    temporary: Path | None = None
-    try:
-        with tempfile.NamedTemporaryFile(
-            dir=output.parent,
-            prefix=f".{output.name}.",
-            mode="w+b",
-            delete=False,
-        ) as stream:
-            temporary = Path(stream.name)
-            temporary.chmod(0o600)
-            command = f"exec dd if={shlex.quote(raw_device)} bs={read_batch_bytes}"
-            if progress is None:
-                ssh.stream_remote(
-                    session, command, cast("BinaryIO", stream), timeout=BACKUP_TIMEOUT_SECONDS
-                )
-            else:
-                progress(0, geometry.raw_bytes)
-                ssh.stream_remote(
-                    session,
-                    command,
-                    cast("BinaryIO", stream),
-                    timeout=BACKUP_TIMEOUT_SECONDS,
-                    progress=read_progress,
-                )
-            stream.flush()
-            os.fsync(stream.fileno())
+    def read_image(stream: BinaryIO) -> None:
+        command = f"exec dd if={shlex.quote(raw_device)} bs={read_batch_bytes}"
+        if progress is None:
+            ssh.stream_remote(session, command, stream, timeout=BACKUP_TIMEOUT_SECONDS)
+        else:
+            progress(0, geometry.raw_bytes)
+            ssh.stream_remote(
+                session, command, stream, timeout=BACKUP_TIMEOUT_SECONDS, progress=read_progress
+            )
 
-        digest = _publish_backup(
-            temporary, output, geometry, target=target, acquisition_recipe=acquisition_recipe
-        )
-    finally:
-        if temporary is not None:
-            temporary.unlink(missing_ok=True)
-
+    digest = write_backup(
+        output,
+        geometry,
+        target=target,
+        acquisition_recipe=acquisition_recipe,
+        write_image=read_image,
+    )
     if progress is not None:
         progress(geometry.raw_bytes, geometry.raw_bytes)
     print(

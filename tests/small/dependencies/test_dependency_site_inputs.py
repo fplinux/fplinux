@@ -6,14 +6,17 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import shutil
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 from fplinux_cli.dependencies.site_inputs import site_dependency_selection
+from fplinux_cli.dependencies.site_install import site_runtime
 from fplinux_cli.dependencies.snapshots import preserve_inputs, publish_snapshot
 from fplinux_cli.dependencies.workflow import restore_dependencies
 
+from tests import ROOT
 from tests.small.dependencies.snapshot_fixtures import selected_checkout
 
 _FIXTURES = Path(__file__).parent / "fixtures/site-inputs"
@@ -100,6 +103,31 @@ def test_context_ignores_lock_mapping_order(site_checkout: Path) -> None:
     lock = site_checkout / "site/package-lock.json"
     lock.write_text(json.dumps(json.loads(lock.read_text()), sort_keys=True, indent=2))
     assert site_dependency_selection(site_checkout) == before
+
+
+def test_site_runtime_key_tracks_node_archive_and_recipe_but_ignores_alpine_install(
+    site_checkout: Path,
+) -> None:
+    """Alpine-only work keeps the prepared Node runtime usable for the site."""
+    relative = "scripts/fplinux_cli/environment"
+    environment = site_checkout / relative
+    shutil.copytree(ROOT / relative, environment)
+    cache = site_checkout / ".data"
+    runtime = site_runtime(site_checkout, cache)
+    with (environment / "install.py").open("ab") as installer:
+        installer.write(b"\n# Alpine installation change\n")
+    assert site_runtime(site_checkout, cache) == runtime
+
+    sources = site_checkout / "sources.lock.toml"
+    checksum = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+    before, node = sources.read_text().split("[site-node]", 1)
+    sources.write_text(before + "[site-node]" + node.replace(checksum, "d" * 64))
+    updated = site_runtime(site_checkout, cache)
+    assert updated != runtime
+
+    with (environment / "node_runtime.py").open("ab") as installer:
+        installer.write(b"\n# Shared Node installation change\n")
+    assert site_runtime(site_checkout, cache) != updated
 
 
 @pytest.mark.parametrize(

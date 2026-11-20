@@ -87,6 +87,17 @@ The UMS9117 system card includes an autonomous bootloader. Starting it requires 
 
 After FPLinux starts from the card, connect the USB cable to the installing PC. Wait for the USB network to connect, then run the SSH command printed during installation in a Linux terminal or Windows PowerShell. SSH opens a root shell using the saved client key and checks the card's host key against the saved pin. No password is needed. A card installed through this workflow uses USB NCM for a Linux installer or RNDIS for a Windows installer.
 
+The launcher can also verify or connect to a specific enrolled card. Replace the example CID with the 32 lowercase hexadecimal digits reported for your card during installation, and choose the exact target and release running on it.
+
+```sh title="Linux PC"
+sh Run.sh verify inoi-240-modern-4g --card 0123456789abcdef0123456789abcdef
+sh Run.sh console inoi-240-modern-4g --card 0123456789abcdef0123456789abcdef
+```
+
+Use `Run.cmd` on Windows or `./fplinux` from a source checkout. `--card` selects the `microsd-uboot` profile. Verification checks the kernel, boot recipe, installed build and mounted root slot. If you intend to inspect a different build, add `--allow-other-build` to `console`. The enrolled card and its SSH pin are still required.
+
+These commands also accept a card started with `run TARGET --boot microsd` from the same launcher installation. That startup uses the launcher's transient authenticated USB session. The commands check the mounted CID and the card enrollment over that connection. After autonomous startup, they use the card's saved SSH credentials directly.
+
 If you wrote a generic `FPLINUX.img.xz` manually, use the USB-assisted start for a shell. The generic image has no saved SSH enrollment for autonomous startup.
 
 ## Build the card image

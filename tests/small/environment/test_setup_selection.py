@@ -8,15 +8,23 @@ import hashlib
 import io
 import json
 from pathlib import Path
+from typing import TYPE_CHECKING
 from unittest import mock
 
 import pytest
 from fplinux_cli import common
-from fplinux_cli.dependencies import site_install, workflow
+from fplinux_cli.dependencies import inputs as dependency_inputs
+from fplinux_cli.dependencies import site_inputs, site_install, workflow
 from fplinux_cli.dependencies.inputs import DependencyInput
 from fplinux_cli.environment import setup as env_setup
+from fplinux_cli.environment.downloads import download_locked_file
 from fplinux_cli.environment.state import EnvironmentState
 from fplinux_cli.reporting import run as reporting
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping, Sequence
+
+    from fplinux_cli.dependencies.site_inputs import SiteConsumer
 
 
 def original(name: str, contents: bytes) -> DependencyInput:
@@ -140,15 +148,27 @@ def test_site_setup_acquires_exact_originals_and_installs_without_alpine(
 ) -> None:
     """The site consumer receives saved runtime and registry bytes in a site-only checkout."""
 
-    def install_saved_site(*, cache: Path) -> None:
+    def install_saved_site(
+        root: Path,
+        cache: Path,
+        inputs: Sequence[DependencyInput],
+        originals: Mapping[str, Path],
+        consumer: SiteConsumer,
+    ) -> None:
+        assert root == site_checkout
         assert cache == site_checkout / ".data"
-        node = cache / "downloads/sources/site-node/node.tar.xz"
-        npm = cache / "downloads/sources/npm/npm.tgz"
-        assert node.read_bytes() == b"abc"
-        assert npm.read_bytes() == b"abc"
-        registry = list((cache / "downloads/site/npm").iterdir())
-        assert len(registry) == 1
-        assert registry[0].read_bytes() == b"abc"
+        assert consumer["node"] == "24.21.0"
+        assert consumer["npm"] == "12.2.0"
+        assert {item.key for item in inputs} == {
+            "source:site-node",
+            "source:npm",
+            "npm:site:node_modules/example",
+        }
+        assert {key: path.read_bytes() for key, path in originals.items()} == {
+            "source:site-node": b"abc",
+            "source:npm": b"abc",
+            "npm:site:node_modules/example": b"abc",
+        }
         (site_checkout / "site/installed").write_bytes(b"installed from preserved originals\n")
 
     monkeypatch.setattr(site_install, "install_site", install_saved_site)
@@ -167,17 +187,112 @@ def test_site_setup_acquires_exact_originals_and_installs_without_alpine(
     assert not (site_checkout / ".data/dependencies").exists()
 
 
+@pytest.mark.parametrize("all_inputs", [False, True], ids=["site", "all"])
+def test_offline_site_setup_checks_each_saved_original_once(
+    site_checkout: Path,
+    ready_checkout: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    all_inputs: bool,
+) -> None:
+    """Verification reads each saved archive once before offline npm receives the selection."""
+    assert ready_checkout == site_checkout
+    monkeypatch.setattr(workflow, "dependency_selection", lambda _root: ([], {}))
+    cache = site_checkout / ".data"
+    for relative in (
+        "downloads/sources/site-node/node.tar.xz",
+        "downloads/sources/npm/npm.tgz",
+    ):
+        path = cache / relative
+        path.parent.mkdir(parents=True)
+        path.write_bytes(b"abc")
+    inputs, _context = site_inputs.site_dependency_selection(site_checkout)
+    registry = next(item for item in inputs if item.purpose == "site-npm-package")
+    registry_archive = cache / registry.destination
+    registry_archive.parent.mkdir(parents=True)
+    registry_archive.write_bytes(b"abc")
+    environment = site_checkout / "scripts/fplinux_cli/environment"
+    environment.mkdir(parents=True)
+    for source in ("node_runtime.py", "archives.py", "install.py"):
+        (environment / source).write_bytes(b"fixture runtime installer\n")
+
+    def unpack_node(node: Path, npm: Path, runtime: Path) -> None:
+        assert node.read_bytes() == b"abc"
+        assert npm.read_bytes() == b"abc"
+        runtime.mkdir()
+
+    def import_packages(_npm: Path, _cache: Path, archives: Sequence[Path]) -> None:
+        assert list(archives) == [registry_archive]
+
+    monkeypatch.setattr(site_install, "install_node_runtime", unpack_node)
+    monkeypatch.setattr(site_install, "populate_npm_cache", import_packages)
+    runner = mock.Mock()
+    runner.run.side_effect = [
+        mock.Mock(returncode=0, stdout="v24.21.0\n"),
+        mock.Mock(returncode=0, stdout="12.2.0\n"),
+        mock.Mock(returncode=0),
+    ]
+    monkeypatch.setattr(site_install, "subprocess", runner)
+
+    with (
+        mock.patch("urllib.request.urlopen", side_effect=AssertionError("network")),
+        mock.patch.object(
+            dependency_inputs, "download_locked_file", wraps=download_locked_file
+        ) as verify,
+    ):
+        env_setup.prepare_setup(site=not all_inputs, all_inputs=all_inputs, offline=True)
+
+    assert sorted(call.args[2] for call in verify.call_args_list) == sorted(
+        (
+            cache / "downloads/sources/site-node/node.tar.xz",
+            cache / "downloads/sources/npm/npm.tgz",
+            registry_archive,
+        )
+    )
+    assert runner.run.call_args.args[0][1:3] == ["ci", "--offline"]
+    assert (cache / "site/node").is_dir()
+
+
 def test_all_setup_acquires_complete_inventory_and_prepares_both_consumers(
     ready_checkout: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Complete preparation uses the snapshot's existing inventory without creating an export."""
-    inputs = [original("linux", b"abc"), original("windows", b"abc"), original("site", b"abc")]
-    monkeypatch.setattr(workflow, "checkout_declarations", lambda: (inputs, {}))
+    inputs = [
+        original("linux_host_python3", b"abc"),
+        original("windows_host_python", b"abc"),
+        original("site-node", b"abc"),
+    ]
+    consumer = {
+        "node": "24.21.0",
+        "npm": "12.2.0",
+        "platform": "linux",
+        "arch": "x86_64",
+        "libc": "glibc",
+    }
+    monkeypatch.setattr(
+        workflow, "checkout_declarations", lambda: (inputs, {"site": {"consumer": consumer}})
+    )
 
-    def install_saved_site(*, cache: Path) -> None:
+    def install_saved_site(
+        root: Path,
+        cache: Path,
+        inputs: Sequence[DependencyInput],
+        originals: Mapping[str, Path],
+        selected_consumer: SiteConsumer,
+    ) -> None:
+        assert root == ready_checkout
         assert cache == ready_checkout / ".data"
-        contents = [(cache / item.destination).read_bytes() for item in inputs]
-        assert contents == [b"abc", b"abc", b"abc"]
+        assert selected_consumer == consumer
+        assert {item.key for item in inputs} == {
+            "source:linux_host_python3",
+            "source:windows_host_python",
+            "source:site-node",
+        }
+        assert {key: path.read_bytes() for key, path in originals.items()} == {
+            "source:linux_host_python3": b"abc",
+            "source:windows_host_python": b"abc",
+            "source:site-node": b"abc",
+        }
         (ready_checkout / "site-installed").write_text("installed\n")
 
     monkeypatch.setattr(site_install, "install_site", install_saved_site)

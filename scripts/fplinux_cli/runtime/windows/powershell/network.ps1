@@ -1,6 +1,5 @@
 # SPDX-License-Identifier: GPL-2.0-only
 param(
-    [Parameter(Mandatory = $true)]
     [string]$HostMac,
     [Parameter(Mandatory = $true)]
     [string]$UsbSerial,
@@ -14,7 +13,8 @@ $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
 
 $MatchingAdapters = @(Get-NetAdapter -IncludeHidden | Where-Object {
-        ([string]$_.MacAddress -replace '-', ':') -eq $HostMac
+        $_.PnPDeviceID -and
+            (-not $HostMac -or ([string]$_.MacAddress -replace '-', ':') -eq $HostMac)
     })
 $RootPattern = '^USB\\VID_{0:X4}&PID_{1:X4}(?:&REV_[0-9A-F]{{4}})?\\{2}$' -f `
     $VendorId, $ProductId, [regex]::Escape($UsbSerial)
@@ -50,6 +50,9 @@ $Adapters = @($MatchingAdapters | ForEach-Object {
                         -KeyName DEVPKEY_Device_Parent -ErrorAction SilentlyContinue
                     $InstanceId = $Parent.Data
                 }
+            }
+            if (-not ($Lineage -match $RootPattern)) {
+                return
             }
             $CompatibleIds = $Properties['DEVPKEY_Device_CompatibleIds']
             $Provider = $Properties['DEVPKEY_Device_DriverProvider']

@@ -150,7 +150,6 @@ def test_acquisition_reuses_backup_when_unrelated_nodes_renumber_phandles(
 @pytest.mark.parametrize(
     "change",
     [
-        "reader",
         "geometry",
         "kernel",
         "chip",
@@ -165,10 +164,7 @@ def test_acquisition_rejects_backup_after_reader_contract_changes(
 ) -> None:
     """Each changed input can alter physical bytes or the chip admitted for the target."""
     before = phone_data_inputs.acquisition()
-    if change == "reader":
-        path = phone_data_inputs.root / "scripts/fplinux_cli/runtime/nand_backup.py"
-        path.write_bytes(b"def read_raw():\n    return b'changed'\n")
-    elif change == "geometry":
+    if change == "geometry":
         path = phone_data_inputs.root / "scripts/fplinux_cli/device_data/nand_geometry.py"
         path.write_bytes(b"PAGE_MAIN_BYTES = 4096\n")
     elif change == "kernel":
@@ -191,8 +187,21 @@ def test_acquisition_rejects_backup_after_reader_contract_changes(
     assert phone_data_inputs.acquisition() != before
 
 
+def test_live_reader_changes_invalidate_acquisition_without_changing_saved_preparation(
+    phone_data_inputs: PhoneDataInputs,
+) -> None:
+    acquisition = phone_data_inputs.acquisition()
+    preparation = phone_data_inputs.preparation()
+    reader = phone_data_inputs.root / "scripts/fplinux_cli/runtime/nand_backup.py"
+
+    reader.write_bytes(b"def read_raw():\n    return b'changed'\n")
+
+    assert phone_data_inputs.acquisition() != acquisition
+    assert phone_data_inputs.preparation() == preparation
+
+
 @pytest.mark.parametrize(
-    "change", ["parser", "audio", "eq", "groups", "interpretation", "compatible"]
+    "change", ["parser", "audio", "eq", "groups", "interpretation", "receipt", "compatible"]
 )
 def test_preparation_changes_without_invalidating_raw_backup(
     phone_data_inputs: PhoneDataInputs, change: str
@@ -215,6 +224,10 @@ def test_preparation_changes_without_invalidating_raw_backup(
     elif change == "interpretation":
         (phone_data_inputs.root / "scripts/fplinux_cli/device_data/formats.py").write_bytes(
             b"def partition():\n    return 1\n"
+        )
+    elif change == "receipt":
+        (phone_data_inputs.root / "scripts/fplinux_cli/device_data/nand_backup.py").write_bytes(
+            b"def read_backup_record():\n    return 'changed'\n"
         )
     else:
         phone_data_inputs.config["identity"]["compatible"] = "demo,another-phone"

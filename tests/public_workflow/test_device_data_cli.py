@@ -12,7 +12,7 @@ from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING
 
 import pytest
-from fplinux_cli.device_data.cache import current_backup
+from fplinux_cli.device_data.nand_backup import current_backup
 from fplinux_cli.device_data.store import locked_phone_store
 
 from tests.cli_support import ROOT, prepare_cli_checkout

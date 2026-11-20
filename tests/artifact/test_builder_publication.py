@@ -146,7 +146,7 @@ def publication_inputs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Publi
         return path
 
     write("VERSION", b"1.0.0\n")
-    write("common/runtime.py", b"#!/usr/bin/env python3\n")
+    write("scripts/fplinux_cli/runtime/bundle_entry.py", b"#!/usr/bin/env python3\n")
     write("common/60-fplinux.rules", b'SUBSYSTEM=="usb"\n')
     write("scripts/fplinux_cli/runtime/events.py", b"# bundled events helper\n")
     write("scripts/fplinux_cli/manifests/identity.py", b"# identity contract\n")

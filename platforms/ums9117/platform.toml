@@ -539,7 +539,7 @@ source_directory = "spd_dump"
 binary = "spd_dump"
 link = "static-libusb"
 copies = []
-patches = ["common/host/spd-dump-usb.patch"]
+patches = ["scripts/fplinux_cli/build/host_tools/spd-dump/spd-dump-usb.patch"]
 self_test = false
 
 [[host.tools.members]]

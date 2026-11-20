@@ -447,7 +447,9 @@ def _connection_files(
 def _selects_microsd(request: Operation) -> bool:
     return isinstance(request, RunRequest | LiveRequest) and (
         request.boot == MICROSD_BOOT_MODE
-        or (isinstance(request, LiveRequest) and request.shutdown)
+        or (
+            isinstance(request, LiveRequest) and (request.shutdown or request.card_cid is not None)
+        )
     )
 
 

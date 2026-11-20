@@ -45,6 +45,7 @@ def main() -> None:
     from fplinux_cli.device_data.inputs import (  # noqa: PLC0415
         capture_phone_data,
     )
+    from fplinux_cli.device_data.prepare import prepare_from_nand  # noqa: PLC0415
     from fplinux_cli.runtime.card_access import prepare_card_access  # noqa: PLC0415
     from fplinux_cli.runtime.cli import main  # noqa: PLC0415
     from fplinux_cli.runtime.events import record_events  # noqa: PLC0415
@@ -55,6 +56,7 @@ def main() -> None:
         capture_phone_data,
         main,
         prepare_card_access,
+        prepare_from_nand,
         backup_nand,
     ):
         assert callable(operation)

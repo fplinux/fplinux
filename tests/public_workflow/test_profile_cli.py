@@ -45,6 +45,7 @@ class ProfileAndToolCliHelpWorkflowTests:
             assert "--boot {microsd}" in result.stdout
             assert "--profile NAME" in result.stdout
             assert ("--events PATH" in result.stdout) == (command[0] == "run")
+            assert ("--card CID" in result.stdout) == (command[0] != "run")
         elif command == ("nand", "backup"):
             assert "nokia-ta1618" in result.stdout
             assert "--profile NAME" in result.stdout
@@ -73,6 +74,37 @@ class ProfileAndToolCliHelpWorkflowTests:
 
         assert result.returncode == 2
         assert "system microSD boot uses the phone data already on the card" in result.stderr
+        assert not data.exists()
+
+    @pytest.mark.parametrize(
+        ("selection", "message"),
+        [
+            (("verify", "--card", "a" * 32), "--card requires an explicit TARGET"),
+            (
+                ("console", "nokia-ta1618", "--card", "a" * 31),
+                "--card must be a 32-digit lowercase SD card CID",
+            ),
+            (
+                ("verify", "nokia-ta1618", "--card", "a" * 32, "--profile", "default"),
+                "--card selects the microsd-uboot profile",
+            ),
+        ],
+    )
+    def test_enrolled_card_rejects_invalid_selections_before_starting(
+        self, tmp_path: Path, selection: tuple[str, ...], message: str
+    ) -> None:
+        """Reject invalid system-card selectors before resolving a build or touching USB."""
+        data = tmp_path / "checkout store"
+        result = run_process(
+            [str(ROOT / "fplinux"), *selection],
+            name="enrolled card selection",
+            timeout=_PUBLIC_HELP_TIMEOUT_SECONDS,
+            cwd=ROOT,
+            env={**os.environ, "FPLINUX_DATA_DIR": str(data)},
+        )
+
+        assert result.returncode == 2
+        assert message in result.stderr
         assert not data.exists()
 
     def test_package_help_exposes_distribution_selections(self) -> None:

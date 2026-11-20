@@ -19,6 +19,10 @@ if TYPE_CHECKING:
     from typing import TextIO
 
 
+class LoaderTimeout(SystemExit):
+    """A loader stage exhausted its deadline and exited with a diagnostic."""
+
+
 class LoaderEvents:
     """Write public progress without copying private session material."""
 
@@ -73,7 +77,9 @@ def record_events(
     except BaseException as error:
         status = 1
         cause = "unexpected-error"
-        if isinstance(error, SystemExit):
+        if isinstance(error, LoaderTimeout):
+            cause = "timeout"
+        elif isinstance(error, SystemExit):
             status = error.code if isinstance(error.code, int) else int(error.code is not None)
             cause = "interrupted" if status in (129, 130, 143) else "command-failed"
         elif isinstance(error, KeyboardInterrupt):

@@ -16,7 +16,7 @@ from fplinux_cli.manifests.paths import discover_profiles, normalize_profile
 from fplinux_cli.manifests.values import TARGET_NAME
 from fplinux_cli.runtime import bundle_session as runtime_bundle_session
 from fplinux_cli.runtime import live
-from fplinux_cli.runtime.bundle import admit_bundle
+from fplinux_cli.runtime.bundle import MICROSD_BOOT_PROFILE, admit_bundle
 from fplinux_cli.runtime.data_paths import checkout_runtime_root
 from fplinux_cli.runtime.keyboard import forward_keyboard, resolve_keyboard_target
 from fplinux_cli.runtime.operations import LiveRequest, SelectedConnection, execute_operation
@@ -88,12 +88,16 @@ def console_target(  # noqa: PLR0913 -- public CLI modes remain explicit.
     exec_command: str | None,
     upload: list[str] | None,
     pull: list[str] | None,
+    screenshot: Path | None = None,
     phone_data: Path | None = None,
     allow_other_build: bool = False,
     shutdown: bool = False,
+    card_cid: str | None = None,
 ) -> None:
     """Use the authenticated phone or forward one evdev keyboard over USB."""
     if keyboard is not None:
+        if card_cid is not None:
+            fail("--card cannot be combined with --keyboard")
         target = resolve_keyboard_target(target)
         bundle = None
         if not allow_other_build:
@@ -121,7 +125,9 @@ def console_target(  # noqa: PLR0913 -- public CLI modes remain explicit.
         exec_command=exec_command,
         upload=upload,
         pull=pull,
+        screenshot=screenshot,
         shutdown=shutdown,
+        card_cid=card_cid,
     )
 
 
@@ -131,10 +137,16 @@ def verify_booted(
     profile: str | None = None,
     build_type: str = "release",
     phone_data: Path | None = None,
+    card_cid: str | None = None,
 ) -> None:
     """Compare the running kernel identity with the current bundle."""
     _console(
-        target, profile=profile, build_type=build_type, phone_data=phone_data, verify_only=True
+        target,
+        profile=profile,
+        build_type=build_type,
+        phone_data=phone_data,
+        verify_only=True,
+        card_cid=card_cid,
     )
 
 
@@ -148,12 +160,24 @@ def _console(  # noqa: PLR0913 -- selection, policy and existing remote actions 
     exec_command: str | None = None,
     upload: list[str] | None = None,
     pull: list[str] | None = None,
+    screenshot: Path | None = None,
     verify_only: bool = False,
     shutdown: bool = False,
+    card_cid: str | None = None,
 ) -> None:
-    connection = _checkout_connection(target)
-    target = str(connection[1]["target"])
+    connection = None
+    if card_cid is None:
+        connection = _checkout_connection(target)
+        target = str(connection[1]["target"])
+    if target is None:
+        fail("--card requires an explicit TARGET")
     profile = normalize_profile(profile)
+    if card_cid is not None:
+        if profile is not None and profile != MICROSD_BOOT_PROFILE:
+            fail("--card selects the microsd-uboot profile")
+        if MICROSD_BOOT_PROFILE not in discover_profiles(target):
+            fail(f"{target} has no enrolled system microSD boot")
+        profile = MICROSD_BOOT_PROFILE
     if shutdown and profile is None:
         card_profiles = [name for name in discover_profiles(target) if name != "default"]
         if not card_profiles:
@@ -192,11 +216,13 @@ def _console(  # noqa: PLR0913 -- selection, policy and existing remote actions 
     status = execute_operation(
         LiveRequest(
             target=target,
+            card_cid=card_cid,
             phone_data=phone_data,
             allow_other_build=allow_other_build,
             exec_command=exec_command,
             upload=upload,
             pull=pull,
+            screenshot=screenshot,
             verify_only=verify_only,
             shutdown=shutdown,
         ),

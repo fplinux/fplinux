@@ -21,15 +21,15 @@ from fplinux_cli.device_data.formats import (
     PreparedGroup,
 )
 from fplinux_cli.device_data.inputs import capture_phone_data
-from fplinux_cli.device_data.nand_geometry import family_page_bytes
-from fplinux_cli.device_data.original_files import read_original_files
-from fplinux_cli.runtime.nand_backup import (
-    backup_receipt_path,
+from fplinux_cli.device_data.nand_backup import (
+    read_backup_bytes,
     read_backup_geometry,
     read_backup_record,
-    require_declared_chip,
     save_backup_bytes,
+    save_backup_without_receipt,
 )
+from fplinux_cli.device_data.nand_geometry import family_page_bytes, require_declared_chip
+from fplinux_cli.device_data.original_files import read_original_files
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -91,16 +91,6 @@ def _require_directory(path: Path, name: str) -> Path:
         except OSError as error:
             fail(f"{name} cannot be made private: {path}: {error}")
     return path
-
-
-def _read_dump(path: Path) -> bytes:
-    """Read one regular NAND backup without changing or replacing it."""
-    if path.is_symlink() or not path.is_file():
-        fail(f"NAND backup is missing or invalid: {path}")
-    try:
-        return path.read_bytes()
-    except OSError as error:
-        fail(f"NAND backup cannot be read: {path}: {error}")
 
 
 def dump_page_bytes(
@@ -192,7 +182,7 @@ def _nand_main_decoder(
 
 def read_physical_nand(spec: DeviceDataSpec, backup: Path, tools: DeviceDataTools) -> PhysicalNand:
     """Admit a complete backup and its geometry before any parser can consume it."""
-    raw = _read_dump(backup)
+    raw = read_backup_bytes(backup)
     page_bytes = dump_page_bytes(spec.target, spec.nand, read_backup_geometry(backup, raw))
     main_decoder = None
     correction_bits = 0
@@ -234,9 +224,7 @@ def import_phone_backup(
         geometry = record.geometry
         selected_recipe = acquisition_recipe or record.acquisition_recipe
     elif acquisition_recipe is None:
-        replace_file_atomically(destination, physical.raw, 0o600)
-        backup_receipt_path(destination).unlink(missing_ok=True)
-        return destination
+        return save_backup_without_receipt(destination, physical.raw)
     else:
         declared_id = None if spec.nand is None else spec.nand.get("id")
         if declared_id is None:

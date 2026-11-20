@@ -47,6 +47,11 @@ def main() -> int:  # noqa: PLR0911 -- each branch supplies a distinct external 
     if command.startswith("set -eu\n"):
         _upload(command)
     if command.startswith("fplinux-session-id && uname -r && "):
+        if rejected := os.environ.get("FPLINUX_TEST_AUTH_REJECTED"):
+            diagnostic = "controlled SSH authentication refusal"
+            Path(rejected).write_text(diagnostic)
+            print(diagnostic, file=sys.stderr)
+            return 255
         if active := os.environ.get("FPLINUX_TEST_ACTIVE_SESSION"):
             session = json.loads(Path(Path(active).read_text()).read_text())
             print(session["session_id"])

@@ -134,7 +134,6 @@ def build_archive_inputs(
         "fplinux",
         "third-party-licenses/musl/COPYRIGHT",
         "common/60-fplinux.rules",
-        "common/runtime.py",
         "common/Run.sh",
         "common/Run.cmd",
         "common/Run-debug.cmd",
@@ -169,11 +168,10 @@ def build_archive_inputs(
     shutil.copytree(source / "scripts/fplinux_cli", tmp_path / "scripts/fplinux_cli")
     shutil.copytree(source / "alpine/aports", tmp_path / "alpine/aports")
     windows_scripts = {}
-    for resource in sorted((source / "common/windows").rglob("*.ps1")):
-        relative = resource.relative_to(source).as_posix()
-        contents = resource.read_bytes()
-        windows_scripts[relative] = contents
-        write_archive_file(tmp_path, relative, contents)
+    powershell = source / "scripts/fplinux_cli/runtime/windows/powershell"
+    for resource in sorted(powershell.rglob("*.ps1")):
+        relative = resource.relative_to(powershell).as_posix()
+        windows_scripts[f"common/windows/{relative}"] = resource.read_bytes()
     generation = "c" * 64
     bundle = tmp_path / ".data/out" / target / "builds/release/bundles" / generation
     monkeypatch.setattr(package, "load_alpine_lock", lambda _root: lock)

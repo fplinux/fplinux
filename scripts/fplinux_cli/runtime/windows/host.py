@@ -128,7 +128,12 @@ def exact_usb_devices(snapshot: dict[str, Any], vendor: int, product: int) -> li
     return sorted({item["id"] for item in snapshot["devices"] if pattern.fullmatch(item["id"])})
 
 
-def bound_interface(snapshot: dict[str, Any], session: dict[str, Any]) -> int | None:
+def bound_interface(
+    snapshot: dict[str, Any],
+    session: dict[str, Any],
+    *,
+    on_rndis: Callable[[], None] | None = None,
+) -> int | None:
     """Require the exact RNDIS ancestry, MAC and private DHCP endpoint."""
     vendor, product = session["vendor_id"], session["product_id"]
     root_pattern = re.compile(
@@ -136,10 +141,11 @@ def bound_interface(snapshot: dict[str, Any], session: dict[str, Any]) -> int | 
         rf"{session['usb_serial']}\Z",
         re.IGNORECASE,
     )
+    host_mac = None if session.get("card_access") else session["host_mac"]
     candidates = [
         adapter
         for adapter in snapshot["adapters"]
-        if adapter["mac"].replace("-", ":").lower() == session["host_mac"]
+        if (host_mac is None or adapter["mac"].replace("-", ":").lower() == host_mac)
         and any(root_pattern.fullmatch(item) for item in adapter["lineage"])
     ]
     if len(candidates) > 1:
@@ -156,6 +162,8 @@ def bound_interface(snapshot: dict[str, Any], session: dict[str, Any]) -> int | 
         for value in adapter["compatible"]
     ):
         fail("The selected USB network adapter is not using the Windows RNDIS driver")
+    if on_rndis is not None:
+        on_rndis()
     index = int(adapter["index"])
     routes = snapshot["routes"]
     if any(route["index"] == index and route["prefix"] == "0.0.0.0/0" for route in routes):
@@ -232,7 +240,14 @@ class WindowsHost:
         cancelled: Callable[[], bool] | None = None,
     ) -> dict[str, Any]:
         """Run one packaged PowerShell file with literal arguments and JSON output."""
-        source = Path(__file__).resolve().parents[4] / "common/windows" / script
+        module = Path(__file__).resolve()
+        root = module.parents[4]
+        # Both delivered launchers use the root entry point and keep their PowerShell paths.
+        if (root / "fplinux.py").is_file():
+            scripts = root / "common/windows"
+        else:
+            scripts = module.with_name("powershell")
+        source = scripts / script
         if not source.is_file():
             fail(f"Windows command file is missing: {source}")
         argv = [
@@ -272,11 +287,11 @@ class WindowsHost:
         return value
 
     def network_snapshot(self, session: dict[str, Any], *, timeout: float = 20) -> dict[str, Any]:
-        """Inspect session-MAC adapters and retain the complete IPv4 route table."""
+        """Inspect the bound USB adapters and retain the complete IPv4 route table."""
+        host_mac = None if session.get("card_access") else session["host_mac"]
         return self.ps(
             "network.ps1",
-            "-HostMac",
-            session["host_mac"],
+            *(("-HostMac", host_mac) if host_mac is not None else ()),
             "-UsbSerial",
             session["usb_serial"],
             "-VendorId",

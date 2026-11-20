@@ -5,18 +5,39 @@ from __future__ import annotations
 
 import json
 import re
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, TypedDict
 
-from fplinux_cli.common import fail
-from fplinux_cli.manifests.source_catalog import resolve_source
+from fplinux_cli.common import fail, load_toml
+from fplinux_cli.manifests.source_catalog import resolve_source_record
 
 from .inputs import DependencyInput, npm_declarations, source_input
 
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from fplinux_cli.manifests.source_catalog import ResolvedSource
 
-def _consumer(root: Path) -> dict[str, str]:
+
+class SiteConsumer(TypedDict):
+    """Runtime identity and platform for the site lock."""
+
+    node: str
+    npm: str
+    platform: str
+    arch: str
+    libc: str
+
+
+def site_runtime_sources(root: Path) -> tuple[ResolvedSource, ResolvedSource]:
+    """Resolve both runtime originals from the same source catalog."""
+    catalog = load_toml(root / "sources.lock.toml")
+    return (
+        resolve_source_record("site-node", catalog.get("site-node")),
+        resolve_source_record("npm", catalog.get("npm")),
+    )
+
+
+def _consumer(root: Path, node: ResolvedSource, npm: ResolvedSource) -> SiteConsumer:
     """Select the same preserved Node and npm releases for local and Pages installs."""
     engines = json.loads((root / "package.json").read_text(encoding="utf-8")).get("engines")
     if not isinstance(engines, dict) or any(
@@ -25,9 +46,9 @@ def _consumer(root: Path) -> dict[str, str]:
         for name in ("node", "npm")
     ):
         fail("root package must declare exact Node.js and npm versions")
-    if resolve_source(root, "site-node").version != engines["node"]:
+    if node.version != engines["node"]:
         fail("documentation Node original must match the root package's exact version")
-    if resolve_source(root, "npm").version != engines["npm"]:
+    if npm.version != engines["npm"]:
         fail("documentation npm original must match the root package's exact version")
     return {
         "node": engines["node"],
@@ -38,7 +59,7 @@ def _consumer(root: Path) -> dict[str, str]:
     }
 
 
-def site_dependency_selection(root: Path) -> tuple[list[DependencyInput], dict[str, object]]:
+def site_dependency_selection(root: Path) -> tuple[list[DependencyInput], dict[str, Any]]:
     """Select every locked registry archive without querying a package index."""
     context, inputs = npm_declarations(
         root / "site/package-lock.json",
@@ -46,5 +67,6 @@ def site_dependency_selection(root: Path) -> tuple[list[DependencyInput], dict[s
         cache_directory="downloads/site/npm",
         purpose="site-npm-package",
     )
-    inputs.extend(source_input(resolve_source(root, source)) for source in ("site-node", "npm"))
-    return inputs, {"consumer": _consumer(root), "npm": context}
+    node, npm = site_runtime_sources(root)
+    inputs.extend((source_input(node), source_input(npm)))
+    return inputs, {"consumer": _consumer(root, node, npm), "npm": context}

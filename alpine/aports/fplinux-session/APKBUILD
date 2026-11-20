@@ -61,6 +61,7 @@ source="
 	fplinux-clock-wire.c
 	fplinux-clock-wire.h
 	clock-signal.c
+	screenshot.c
 	fplinux-session
 	fplinux-session.initd
 	weston.ini
@@ -140,6 +141,8 @@ build() {
 		-I"$srcdir" clock-signal.c session-vibrator.c \
 		fplinux-audio-client.c fplinux-cli.c \
 		-lm $LDFLAGS -o clock-signal
+	"$CC" $CPPFLAGS $CFLAGS -Os -std=c11 -Wall -Wextra -Werror \
+		screenshot.c $LDFLAGS -o screenshot
 }
 
 package() {
@@ -150,6 +153,7 @@ package() {
 	install -Dm755 "$srcdir/fplinux-session.initd" "$pkgdir/etc/init.d/fplinux-session"
 	install -Dm755 "$builddir/preparation" "$pkgdir/usr/libexec/fplinux/preparation"
 	install -Dm755 "$builddir/clock-signal" "$pkgdir/usr/libexec/fplinux/clock-signal"
+	install -Dm755 "$builddir/screenshot" "$pkgdir/usr/libexec/fplinux/screenshot"
 	install -Dm644 "$srcdir/weston.ini" "$pkgdir/etc/fplinux/weston.ini"
 	install -Dm644 "$srcdir/10-fplinux.quirks" \
 		"$pkgdir/usr/share/fplinux/libinput/10-fplinux.quirks"
@@ -211,6 +215,7 @@ eaa30b6f75ba81bc9c4a457f12053b22a427c0b8afef79b27cb5e83502034de2694755468635f74d
 1fa09e779caa36098a972daaf3a5fae450d687c0a1bcb6d8f99dc3417b4a50c4fd3354a63e5bad60bedfe72c448b6e6130a8cbdfd3c820077180ee5e8fb9ccb6  fplinux-clock-wire.c
 0d64a859bd7e3804feefd5a03ae1b40d5fef59e4b2156877c7bee95cc29f42e9f4fa89776cebaea2a153d4408d09cd67f727ce46753922a8be974843ec1cd6d1  fplinux-clock-wire.h
 3480003e1eef1f3bb8958a917d6e38aaa33e85f7beb249cd9ff9b9acc8e7cc7c255cc32a72037139ff0f5d31c27cb511d7796e92536d6f2ecd17d108dc2d7a5b  clock-signal.c
+8019a820bdd9f7b3cd6b4f21ba66780e3a5b2fc2c6e59b3b35dc706d496f7eeb3c0745163fc40af7855f15ef978c4aa00bc02226f7f6ce58ffff74890ad81050  screenshot.c
 a92ee71c17395912f8c4fbd93fafc40d573ecb9411423d165f50b2e3b39ff07d95d781c49b7ab3e9c8ba053fac3aa18b4af072981a2a2931b60bf74b49f81a71  fplinux-session
 f246a7f8c70514a3758a0c79ab67deaa68fcf193330ea8c77141da2e6d7d7e24313216a1a92540be16e94de376728c0542dd1ddf8f0a65f017edf75bd7fd88cb  fplinux-session.initd
 ae69b5c4cfee0889018c3e232b4f342e5bc7fdc0ffb2fbabdd5b3b80bdb42e9ffd0600822c8155853159c90df122f1969ea65b701f26464f10b0ecc1e013f529  weston.ini

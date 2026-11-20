@@ -10,14 +10,13 @@ from typing import TYPE_CHECKING, Any
 
 from fplinux_cli.common import canonical_json_bytes, fail, sha256_bytes, sha256_file
 from fplinux_cli.device_data.inputs import capture_phone_data
-from fplinux_cli.runtime.nand_backup import read_backup_record, require_declared_chip
 
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from fplinux_cli.device_data.nand_backup import BackupRecord
     from fplinux_cli.device_data.original_files import OriginalFilesSource
     from fplinux_cli.device_data.prepare import DeviceDataSpec, DeviceDataTools
-    from fplinux_cli.runtime.nand_backup import BackupRecord
 
 
 def preparation_identity(spec: DeviceDataSpec, tools: DeviceDataTools) -> str:
@@ -35,31 +34,6 @@ def preparation_identity(spec: DeviceDataSpec, tools: DeviceDataTools) -> str:
     return sha256_bytes(
         canonical_json_bytes({"implementation": spec.preparation_recipe, "native_ecc": native})
     )
-
-
-def current_backup(backup: Path, *, target: str, nand: dict[str, Any]) -> BackupRecord | None:
-    """Treat an absent, incompatible or incomplete acquisition record as a cache miss."""
-    if not backup.is_file() or backup.is_symlink():
-        return None
-    raw = backup.read_bytes()
-    try:
-        record = read_backup_record(backup, raw)
-        if (
-            record is None
-            or record.target != target
-            or record.acquisition_recipe != nand["acquisition_recipe"]
-        ):
-            return None
-        require_declared_chip(
-            record.geometry,
-            target=target,
-            declared_id=nand.get("id"),
-            declared_raw_page_bytes=nand.get("raw_page_bytes"),
-            source="saved NAND backup",
-        )
-    except SystemExit:
-        return None
-    return record
 
 
 def prepared_data_current(

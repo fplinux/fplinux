@@ -9,8 +9,9 @@ from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any
 
 import pytest
-from fplinux_cli.device_data.cache import current_backup, prepared_data_current
+from fplinux_cli.device_data.cache import prepared_data_current
 from fplinux_cli.device_data.formats import AudioProfileContext
+from fplinux_cli.device_data.nand_backup import current_backup
 from fplinux_cli.device_data.prepare import DeviceDataSpec, DeviceDataTools
 
 if TYPE_CHECKING:

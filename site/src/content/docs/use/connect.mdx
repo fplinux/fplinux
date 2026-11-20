@@ -109,6 +109,37 @@ Run.cmd console nokia-ta1618 --exec "uname -r"
 
 Stopping the local `--exec` client can leave a silent command running on the phone. Use bounded commands where possible. If you interrupt one, reconnect and stop that command explicitly before ending the session.
 
+## Save a screenshot
+
+Use `--screenshot FILE` with a running phone to save its primary DRM scanout as a binary PPM image on the computer.
+
+<Tabs syncKey="source">
+	<TabItem label="Source checkout">
+
+```sh title="PC"
+./fplinux console <target> --screenshot screen.ppm
+```
+
+    </TabItem>
+    <TabItem label="Linux ZIP">
+
+```sh title="PC"
+sh Run.sh console nokia-ta1618 --screenshot screen.ppm
+```
+
+    </TabItem>
+    <TabItem label="Windows ZIP">
+
+```bat title="PC"
+Run.cmd console nokia-ta1618 --screenshot screen.ppm
+```
+
+    </TabItem>
+
+</Tabs>
+
+Capture requires a single active display on `/dev/dri/card0` with a readable, linear RGB565 framebuffer at the display size. It records pixels before the physical panel's brightness and color settings. The destination directory must exist. A successful capture replaces the destination file with the complete frame. If the capture fails, an existing file is preserved.
+
 ## Copy files
 
 <FeatureStatus feature="file-transfer" />

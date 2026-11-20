@@ -335,6 +335,7 @@ def command_action(
             exec_command=args.exec_command,
             upload=args.upload,
             pull=args.pull,
+            screenshot=args.screenshot,
             allow_other_build=args.allow_other_build,
             shutdown=args.shutdown,
         )
@@ -418,4 +419,6 @@ def command_action(
     if phone_data is not None:
         # This selector is exposed only by parsers whose backends accept it.
         action = partial(cast("Callable[..., None]", action), phone_data=phone_data)
+    if args.command in {"console", "verify"} and getattr(args, "card", None) is not None:
+        action = partial(cast("Callable[..., None]", action), card_cid=args.card)
     return action

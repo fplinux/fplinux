@@ -210,6 +210,29 @@ def test_auto_console_uses_the_exact_connected_binding_and_independent_log_overr
     assert list(bundle.parent.iterdir()) == [bundle]
 
 
+@pytest.mark.parametrize("command", ["verify", "console"])
+def test_enrolled_card_selects_the_system_boot_artifacts_in_the_archive(
+    archive: Path, command: str
+) -> None:
+    cid = "0123456789abcdef0123456789abcdef"
+    console_action = ["--exec", "id"] if command == "console" else []
+
+    unavailable = _launch(archive, command, "opal", "--card", cid, *console_action)
+    assert unavailable.returncode == 2
+    assert "opal has no system microSD boot in this archive" in unavailable.stderr
+    assert not (archive / "runtime data/runtime/archive-bundles").exists()
+
+    result = _launch(archive, command, "jade", "--card", cid, *console_action)
+    assert result.returncode == 23, (result.stdout, result.stderr)
+    action = _record(result)
+    assert action["target"] == "jade"
+    assert action["profile"] == "microsd-uboot"
+    assert action["card_cid"] == cid
+    assert action["verify_only"] == (command == "verify")
+    assert action["exec_command"] == ("id" if command == "console" else None)
+    assert (Path(action["bundle"]) / "ramboot.bin").read_bytes() == b"Jade microSD Stage0"
+
+
 def _add_windows_recipe(archive: Path, target: str) -> str:
     """Add independently generated Windows metadata, including both shared and object members."""
     catalog_path = archive / "targets.json"

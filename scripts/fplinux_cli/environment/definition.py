@@ -18,6 +18,8 @@ if TYPE_CHECKING:
 
 
 ENVIRONMENT_RECIPE_INPUTS = (
+    "scripts/fplinux_cli/__init__.py",
+    "scripts/fplinux_cli/environment/__init__.py",
     "scripts/fplinux_cli/environment/setup.py",
     "scripts/fplinux_cli/environment/definition.py",
     "scripts/fplinux_cli/environment/runtime.py",
@@ -26,6 +28,8 @@ ENVIRONMENT_RECIPE_INPUTS = (
     "scripts/fplinux_cli/environment/downloads.py",
     "scripts/fplinux_cli/environment/rootfs.py",
     "scripts/fplinux_cli/environment/install.py",
+    "scripts/fplinux_cli/environment/archives.py",
+    "scripts/fplinux_cli/environment/node_runtime.py",
     "scripts/fplinux_cli/environment/install/prepare.sh",
     "scripts/fplinux_cli/environment/image_content.py",
     "scripts/fplinux_cli/environment/install_wheels.py",

@@ -130,6 +130,25 @@ def test_release_launcher_and_reconstructed_runtime_work_without_the_checkout(
     assert "--loader-trace" in help_result.stdout
     assert "--loader-inputs" not in help_result.stdout
     assert "--ssh" not in help_result.stdout
+    card_help = run_process(
+        [sys.executable, "-B", "-I", str(root / "fplinux.py"), "verify", "--help"],
+        name="release enrolled card help",
+        cwd=root,
+        env={},
+        timeout=10,
+    )
+    assert card_help.returncode == 0, card_help.stderr
+    assert "--card CID" in card_help.stdout
+
+    console_help = run_process(
+        [sys.executable, "-B", "-I", str(root / "fplinux.py"), "console", "--help"],
+        name="release screenshot help",
+        cwd=root,
+        env={},
+        timeout=10,
+    )
+    assert console_help.returncode == 0, console_help.stderr
+    assert "--screenshot FILE" in console_help.stdout
 
     events = root.parent / "events.jsonl"
     result = run_process(

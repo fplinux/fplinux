@@ -243,6 +243,19 @@ def test_emmc_preparation_ignores_unselected_catalog_records(emmc_inputs: EmmcIn
     assert emmc_inputs.acquisition() == acquisition
 
 
+def test_nand_receipt_changes_do_not_invalidate_emmc_originals_or_preparation(
+    emmc_inputs: EmmcInputs,
+) -> None:
+    acquisition = emmc_inputs.acquisition()
+    preparation = emmc_inputs.preparation()
+    nand = emmc_inputs.root / "scripts/fplinux_cli/device_data/nand_backup.py"
+
+    nand.write_bytes(b"def read_backup_record():\n    return 'changed'\n")
+
+    assert emmc_inputs.acquisition() == acquisition
+    assert emmc_inputs.preparation() == preparation
+
+
 def test_delivered_preparation_uses_explicit_captured_catalog_without_shipping_it(
     emmc_inputs: EmmcInputs, tmp_path: Path
 ) -> None:

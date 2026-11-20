@@ -275,14 +275,6 @@ def archive_files(directory: Path, *, platform: str = "ums9117") -> Path:
         "driver": "tools/driver/wdi-simple.exe",
     }
     hashes = {}
-    for source in sorted((ROOT / "common/windows").rglob("*.ps1")):
-        relative = source.relative_to(ROOT).as_posix()
-        payload = source.read_bytes()
-        destination = directory / relative
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        destination.write_bytes(payload)
-        if relative not in runtime["sha256"]:
-            hashes[relative] = hashlib.sha256(payload).hexdigest()
     for role, relative in tools.items():
         destination = directory / relative
         destination.parent.mkdir(parents=True, exist_ok=True)

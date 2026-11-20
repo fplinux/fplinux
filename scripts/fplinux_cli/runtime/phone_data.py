@@ -401,10 +401,8 @@ def prepare_phone_data(  # noqa: PLR0913 -- preparation inputs and their state o
     retain_reader: bool = False,
 ) -> bool:
     """Refresh shared data and report whether a preparation session ran."""
-    from fplinux_cli.device_data.cache import (  # noqa: PLC0415 -- selected preparation.
-        current_backup,
-        prepared_data_current,
-    )
+    from fplinux_cli.device_data.cache import prepared_data_current  # noqa: PLC0415
+    from fplinux_cli.device_data.nand_backup import current_backup  # noqa: PLC0415
     from fplinux_cli.device_data.prepare import (  # noqa: PLC0415
         import_phone_backup,
         prepare_from_nand,
@@ -574,11 +572,11 @@ def phone_preparation_current(
 ) -> bool:
     """Use the acquisition contract matching the selected medium before reconnecting."""
     from fplinux_cli.device_data.cache import (  # noqa: PLC0415
-        current_backup,
         current_original_files,
         prepared_data_current,
         prepared_originals_current,
     )
+    from fplinux_cli.device_data.nand_backup import current_backup  # noqa: PLC0415
 
     tools = _phone_data_tools(admitted)
     if spec.emmc is not None:

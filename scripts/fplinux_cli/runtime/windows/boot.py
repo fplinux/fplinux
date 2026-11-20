@@ -267,7 +267,10 @@ def boot_archive(  # noqa: PLR0913 -- native loading inputs have separate owners
         wait_seconds = bundle.runtime["usb"]["linux_gadget"]["wait_seconds"]
         transport = WindowsTransport(host, bundle.tools, wait_seconds=wait_seconds)
         transport.authenticate(
-            session, expected_device_identity=bundle.device_identity, timeout=wait_seconds
+            session,
+            expected_device_identity=bundle.device_identity,
+            timeout=wait_seconds,
+            events=events,
         )
         ready = True
         transport.retire_previous_sessions(session)

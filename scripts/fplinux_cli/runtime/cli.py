@@ -95,6 +95,10 @@ def add_session_commands(
                     metavar="NAME",
                     help="select this build profile",
                 )
+            if command is not run:
+                command.add_argument(
+                    "--card", metavar="CID", help="connect to this enrolled system microSD card"
+                )
         _add_phone_data_argument(command)
     _add_loader_arguments(run)
     console.add_argument(
@@ -121,6 +125,7 @@ def add_session_commands(
         metavar=("REMOTE", "LOCAL"),
         help=argparse.SUPPRESS if os.name == "nt" else "copy one file from an absolute phone path",
     )
+    remote.add_argument("--screenshot", type=Path, metavar="FILE", help="save a PPM screenshot")
     return run, console, verify
 
 
@@ -140,6 +145,7 @@ def session_request(options: argparse.Namespace) -> RunRequest | LiveRequest:
     return LiveRequest(
         target=target,
         boot=boot,
+        card_cid=getattr(options, "card", None),
         phone_data=options.phone_data,
         verify_only=options.command == "verify",
         allow_other_build=getattr(options, "allow_other_build", False),
@@ -147,6 +153,7 @@ def session_request(options: argparse.Namespace) -> RunRequest | LiveRequest:
         exec_command=getattr(options, "exec_command", None),
         upload=getattr(options, "upload", None),
         pull=getattr(options, "pull", None),
+        screenshot=getattr(options, "screenshot", None),
     )
 
 
@@ -157,6 +164,11 @@ def validate_session_request(
     error = session_selection_error(request, system_card_profile=profile == MICROSD_BOOT_PROFILE)
     if error is not None:
         parser.error(error)
+    if isinstance(request, LiveRequest) and request.card_cid is not None:
+        if profile is not None and profile != MICROSD_BOOT_PROFILE:
+            parser.error("--card selects the microsd-uboot profile")
+        if getattr(options, "keyboard", None) is not None:
+            parser.error("--card cannot be combined with --keyboard")
     if (
         isinstance(request, LiveRequest)
         and request.allow_other_build

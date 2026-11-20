@@ -22,6 +22,7 @@ from fplinux_cli.runtime.windows import host as windows_host
 from tests.windows_host_support import StubWindowsHost
 
 if TYPE_CHECKING:
+    from fplinux_cli.runtime.operations import BundlePaths, LiveRequest
     from fplinux_cli.runtime.workflow import CardInspector
 
 
@@ -52,6 +53,18 @@ def saved_binding(target: str, *, runtime_root: Path) -> dict[str, str] | None:
     """Read a controlled Linux session at the location requested by discovery."""
     saved = runtime_root / f"{target}.json"
     return json.loads(saved.read_bytes()) if saved.is_file() else None
+
+
+def record_enrolled_card(request: LiveRequest, paths: BundlePaths) -> int:
+    """Observe which artifacts and selection reach the common card operation."""
+    return record_action(
+        paths.bundle,
+        paths.data,
+        paths.logs,
+        card_cid=request.card_cid,
+        verify_only=request.verify_only,
+        exec_command=request.exec_command,
+    )
 
 
 def connected(binding: dict[str, str]) -> bool:
@@ -100,6 +113,7 @@ if __name__ == "__main__":
         ExitStack() as platform,
         patch.object(workflow, "run_phone", record_action),
         patch.object(live, "console_bundle", record_action),
+        patch.object(live, "console_card", record_enrolled_card),
         card_boundary,
     ):
         if os.environ.get("FPLINUX_TEST_WINDOWS"):

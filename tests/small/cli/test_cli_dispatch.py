@@ -141,7 +141,14 @@ class CliCacheLockTests:
         lock.assert_not_called()
 
     @pytest.mark.parametrize(
-        "option", [["--exec", "id"], ["--allow-other-build"], ["--json"], ["--shutdown"]]
+        "option",
+        [
+            ["--exec", "id"],
+            ["--allow-other-build"],
+            ["--json"],
+            ["--shutdown"],
+            ["--screenshot", "x"],
+        ],
     )
     def test_verify_rejects_actions_and_diagnostic_options(
         self, option: list[str], capsys: pytest.CaptureFixture[str]
@@ -170,7 +177,20 @@ class CliCacheLockTests:
         assert console.call_args.args == ("target",)
         assert console.call_args.kwargs["shutdown"] is True
 
-    @pytest.mark.parametrize("option", [("--exec", "id"), ("--allow-other-build",)])
+    def test_console_forwards_screenshot_to_expected_target(self, dispatch_root: Path) -> None:
+        """The checkout forwards the screenshot destination with its explicit target."""
+        _events, console = run_dispatch(
+            dispatch_root,
+            ["console", "target", "--screenshot", "screen.ppm"],
+            "fplinux_cli.cli.runtime.console_target",
+        )
+
+        assert console.call_args.args == ("target",)
+        assert console.call_args.kwargs["screenshot"] == Path("screen.ppm")
+
+    @pytest.mark.parametrize(
+        "option", [("--exec", "id"), ("--allow-other-build",), ("--screenshot", "screen.ppm")]
+    )
     def test_shutdown_refuses_console_action_or_build_bypass_before_locking(
         self, option: tuple[str, ...], capsys: pytest.CaptureFixture[str]
     ) -> None:

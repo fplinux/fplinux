@@ -161,6 +161,19 @@ def test_another_usb_or_dhcp_endpoint_does_not_match(tmp_path: Path, mismatch: s
     assert bound_interface(snapshot, endpoint_session(tmp_path / "session")) is None
 
 
+def test_enrolled_card_requires_exact_usb_ancestry_with_the_saved_dhcp_binding(
+    tmp_path: Path,
+) -> None:
+    snapshot = endpoint_snapshot()
+    session = endpoint_session(tmp_path / "card")
+    session.pop("host_mac")
+    session["card_access"] = True
+    assert bound_interface(snapshot, session) == 17
+
+    snapshot["adapters"][0]["lineage"][-1] = "USB\\VID_0525&PID_A4A6\\another-phone"
+    assert bound_interface(snapshot, session) is None
+
+
 @pytest.mark.parametrize(
     "route",
     [

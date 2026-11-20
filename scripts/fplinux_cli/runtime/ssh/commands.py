@@ -91,7 +91,9 @@ def ssh_options(session: dict[str, Any], *, connect_timeout: int = 5) -> list[st
     for name, value in _ssh_option_values(session, connect_timeout=connect_timeout):
         rendered = value
         if name in {"IdentityFile", "UserKnownHostsFile"}:
-            rendered = ssh_config_value(value)
+            if session.get("card_access"):
+                rendered = rendered.replace("%", "%%")
+            rendered = ssh_config_value(rendered)
         arguments.extend(("-o", f"{name}={rendered}"))
     return arguments
 

@@ -7,48 +7,58 @@ import os
 import subprocess
 import tempfile
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-from fplinux_cli import common
 from fplinux_cli.common import canonical_json_bytes, fail, sha256_bytes, sha256_file
-from fplinux_cli.data_paths import DATA_ENV, data_root
-from fplinux_cli.dependencies.inputs import acquire_inputs
-from fplinux_cli.dependencies.site_inputs import site_dependency_selection
-from fplinux_cli.environment.install import install_node_runtime, populate_npm_cache
-from fplinux_cli.manifests.source_catalog import resolve_source
+from fplinux_cli.data_paths import DATA_ENV
+from fplinux_cli.environment.node_runtime import install_node_runtime, populate_npm_cache
+
+from .inputs import source_input
+from .site_inputs import site_runtime_sources
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping, Sequence
+
+    from .inputs import DependencyInput
+    from .site_inputs import SiteConsumer
 
 
 def site_runtime(root: Path, cache: Path) -> Path:
     """Resolve the runtime owned by the current Node and npm declarations."""
-    node = resolve_source(root, "site-node")
-    npm = resolve_source(root, "npm")
+    node, npm = site_runtime_sources(root)
+    return _runtime_path(root, cache, source_input(node), source_input(npm))
+
+
+def _runtime_path(root: Path, cache: Path, node: DependencyInput, npm: DependencyInput) -> Path:
+    environment = root / "scripts/fplinux_cli/environment"
     recipe = sha256_bytes(
         canonical_json_bytes(
             {
-                "node": node.checksum,
-                "npm": npm.checksum,
-                "installation": sha256_file(Path(__file__)),
-                "shared_runtime": sha256_file(root / "scripts/fplinux_cli/environment/install.py"),
+                "node": (node.algorithm, node.checksum or node.sha256),
+                "npm": (npm.algorithm, npm.checksum or npm.sha256),
+                "installation": sha256_file(environment / "node_runtime.py"),
+                "extraction": sha256_file(environment / "archives.py"),
             }
         )
     )
     return cache / "site/runtime" / recipe
 
 
-def install_site(*, cache: Path | None = None) -> None:
-    """Prepare exact Node/npm and feed the site's native lock into an offline install."""
-    root = common.ROOT
-    cache = data_root(root) if cache is None else cache
-    inputs, _context = site_dependency_selection(root)
-    local = acquire_inputs(inputs, cache, offline=True)
-    node = resolve_source(root, "site-node")
-    npm = resolve_source(root, "npm")
-    runtimes = cache / "site/runtime"
-    runtimes.mkdir(parents=True, exist_ok=True)
-    runtime = site_runtime(root, cache)
+def install_site(
+    root: Path,
+    cache: Path,
+    inputs: Sequence[DependencyInput],
+    originals: Mapping[str, Path],
+    consumer: SiteConsumer,
+) -> None:
+    """Install pinned tooling and the native site lock from already admitted originals."""
+    by_key = {item.key: item for item in inputs}
+    runtime = _runtime_path(root, cache, by_key["source:site-node"], by_key["source:npm"])
+    runtime.parent.mkdir(parents=True, exist_ok=True)
     if not runtime.exists():
-        with tempfile.TemporaryDirectory(dir=runtimes, prefix=".node-") as temporary:
+        with tempfile.TemporaryDirectory(dir=runtime.parent, prefix=".node-") as temporary:
             prepared = Path(temporary) / "runtime"
-            install_node_runtime(local["source:site-node"], local["source:npm"], prepared)
+            install_node_runtime(originals["source:site-node"], originals["source:npm"], prepared)
             prepared.rename(runtime)
     environment = {
         **os.environ,
@@ -56,7 +66,10 @@ def install_site(*, cache: Path | None = None) -> None:
         "PATH": str(runtime / "bin") + os.pathsep + os.environ.get("PATH", ""),
     }
     node_command, npm_command = runtime / "bin/node", runtime / "bin/npm"
-    for command, expected in ((node_command, f"v{node.version}"), (npm_command, npm.version)):
+    for command, expected in (
+        (node_command, f"v{consumer['node']}"),
+        (npm_command, consumer["npm"]),
+    ):
         result = subprocess.run(
             [str(command), "--version"],
             env=environment,
@@ -67,7 +80,7 @@ def install_site(*, cache: Path | None = None) -> None:
         if result.returncode or result.stdout.strip() != expected:
             fail(f"preserved documentation runtime has an unexpected version: {command.name}")
     npm_cache = cache / "site/npm-cache"
-    archives = [local[item.key] for item in inputs if item.purpose == "site-npm-package"]
+    archives = [originals[item.key] for item in inputs if item.purpose == "site-npm-package"]
     populate_npm_cache(npm_command, npm_cache, archives)
     installed = subprocess.run(
         [

@@ -53,6 +53,7 @@ from .runtime import (
 
 if TYPE_CHECKING:
     from fplinux_cli.dependencies.inputs import DependencyInput
+    from fplinux_cli.dependencies.site_inputs import SiteConsumer
 
     from .state import EnvironmentState
 
@@ -106,6 +107,7 @@ def prepare_setup(  # noqa: PLR0913 -- public preparation selectors and environm
     """Prepare selected originals and their current local consumers without an export."""
     cache = data_root(ROOT)
     reporter = RunReporter.create("setup", target=target, verbose=False, selected_data_root=cache)
+    site_consumer: SiteConsumer | None = None
     if site or all_inputs:
         if all_inputs:
             from fplinux_cli.dependencies.workflow import (  # noqa: PLC0415 -- complete inventory only.
@@ -113,7 +115,8 @@ def prepare_setup(  # noqa: PLR0913 -- public preparation selectors and environm
             )
 
             with reporter.stage("setup-selection"):
-                inputs, _context = checkout_declarations()
+                inputs, context = checkout_declarations()
+                site_consumer = context["site"]["consumer"]
             setup_command = "./fplinux setup --all"
         else:
             from fplinux_cli.dependencies.site_inputs import (  # noqa: PLC0415 -- site-only selection.
@@ -121,7 +124,8 @@ def prepare_setup(  # noqa: PLR0913 -- public preparation selectors and environm
             )
 
             with reporter.stage("setup-selection"):
-                inputs, _context = site_dependency_selection(ROOT)
+                inputs, site_context = site_dependency_selection(ROOT)
+                site_consumer = site_context["consumer"]
             setup_command = "./fplinux setup --site"
     elif target is not None:
         with reporter.stage("setup-selection"):
@@ -130,18 +134,21 @@ def prepare_setup(  # noqa: PLR0913 -- public preparation selectors and environm
     else:
         inputs = []
         setup_command = "./fplinux setup"
+    originals = {}
     if inputs:
         with reporter.stage("setup-inputs"):
-            _acquire_setup_inputs(inputs, cache, offline=offline, setup_command=setup_command)
+            originals = _acquire_setup_inputs(
+                inputs, cache, offline=offline, setup_command=setup_command
+            )
     if not site:
         setup(force=force, offline=offline, reporter=reporter, cache=cache)
-    if site or all_inputs:
+    if site_consumer is not None:
         from fplinux_cli.dependencies.site_install import (  # noqa: PLC0415 -- documentation consumer only.
             install_site,
         )
 
         with reporter.stage("site-install"):
-            install_site(cache=cache)
+            install_site(ROOT, cache, inputs, originals, site_consumer)
     reporter.finish()
 
 
