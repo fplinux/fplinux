@@ -14,45 +14,26 @@
 #include <media/v4l2-fwnode.h>
 #include <media/v4l2-mediabus.h>
 
-#include "bf30a2-regs.h"
+#include "bf30a2-internal.h"
 #include "fplinux-camera-i2c.h"
 #include "ums9117-fixed-format.h"
 
-#ifdef CONFIG_MACH_NOKIA_110_4G
-#include "nokia110-bf30a2-mode.h"
-#endif
-
 #define BF30A2_ID_HIGH_REG 0xfc
 #define BF30A2_ID_LOW_REG 0xfd
-#define BF30A2_ID_XCLK_HZ 12000000UL
-#define BF30A2_MODE_XCLK_HZ 24000000UL
 #define BF30A2_REG_DELAY_MS 0xffff
 #define BF30A2_WIDTH 240
 #define BF30A2_HEIGHT 320
-
-struct bf30a2_variant {
-	const struct bf30a2_reg *mode_regs;
-	size_t num_mode_regs;
-	int avdd_uv;
-	bool requires_core;
-	bool nokia110_power_sequence;
-	u8 id_high;
-	u8 id_low;
-};
 
 struct bf30a2 {
 	struct v4l2_subdev sd;
 	const struct bf30a2_variant *variant;
 	struct media_pad pad;
 	struct v4l2_ctrl_handler ctrls;
-	struct clk *xclk;
-	struct regulator *core;
-	struct regulator *avdd;
-	struct regulator *iovdd;
-	struct gpio_desc *reset;
-	struct gpio_desc *powerdown;
-	struct gpio_desc *front_powerdown;
+	struct bf30a2_power power;
 };
+
+static int bf30a2_power_on(struct bf30a2_power *power);
+static int bf30a2_power_off(struct bf30a2_power *power);
 
 static const struct bf30a2_reg bf30a2_mode_regs[] = {
 	{ 0xf2, 0x01 }, { 0xcf, 0xb0 }, { 0x12, 0x10 }, { 0x6b, 0x70 },
@@ -220,6 +201,10 @@ static const struct bf30a2_variant bf30a2_variant = {
 	.requires_core = true,
 	.id_high = 0x3b,
 	.id_low = 0x02,
+	.reset_flags = GPIOD_OUT_LOW,
+	.powerdown_flags = GPIOD_OUT_HIGH,
+	.power_on = bf30a2_power_on,
+	.power_off = bf30a2_power_off,
 };
 
 static const struct bf30a2_variant bf3a01_variant = {
@@ -229,18 +214,11 @@ static const struct bf30a2_variant bf3a01_variant = {
 	.requires_core = true,
 	.id_high = 0x00,
 	.id_low = 0x01,
+	.reset_flags = GPIOD_OUT_LOW,
+	.powerdown_flags = GPIOD_OUT_HIGH,
+	.power_on = bf30a2_power_on,
+	.power_off = bf30a2_power_off,
 };
-
-#ifdef CONFIG_MACH_NOKIA_110_4G
-static const struct bf30a2_variant nokia110_variant = {
-	.mode_regs = nokia110_mode_regs,
-	.num_mode_regs = ARRAY_SIZE(nokia110_mode_regs),
-	.avdd_uv = 2800000,
-	.nokia110_power_sequence = true,
-	.id_high = 0x3b,
-	.id_low = 0x02,
-};
-#endif
 
 static const u8 bf3a01_brightness_levels[] = {
 	0x10, 0x20, 0x30, 0x40, 0x5a, 0x66, 0x70,
@@ -279,155 +257,77 @@ static const struct v4l2_ctrl_ops bf3a01_ctrl_ops = {
 	.s_ctrl = bf3a01_set_ctrl,
 };
 
-static int nokia110_power_off(struct bf30a2 *sensor)
-{
-	int ret;
-	int step_ret;
-
-	ret = gpiod_direction_output(sensor->powerdown, 0);
-	step_ret = gpiod_direction_output(sensor->front_powerdown, 0);
-	if (!ret)
-		ret = step_ret;
-	clk_disable_unprepare(sensor->xclk);
-	step_ret = regulator_disable(sensor->avdd);
-	if (!ret)
-		ret = step_ret;
-	step_ret = regulator_disable(sensor->iovdd);
-	if (!ret)
-		ret = step_ret;
-	return ret;
-}
-
-static int nokia110_power_on(struct bf30a2 *sensor)
-{
-	int ret;
-
-	ret = clk_set_rate(sensor->xclk, BF30A2_ID_XCLK_HZ);
-	if (ret)
-		return ret;
-	ret = regulator_enable(sensor->avdd);
-	if (ret)
-		return ret;
-	ret = regulator_enable(sensor->iovdd);
-	if (ret)
-		goto avdd_off;
-
-	ret = gpiod_direction_output(sensor->front_powerdown, 1);
-	if (ret)
-		goto gpios_off;
-	fsleep(2000);
-	ret = gpiod_direction_output(sensor->powerdown, 0);
-	if (ret)
-		goto gpios_off;
-	fsleep(2000);
-	fsleep(1000);
-	fsleep(2000);
-	ret = gpiod_set_value_cansleep(sensor->powerdown, 0);
-	if (ret)
-		goto gpios_off;
-
-	ret = clk_prepare_enable(sensor->xclk);
-	if (ret)
-		goto gpios_off;
-	msleep(20);
-	ret = gpiod_direction_output(sensor->reset, 0);
-	if (ret)
-		goto clock_off;
-	msleep(20);
-	ret = gpiod_set_value_cansleep(sensor->reset, 1);
-	if (ret)
-		goto clock_off;
-	msleep(100);
-	return 0;
-
-clock_off:
-	clk_disable_unprepare(sensor->xclk);
-gpios_off:
-	gpiod_direction_output(sensor->powerdown, 0);
-	gpiod_direction_output(sensor->front_powerdown, 0);
-	regulator_disable(sensor->avdd);
-	regulator_disable(sensor->iovdd);
-	return ret;
-avdd_off:
-	regulator_disable(sensor->avdd);
-	return ret;
-}
-
-static int bf30a2_power_off(struct bf30a2 *sensor)
+static int bf30a2_power_off(struct bf30a2_power *power)
 {
 	int ret = 0;
 	int step_ret;
 
-	if (sensor->variant->nokia110_power_sequence)
-		return nokia110_power_off(sensor);
-
-	gpiod_set_value_cansleep(sensor->powerdown, 1);
-	gpiod_set_value_cansleep(sensor->reset, 0);
-	clk_disable_unprepare(sensor->xclk);
-	step_ret = regulator_disable(sensor->iovdd);
+	gpiod_set_value_cansleep(power->powerdown, 1);
+	gpiod_set_value_cansleep(power->reset, 0);
+	clk_disable_unprepare(power->xclk);
+	step_ret = regulator_disable(power->iovdd);
 	if (!ret)
 		ret = step_ret;
-	step_ret = regulator_disable(sensor->avdd);
+	step_ret = regulator_disable(power->avdd);
 	if (!ret)
 		ret = step_ret;
-	step_ret = regulator_disable(sensor->core);
+	step_ret = regulator_disable(power->core);
 	if (!ret)
 		ret = step_ret;
 
 	return ret;
 }
 
-static int bf30a2_power_on(struct bf30a2 *sensor)
+static int bf30a2_power_on(struct bf30a2_power *power)
 {
 	int ret;
 
-	if (sensor->variant->nokia110_power_sequence)
-		return nokia110_power_on(sensor);
-
-	ret = regulator_enable(sensor->core);
+	ret = regulator_enable(power->core);
 	if (ret)
 		return ret;
-	ret = regulator_enable(sensor->avdd);
+	ret = regulator_enable(power->avdd);
 	if (ret)
 		goto core_off;
-	ret = regulator_enable(sensor->iovdd);
+	ret = regulator_enable(power->iovdd);
 	if (ret)
 		goto avdd_off;
 
-	gpiod_set_value_cansleep(sensor->powerdown, 0);
-	ret = clk_prepare_enable(sensor->xclk);
+	gpiod_set_value_cansleep(power->powerdown, 0);
+	ret = clk_prepare_enable(power->xclk);
 	if (ret)
 		goto iovdd_off;
 	msleep(20);
-	gpiod_set_value_cansleep(sensor->reset, 0);
+	gpiod_set_value_cansleep(power->reset, 0);
 	msleep(20);
-	gpiod_set_value_cansleep(sensor->reset, 1);
+	gpiod_set_value_cansleep(power->reset, 1);
 	msleep(100);
 
 	return 0;
 
 iovdd_off:
-	gpiod_set_value_cansleep(sensor->powerdown, 1);
-	regulator_disable(sensor->iovdd);
+	gpiod_set_value_cansleep(power->powerdown, 1);
+	regulator_disable(power->iovdd);
 avdd_off:
-	regulator_disable(sensor->avdd);
+	regulator_disable(power->avdd);
 core_off:
-	regulator_disable(sensor->core);
+	regulator_disable(power->core);
 	return ret;
 }
 
 static int bf30a2_runtime_resume(struct device *dev)
 {
 	struct v4l2_subdev *sd = dev_get_drvdata(dev);
+	struct bf30a2 *sensor = to_bf30a2(sd);
 
-	return bf30a2_power_on(to_bf30a2(sd));
+	return sensor->variant->power_on(&sensor->power);
 }
 
 static int bf30a2_runtime_suspend(struct device *dev)
 {
 	struct v4l2_subdev *sd = dev_get_drvdata(dev);
+	struct bf30a2 *sensor = to_bf30a2(sd);
 
-	return bf30a2_power_off(to_bf30a2(sd));
+	return sensor->variant->power_off(&sensor->power);
 }
 
 static int bf30a2_init_state(struct v4l2_subdev *sd,
@@ -452,6 +352,7 @@ static int bf30a2_enable_streams(struct v4l2_subdev *sd,
 	struct i2c_client *client = v4l2_get_subdevdata(sd);
 	struct bf30a2 *sensor = to_bf30a2(sd);
 	const struct bf30a2_variant *variant = sensor->variant;
+	struct clk *xclk = sensor->power.xclk;
 	size_t i;
 	int ret;
 
@@ -459,11 +360,11 @@ static int bf30a2_enable_streams(struct v4l2_subdev *sd,
 	if (ret)
 		return ret;
 
-	if (variant->nokia110_power_sequence) {
-		ret = clk_set_rate(sensor->xclk, BF30A2_MODE_XCLK_HZ);
+	if (variant->stream_xclk_hz) {
+		ret = clk_set_rate(xclk, variant->stream_xclk_hz);
 		if (ret)
 			goto power_off;
-		if (clk_get_rate(sensor->xclk) != BF30A2_MODE_XCLK_HZ) {
+		if (clk_get_rate(xclk) != variant->stream_xclk_hz) {
 			ret = -ERANGE;
 			goto power_off;
 		}
@@ -530,6 +431,8 @@ static int bf30a2_probe(struct i2c_client *client)
 {
 	struct device *dev = &client->dev;
 	struct v4l2_fwnode_device_properties props;
+	const struct bf30a2_variant *variant;
+	struct bf30a2_power *power;
 	struct bf30a2 *sensor;
 	u8 high;
 	u8 low;
@@ -542,95 +445,89 @@ static int bf30a2_probe(struct i2c_client *client)
 	sensor = devm_kzalloc(dev, sizeof(*sensor), GFP_KERNEL);
 	if (!sensor)
 		return -ENOMEM;
-	sensor->variant = device_get_match_data(dev);
-	if (!sensor->variant)
+	variant = device_get_match_data(dev);
+	if (!variant)
 		return -ENODEV;
+	sensor->variant = variant;
+	power = &sensor->power;
 	v4l2_i2c_subdev_init(&sensor->sd, client, &bf30a2_subdev_ops);
 	sensor->sd.internal_ops = &bf30a2_internal_ops;
 
-	sensor->xclk = devm_clk_get(dev, "xclk");
-	if (IS_ERR(sensor->xclk))
-		return dev_err_probe(dev, PTR_ERR(sensor->xclk),
+	power->xclk = devm_clk_get(dev, "xclk");
+	if (IS_ERR(power->xclk))
+		return dev_err_probe(dev, PTR_ERR(power->xclk),
 				     "failed to get xclk\n");
-	if (sensor->variant->requires_core) {
-		sensor->core = devm_regulator_get(dev, "camera-core");
-		if (IS_ERR(sensor->core))
-			return dev_err_probe(dev, PTR_ERR(sensor->core),
+	if (variant->requires_core) {
+		power->core = devm_regulator_get(dev, "camera-core");
+		if (IS_ERR(power->core))
+			return dev_err_probe(dev, PTR_ERR(power->core),
 					     "failed to get core supply\n");
 	}
-	sensor->avdd = devm_regulator_get(dev, "avdd");
-	if (IS_ERR(sensor->avdd))
-		return dev_err_probe(dev, PTR_ERR(sensor->avdd),
+	power->avdd = devm_regulator_get(dev, "avdd");
+	if (IS_ERR(power->avdd))
+		return dev_err_probe(dev, PTR_ERR(power->avdd),
 				     "failed to get analog supply\n");
-	sensor->iovdd = devm_regulator_get(dev, "iovdd");
-	if (IS_ERR(sensor->iovdd))
-		return dev_err_probe(dev, PTR_ERR(sensor->iovdd),
+	power->iovdd = devm_regulator_get(dev, "iovdd");
+	if (IS_ERR(power->iovdd))
+		return dev_err_probe(dev, PTR_ERR(power->iovdd),
 				     "failed to get IO supply\n");
-	sensor->reset = devm_gpiod_get(
-		dev, "reset",
-		sensor->variant->nokia110_power_sequence ? GPIOD_ASIS :
-							   GPIOD_OUT_LOW);
-	if (IS_ERR(sensor->reset))
-		return dev_err_probe(dev, PTR_ERR(sensor->reset),
+	power->reset = devm_gpiod_get(dev, "reset", variant->reset_flags);
+	if (IS_ERR(power->reset))
+		return dev_err_probe(dev, PTR_ERR(power->reset),
 				     "failed to get reset GPIO\n");
-	sensor->powerdown = devm_gpiod_get(
-		dev, "powerdown",
-		sensor->variant->nokia110_power_sequence ? GPIOD_ASIS :
-							   GPIOD_OUT_HIGH);
-	if (IS_ERR(sensor->powerdown))
-		return dev_err_probe(dev, PTR_ERR(sensor->powerdown),
+	power->powerdown =
+		devm_gpiod_get(dev, "powerdown", variant->powerdown_flags);
+	if (IS_ERR(power->powerdown))
+		return dev_err_probe(dev, PTR_ERR(power->powerdown),
 				     "failed to get powerdown GPIO\n");
 
-	if (sensor->variant->nokia110_power_sequence) {
-		sensor->front_powerdown =
-			devm_gpiod_get(dev, "front-powerdown", GPIOD_ASIS);
-		if (IS_ERR(sensor->front_powerdown))
-			return dev_err_probe(
-				dev, PTR_ERR(sensor->front_powerdown),
-				"failed to get secondary power GPIO\n");
+	if (variant->get_board_gpios) {
+		ret = variant->get_board_gpios(dev, power);
+		if (ret)
+			return ret;
 	}
 
-	if (sensor->variant->requires_core) {
-		ret = regulator_set_voltage(sensor->core, 1250000, 1250000);
+	if (variant->requires_core) {
+		ret = regulator_set_voltage(power->core, 1250000, 1250000);
 		if (ret)
 			return dev_err_probe(dev, ret,
 					     "failed to set core voltage\n");
 	}
-	ret = regulator_set_voltage(sensor->avdd, sensor->variant->avdd_uv,
-				    sensor->variant->avdd_uv);
+	ret = regulator_set_voltage(power->avdd, variant->avdd_uv,
+				    variant->avdd_uv);
 	if (ret)
 		return dev_err_probe(dev, ret,
 				     "failed to set analog voltage\n");
-	ret = regulator_set_voltage(sensor->iovdd, 1800000, 1800000);
+	ret = regulator_set_voltage(power->iovdd, 1800000, 1800000);
 	if (ret)
 		return dev_err_probe(dev, ret, "failed to set IO voltage\n");
-	ret = clk_set_rate(sensor->xclk, BF30A2_ID_XCLK_HZ);
+	ret = clk_set_rate(power->xclk, BF30A2_ID_XCLK_HZ);
 	if (ret)
 		return dev_err_probe(dev, ret, "failed to set ID clock\n");
-	if (clk_get_rate(sensor->xclk) != BF30A2_ID_XCLK_HZ)
+	if (clk_get_rate(power->xclk) != BF30A2_ID_XCLK_HZ)
 		return -ERANGE;
 
-	ret = bf30a2_power_on(sensor);
+	ret = variant->power_on(power);
 	if (ret)
 		return dev_err_probe(dev, ret, "failed to power sensor\n");
 	ret = fplinux_camera_i2c_read(client, BF30A2_ID_HIGH_REG, &high);
 	if (!ret)
 		ret = fplinux_camera_i2c_read(client, BF30A2_ID_LOW_REG, &low);
-	power_ret = bf30a2_power_off(sensor);
+	power_ret = variant->power_off(power);
 	if (ret)
 		return dev_err_probe(dev, ret, "failed to read sensor ID\n");
 	if (power_ret)
 		return dev_err_probe(dev, power_ret,
 				     "failed to power off sensor\n");
-	if (high != sensor->variant->id_high || low != sensor->variant->id_low)
+	if (high != variant->id_high || low != variant->id_low)
 		return dev_err_probe(dev, -ENODEV,
 				     "unexpected sensor ID %02x%02x\n", high,
 				     low);
 
-	ret = clk_set_rate(sensor->xclk, BF30A2_MODE_XCLK_HZ);
+	ret = clk_set_rate(power->xclk, BF30A2_MODE_XCLK_HZ);
 	if (ret)
 		return dev_err_probe(dev, ret, "failed to set mode clock\n");
-	if (clk_get_rate(sensor->xclk) != BF30A2_MODE_XCLK_HZ)
+	if (clk_get_rate(power->xclk) != BF30A2_MODE_XCLK_HZ)
 		return -ERANGE;
 
 	ret = v4l2_fwnode_device_parse(dev, &props);
@@ -643,7 +540,7 @@ static int bf30a2_probe(struct i2c_client *client)
 	ret = v4l2_ctrl_new_fwnode_properties(&sensor->ctrls, NULL, &props);
 	if (ret)
 		goto ctrls_cleanup;
-	if (sensor->variant == &bf3a01_variant) {
+	if (variant == &bf3a01_variant) {
 		v4l2_ctrl_new_std(&sensor->ctrls, &bf3a01_ctrl_ops,
 				  V4L2_CID_BRIGHTNESS, 0,
 				  ARRAY_SIZE(bf3a01_brightness_levels) - 1, 1,
@@ -688,11 +585,12 @@ ctrls_cleanup:
 static void bf30a2_remove(struct i2c_client *client)
 {
 	struct v4l2_subdev *sd = i2c_get_clientdata(client);
+	struct bf30a2 *sensor = to_bf30a2(sd);
 
 	v4l2_async_unregister_subdev(sd);
 	pm_runtime_disable(&client->dev);
 	if (!pm_runtime_status_suspended(&client->dev))
-		bf30a2_power_off(to_bf30a2(sd));
+		sensor->variant->power_off(&sensor->power);
 	pm_runtime_set_suspended(&client->dev);
 	v4l2_subdev_cleanup(sd);
 	media_entity_cleanup(&sd->entity);
@@ -703,7 +601,8 @@ static const struct of_device_id bf30a2_of_match[] = {
 	{ .compatible = "byd,bf30a2", .data = &bf30a2_variant },
 	{ .compatible = "byd,bf3a01", .data = &bf3a01_variant },
 #ifdef CONFIG_MACH_NOKIA_110_4G
-	{ .compatible = "nokia,110-4g-bf30a2", .data = &nokia110_variant },
+	{ .compatible = "nokia,110-4g-bf30a2",
+	  .data = &nokia110_bf30a2_variant },
 #endif
 	{}
 };

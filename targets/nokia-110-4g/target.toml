@@ -52,6 +52,10 @@ destination = "drivers/gpu/drm/Kconfig"
 source = "linux/fragments/drivers/gpu/drm/ums9117/drm.Makefile"
 destination = "drivers/gpu/drm/ums9117/Makefile"
 
+[[linux.appends]]
+source = "linux/fragments/drivers/media/i2c/bf30a2.Makefile"
+destination = "drivers/media/i2c/Makefile"
+
 [bootstrap]
 lcd_config = "bootstrap/lcd_config.h"
 image = "nokia_110_4g_linux_bootstrap.bin"

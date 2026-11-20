@@ -1,0 +1,1 @@
+bf30a2-$(CONFIG_MACH_NOKIA_110_4G) += nokia110-bf30a2.o
