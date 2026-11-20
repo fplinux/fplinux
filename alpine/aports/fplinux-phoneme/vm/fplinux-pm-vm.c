@@ -152,6 +152,21 @@ bool fplinux_pm_vm_start(const struct fplinux_pm_vm_config *config)
 	vm_state = FPLINUX_PM_VM_RUNNING;
 	/* MIDP initialization sets VM system properties. */
 	JVM_Initialize();
+	const char *jit = getenv("FPLINUX_PHONEME_JIT");
+	bool enable_jit = config->enable_jit;
+	if (jit != NULL)
+		enable_jit = strcmp(jit, "1") == 0;
+	if (!enable_jit) {
+		char option[] = "-int";
+		char *arguments[] = { option };
+		JVM_ParseOneArg(1, arguments);
+	}
+	const char *jit_trace = getenv("FPLINUX_PHONEME_JIT_TRACE");
+	if (jit_trace != NULL && strcmp(jit_trace, "1") == 0) {
+		char option[] = "+PrintCompilation";
+		char *arguments[] = { option };
+		JVM_ParseOneArg(1, arguments);
+	}
 	if (!fplinux_pm_midp_init(config->storage_dir)) {
 		fputs("fplinux-phoneme: MIDP initialization failed\n", stderr);
 		finish(EXIT_START_FAILED);

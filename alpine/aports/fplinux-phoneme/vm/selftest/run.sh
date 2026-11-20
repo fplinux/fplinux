@@ -44,7 +44,49 @@ fail() {
 	exit 1
 }
 
+run_jit_fixture() {
+	if ! FPLINUX_PHONEME_JIT=$1 FPLINUX_PHONEME_JIT_TRACE=$2 \
+		"${qemu_arm}" -L "${sysroot}" "${headless}" --system-classes "${classes}" \
+		--timeout-ms 30000 "${work}/jit.jar" >"$3" 2>&1; then
+		cat "$3" >&2
+		fail "JIT fixture failed with JIT=$1 trace=$2"
+	fi
+}
+
 mkdir -p "${work}"
+build_jar jit "${here}/jit.mf"
+run_jit_fixture '' 1 "${work}/jit-interpreted.txt"
+run_jit_fixture 1 0 "${work}/jit-compiled.txt"
+for output in "${work}/jit-interpreted.txt" "${work}/jit-compiled.txt"; do
+	grep -qx 'PM-JIT result=-1156218545' "${output}" || {
+		cat "${output}" >&2
+		fail "JIT fixture checksum differs"
+	}
+	grep -qx 'PM-JIT wrong-remainders=0' "${output}" || {
+		cat "${output}" >&2
+		fail "JIT fixture produced an incorrect floating-point remainder"
+	}
+	grep '^PM-JIT ' "${output}"
+done
+if grep -q 'Compiling ' "${work}/jit-interpreted.txt"; then
+	fail "a method compiled in interpreted mode"
+fi
+# Compiler trace can interrupt MIDlet output, so inspect it separately.
+run_jit_fixture 1 1 "${work}/jit-trace.txt"
+awk '
+    /Compiling / { method = /JitMIDlet\.(hotLoop|countWrongRemainders)/ ? $0 : "" }
+    method && /<done [1-9][0-9]*>/ {
+        print method; print
+        if (method ~ /\.hotLoop/) integer = 1
+        if (method ~ /\.countWrongRemainders/) remainder = 1
+        method = ""
+    }
+    END { exit !(integer && remainder) }
+' "${work}/jit-trace.txt" || {
+	cat "${work}/jit-trace.txt" >&2
+	fail "JIT did not compile both arithmetic methods"
+}
+
 build_jar hello "${here}/hello.mf"
 build_jar vectors "${here}/vectors.mf"
 cp "${here}/vectors-hotspot.expected" "${work}/vectors-expected.txt"

@@ -1,0 +1,28 @@
+Run the already built host preverifier during CLDC class generation.
+
+--- a/cldc/build/share/jvm.make
++++ b/cldc/build/share/jvm.make
+@@ -564,7 +564,7 @@
+ # CLDC Java classes
+ #
+ # -------------------------------------------------------
+-$(CLDC_ZIP): $(JAVA_FILES)
++$(CLDC_ZIP): $(JAVA_FILES) | $(PREVERIFY_ORIGINAL)
+ 	$(A)echo "=============================="
+ 	$(A)num=`echo $? | wc -w`; \
+          num=`echo $$num | cut -f1 -d' '`; \
+@@ -578,13 +578,9 @@
+ 	 $(JAVAC) -g$(JAVAC_DEBUG) -d $(TMPCLASSES) \
+                   -bootclasspath $(CLASSES) \
+                   -classpath $(CLASSES) $$files
+ 	$(A)echo "preverifying classes...";
+-	$(A)if test ! -f $(PREVERIFY); then \
+-		$(MAKE) $(PREVERIFY) ; \
+-	fi
+-	$(A)chmod a+rx $(PREVERIFY)
+-	$(A)$(PREVERIFY) -classpath $(CLASSES) -d $(CLASSES) $(TMPCLASSES)
++	$(A)$(PREVERIFY_ORIGINAL) -classpath $(CLASSES) -d $(CLASSES) $(TMPCLASSES)
+ 	$(A)echo rm -rf $@ $(TMPCLASSES)
+ 	$(A)$(JAR) -cfM0 $@ -C $(CLASSES) .
+ 	$(A)echo "=============================="
+ 

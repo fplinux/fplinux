@@ -1,0 +1,80 @@
+Preserve every VFP argument when calling an ARM runtime helper.
+
+Two argument words can share a VFP source register. Keep one transfer per
+destination so both words reach the helper.
+
+--- a/cldc/src/vm/cpu/arm/CodeGenerator_arm.cpp
++++ b/cldc/src/vm/cpu/arm/CodeGenerator_arm.cpp
+@@ -4785,8 +4785,12 @@ void CodeGenerator::vsetup_c_args(va_list ap) {
+   int regCount = 0;
+ 
+ #if ENABLE_ARM_VFP
+-  jbyte floatMap[32];
+-  juint floatMask = 0;
++  // Each argument word needs a transfer, even if it shares a source.
++  struct FloatArgument {
++    Register dst;
++    Register src;
++  } floatArgs[6];
++  int floatCount = 0;
+ #endif
+ 
+   Register dstImm[6];
+@@ -4799,16 +4803,16 @@ void CodeGenerator::vsetup_c_args(va_list ap) {
+     if (value->type() == T_ILLEGAL) {
+       // just a place holder.  We'll fill in the register late
+     } else if (value->in_register()) {
+ #if ENABLE_ARM_VFP
+-      if( Assembler::is_vfp_register( value->lo_register() ) ) {
+-        int lo = value->lo_register() - s0;
+-        floatMap[lo] = jbyte(targetRegister);
+-        floatMask |= 1 << lo;
+-        if( value->is_two_word() ) {
+-          ++lo;
+-          floatMap[lo] = jbyte(targetRegister+1);
+-          floatMask |= 1 << lo;
++      if (Assembler::is_vfp_register(value->lo_register())) {
++        floatArgs[floatCount].dst = as_register(targetRegister);
++        floatArgs[floatCount].src = value->lo_register();
++        floatCount++;
++        if (value->is_two_word()) {
++          floatArgs[floatCount].dst = as_register(targetRegister + 1);
++          floatArgs[floatCount].src = value->hi_register();
++          floatCount++;
+         }
+       } else
+ #endif
+       {
+@@ -4858,18 +4862,21 @@ void CodeGenerator::vsetup_c_args(va_list ap) {
+ 
+ #if ENABLE_ARM_VFP
+-  {
+-    for( int i = 0; floatMask; i++, floatMask >>= 1 ) {
+-      if( floatMask & 1 ) {
+-        const Register dst = as_register( floatMap[i] );
+-        if( floatMask & 2 ) {
+-          fmrrs( dst, Register(floatMap[i+1]), Register(s0 + i) );
+-          floatMask >>= 1;
+-          i++;
+-        } else {
+-          fmrs( dst, Register(s0 + i) );
+-        }
++  for (int i = 0; i < floatCount; i++) {
++    const FloatArgument& arg = floatArgs[i];
++    if (i + 1 < floatCount) {
++      const FloatArgument& next = floatArgs[i + 1];
++      if (next.src == arg.src + 1) {
++        fmrrs(arg.dst, next.dst, arg.src);
++        i++;
++        continue;
++      }
++      if (arg.src == next.src + 1) {
++        fmrrs(next.dst, arg.dst, next.src);
++        i++;
++        continue;
+       }
+     }
++    fmrs(arg.dst, arg.src);
+   }
+ #endif
+ }

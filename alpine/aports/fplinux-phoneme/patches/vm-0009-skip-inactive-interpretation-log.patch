@@ -1,0 +1,28 @@
+Skip the compiler's method history when running in the interpreter alone.
+
+--- a/cldc/src/vm/cpu/arm/SourceMacros_arm.cpp
++++ b/cldc/src/vm/cpu/arm/SourceMacros_arm.cpp
+@@ -1018,13 +1018,23 @@
+ void SourceMacros::update_interpretation_log() {
+   // _interpretation_log[] is a circular buffer that stores
+   // the most recently executed interpreted methods.
++#if !(ENABLE_EXECUTION_LOG || ENABLE_METHOD_EXECUTION_TRACE)
++  Label skip_log;
++  ldr_label(tmp0, "UseCompiler");
++  ldr(tmp0, imm_index(tmp0));
++  cmp(tmp0, zero);
++  b(skip_log, eq);
++#endif
+   comment("Save this interpreted method into interpretation log");
+   get_interpretation_log_idx(tmp1);
+   get_interpretation_log_addr(tmp0);
+   str(callee, add_index(tmp0, tmp1));
+   add(tmp1, tmp1, imm(sizeof(int)));
+   andr(tmp1, tmp1, imm(INTERP_LOG_MASK));
+   set_interpretation_log_idx(tmp1);
++#if !(ENABLE_EXECUTION_LOG || ENABLE_METHOD_EXECUTION_TRACE)
++  bind(skip_log);
++#endif
+ }
+ #endif
+ 

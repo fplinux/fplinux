@@ -36,8 +36,7 @@ source="
 "
 builddir="$srcdir/phoneME-$_commit"
 
-# The runtime uses the interpreter.
-_jit=false
+_jit=true
 
 _unpack_tool() {
 	mkdir -p "$2"
@@ -56,8 +55,8 @@ prepare() {
 	done
 
 	local mascot="$srcdir/MascotME-$_mascot_commit"
-	patch --ignore-whitespace -d "$mascot" -p1 -i "$startdir/mascotme/texture-spans.patch"
 	patch --ignore-whitespace -d "$mascot" -p1 -i "$startdir/mascotme/graphics-target.patch"
+	patch --ignore-whitespace -d "$mascot" -p1 -i "$startdir/mascotme/texture-spans.patch"
 	rm "$mascot/src/com/mascotcapsule/micro3d/v3/DummyCanvas.java"
 
 	_unpack_tool x86-musl-dev-$_muslver.apk "$srcdir/i386-root"
@@ -120,6 +119,8 @@ _build_cldc() {
 		host_arch=i386 host_os=linux \
 		ENABLE_COMPILATION_WARNINGS=true \
 		ENABLE_COMPILER="$_jit" \
+		ENABLE_TTY_TRACE=true \
+		LOOP_GEN_FLAGS="+GenerateGNUCode -TraceNativeCalls" \
 		ENABLE_JNI=false \
 		ENABLE_STATIC_LINK=true \
 		ROMIZING=false \

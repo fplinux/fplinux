@@ -45,6 +45,8 @@ struct fplinux_pm_vm_config {
 	const char *system_classes;
 	/* Java heap size; 0 selects FPLINUX_PM_VM_HEAP_KIB_DEFAULT. */
 	unsigned int heap_kib;
+	/* Use JIT unless FPLINUX_PHONEME_JIT overrides this setting. */
+	bool enable_jit;
 	/*
 	 * Existing writable directory owned by the caller for this suite's RMS
 	 * record stores and other MIDP files; its lifetime is caller-controlled.
