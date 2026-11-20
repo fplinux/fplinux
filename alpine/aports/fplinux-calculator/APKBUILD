@@ -1,6 +1,6 @@
 # Maintainer: FPLinux contributors <fplinux@example.invalid>
 pkgname=fplinux-calculator
-pkgver=1
+pkgver=1.0.0
 pkgrel=0
 pkgdesc="Keypad calculator for the FPLinux graphical session"
 url="https://github.com/fplinux/fplinux"

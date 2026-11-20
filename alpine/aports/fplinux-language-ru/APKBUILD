@@ -1,6 +1,6 @@
 # Maintainer: FPLinux contributors <fplinux@example.invalid>
 pkgname=fplinux-language-ru
-pkgver=1
+pkgver=1.0.0
 pkgrel=0
 pkgdesc="Russian language definition for FPLinux"
 url="https://github.com/fplinux/fplinux"

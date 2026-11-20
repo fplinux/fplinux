@@ -1,6 +1,6 @@
 # Maintainer: FPLinux contributors <fplinux@example.invalid>
 pkgname=fplinux-icons
-pkgver=1
+pkgver=1.0.0
 pkgrel=0
 _tablerver=@version:aport_tabler_icons_3_52_0_tgz@
 pkgdesc="System glyphs and application tiles for the FPLinux graphical session"

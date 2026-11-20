@@ -1,6 +1,6 @@
 # Maintainer: FPLinux contributors <fplinux@example.invalid>
 pkgname=fplinux-media
-pkgver=1
+pkgver=1.0.0
 pkgrel=0
 pkgdesc="Shared bounded media decoders for FPLinux applications"
 url="https://github.com/fplinux/fplinux"

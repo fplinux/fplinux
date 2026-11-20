@@ -1,6 +1,6 @@
 # Maintainer: FPLinux contributors <fplinux@example.invalid>
 pkgname=fplinux-launcher
-pkgver=1
+pkgver=1.0.0
 pkgrel=0
 pkgdesc="Keypad home, system bars and package-driven FPLinux app catalogue"
 url="https://github.com/fplinux/fplinux"

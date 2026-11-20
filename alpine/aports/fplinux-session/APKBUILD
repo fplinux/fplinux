@@ -1,6 +1,6 @@
 # Maintainer: FPLinux contributors <fplinux@example.invalid>
 pkgname=fplinux-session
-pkgver=1
+pkgver=1.0.0
 pkgrel=0
 pkgdesc="Graphical phone session and application lifecycle"
 url="https://github.com/fplinux/fplinux"

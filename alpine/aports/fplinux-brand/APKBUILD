@@ -1,6 +1,6 @@
 # Maintainer: FPLinux contributors <fplinux@example.invalid>
 pkgname=fplinux-brand
-pkgver=1
+pkgver=1.0.0
 pkgrel=0
 pkgdesc="FPLinux brand marks and lockups for the session"
 url="https://github.com/fplinux/fplinux"

@@ -1,6 +1,6 @@
 # Maintainer: FPLinux contributors <fplinux@example.invalid>
 pkgname=fplinux-qin1splus-config
-pkgver=1
+pkgver=1.0.0
 pkgrel=0
 pkgdesc="Board configuration for Xiaomi Qin 1s+"
 url="https://github.com/fplinux/fplinux"

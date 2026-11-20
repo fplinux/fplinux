@@ -1,6 +1,6 @@
 # Maintainer: FPLinux contributors <fplinux@example.invalid>
 pkgname=fplinux-ui
-pkgver=1
+pkgver=1.0.0
 pkgrel=0
 pkgdesc="Shared LVGL keypad UI and Wayland SHM application runtime"
 url="https://github.com/fplinux/fplinux"

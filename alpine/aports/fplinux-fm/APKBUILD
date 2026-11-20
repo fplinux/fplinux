@@ -1,6 +1,6 @@
 # Maintainer: FPLinux contributors <fplinux@example.invalid>
 pkgname=fplinux-fm
-pkgver=1
+pkgver=1.0.0
 pkgrel=0
 pkgdesc="FM radio tuning and playback for FPLinux"
 url="https://github.com/fplinux/fplinux"

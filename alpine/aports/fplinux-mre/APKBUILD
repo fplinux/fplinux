@@ -1,6 +1,6 @@
 # Maintainer: FPLinux contributors <fplinux@example.invalid>
 pkgname=fplinux-mre
-pkgver=1
+pkgver=1.0.0
 pkgrel=0
 _jpegver=@version:aport_libjpeg_turbo_3_2_1_tar_gz@
 pkgdesc="MRE runtime for native ARM VXP applications"

@@ -1,6 +1,6 @@
 # Maintainer: FPLinux contributors <fplinux@example.invalid>
 pkgname=fplinux-cpuclock
-pkgver=1
+pkgver=1.0.0
 pkgrel=0
 pkgdesc="CPU clock diagnostic helper for FPLinux"
 url="https://github.com/fplinux/fplinux"

@@ -1,6 +1,6 @@
 # Maintainer: FPLinux contributors <fplinux@example.invalid>
 pkgname=fplinux-runtime-media
-pkgver=1
+pkgver=1.0.0
 pkgrel=0
 pkgdesc="Bounded guest media playback for FPLinux runtimes"
 url="https://github.com/fplinux/fplinux"

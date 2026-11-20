@@ -1,6 +1,6 @@
 # Maintainer: FPLinux contributors <fplinux@example.invalid>
 pkgname=fplinux-microsd-root
-pkgver=1
+pkgver=1.0.0
 pkgrel=0
 pkgdesc="Persistent microSD root filesystem support for FPLinux"
 url="https://github.com/fplinux/fplinux"

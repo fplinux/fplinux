@@ -1,6 +1,6 @@
 # Maintainer: FPLinux contributors <fplinux@example.invalid>
 pkgname=fplinux-present
-pkgver=1
+pkgver=1.0.0
 pkgrel=0
 pkgdesc="Native DRM presentation tool for FPLinux"
 url="https://github.com/fplinux/fplinux"

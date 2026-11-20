@@ -1,6 +1,6 @@
 # Maintainer: FPLinux contributors <fplinux@example.invalid>
 pkgname=fplinux-midi
-pkgver=1
+pkgver=1.0.0
 pkgrel=0
 pkgdesc="Shared bounded MIDI and tone renderer for FPLinux applications"
 url="https://github.com/fplinux/fplinux"

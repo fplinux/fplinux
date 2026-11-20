@@ -1,6 +1,6 @@
 # Maintainer: FPLinux contributors <fplinux@example.invalid>
 pkgname=fplinux-usb-gadget
-pkgver=1
+pkgver=1.0.0
 pkgrel=0
 pkgdesc="ConfigFS USB gadget for FPLinux"
 url="https://github.com/fplinux/fplinux"

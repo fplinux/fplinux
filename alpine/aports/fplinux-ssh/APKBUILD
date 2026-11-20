@@ -1,6 +1,6 @@
 # Maintainer: FPLinux contributors <fplinux@example.invalid>
 pkgname=fplinux-ssh
-pkgver=1
+pkgver=1.0.0
 pkgrel=0
 pkgdesc="SSH and SFTP access over the phone's USB network"
 url="https://github.com/fplinux/fplinux"

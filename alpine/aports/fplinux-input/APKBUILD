@@ -1,6 +1,6 @@
 # Maintainer: FPLinux contributors <fplinux@example.invalid>
 pkgname=fplinux-input
-pkgver=1
+pkgver=1.0.0
 pkgrel=0
 pkgdesc="Input device runtime and USB host-keyboard bridge for FPLinux"
 url="https://github.com/fplinux/fplinux"
