@@ -180,6 +180,32 @@ static void test_integer_scale(void)
 	assert(viewport.width == 4 && viewport.height == 6);
 }
 
+static void test_half_size_rounds_channels_and_preserves_margins(void)
+{
+	const uint16_t source[] = {
+		0xf800, 0x07e0, 0x0861, 0x0000, 0x07e0, 0x07e0, 0xbeef,
+		0x001f, 0xffff, 0x0021, 0x0000, 0x07e0, 0x07e0, 0xbeef,
+		0x0000, 0x0000, 0x0000, 0x0000, 0xffff, 0xffff, 0xbeef,
+		0x0000, 0x0000, 0x0000, 0x1061, 0xffff, 0xffff, 0xbeef,
+	};
+	const uint16_t expected[][6] = {
+		{ 0xaaaa, 0xaaaa, 0xaaaa, 0xaaaa, 0xaaaa, 0xaaaa },
+		{ 0xaaaa, 0x8410, 0x0021, 0x07e0, 0xaaaa, 0xaaaa },
+		{ 0xaaaa, 0x0000, 0x0820, 0xffff, 0xaaaa, 0xaaaa },
+		{ 0xaaaa, 0xaaaa, 0xaaaa, 0xaaaa, 0xaaaa, 0xaaaa },
+	};
+	uint16_t output[sizeof(expected) / sizeof(expected[0][0])];
+	struct fplinux_rgb565_viewport viewport;
+
+	for (size_t i = 0; i < sizeof(output) / sizeof(*output); ++i)
+		output[i] = 0xaaaa;
+	assert(!fplinux_rgb565_viewport_init(&viewport, 6, 4, 5, 4,
+					     FPLINUX_RGB565_INTEGER,
+					     FPLINUX_RGB565_ROTATE_0));
+	assert(!fplinux_rgb565_transform(&viewport, source, 7, output, 6));
+	assert(!memcmp(output, &expected, sizeof(output)));
+}
+
 static void test_clipping_and_invalid_input(void)
 {
 	const uint16_t source[] = {
@@ -223,6 +249,7 @@ int main(void)
 	test_rotated_enlargement();
 	test_area_reduction();
 	test_integer_scale();
+	test_half_size_rounds_channels_and_preserves_margins();
 	test_clipping_and_invalid_input();
 	return 0;
 }

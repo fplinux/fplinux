@@ -300,7 +300,6 @@ static void render(void)
 	struct fplinux_ui_view_settings settings;
 	struct fplinux_rgb565_viewport viewport;
 	uint16_t *destination;
-	uint16_t background;
 	int width, height;
 	uint64_t start;
 	uint64_t spent;
@@ -323,9 +322,14 @@ static void render(void)
 		    settings.scale, settings.rotation))
 		return;
 	destination = fplinux_ui_frame_pixels(port.frame, NULL, NULL);
-	background = lv_color_to_u16(fplinux_ui_theme(port.ui)->background);
-	for (size_t i = 0; i < (size_t)width * (size_t)height; ++i)
-		destination[i] = background;
+	if (viewport.x || viewport.y || viewport.width != width ||
+	    viewport.height != height) {
+		uint16_t background =
+			lv_color_to_u16(fplinux_ui_theme(port.ui)->background);
+
+		for (size_t i = 0; i < (size_t)width * (size_t)height; ++i)
+			destination[i] = background;
+	}
 	if (fplinux_rgb565_transform(&viewport, port.pixels,
 				     (size_t)gxj_system_screen_buffer.width,
 				     destination, (size_t)width))

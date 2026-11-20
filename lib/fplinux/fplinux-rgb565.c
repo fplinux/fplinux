@@ -217,6 +217,19 @@ static uint16_t sample(const struct fplinux_rgb565_viewport *v,
 			  ((blue + total / 2) / total));
 }
 
+static uint16_t average_2x2(const uint16_t *upper, const uint16_t *lower)
+{
+	uint16_t a = upper[0], b = upper[1], c = lower[0], d = lower[1];
+	unsigned int red = (a >> 11) + (b >> 11) + (c >> 11) + (d >> 11);
+	unsigned int green = ((a >> 5) & 63) + ((b >> 5) & 63) +
+			     ((c >> 5) & 63) + ((d >> 5) & 63);
+	unsigned int blue = (a & 31) + (b & 31) + (c & 31) + (d & 31);
+
+	/* Equal pixel weights cancel, leaving a rounded mean per channel. */
+	return (uint16_t)(((red + 2) / 4 << 11) | ((green + 2) / 4 << 5) |
+			  ((blue + 2) / 4));
+}
+
 static int stride_valid(size_t stride, int width, int height)
 {
 	return stride >= (size_t)width &&
@@ -249,6 +262,26 @@ int fplinux_rgb565_transform(const struct fplinux_rgb565_viewport *v,
 			       source + (size_t)(y - v->y) * source_stride +
 				       (left - v->x),
 			       (size_t)(right - left) * sizeof(*source));
+		return 0;
+	}
+	if (v->rotation == FPLINUX_RGB565_ROTATE_0 &&
+	    v->width * 2 == v->source_width &&
+	    v->height * 2 == v->source_height) {
+		for (int y = top; y < bottom; ++y) {
+			int source_y = 2 * (y - v->y);
+			const uint16_t *upper =
+				source + (size_t)source_y * source_stride;
+			const uint16_t *lower = upper + source_stride;
+			uint16_t *row =
+				destination + (size_t)y * destination_stride;
+
+			for (int x = left; x < right; ++x) {
+				int source_x = 2 * (x - v->x);
+
+				row[x] = average_2x2(upper + source_x,
+						     lower + source_x);
+			}
+		}
 		return 0;
 	}
 	for (int y = top; y < bottom; ++y)
