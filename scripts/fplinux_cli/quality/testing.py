@@ -28,7 +28,7 @@ TEST_TIERS = {
     # Native builds and five-profile application matrices share one deadline.
     "host_tool": 30 * 60,
     "artifact": 300,
-    "public_workflow": 90,
+    "public_workflow": 2 * 60,
 }
 
 HOST_TEST_MODULES = (

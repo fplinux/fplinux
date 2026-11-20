@@ -141,20 +141,14 @@ class ProbeCliTests:
         self, probe_cli: ProbeCli
     ) -> None:
         """An ignored local probe is accepted, but missing Kern never triggers setup."""
-        for relative in (
+        for filename in (
             "environment.lock.toml",
             "sources.lock.toml",
             "package.json",
             "package-lock.json",
-            "alpine/aports/fplinux-libtsm/0001-xterm-function-keys.patch",
-            "alpine/aports/fplinux-midi/borrowed-s16.patch",
-            "alpine/aports/fplinux-ui/APKBUILD",
-            "alpine/aports/fplinux-font-terminus/APKBUILD",
-            "alpine/aports/fplinux-icons/APKBUILD",
         ):
-            destination = probe_cli.root / relative
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy(ROOT / relative, destination)
+            shutil.copy(ROOT / filename, probe_cli.root)
+        shutil.copytree(ROOT / "alpine/aports", probe_cli.root / "alpine/aports")
         source = probe_cli.root / ".private/local.c"
         source.parent.mkdir()
         source.write_text("int main(void) { return 0; }\n")

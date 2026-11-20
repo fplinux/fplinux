@@ -21,11 +21,12 @@ def test_source_companion_keeps_active_sources_and_excludes_private_runtime_file
     """Use real Git discovery and current filesystem bytes, without a source-list snapshot."""
     subprocess.run(["git", "init", "--quiet", str(tmp_path)], check=True)
     (tmp_path / ".gitignore").write_text("/.data/\n/AGENTS.md\n")
+    (tmp_path / "VERSION").write_bytes(b"1.0.0\n")
     source = tmp_path / "common/boot.py"
     source.parent.mkdir()
     source.write_bytes(b"original tracked source\n")
     source.chmod(0o755)
-    subprocess.run(["git", "-C", str(tmp_path), "add", "common/boot.py"], check=True)
+    subprocess.run(["git", "-C", str(tmp_path), "add", "VERSION", "common/boot.py"], check=True)
     subprocess.run(
         [
             "git",
