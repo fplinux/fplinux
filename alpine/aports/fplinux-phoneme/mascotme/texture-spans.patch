@@ -1,0 +1,31 @@
+--- a/src/com/mascotcapsule/micro3d/v3/Rasterizer.java
++++ b/src/com/mascotcapsule/micro3d/v3/Rasterizer.java
+@@ -404,6 +404,14 @@
+ 		}
+ 	}
+ 
++	private static native boolean fillTextureSpans0(
++			int[] frameBuffer, byte[] texBitmap, int[] texPal,
++			int fbWidth, int clipX1, int clipX2, int y_start, int y_end,
++			int x_start, int dx_start, int x_end, int dx_end,
++			int u_start, int du_start, int du,
++			int v_start, int dv_start, int dv,
++			int texWBit, boolean useColorKey, int shadeOffset);
++
+ 	private final static void fillTriangleAffineT_replace(
+ 			int[] frameBuffer, int fbWidth,
+ 			int clipX1, int clipX2,
+@@ -417,6 +425,13 @@
+ 		final int texWBit = tex.widthBit;
+ 		final int texLenMask = texBitmap.length - 1;
+ 		final int[] texPal = tex.palette;
++		if (fillTextureSpans0(frameBuffer, texBitmap, texPal,
++				fbWidth, clipX1, clipX2, y_start, y_end,
++				x_start, dx_start, x_end, dx_end,
++				u_start, du_start, du, v_start, dv_start, dv,
++				texWBit, useColorKey, shadeOffset)) {
++			return;
++		}
+ 		int colorKeyIdx = useColorKey ? 0 : 256;
+ 		//Corrected rounding to avoid texture seams
+ 		if(du_start != 0) u_start += du_start > 0 ? 1 : -1;

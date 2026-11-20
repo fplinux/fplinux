@@ -56,6 +56,7 @@ prepare() {
 	done
 
 	local mascot="$srcdir/MascotME-$_mascot_commit"
+	patch --ignore-whitespace -d "$mascot" -p1 -i "$startdir/mascotme/texture-spans.patch"
 	patch --ignore-whitespace -d "$mascot" -p1 -i "$startdir/mascotme/graphics-target.patch"
 	rm "$mascot/src/com/mascotcapsule/micro3d/v3/DummyCanvas.java"
 

@@ -4,6 +4,8 @@ package fplinux.fixtures.canvas;
 import com.mascotcapsule.micro3d.v3.Effect3D;
 import com.mascotcapsule.micro3d.v3.FigureLayout;
 import com.mascotcapsule.micro3d.v3.Graphics3D;
+import com.mascotcapsule.micro3d.v3.Light;
+import com.mascotcapsule.micro3d.v3.Texture;
 import com.nokia.mid.ui.DirectGraphics;
 import com.nokia.mid.ui.DirectUtils;
 import com.nokia.mid.ui.FullCanvas;
@@ -101,6 +103,7 @@ public class CanvasProbeMIDlet extends MIDlet implements Runnable {
         nokiaDecodedImage();
         nokiaShapes();
         mascotPixels();
+        mascotTexturedPixels();
         say(M3gProbe.check());
         imageStream();
         font();
@@ -292,6 +295,83 @@ public class CanvasProbeMIDlet extends MIDlet implements Runnable {
             graphics.getClipHeight() == 8;
         say("mascot pixels alpha=" + alpha + " overlay=" + overlay +
             " graphicsRestored=" + graphicsRestored);
+    }
+
+    private Texture indexedTexture() {
+        int paletteOffset = 54;
+        int rasterOffset = paletteOffset + 129 * 4;
+        byte[] bmp = new byte[rasterOffset + 8];
+        bmp[0] = 'B';
+        bmp[1] = 'M';
+        bmp[2] = (byte) bmp.length;
+        bmp[3] = (byte) (bmp.length >> 8);
+        bmp[10] = (byte) rasterOffset;
+        bmp[11] = (byte) (rasterOffset >> 8);
+        bmp[14] = 40; // DIB header size
+        bmp[18] = 4; // width
+        bmp[22] = 2; // height
+        bmp[26] = 1; // planes
+        bmp[28] = 8; // bits per pixel
+        bmp[46] = (byte) 129; // palette entries
+        bmp[paletteOffset + 2] = (byte) 255; // red at index 0
+        bmp[paletteOffset + 4 + 1] = (byte) 255; // green at index 1
+        bmp[paletteOffset + 128 * 4] = (byte) 255; // blue at index 128
+        // The BMP stores the bottom row first.
+        bmp[rasterOffset] = (byte) 128;
+        bmp[rasterOffset + 2] = 1;
+        bmp[rasterOffset + 3] = (byte) 128;
+        bmp[rasterOffset + 5] = 1;
+        bmp[rasterOffset + 6] = (byte) 128;
+        return new Texture(bmp, true);
+    }
+
+    private void mascotTexturedPixels() {
+        Image image = DirectUtils.createImage(12, 10, 0);
+        Graphics graphics = image.getGraphics();
+        graphics.setClip(2, 2, 6, 3);
+        Graphics3D engine = new Graphics3D();
+        FigureLayout layout = new FigureLayout();
+        layout.setScale(4096, 4096);
+        Light light = new Light();
+        light.setDirIntensity(0);
+        light.setAmbientIntensity(2048);
+        Effect3D effect = new Effect3D();
+        effect.setLight(light);
+        Texture texture = indexedTexture();
+        int command = Graphics3D.PRIMITVE_TRIANGLES | Graphics3D.PDATA_TEXURE_COORD |
+            Graphics3D.PDATA_NORMAL_PER_FACE | Graphics3D.PATTR_LIGHTING;
+        int[] vertices = { 0, 0, 32, 12, 0, 32, 0, 8, 32 };
+        int[] normals = { 0, 0, 4096 };
+        int[] uv = { 0, 0, 12, 0, 0, 8 };
+        int[] row = new int[12];
+
+        engine.bind(graphics);
+        engine.renderPrimitives(texture, 0, 0, layout, effect, command | Graphics3D.PATTR_COLORKEY,
+                                1, vertices, normals, uv, null);
+        engine.flush();
+        image.getRGB(row, 0, 12, 0, 2, 12, 1);
+        int pixelMask = 0xfff8fcf8; // Stored RGB565 bits and alpha.
+        boolean keyed = (row[2] & pixelMask) == 0xff000080 && row[3] == 0 &&
+            (row[4] & pixelMask) == 0xff000080 && row[5] == 0 &&
+            (row[6] & pixelMask) == 0xff008000;
+        boolean clipped = row[1] == 0;
+        image.getRGB(row, 0, 12, 0, 3, 12, 1);
+        boolean textureRows = (row[2] & pixelMask) == 0xff008000 &&
+            (row[3] & pixelMask) == 0xff000080 && (row[4] & pixelMask) == 0xff000080;
+        image.getRGB(row, 0, 12, 0, 1, 12, 1);
+        clipped &= row[2] == 0;
+
+        engine.renderPrimitives(texture, 0, 0, layout, effect, command, 1, vertices, normals,
+                                uv, null);
+        engine.flush();
+        engine.release(graphics);
+        engine.dispose();
+        texture.dispose();
+        image.getRGB(row, 0, 12, 0, 2, 12, 1);
+        boolean zeroIndexDrawn = (row[3] & pixelMask) == 0xff800000;
+        clipped &= row[8] == 0;
+        say("mascot texture keyed=" + keyed + " rows=" + textureRows + " clipped=" + clipped +
+            " zeroIndexDrawn=" + zeroIndexDrawn);
     }
 
     private void nokiaDecodedImage() throws IOException {
