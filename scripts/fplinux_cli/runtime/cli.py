@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import argparse
-import os
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -16,11 +15,13 @@ from .data_paths import archive_runtime_root
 from .operations import (
     BundlePaths,
     CardRequest,
+    FileTransfer,
     LiveRequest,
     NandRequest,
     PrepareRequest,
     RunRequest,
     execute_operation,
+    file_transfer_available,
     session_selection_error,
 )
 
@@ -117,16 +118,31 @@ def add_session_commands(
         "--upload",
         nargs=2,
         metavar=("LOCAL", "REMOTE"),
-        help=argparse.SUPPRESS if os.name == "nt" else "copy one file to an absolute phone path",
+        help="copy one file to an absolute phone path"
+        if file_transfer_available()
+        else argparse.SUPPRESS,
     )
     remote.add_argument(
         "--pull",
         nargs=2,
         metavar=("REMOTE", "LOCAL"),
-        help=argparse.SUPPRESS if os.name == "nt" else "copy one file from an absolute phone path",
+        help="copy one file from an absolute phone path"
+        if file_transfer_available()
+        else argparse.SUPPRESS,
     )
     remote.add_argument("--screenshot", type=Path, metavar="FILE", help="save a PPM screenshot")
     return run, console, verify
+
+
+def transfer_request(upload: list[str] | None, pull: list[str] | None) -> FileTransfer | None:
+    """Translate one mutually exclusive CLI file transfer into a runtime request."""
+    if upload is not None:
+        local, remote = upload
+        return FileTransfer(direction="upload", local=Path(local), remote=remote)
+    if pull is not None:
+        remote, local = pull
+        return FileTransfer(direction="pull", local=Path(local), remote=remote)
+    return None
 
 
 def session_request(options: argparse.Namespace) -> RunRequest | LiveRequest:
@@ -151,8 +167,9 @@ def session_request(options: argparse.Namespace) -> RunRequest | LiveRequest:
         allow_other_build=getattr(options, "allow_other_build", False),
         shutdown=getattr(options, "shutdown", False),
         exec_command=getattr(options, "exec_command", None),
-        upload=getattr(options, "upload", None),
-        pull=getattr(options, "pull", None),
+        transfer=transfer_request(
+            getattr(options, "upload", None), getattr(options, "pull", None)
+        ),
         screenshot=getattr(options, "screenshot", None),
     )
 

@@ -72,6 +72,7 @@ def runtime_manifest() -> dict[str, Any]:
             "scripts/fplinux_cli/runtime/ssh/errors.py": "c" * 64,
             "scripts/fplinux_cli/runtime/ssh/material.py": "c" * 64,
             "scripts/fplinux_cli/runtime/ssh/session.py": "c" * 64,
+            "scripts/fplinux_cli/runtime/ssh/transfer.py": "c" * 64,
             "scripts/fplinux_cli/runtime/phone_data.py": "c" * 64,
             "scripts/fplinux_cli/runtime/events.py": "2" * 64,
             "scripts/fplinux_cli/runtime/bundle.py": "3" * 64,

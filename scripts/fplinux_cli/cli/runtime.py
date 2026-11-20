@@ -17,6 +17,7 @@ from fplinux_cli.manifests.values import TARGET_NAME
 from fplinux_cli.runtime import bundle_session as runtime_bundle_session
 from fplinux_cli.runtime import live
 from fplinux_cli.runtime.bundle import MICROSD_BOOT_PROFILE, admit_bundle
+from fplinux_cli.runtime.cli import transfer_request
 from fplinux_cli.runtime.data_paths import checkout_runtime_root
 from fplinux_cli.runtime.keyboard import forward_keyboard, resolve_keyboard_target
 from fplinux_cli.runtime.operations import LiveRequest, SelectedConnection, execute_operation
@@ -27,6 +28,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from fplinux_cli.artifacts.bundles import CurrentBundle
+    from fplinux_cli.runtime.operations import FileTransfer
 
 
 def _checkout_connection(target: str | None) -> tuple[Any, dict[str, Any]]:
@@ -123,8 +125,7 @@ def console_target(  # noqa: PLR0913 -- public CLI modes remain explicit.
         phone_data=phone_data,
         allow_other_build=allow_other_build,
         exec_command=exec_command,
-        upload=upload,
-        pull=pull,
+        transfer=transfer_request(upload, pull),
         screenshot=screenshot,
         shutdown=shutdown,
         card_cid=card_cid,
@@ -158,8 +159,7 @@ def _console(  # noqa: PLR0913 -- selection, policy and existing remote actions 
     phone_data: Path | None,
     allow_other_build: bool = False,
     exec_command: str | None = None,
-    upload: list[str] | None = None,
-    pull: list[str] | None = None,
+    transfer: FileTransfer | None = None,
     screenshot: Path | None = None,
     verify_only: bool = False,
     shutdown: bool = False,
@@ -220,8 +220,7 @@ def _console(  # noqa: PLR0913 -- selection, policy and existing remote actions 
             phone_data=phone_data,
             allow_other_build=allow_other_build,
             exec_command=exec_command,
-            upload=upload,
-            pull=pull,
+            transfer=transfer,
             screenshot=screenshot,
             verify_only=verify_only,
             shutdown=shutdown,

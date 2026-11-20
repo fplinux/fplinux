@@ -28,10 +28,12 @@ from .data_paths import archive_runtime_root
 from .operations import (
     BundlePaths,
     CardRequest,
+    FileTransfer,
     LiveRequest,
     RunRequest,
     card_selection_error,
     execute_operation,
+    file_transfer_available,
     session_selection_error,
 )
 from .workflow import cancellation_signals, report_runtime_error
@@ -375,9 +377,9 @@ def _choose_target(catalog: ReleaseCatalog) -> str | None:
 
 
 def _choose_action(
-    target: str, *, install_card: bool, boot_card: bool, change_card: bool
+    target: str, *, install_card: bool, boot_card: bool, change_card: bool, copy_files: bool
 ) -> RunRequest | LiveRequest | CardRequest | None:
-    choices: dict[str, tuple[str, RunRequest | LiveRequest | CardRequest]] = {
+    choices: dict[str, tuple[str, RunRequest | LiveRequest | CardRequest | None]] = {
         "1": ("Start in RAM", RunRequest(target=target))
     }
     if install_card:
@@ -395,6 +397,9 @@ def _choose_action(
             "Shut down the running microSD system",
             LiveRequest(target=target, shutdown=True),
         )
+    if copy_files:
+        choices["7"] = ("Upload a file to the running phone", None)
+        choices["8"] = ("Pull a file from the running phone", None)
     for number, (label, _request) in choices.items():
         print(f"  {number}. {label}")
     print("  0. Exit")
@@ -405,6 +410,29 @@ def _choose_action(
         if action == "5" and change_card:
             build_id = input("Previous confirmed build ID: ").strip()
             return CardRequest(target=target, action="rollback", build_id=build_id)
+        if copy_files and action in {"7", "8"}:
+            boot = None
+            if boot_card:
+                system = input("Running system (1. RAM, 2. microSD): ").strip()
+                if system not in {"1", "2"}:
+                    print("Enter 1 for RAM or 2 for microSD.")
+                    continue
+                if system == "2":
+                    boot = MICROSD_BOOT_MODE
+            local = input("File on this computer: ")
+            remote = input("Absolute file path on the phone: ")
+            if not local or not remote:
+                print("Enter both file paths.")
+                continue
+            return LiveRequest(
+                target=target,
+                boot=boot,
+                transfer=FileTransfer(
+                    direction="upload" if action == "7" else "pull",
+                    local=Path(local),
+                    remote=remote,
+                ),
+            )
         if action in choices:
             return choices[action][1]
         print(f"Enter one of {', '.join(choices)} or 0.")
@@ -558,14 +586,16 @@ def main(*, archive_root: Path) -> None:
                 target = _choose_target(catalog)
                 if target is None:
                     return
+                copy_files = file_transfer_available()
                 request = (
                     _choose_action(
                         target,
                         install_card=target in card_targets,
                         boot_card=target in microsd_targets,
                         change_card=target in update_targets,
+                        copy_files=copy_files,
                     )
-                    if target in card_targets or target in microsd_targets
+                    if copy_files or target in card_targets or target in microsd_targets
                     else RunRequest(target=target)
                 )
                 if request is None:
@@ -629,7 +659,7 @@ def main(*, archive_root: Path) -> None:
     )
     status = execute_operation(request, paths, confirm_card=consent)
     keep_menu_open = isinstance(request, CardRequest) or (
-        isinstance(request, LiveRequest) and request.shutdown
+        isinstance(request, LiveRequest) and (request.shutdown or request.transfer is not None)
     )
     if interactive and status == 0 and keep_menu_open:
         with suppress(EOFError, KeyboardInterrupt):

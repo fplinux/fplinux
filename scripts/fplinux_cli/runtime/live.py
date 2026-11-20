@@ -16,7 +16,7 @@ from .bundle import admit_bundle, boots_system_card, fail, host_preflight, load_
 from .card_access import enrolled_endpoints
 from .connection import RunningBuild, read_running_build, read_running_card
 from .events import RunLog
-from .operations import BundlePaths, LiveRequest, SelectedConnection
+from .operations import BundlePaths, LiveRequest, SelectedConnection, file_transfer_available
 from .screenshot import capture_screenshot
 from .ssh import session as ssh_session
 from .ssh import transport as ssh_transport
@@ -32,6 +32,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from .bundle import ValidatedBundle
+    from .operations import FileTransfer
 
 
 def load_connections(  # noqa: PLR0913 -- fixed bundles and archive projections admit host files separately.
@@ -254,8 +255,7 @@ def console_connection(  # noqa: PLR0913 -- selected session and action policies
     admitted: ValidatedBundle | None,
     phone_data: Path | None = None,
     exec_command: str | None = None,
-    upload: list[str] | None = None,
-    pull: list[str] | None = None,
+    transfer: FileTransfer | None = None,
     screenshot: Path | None = None,
     verify_only: bool = False,
     shutdown: bool = False,
@@ -267,9 +267,7 @@ def console_connection(  # noqa: PLR0913 -- selected session and action policies
     status = "failed"
     try:
         private_directory(data_root)
-        remote_action = any(
-            value is not None for value in (exec_command, upload, pull, screenshot)
-        )
+        remote_action = any(value is not None for value in (exec_command, transfer, screenshot))
         lock = (
             nullcontext()
             if verify_only or remote_action
@@ -288,7 +286,7 @@ def console_connection(  # noqa: PLR0913 -- selected session and action policies
             if shutdown and (remote_action or phone_data is not None):
                 fail("Shutdown requires a selected microSD system and no other console action")
             mountpoint = _shutdown_mountpoint(admitted) if shutdown else None
-            if os.name == "nt" and (upload is not None or pull is not None):
+            if transfer is not None and not file_transfer_available():
                 fail("File transfer is available from a Linux host")
             if admitted is None:
                 log.message("Diagnostic connection: the current build is not being verified.")
@@ -359,10 +357,11 @@ def console_connection(  # noqa: PLR0913 -- selected session and action policies
                 result = transport.run_remote(session, exec_command)
                 if result.returncode:
                     raise SystemExit(result.returncode)  # noqa: TRY301 -- preserve remote status.
-            elif upload is not None:
-                transport.upload(session, *upload)
-            elif pull is not None:
-                transport.pull(session, *pull)
+            elif transfer is not None:
+                if transfer.direction == "upload":
+                    transport.upload(session, str(transfer.local), transfer.remote)
+                else:
+                    transport.pull(session, transfer.remote, str(transfer.local))
             elif screenshot is not None:
                 capture_screenshot(transport, session, screenshot)
                 log.message(f"Screenshot saved: {screenshot}")
@@ -425,8 +424,7 @@ def console_card(request: LiveRequest, paths: BundlePaths | SelectedConnection) 
         admitted=admitted,
         revalidate=revalidate,
         exec_command=request.exec_command,
-        upload=request.upload,
-        pull=request.pull,
+        transfer=request.transfer,
         screenshot=request.screenshot,
         verify_only=request.verify_only,
         shutdown=request.shutdown,
@@ -441,8 +439,7 @@ def console_bundle(  # noqa: PLR0913 -- archive selectors and remote actions are
     *,
     allow_other_build: bool = False,
     exec_command: str | None = None,
-    upload: list[str] | None = None,
-    pull: list[str] | None = None,
+    transfer: FileTransfer | None = None,
     screenshot: Path | None = None,
     phone_data: Path | None = None,
     verify_only: bool = False,
@@ -489,8 +486,7 @@ def console_bundle(  # noqa: PLR0913 -- archive selectors and remote actions are
         admitted=admitted,
         phone_data=phone_data,
         exec_command=exec_command,
-        upload=upload,
-        pull=pull,
+        transfer=transfer,
         screenshot=screenshot,
         verify_only=verify_only,
         shutdown=shutdown,

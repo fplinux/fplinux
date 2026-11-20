@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
@@ -39,6 +40,15 @@ class RunRequest(_PhoneInputs):
 
 
 @dataclass(frozen=True, kw_only=True)
+class FileTransfer:
+    """Copy one regular file between a local path and an absolute phone path."""
+
+    direction: Literal["upload", "pull"]
+    local: Path
+    remote: str
+
+
+@dataclass(frozen=True, kw_only=True)
 class LiveRequest:
     """Verify or use the selected authenticated live session."""
 
@@ -50,8 +60,7 @@ class LiveRequest:
     allow_other_build: bool = False
     shutdown: bool = False
     exec_command: str | None = None
-    upload: list[str] | None = None
-    pull: list[str] | None = None
+    transfer: FileTransfer | None = None
     screenshot: Path | None = None
 
 
@@ -110,6 +119,11 @@ class SelectedConnection:
     revalidate: Callable[[], None] | None = None
 
 
+def file_transfer_available() -> bool:
+    """Report whether the host supports console file transfer."""
+    return os.name != "nt"
+
+
 def session_selection_error(
     request: RunRequest | LiveRequest, *, system_card_profile: bool = False
 ) -> str | None:
@@ -117,7 +131,7 @@ def session_selection_error(
     if isinstance(request, LiveRequest):
         actions = int(request.shutdown) + sum(
             action is not None
-            for action in (request.exec_command, request.upload, request.pull, request.screenshot)
+            for action in (request.exec_command, request.transfer, request.screenshot)
         )
         if request.verify_only and (request.allow_other_build or actions):
             return "Verification requires a selected build and no remote action"
@@ -207,8 +221,7 @@ def execute_operation(
                 revalidate=paths.revalidate,
                 phone_data=request.phone_data,
                 exec_command=request.exec_command,
-                upload=request.upload,
-                pull=request.pull,
+                transfer=request.transfer,
                 screenshot=request.screenshot,
                 verify_only=request.verify_only,
                 shutdown=request.shutdown,
@@ -220,8 +233,7 @@ def execute_operation(
             phone_data=_absolute(request.phone_data),
             allow_other_build=request.allow_other_build,
             exec_command=request.exec_command,
-            upload=request.upload,
-            pull=request.pull,
+            transfer=request.transfer,
             screenshot=request.screenshot,
             verify_only=request.verify_only,
             shutdown=request.shutdown,

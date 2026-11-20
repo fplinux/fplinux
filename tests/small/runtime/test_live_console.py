@@ -6,12 +6,19 @@ from __future__ import annotations
 import json
 import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from fplinux_cli.runtime import boot, live
+from fplinux_cli.runtime import boot, live, operations
 from fplinux_cli.runtime.bundle import ValidatedBundle
 from fplinux_cli.runtime.connection import ConnectionLostError
+from fplinux_cli.runtime.operations import (
+    FileTransfer,
+    LiveRequest,
+    SelectedConnection,
+    execute_operation,
+)
 from fplinux_cli.runtime.ssh import transport as ssh_transport
 from fplinux_cli.runtime.state import exclusive_lock
 
@@ -129,6 +136,51 @@ def test_shell_requires_launcher_lock_but_one_shot_command_does_not(tmp_path: Pa
     assert command_status == 255
     assert phone.shells == 0
     assert phone.authenticated == [None]
+
+
+def test_programmatic_transfer_uses_the_authenticated_selected_session(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    phone = Phone()
+    session = {"target": "phone"}
+    local = tmp_path / "download with spaces.bin"
+
+    def pull(binding: dict[str, Any], remote: str, destination: str) -> None:
+        assert phone.authenticated == [None]
+        assert binding is session
+        assert remote == "/phone/source.bin"
+        Path(destination).write_bytes(b"selected file")
+
+    monkeypatch.setattr(phone, "pull", pull, raising=False)
+    request = LiveRequest(
+        allow_other_build=True,
+        transfer=FileTransfer(direction="pull", local=local, remote="/phone/source.bin"),
+    )
+    paths = SelectedConnection((phone, session), tmp_path / "data", tmp_path / "logs", None)
+
+    assert execute_operation(request, paths) == 0
+    assert local.read_bytes() == b"selected file"
+    assert phone.shells == 0
+
+
+def test_unqualified_windows_console_transfer_is_rejected_before_authentication(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(operations, "os", SimpleNamespace(name="nt"))
+    phone = Phone()
+    local = tmp_path / "download.bin"
+    paths = SelectedConnection(
+        (phone, {"target": "phone"}), tmp_path / "data", tmp_path / "logs", None
+    )
+    request = LiveRequest(
+        allow_other_build=True,
+        transfer=FileTransfer(direction="pull", local=local, remote="/phone/source.bin"),
+    )
+
+    assert execute_operation(request, paths) == 1
+    assert "File transfer is available from a Linux host" in capsys.readouterr().err
+    assert phone.authenticated == []
+    assert not local.exists()
 
 
 def test_archive_manifest_read_error_is_reported_without_traceback(

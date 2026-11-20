@@ -40,6 +40,7 @@ from .commands import (
 )
 from .errors import fail
 from .session import mark_current, validate_session
+from .transfer import pull_file, remote_file_metadata
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -580,18 +581,9 @@ def _sftp(session: dict[str, Any], command: str) -> subprocess.CompletedProcess[
 
 
 def _remote_metadata(session: dict[str, Any], remote: str) -> tuple[int, str]:
-    command = (
-        f"if [ -f '{remote}' ] && [ -r '{remote}' ]; then "
-        f"set -- $(sha256sum '{remote}'); size=$(wc -c < '{remote}'); "
-        'printf "%s %s\\n" "$size" "$1"; else exit 44; fi'
+    return remote_file_metadata(
+        remote, lambda command: run_remote(session, command, capture_output=True, shared=True)
     )
-    result = run_remote(session, command, capture_output=True, shared=True)
-    if result.returncode:
-        fail(f"the phone cannot read {remote}")
-    fields = result.stdout.strip().split()
-    if len(fields) != 2 or not fields[0].isdigit() or not is_sha256(fields[1]):
-        fail("the phone returned invalid file metadata")
-    return int(fields[0]), fields[1]
 
 
 def upload(session: dict[str, Any], local_name: str, remote_name: str) -> None:
@@ -653,20 +645,8 @@ def pull(session: dict[str, Any], remote_name: str, local_name: str) -> None:
     """Download through SFTP and publish locally only after end-to-end verification."""
     session = _require_command_endpoint(session)
     remote = remote_path(remote_name, "pull source")
-    expected_size, expected_hash = _remote_metadata(session, remote)
-    destination = Path(local_name)
-    parent = destination.parent
-    if parent.is_symlink() or not parent.is_dir():
-        fail(f"pull destination directory is missing or invalid: {parent}")
-    temporary: Path | None = None
-    try:
-        with tempfile.NamedTemporaryFile(
-            dir=parent,
-            prefix=f".{destination.name}.",
-            delete=False,
-        ) as stream:
-            temporary = Path(stream.name)
-        temporary.chmod(0o600)
+
+    def receive(temporary: Path, _expected_size: int) -> None:
         result = _sftp(
             session,
             f"get {_sftp_quote(remote)} {_sftp_quote(str(temporary))}",
@@ -674,16 +654,10 @@ def pull(session: dict[str, Any], remote_name: str, local_name: str) -> None:
         if result.returncode:
             detail = result.stderr.strip().splitlines()
             fail("SFTP pull failed" + (f": {detail[-1]}" if detail else ""))
-        actual_size = temporary.stat().st_size
-        actual_hash = sha256_file(temporary)
-        if actual_size != expected_size or actual_hash != expected_hash:
-            fail("downloaded file does not match the size and SHA-256 reported by the phone")
-        if _remote_metadata(session, remote) != (expected_size, expected_hash):
-            fail("pull source changed while it was downloaded")
-        temporary.replace(destination)
-        temporary = None
-    finally:
-        if temporary is not None:
-            temporary.unlink(missing_ok=True)
-    message = f"pull verified: {remote} ({expected_size} bytes, sha256={expected_hash})"
-    print(f"{message} -> {destination}", flush=True)
+
+    pull_file(
+        remote,
+        Path(local_name),
+        metadata=lambda: _remote_metadata(session, remote),
+        receive=receive,
+    )

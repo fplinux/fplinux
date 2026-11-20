@@ -8,13 +8,15 @@ import os
 import subprocess
 import sys
 from contextlib import ExitStack
+from dataclasses import asdict
 from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
 from unittest.mock import patch
 
-from fplinux_cli.runtime import card, live, release_catalog, workflow
+from fplinux_cli.runtime import card, live, operations, release_catalog, workflow
 from fplinux_cli.runtime.events import RunLog
+from fplinux_cli.runtime.operations import FileTransfer
 from fplinux_cli.runtime.ssh import session, transport
 from fplinux_cli.runtime.state import private_directory
 from fplinux_cli.runtime.windows import host as windows_host
@@ -45,6 +47,8 @@ def record_action(
     }
     if isinstance(connection, tuple):
         result["selected_usb"] = connection[1]["usb_serial"]
+    if isinstance(transfer := options.get("transfer"), FileTransfer):
+        result["transfer"] = asdict(transfer)
     print("RUNTIME ACTION " + json.dumps(result, default=str))
     return int(os.environ["FPLINUX_TEST_ACTION_STATUS"])
 
@@ -120,6 +124,7 @@ if __name__ == "__main__":
             native = SimpleNamespace(name="nt")
             platform.enter_context(patch.object(release_catalog, "os", native))
             platform.enter_context(patch.object(live, "os", native))
+            platform.enter_context(patch.object(operations, "os", native))
             platform.enter_context(patch.object(windows_host, "WindowsHost", windows_snapshot))
         else:
             platform.enter_context(patch.object(session, "load_saved_session", saved_binding))

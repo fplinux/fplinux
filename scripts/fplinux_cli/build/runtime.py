@@ -61,6 +61,7 @@ _RUNTIME_MODULES = (
     "runtime/ssh/errors.py",
     "runtime/ssh/material.py",
     "runtime/ssh/session.py",
+    "runtime/ssh/transfer.py",
     "runtime/ssh/transport.py",
     "runtime/windows/__init__.py",
     "runtime/windows/boot.py",

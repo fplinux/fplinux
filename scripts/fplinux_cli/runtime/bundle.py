@@ -320,7 +320,7 @@ def load_runtime_manifest(path: Path) -> dict[str, Any]:
         EVENTS_HELPER_PATH,
         *(
             f"scripts/fplinux_cli/runtime/ssh/{name}.py"
-            for name in ("__init__", "commands", "errors", "material", "session")
+            for name in ("__init__", "commands", "errors", "material", "session", "transfer")
         ),
         *(
             f"scripts/fplinux_cli/runtime/{name}.py"

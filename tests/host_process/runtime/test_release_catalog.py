@@ -326,7 +326,7 @@ def test_windows_auto_verify_admits_native_recipe_before_dispatch(
 def test_menu_selects_one_model_and_uses_its_exact_bundle_and_runtime_status(
     archive: Path,
 ) -> None:
-    result = _launch(archive, terminal="unknown model\n2\n")
+    result = _launch(archive, terminal="unknown model\n2\n1\n")
 
     assert result.returncode == 23, (result.stdout, result.stderr)
     assert "1. Jade Phone (jade)" in result.stdout
@@ -378,6 +378,38 @@ def test_explicit_console_uses_cwd_relative_runtime_overrides_without_reading_me
     assert action["logs"] == str(archive.parent / "alternate logs")
     assert action["exec_command"] == "printf 'x --target opal y'"
     assert action["allow_other_build"] is True
+
+
+@pytest.mark.parametrize(("direction", "choice"), [("upload", "7"), ("pull", "8")])
+@pytest.mark.parametrize(
+    "menu_profile",
+    [
+        pytest.param(("opal", "2", "", None), id="ram-only-model"),
+        pytest.param(("jade", "1", "1\n", None), id="ram-on-card-capable-model"),
+        pytest.param(("jade", "1", "2\n", "microsd-uboot"), id="microsd-system"),
+    ],
+)
+def test_archive_menu_and_explicit_console_route_the_same_file_transfer(
+    archive: Path,
+    direction: str,
+    choice: str,
+    menu_profile: tuple[str, str, str, str | None],
+) -> None:
+    target, selection, system, profile = menu_profile
+    local = "Папка & file.bin"
+    remote = "/phone/file.bin"
+    operands = [local, remote] if direction == "upload" else [remote, local]
+
+    boot = ["--boot", "microsd"] if profile is not None else []
+    explicit = _launch(archive, "console", target, *boot, f"--{direction}", *operands)
+    menu = _launch(archive, terminal=f"{selection}\n{choice}\n{system}{local}\n{remote}\n")
+
+    assert explicit.returncode == menu.returncode == 23
+    action = _record(menu)
+    assert action == _record(explicit)
+    assert action["target"] == target
+    assert action["profile"] == profile
+    assert action["transfer"] == {"direction": direction, "local": local, "remote": remote}
 
 
 def test_cached_bundle_rejects_changed_shared_host_file(archive: Path) -> None:

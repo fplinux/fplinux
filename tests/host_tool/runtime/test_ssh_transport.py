@@ -107,6 +107,62 @@ def ssh_runtime(ssh_base: Path) -> Path:
     return root
 
 
+def test_real_sftp_transfer_verifies_binary_files_and_refuses_an_unknown_host(
+    ssh_base: Path,
+    request: pytest.FixtureRequest,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Use real Linux SSH/SFTP while replacing the USB binding with loopback."""
+    root = ssh_base / "runtime"
+    root.mkdir(mode=0o700)
+    session = create_ready_session(root)
+    server = OpenSshServer(ssh_base / "server", Path(session["private_key"]))
+    server.start()
+    request.addfinalizer(server.stop)
+    pin = Path(session["known_hosts"])
+    pin.write_text(server.host_key_line(f"fplinux-{session['usb_serial']}"), encoding="ascii")
+
+    linux_options = ssh_commands.ssh_options
+
+    def linux_loopback(binding: dict[str, Any], *, connect_timeout: int = 5) -> list[str]:
+        argv = linux_options(binding, connect_timeout=connect_timeout)
+        argv[argv.index(f"BindAddress={binding['host_address']}")] = "BindAddress=127.0.0.1"
+        return [
+            *argv,
+            "-o",
+            "HostName=127.0.0.1",
+            "-o",
+            f"Port={server.port}",
+            "-o",
+            f"User={server.user}",
+        ]
+
+    monkeypatch.setattr(ssh_commands, "ssh_options", linux_loopback)
+    monkeypatch.setattr(ssh_transport, "ssh_options", linux_loopback)
+    monkeypatch.setattr(ssh_transport, "_require_command_endpoint", lambda binding: binding)
+
+    source = ssh_base / "Файл & $source.bin"
+    remote = ssh_base / "phone-file.bin"
+    destination = ssh_base / "Файл & $destination.bin"
+    payload = bytes(range(256)) * 1024
+    source.write_bytes(payload)
+    remote.write_bytes(b"old remote")
+    destination.write_bytes(b"old local")
+
+    ssh_transport.upload(session, str(source), str(remote))
+    ssh_transport.pull(session, str(remote), str(destination))
+
+    assert remote.read_bytes() == destination.read_bytes() == payload
+    assert list(ssh_base.glob(f".{destination.name}.*")) == []
+
+    pin.write_bytes(b"")
+    remote.write_bytes(b"changed remote")
+    with pytest.raises(SystemExit, match="the phone cannot read"):
+        ssh_transport.pull(session, str(remote), str(destination))
+
+    assert destination.read_bytes() == payload
+
+
 @pytest.mark.parametrize(
     "path_component",
     ["plain", "session with spaces", 'session"with"quotes', r"session\with\backslashes"],

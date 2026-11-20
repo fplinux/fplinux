@@ -98,15 +98,23 @@ def test_linux_release_includes_sftp_in_the_shared_runtime_and_manifests(
         assert runtime["sha256"][relative] == digest
 
 
-@pytest.mark.parametrize("script", ["workflow.py", "card-slots.sh"])
+@pytest.mark.parametrize(
+    ("host", "script"),
+    [
+        ("linux", "workflow.py"),
+        ("linux", "card-slots.sh"),
+        ("linux", "ssh/transfer.py"),
+        ("windows", "ssh/transfer.py"),
+    ],
+)
 def test_release_uses_the_runtime_from_the_admitted_build(
-    archive_inputs: ArchiveInputs, script: str
+    archive_inputs: ArchiveInputs, host: str, script: str
 ) -> None:
     helper = f"scripts/fplinux_cli/runtime/{script}"
     original = (archive_inputs.bundle / helper).read_bytes()
     (archive_inputs.root / helper).write_bytes(b"changed checkout runtime\n")
 
-    files, _modes = read_zip(archive_inputs.package("linux"))
+    files, _modes = read_zip(archive_inputs.package(host))
 
     assert files[helper] == original
 

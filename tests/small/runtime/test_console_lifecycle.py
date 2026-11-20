@@ -7,6 +7,7 @@ import json
 import os
 import pwd
 import subprocess
+from pathlib import Path
 from typing import TYPE_CHECKING
 from unittest import mock
 
@@ -27,8 +28,6 @@ from tests.small.command_fixtures import (
 from tests.ssh_transport_support import create_ready_session
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from tests.small.command_fixtures import CommandBundleContext
 
 
@@ -140,11 +139,14 @@ class ConsoleLifecycleTests:
         assert data == session_root
         assert logs == command_bundle.cache / "logs/run/phone/profiles/microsd-uboot"
         options = live.call_args.kwargs
-        assert (options["exec_command"], options["upload"], options["pull"]) == (
-            exec_command,
-            upload,
-            pull,
-        )
+        assert options["exec_command"] == exec_command
+        if upload is not None or pull is not None:
+            transfer = options["transfer"]
+            assert transfer.direction == ("upload" if upload is not None else "pull")
+            assert transfer.local == Path("local.bin")
+            assert transfer.remote == "/phone/remote.bin"
+        else:
+            assert options["transfer"] is None
         assert options["admitted"] is None
         assert options["revalidate"] is None
 
