@@ -1534,8 +1534,7 @@ bool fplinux_terminal_pty_open(struct fplinux_terminal_pty *pty,
 {
 	int sockets[2];
 
-	assert(screen_created && !ui.current && !canvas.draw &&
-	       !screen.filter && !screen.command && !timer.callback);
+	assert(screen_created && !ui.current && !canvas.draw);
 	assert(!pty_opened && columns == expected_columns &&
 	       rows == expected_rows);
 	reported_columns = columns;

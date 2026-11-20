@@ -24,6 +24,12 @@ if TYPE_CHECKING:
     from types import ModuleType
 
 
+# One row of 4-bit coverage per string for U+0021 in the pinned body fonts.
+GALMURI_10_EXCLAMATION = ("f", "f", "f", "f", "f", "f", "0", "f", "f")
+NOTO_13_EXCLAMATION = ("0e6", "0e5", "0d4", "0c4", "0b3", "0a2", "000", "0b4", "0d6")
+NOTO_14_EXCLAMATION = ("d9", "c8", "b8", "b7", "a6", "95", "84", "00", "c8", "c8")
+
+
 @dataclass(frozen=True)
 class Frame:
     """The immutable panel pixels and screen placement returned by the renderer."""
@@ -110,7 +116,17 @@ def frame(  # noqa: PLR0913 -- independent profile, state, theme and visible chr
     ("theme", "fill_colour", "track_colour"),
     [("dark", 0xAE7B, 0x3A29), ("light", 0x3B0E, 0xBE39)],
 )
-@pytest.mark.parametrize("softkeys", [False, True])
+@pytest.mark.parametrize(
+    ("state", "softkeys", "fill_fraction"),
+    [
+        ("ready", False, (7, 10)),
+        ("ready", True, (7, 10)),
+        ("zero", True, (0, 1)),
+        ("full", True, (1, 1)),
+        ("alarm", True, (3, 10)),
+        ("brightness", True, (3, 4)),
+    ],
+)
 def test_applied_level_scale_and_profile_placement(  # noqa: PLR0913 -- independent geometry, palette and chrome cases.
     renderer: Path,
     tmp_path: Path,
@@ -125,10 +141,12 @@ def test_applied_level_scale_and_profile_placement(  # noqa: PLR0913 -- independ
     theme: str,
     fill_colour: int,
     track_colour: int,
+    state: str,
     softkeys: bool,
+    fill_fraction: tuple[int, int],
 ) -> None:
     actual = frame(
-        renderer, tmp_path / "panel", width, height, theme=theme, state="ready", softkeys=softkeys
+        renderer, tmp_path / "panel", width, height, theme=theme, state=state, softkeys=softkeys
     )
     assert (actual.x, actual.y, actual.width, actual.height) == (
         margin,
@@ -137,7 +155,8 @@ def test_applied_level_scale_and_profile_placement(  # noqa: PLR0913 -- independ
         panel_height,
     )
     bar_width = actual.width - 2 * margin
-    filled = bar_width * 7 // 10
+    numerator, denominator = fill_fraction
+    filled = bar_width * numerator // denominator
     for row in range(bar_y, bar_y + bar_height):
         assert actual.pixels[row * actual.width + margin : (row + 1) * actual.width - margin] == (
             (fill_colour,) * filled + (track_colour,) * (bar_width - filled)
@@ -147,37 +166,70 @@ def test_applied_level_scale_and_profile_placement(  # noqa: PLR0913 -- independ
 
 
 @pytest.mark.parametrize(
-    ("width", "height"), [(128, 128), (128, 160), (176, 220), (240, 320), (320, 240)]
+    ("width", "height", "warning_right_offset", "warning_top", "alpha_rows"),
+    [
+        (128, 128, 35, 7, GALMURI_10_EXCLAMATION),
+        (128, 160, 35, 7, GALMURI_10_EXCLAMATION),
+        (176, 220, 42, 11, NOTO_13_EXCLAMATION),
+        (240, 320, 48, 15, NOTO_14_EXCLAMATION),
+        (320, 240, 44, 13, NOTO_14_EXCLAMATION),
+    ],
 )
-@pytest.mark.parametrize("theme", ["dark", "light"])
-def test_pending_uses_applied_value_and_warning_preserves_level_pixels(
-    renderer: Path, tmp_path: Path, width: int, height: int, theme: str
+@pytest.mark.parametrize(
+    ("theme", "warning_colour", "background"),
+    [("dark", 0xFDB5, 0x2945), ("light", 0xB0A3, 0xE73C)],
+)
+def test_pending_keeps_applied_frame_and_warning_adds_exclamation(  # noqa: PLR0913 -- independent profile and glyph expectations.
+    renderer: Path,
+    tmp_path: Path,
+    *,
+    width: int,
+    height: int,
+    theme: str,
+    warning_colour: int,
+    background: int,
+    warning_right_offset: int,
+    warning_top: int,
+    alpha_rows: tuple[str, ...],
 ) -> None:
     ready = frame(renderer, tmp_path / "ready", width, height, theme=theme, state="ready")
     pending = frame(renderer, tmp_path / "pending", width, height, theme=theme, state="pending")
     warning = frame(renderer, tmp_path / "warning", width, height, theme=theme, state="warning")
     assert pending == ready
-    assert warning.pixels != ready.pixels
-    # The last quarter contains the scale and its lower margin, below the marker.
-    assert (
-        warning.pixels[-warning.width * (warning.height // 4) :]
-        == ready.pixels[-ready.width * (ready.height // 4) :]
+    assert (warning.x, warning.y, warning.width, warning.height) == (
+        ready.x,
+        ready.y,
+        ready.width,
+        ready.height,
     )
+    changed_pixels = {
+        offset: after
+        for offset, (before, after) in enumerate(zip(ready.pixels, warning.pixels, strict=True))
+        if before != after
+    }
+    warning_left = ready.width - warning_right_offset
+    expected_pixels = {
+        (warning_top + row) * ready.width + warning_left + col: blend_pixel(
+            int(alpha, 16) * 17, warning_colour, background
+        )
+        for row, alpha_row in enumerate(alpha_rows)
+        for col, alpha in enumerate(alpha_row)
+        if alpha != "0"
+    }
+    assert changed_pixels == expected_pixels
 
 
 @pytest.mark.parametrize(
-    ("width", "height", "margin", "bar_y"),
+    ("width", "height", "margin", "bar_y", "bar_height"),
     [
-        (128, 128, 4, 24),
-        (128, 160, 4, 24),
-        (176, 220, 6, 32),
-        (240, 320, 8, 40),
-        (320, 240, 6, 36),
+        (128, 128, 4, 24, 4),
+        (128, 160, 4, 24, 4),
+        (176, 220, 6, 32, 6),
+        (240, 320, 8, 40, 8),
+        (320, 240, 6, 36, 8),
     ],
 )
-@pytest.mark.parametrize(
-    ("theme", "background", "track"), [("dark", 0x2945, 0x3A29), ("light", 0xE73C, 0xBE39)]
-)
+@pytest.mark.parametrize(("theme", "background"), [("dark", 0x2945), ("light", 0xE73C)])
 def test_unknown_and_unavailable_show_dashes_without_a_zero_scale(  # noqa: PLR0913 -- independent geometry and palette values.
     renderer: Path,
     tmp_path: Path,
@@ -186,34 +238,20 @@ def test_unknown_and_unavailable_show_dashes_without_a_zero_scale(  # noqa: PLR0
     height: int,
     margin: int,
     bar_y: int,
+    bar_height: int,
     theme: str,
     background: int,
-    track: int,
 ) -> None:
     unknown = frame(renderer, tmp_path / "unknown", width, height, theme=theme, state="unknown")
     unavailable = frame(
         renderer, tmp_path / "unavailable", width, height, theme=theme, state="unavailable"
     )
-    zero = frame(renderer, tmp_path / "zero", width, height, theme=theme, state="zero")
     assert unknown == unavailable
-    assert unknown.pixels != zero.pixels
-    start = bar_y * unknown.width + margin
-    end = (bar_y + 1) * unknown.width - margin
-    assert unknown.pixels[start:end] == (background,) * (unknown.width - 2 * margin)
-    assert zero.pixels[start:end] == (track,) * (zero.width - 2 * margin)
-
-
-@pytest.mark.parametrize("state", ["zero", "full", "alarm", "brightness"])
-@pytest.mark.parametrize(
-    ("width", "height"), [(128, 128), (128, 160), (176, 220), (240, 320), (320, 240)]
-)
-@pytest.mark.parametrize("theme", ["dark", "light"])
-def test_resource_icon_number_and_range_have_distinct_pixels(  # noqa: PLR0913 -- independent resource, profile and theme inputs.
-    renderer: Path, tmp_path: Path, *, state: str, width: int, height: int, theme: str
-) -> None:
-    ready = frame(renderer, tmp_path / "ready", width, height, theme=theme, state="ready")
-    selected = frame(renderer, tmp_path / "selected", width, height, theme=theme, state=state)
-    assert selected.pixels != ready.pixels
+    expected_row = (background,) * (unknown.width - 2 * margin)
+    for row in range(bar_y, bar_y + bar_height):
+        start = row * unknown.width + margin
+        end = (row + 1) * unknown.width - margin
+        assert unknown.pixels[start:end] == expected_row
 
 
 @pytest.fixture

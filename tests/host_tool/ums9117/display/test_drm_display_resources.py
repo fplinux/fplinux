@@ -58,10 +58,10 @@ def display_resources(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path
     "resource",
     ["success", "ap-ahb-gate-set", "ap-ahb-reset-set", "ap-ahb-reset-clear"],
 )
-def test_display_initialization_preserves_mapping_errors(
+def test_display_initialization_requires_shared_mappings_before_register_writes(
     display_resources: Path, resource: str
 ) -> None:
-    """A shared mapping failure returns ENOMEM before hardware initialization."""
+    """Return ENOMEM without writes or setup when a shared mapping fails."""
     result = run_process(
         [str(display_resources), resource],
         name=f"exercise linked UMS9117 display initialization: {resource}",

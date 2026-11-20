@@ -70,6 +70,7 @@ def read_entry(
     result = run_process(
         command,
         name="read trusted desktop metadata",
+        cwd=directory,
         timeout=5,
         check=True,
     )
@@ -236,14 +237,19 @@ def test_exec_rejects_shell_syntax_in_real_executable_name(
 
 def test_exec_requires_absolute_existing_executable(desktop_reader: Path, tmp_path: Path) -> None:
     executable = tmp_path / "notes"
-    executable.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
-    executable.chmod(0o644)
     write_entry(tmp_path, executable)
     assert read_entry(desktop_reader, tmp_path)["valid"] == "0"
-    executable.unlink()
+
+    executable.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    executable.chmod(0o644)
     assert read_entry(desktop_reader, tmp_path)["valid"] == "0"
-    path = write_entry(tmp_path, desktop_reader)
-    path.write_text(path.read_text().replace(str(desktop_reader), "notes"), encoding="utf-8")
+
+    executable.chmod(0o755)
+    accepted = read_entry(desktop_reader, tmp_path)
+    assert accepted["valid"] == "1"
+    assert accepted["executable"] == str(executable)
+
+    write_entry(tmp_path, executable.relative_to(tmp_path))
     assert read_entry(desktop_reader, tmp_path)["valid"] == "0"
 
 

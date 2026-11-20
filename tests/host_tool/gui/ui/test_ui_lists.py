@@ -398,17 +398,17 @@ def test_stored_controls_render_levels_and_values_at_each_profile(
 
 
 @pytest.mark.parametrize(
-    ("width", "height", "row_height", "padding"),
+    ("width", "height", "row_height"),
     [
-        (128, 128, 24, 4),
-        (128, 160, 23, 4),
-        (176, 220, 27, 6),
-        (240, 320, 33, 8),
-        (320, 240, 32, 6),
+        (128, 128, 24),
+        (128, 160, 23),
+        (176, 220, 27),
+        (240, 320, 33),
+        (320, 240, 32),
     ],
 )
 def test_native_scrollbar_keeps_its_thumb_in_a_channel_and_hides_both_when_content_fits(
-    ui_lists: Path, width: int, height: int, row_height: int, padding: int
+    ui_lists: Path, width: int, height: int, row_height: int
 ) -> None:
     """A list and raw viewports, bare and bordered, grow, scroll and shrink.
 
@@ -419,7 +419,7 @@ def test_native_scrollbar_keeps_its_thumb_in_a_channel_and_hides_both_when_conte
     content that fits shows neither.
     """
     run_process(
-        [str(ui_lists), "scrollbar", str(width), str(height), str(row_height), str(padding)],
+        [str(ui_lists), "scrollbar", str(width), str(height), str(row_height), ""],
         name=f"native shared scrollbar appearance at {width}x{height}",
         timeout=10,
         check=True,
@@ -434,7 +434,7 @@ def test_list_keypad_keeps_decorated_and_virtual_selection_visible(
 ) -> None:
     """Rows retain their text/detail/icon contents while native scrolling reveals focus."""
     run_process(
-        [str(ui_lists), presentation, "128", "160", str(row_height), "4"],
+        [str(ui_lists), presentation, "128", "160", str(row_height), ""],
         name=f"native {presentation} list keypad selection",
         timeout=10,
         check=True,

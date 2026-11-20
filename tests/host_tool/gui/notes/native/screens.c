@@ -126,24 +126,25 @@ static void save_frame(struct capture *capture, const char *name)
 		(size_t)capture->peer.width * sizeof(uint16_t)));
 }
 
-static void check_file(const struct capture *capture, const char *expected)
+static bool file_matches(const struct capture *capture, const char *expected)
 {
-	char path[1024], contents[256] = { 0 };
+	char path[1024], contents[256];
 	FILE *file;
+	size_t bytes;
 
 	assert(snprintf(path, sizeof(path),
 			"%s/state/fplinux/org.fplinux.notes/preferences",
 			capture->directory) < (int)sizeof(path));
 	file = fopen(path, "r");
-	if (!expected) {
-		assert(!file && errno == ENOENT);
-		return;
+	if (!file) {
+		assert(errno == ENOENT);
+		return !expected;
 	}
-	assert(file);
-	assert(fread(contents, 1, sizeof(contents) - 1, file) ==
-	       strlen(expected));
-	assert(!strcmp(contents, expected));
+	bytes = fread(contents, 1, sizeof(contents), file);
+	assert(!ferror(file));
 	assert(fclose(file) == 0);
+	return expected && bytes == strlen(expected) &&
+	       !memcmp(contents, expected, bytes);
 }
 
 static void start(struct capture *capture, char **arguments, const char *text)
@@ -253,7 +254,7 @@ int main(int argc, char **argv)
 	assert(argc == 9);
 	start(&capture, argv, "");
 	assert(!capture.left[0]);
-	check_file(&capture, NULL);
+	assert(file_matches(&capture, NULL));
 	save_frame(&capture, "notes-clean");
 	press(&capture, KEY_A);
 	press(&capture, KEY_B);
@@ -274,7 +275,7 @@ int main(int argc, char **argv)
 	press(&capture, KEY_ENTER);
 	wait_view(&capture, "abc", false, false);
 	assert(capture.observed.cursor == 2);
-	check_file(&capture, "note=abc\n");
+	assert(file_matches(&capture, "note=abc\n"));
 	save_frame(&capture, "notes-saved");
 	press(&capture, KEY_COMPOSE);
 	wait_view(&capture, "abc", false, true);
@@ -285,8 +286,11 @@ int main(int argc, char **argv)
 	wait_view(&capture, "abdc", true, false);
 	assert(capture.observed.cursor == 3);
 	assert(fplinux_ui_session_send(capture.session, &visibility));
-	pump_for(&capture, 100);
-	check_file(&capture, "note=abdc\n");
+	deadline = fplinux_ui_frame_now_ms() + 3000;
+	while (!file_matches(&capture, "note=abdc\n") &&
+	       fplinux_ui_frame_now_ms() < deadline)
+		pump(&capture);
+	assert(file_matches(&capture, "note=abdc\n"));
 	visibility.visible = true;
 	assert(fplinux_ui_session_send(capture.session, &visibility));
 	wait_view(&capture, "abdc", false, false);
@@ -302,6 +306,6 @@ int main(int argc, char **argv)
 	wait_view(&capture, "abdc", false, false);
 	save_frame(&capture, "notes-reopened");
 	close_and_reap(&capture);
-	puts("notes-screens: clean has no Save; real typing and menu Save retain editor/cursor; Home saves; reopen reads saved text");
+	puts("notes-screens: clean has no Save; real typing and menu Save retain editor/cursor; hiding saves; reopen reads saved text");
 	return 0;
 }

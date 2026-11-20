@@ -570,7 +570,7 @@ class CliCacheLockTests:
             "inspect-footprint-target",
             "checksum-demo-aport",
             "format-scripts/demo.py",
-            "probe-build-probe.c---output-.cache/tools/probe",
+            "probe-build",
             "prune---apply",
             "run-target",
             "verify-target",

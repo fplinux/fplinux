@@ -54,7 +54,7 @@ def _nand_identification_stream(report: str) -> bytes:
     ).encode("ascii")
 
 
-def test_unknown_nand_identify_reports_feature_bytes_without_reading_raw_pages(
+def test_nand_identify_reports_unknown_chip_features_and_audits(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """Identification preserves the kernel's unknown-chip report for contributor inspection."""

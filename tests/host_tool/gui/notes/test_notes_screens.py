@@ -76,7 +76,7 @@ def caret(
 @pytest.mark.parametrize("screen", [(128, 128), (128, 160), (176, 220), (240, 320), (320, 240)])
 @pytest.mark.parametrize("theme", ["light", "dark"])
 @pytest.mark.parametrize("locale", ["en", "ru"])
-def test_actual_notes_save_retains_text_caret_and_editor_then_home_persists(
+def test_actual_notes_save_retains_text_caret_and_editor_then_hiding_persists(
     notes_native: Path, tmp_path: Path, screen: tuple[int, int], theme: str, locale: str
 ) -> None:
     """A middle insertion after Save independently verifies the actual caret."""
@@ -109,7 +109,7 @@ def test_actual_notes_save_retains_text_caret_and_editor_then_home_persists(
     assert result.returncode == 0, result.stdout + result.stderr
     assert result.stdout.endswith(
         "notes-screens: clean has no Save; real typing and menu Save retain editor/cursor; "
-        "Home saves; reopen reads saved text\n"
+        "hiding saves; reopen reads saved text\n"
     )
     bar_heights = {(128, 128): 32, (128, 160): 34, (176, 220): 43, (240, 320): 52, (320, 240): 41}
     surface_height = height - bar_heights[screen]

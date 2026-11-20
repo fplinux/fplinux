@@ -22,19 +22,20 @@ void fplinux_pm_files_volumes(const struct fplinux_volume_snapshot *snapshot)
 /* Replace the VM and its volumes consumer; the runner and CLI are real. */
 bool fplinux_pm_vm_start(const struct fplinux_pm_vm_config *config)
 {
-	int directory;
+	static const char contents[] = "test record\n";
+	int directory, record;
+	ssize_t written;
 
 	printf("storage %s\n", config->storage_dir);
 	directory = open(config->storage_dir, O_RDONLY | O_DIRECTORY);
-	if (directory >= 0) {
-		int record =
-			openat(directory, "record", O_CREAT | O_WRONLY, 0600);
-
-		if (record >= 0)
-			close(record);
-		close(directory);
-	}
-	return true;
+	if (directory < 0)
+		return false;
+	record = openat(directory, "record", O_CREAT | O_EXCL | O_WRONLY, 0600);
+	close(directory);
+	if (record < 0)
+		return false;
+	written = write(record, contents, sizeof(contents) - 1);
+	return close(record) == 0 && written == (ssize_t)(sizeof(contents) - 1);
 }
 
 int fplinux_pm_vm_slice(void)

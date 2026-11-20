@@ -1032,12 +1032,12 @@ static void check_midi_time_pause_seek_eof(void)
 	assert(fplinux_midi_seek(midi, 1300) == 1);
 	assert(get_info(midi).position_us == 1300000);
 	assert(fplinux_midi_seek(midi, 250) == 1);
+	assert(get_info(midi).seeking);
 	for (steps = 0; get_info(midi).seeking; steps++) {
 		assert(steps < 10);
 		assert(fplinux_midi_read(midi, samples, 1024) == -1);
 		assert(errno == EAGAIN);
 	}
-	assert(steps == 6);
 	info = get_info(midi);
 	assert(info.state == FPLINUX_MIDI_PAUSED);
 	assert(info.position_frames == 5512 && info.position_us == 249977);

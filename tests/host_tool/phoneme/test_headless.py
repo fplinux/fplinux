@@ -75,8 +75,10 @@ def test_default_storage_is_removed_after_vm_exits(headless: Path) -> None:
         [str(headless), "suite.jar", "example.Main"], name="headless temporary store", timeout=10
     )
     assert result.returncode == 0, result.stdout + result.stderr
-    assert result.stdout.startswith("storage /tmp/fplinux-phoneme-headless.")
-    assert not Path(result.stdout.removeprefix("storage ").strip()).exists()
+    (storage_line,) = result.stdout.splitlines()
+    label, storage = storage_line.split(" ", 1)
+    assert label == "storage"
+    assert not Path(storage).exists()
 
 
 def test_explicit_storage_is_preserved_and_passed_to_vm(headless: Path, tmp_path: Path) -> None:
@@ -89,7 +91,7 @@ def test_explicit_storage_is_preserved_and_passed_to_vm(headless: Path, tmp_path
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert result.stdout == f"storage {storage}\n"
-    assert (storage / "record").is_file()
+    assert (storage / "record").read_bytes() == b"test record\n"
 
 
 def test_card_directory_is_reported_to_the_vm_boundary(headless: Path, tmp_path: Path) -> None:
@@ -114,11 +116,15 @@ def test_card_directory_is_reported_to_the_vm_boundary(headless: Path, tmp_path:
     assert result.stdout == f"card {card}\nstorage {storage}\n"
 
 
-def test_unusable_storage_reaches_vm_without_headless_replacement(headless: Path) -> None:
+def test_unusable_storage_is_rejected_at_vm_boundary(headless: Path, tmp_path: Path) -> None:
+    parent = tmp_path / "file"
+    parent.write_bytes(b"keep this file")
+    storage = parent / "storage"
     result = run_process(
-        [str(headless), "--storage-dir", "/dev/null/blocked", "suite.jar", "example.Main"],
+        [str(headless), "--storage-dir", str(storage), "suite.jar", "example.Main"],
         name="headless storage error boundary",
         timeout=10,
     )
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert result.stdout == "storage /dev/null/blocked\n"
+    assert result.returncode == 125, result.stdout + result.stderr
+    assert result.stdout == f"storage {storage}\n"
+    assert parent.read_bytes() == b"keep this file"

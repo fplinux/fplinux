@@ -60,6 +60,8 @@ static const char *failed_mapping;
 static u32 pin_allocations[8];
 static unsigned int pin_allocation_count;
 static unsigned int invalid_mmio;
+static unsigned int mmio_writes;
+static unsigned int regmap_writes;
 static unsigned int transport_initializations;
 static unsigned int transport_enables;
 static unsigned int irq_requests;
@@ -147,6 +149,7 @@ void writel(u32 value, void *address)
 {
 	u32 *word = mapped_word(address);
 
+	mmio_writes++;
 	if (word)
 		*word = value;
 }
@@ -170,6 +173,7 @@ int regmap_read(struct regmap *map, unsigned int reg, unsigned int *value)
 int regmap_write(struct regmap *map, unsigned int reg, unsigned int value)
 {
 	assert(!(reg % 4) && reg < sizeof(map->words));
+	regmap_writes++;
 	if (map == &pmic && failed_pmic_register == reg)
 		return -5;
 	map->words[reg / 4] = value;
@@ -405,6 +409,8 @@ int main(int argc, char *argv[])
 	}
 	assert(invalid_mmio == 0);
 	if (failed_mapping) {
+		assert(mmio_writes == 0);
+		assert(regmap_writes == 0);
 		assert(transport_initializations == 0);
 		assert(transport_enables == 0);
 		assert(irq_requests == 0);

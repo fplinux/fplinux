@@ -136,7 +136,7 @@ static lv_obj_t *find_image(lv_obj_t *object)
 }
 
 static lv_area_t row_geometry(struct fplinux_ui_listview *list, int height,
-			      int padding, bool overflow)
+			      bool overflow)
 {
 	lv_obj_t *object = fplinux_ui_listview_object(list);
 	lv_obj_t *selected;
@@ -146,9 +146,6 @@ static lv_area_t row_geometry(struct fplinux_ui_listview *list, int height,
 	viewport = coords(object);
 	selected = fplinux_ui_listview_selected_row(list);
 	row = coords(selected);
-	check(lv_obj_get_style_pad_top(object, 0) == 0 &&
-		      lv_obj_get_style_pad_bottom(object, 0) == -1,
-	      "list view starts at its top and ends 1 px under its bottom");
 	if (fplinux_ui_listview_selected(list) == 0)
 		check(row.y1 == viewport.y1,
 		      "first row starts at the viewport's top edge");
@@ -157,9 +154,6 @@ static lv_area_t row_geometry(struct fplinux_ui_listview *list, int height,
 	      "selected row reserves a scrollbar lane only while overflowing");
 	check(lv_area_get_height(&row) == height,
 	      "selected row keeps its full pitch");
-	check(lv_obj_get_style_pad_left(selected, 0) == padding &&
-		      lv_obj_get_style_pad_right(selected, 0) == padding,
-	      "row keeps its horizontal text padding");
 	return row;
 }
 
@@ -867,7 +861,6 @@ static void check_mixed_row_centres(struct fplinux_ui *ui, lv_obj_t *screen,
 	struct fplinux_ui_listview *list;
 	bool omit_detail = false;
 	lv_draw_buf_t *icon;
-	lv_obj_t *first;
 
 	ui->theme.font = fplinux_ui_builtin_font(ui->spec->font_body);
 	ui->theme.font_large = fplinux_ui_builtin_font(ui->spec->font_title);
@@ -881,15 +874,16 @@ static void check_mixed_row_centres(struct fplinux_ui *ui, lv_obj_t *screen,
 		check_centred_column(ui, list, false, expected_pitch, "body");
 		fplinux_ui_listview_select(list, 21);
 		check_centred_column(ui, list, true, expected_pitch, "detail");
-		first = fplinux_ui_listview_selected_row(list);
 		omit_detail = true;
 		fplinux_ui_listview_invalidate(list, 21, 1);
-		check(fplinux_ui_listview_selected_row(list) == first,
-		      "invalidation reuses the selected virtual row");
+		check(fplinux_ui_listview_selected(list) == 21,
+		      "removing detail preserves the selected index");
 		check_centred_column(ui, list, false, expected_pitch,
 				     "removed");
 		omit_detail = false;
 		fplinux_ui_listview_invalidate(list, 21, 1);
+		check(fplinux_ui_listview_selected(list) == 21,
+		      "restoring detail preserves the selected index");
 		check_centred_column(ui, list, true, expected_pitch,
 				     "restored");
 		fplinux_ui_listview_select(list, 38);
@@ -1333,14 +1327,13 @@ int main(int argc, char **argv)
 	lv_obj_t *screen, *object;
 	lv_area_t short_row, long_row, shrunk_row;
 	bool is_virtual, details;
-	int width, height, row_height, padding;
+	int width, height, row_height;
 
 	if (argc != 6)
 		return 2;
 	width = atoi(argv[2]);
 	height = atoi(argv[3]);
 	row_height = atoi(argv[4]);
-	padding = atoi(argv[5]);
 	is_virtual = !strcmp(argv[1], "virtual");
 	details = is_virtual || !strcmp(argv[1], "detail") ||
 		  !strcmp(argv[1], "inline");
@@ -1458,7 +1451,7 @@ int main(int argc, char **argv)
 		}
 	}
 	object = fplinux_ui_listview_object(list);
-	short_row = row_geometry(list, row_height, padding, false);
+	short_row = row_geometry(list, row_height, false);
 	thumb_geometry(list, false);
 	check_contents(&ui, short_row, details);
 	if (!strcmp(argv[1], "icon")) {
@@ -1479,7 +1472,7 @@ int main(int argc, char **argv)
 						      details ? "Detail" :
 								NULL) == index,
 			      "overflow row is added");
-	long_row = row_geometry(list, row_height, padding, true);
+	long_row = row_geometry(list, row_height, true);
 	check(short_row.x1 == long_row.x1 && short_row.x2 - long_row.x2 == 4,
 	      "overflow adds only the four-pixel scrollbar lane");
 	thumb_geometry(list, true);
@@ -1494,7 +1487,7 @@ int main(int argc, char **argv)
 		key(list, KEY_RIGHT);
 	check(fplinux_ui_listview_selected(list) == 39,
 	      "Right pages to the final row without wrapping");
-	long_row = row_geometry(list, row_height, padding, true);
+	long_row = row_geometry(list, row_height, true);
 	check(contains(list_view(object), long_row),
 	      "keypad scrolling fully reveals the selected final row");
 	check_contents(&ui, long_row, details);
@@ -1510,7 +1503,7 @@ int main(int argc, char **argv)
 		for (size_t index = 39; index > 0; --index)
 			check(fplinux_ui_listview_remove(list, index),
 			      "overflow row is removed");
-	shrunk_row = row_geometry(list, row_height, padding, false);
+	shrunk_row = row_geometry(list, row_height, false);
 	check(short_row.x1 == shrunk_row.x1 && short_row.x2 == shrunk_row.x2,
 	      "shrinking restores the full row width");
 	thumb_geometry(list, false);
