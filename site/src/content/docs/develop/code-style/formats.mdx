@@ -46,7 +46,7 @@ Target fields follow their consumer roles:
 | microsd | system-card support; UMS9117 uses the bootstrap table below, SC9820E uses an empty table |
 | microsd.bootstrap | `image`, `map` |
 
-Platform identity uses `vendor`, `soc`, `aliases`, `compatible`. U-Boot groups `source`, `archive_prefix`, `defconfig`, `patches`, `required_config` and `copies`. Linux groups source and toolchain, configuration, destinations and outputs, then patches, overlay, copies, appends and configuration checks. Bootstrap groups source paths including `stage0_source`, destination paths, files and patches, toolchain and build settings, load limits, copies and memory layout. Runtime groups the load address, adapter and USB identities. Host runtime tools precede tool recipes; recipe members precede nonempty copy tables. Empty copy arrays remain ordinary fields.
+Platform identity uses `vendor`, `soc`, `aliases`, `compatible`. U-Boot groups `source`, `archive_prefix`, `defconfig`, `patches`, `required_config` and `copies`. Linux groups source and toolchain, configuration, destinations and outputs, then patches, overlay, copies, appends and configuration checks. Bootstrap groups source paths including `ram_source` and `stage0_source`, destination paths, files and patches, toolchain and build settings, load limits, copies and memory layout. Runtime groups the load address, adapter and USB identities. Host runtime tools precede tool recipes; recipe members precede nonempty copy tables. Empty copy arrays remain ordinary fields.
 
 Platforms declare `linux.dt_config_checks` for shared hardware; targets may add the same array for board-specific devices. The build checks both lists against the compiled device tree and kernel configuration.
 

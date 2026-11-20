@@ -17,6 +17,7 @@ defconfig = "platforms/demo/kernel/defconfig"
 dt_config_checks = []
 
 [bootstrap]
+ram_source = "platforms/demo/bootstrap/ram"
 stage0_source = "platforms/demo/bootstrap-microsd"
 kernel_destination = "zImage"
 toolchain = "toolchain"

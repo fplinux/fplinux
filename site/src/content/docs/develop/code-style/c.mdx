@@ -144,7 +144,7 @@ Absolute addresses use `_PHYS`. Keep direct volatile MMIO casts inside small, ty
 
 Bootstrap diagnostic records follow the [logging contract](/fplinux/develop/logging/); they never authorize a handoff. A fatal bootstrap path presents the failure when possible and stops; it must not continue into Linux with an invalid handoff.
 
-Shared boot flow and required runtime hooks stay in the platform bootstrap. A target `main.c` supplies board data without copying the common flow.
+Shared boot flow and required runtime hooks stay in the platform bootstrap. The UMS9117 RAM entry point consumes generated settings from the selected target. Board data such as panel configuration stays with the target.
 
 ## Phone userspace
 

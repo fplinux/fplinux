@@ -349,9 +349,16 @@ compatible = "sprd,ums9117-sdhci"
 property = "cd-gpios"
 config = "CONFIG_MMC_REMOVABLE"
 
+[[linux.dt_config_checks]]
+path = "/soc/mmc@20300000"
+compatible = "sprd,ums9117-sdhci"
+property = "cd-gpios"
+config = "CONFIG_MMC_GPIO"
+
 [bootstrap]
 vendor_source_lock = "fpdoom_bootstrap"
 archive_prefix = "fpdoom-{commit}/"
+ram_source = "platforms/ums9117/bootstrap/ram"
 stage0_source = "platforms/ums9117/bootstrap-microsd"
 source_destination = "bootstrap"
 vendor_destination = "vendor/fpdoom"

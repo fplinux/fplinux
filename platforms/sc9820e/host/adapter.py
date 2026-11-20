@@ -18,6 +18,8 @@ import zlib
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NoReturn
 
+from fplinux_cli.fdt import FdtError, parse_fdt
+
 if TYPE_CHECKING:
     from collections.abc import Callable
     from typing import TextIO
@@ -137,99 +139,6 @@ def _session_record(image: bytes, runtime: dict[str, Any], session: dict[str, An
     return record
 
 
-def _property_ranges(tree: bytes) -> dict[tuple[str, str], tuple[int, int]]:
-    """Parse bounded FDT structure tokens and retain exact property data ranges."""
-    if len(tree) < 40:
-        fail("SC9820E DTB header is truncated")
-    magic, total, structure, strings, reserved, version, compatible, _cpu, string_size, size = (
-        struct.unpack_from(">10I", tree)
-    )
-    if (
-        magic != 0xD00DFEED
-        or total != len(tree)
-        or version < 17
-        or compatible > 17
-        or structure < 40
-        or structure % 4
-        or strings < 40
-        or reserved < 40
-        or reserved % 8
-        or structure + size > total
-        or strings + string_size > total
-        or (structure < strings + string_size and strings < structure + size)
-    ):
-        fail("SC9820E DTB header or block bounds are invalid")
-    reserve_end = reserved
-    while True:
-        if reserve_end + 16 > total:
-            fail("SC9820E DTB memory reservation list is truncated")
-        address, length = struct.unpack_from(">QQ", tree, reserve_end)
-        reserve_end += 16
-        if address == length == 0:
-            break
-    if any(
-        reserved < end and start < reserve_end
-        for start, end in ((structure, structure + size), (strings, strings + string_size))
-    ):
-        fail("SC9820E DTB reservation list overlaps another block")
-
-    properties: dict[tuple[str, str], tuple[int, int]] = {}
-    stack: list[str] = []
-    seen_nodes: set[str] = set()
-    position, end = structure, structure + size
-    while position + 4 <= end:
-        token = struct.unpack_from(">I", tree, position)[0]
-        position += 4
-        if token == 1:
-            name_end = tree.find(b"\0", position, end)
-            if name_end < 0:
-                fail("SC9820E DTB node name is unterminated")
-            try:
-                name = tree[position:name_end].decode("ascii")
-            except UnicodeDecodeError:
-                fail("SC9820E DTB node name is invalid")
-            if "/" in name or (not stack and (name or seen_nodes)) or (stack and not name):
-                fail("SC9820E DTB node hierarchy is invalid")
-            stack.append(name)
-            path = "/".join(stack) or "/"
-            if path in seen_nodes:
-                fail("SC9820E DTB repeats a node")
-            seen_nodes.add(path)
-            position = (name_end + 4) & ~3
-        elif token == 2:
-            if not stack:
-                fail("SC9820E DTB has an unmatched end node")
-            stack.pop()
-        elif token == 3:
-            if not stack or position + 8 > end:
-                fail("SC9820E DTB property header is invalid")
-            length, name_offset = struct.unpack_from(">II", tree, position)
-            position += 8
-            if name_offset >= string_size or position + length > end:
-                fail("SC9820E DTB property is outside its block")
-            name_end = tree.find(b"\0", strings + name_offset, strings + string_size)
-            if name_end < 0:
-                fail("SC9820E DTB property name is unterminated")
-            try:
-                name = tree[strings + name_offset : name_end].decode("ascii")
-            except UnicodeDecodeError:
-                fail("SC9820E DTB property name is invalid")
-            key = ("/".join(stack) or "/", name)
-            if not name or key in properties:
-                fail("SC9820E DTB repeats a property or has an empty name")
-            properties[key] = position, length
-            position = (position + length + 3) & ~3
-        elif token == 4:
-            continue
-        elif token == 9:
-            if stack or position != end or "/" not in seen_nodes:
-                fail("SC9820E DTB structure termination is invalid")
-            return properties
-        else:
-            fail("SC9820E DTB contains an invalid structure token")
-    fail("SC9820E DTB structure is truncated")
-
-
 def personalize_dtb(
     tree: bytes,
     record: bytes,
@@ -238,52 +147,49 @@ def personalize_dtb(
     initramfs_bytes: int | None = None,
 ) -> bytes:
     """Replace four session properties while preserving the selected root handoff."""
-    properties = _property_ranges(tree)
+    try:
+        properties = parse_fdt(tree, allow_structure_padding=False).property_ranges
+    except FdtError as error:
+        fail(f"SC9820E DTB {error}")
+
     replacements = (
         ("/chosen", "rng-seed", b"\xa1" * 64, record[48:112]),
         ("/fplinux-session", "fplinux,session-id", b"\xc3" * 32, record[16:48]),
         ("/fplinux-session", "fplinux,ssh-client-key", b"\xb2" * 68, record[112:180]),
         ("/fplinux-session", "fplinux,usb-session", b"\xd4" * 256, record[180:436]),
     )
-    for path, name, marker, _replacement in replacements:
-        location = properties.get((path, name))
-        if (
-            location is None
-            or location[1] != len(marker)
-            or tree[location[0] : location[0] + location[1]] != marker
-        ):
+    changes: list[tuple[slice, bytes]] = []
+    for path, name, marker, replacement in replacements:
+        location = properties.get(path, {}).get(name)
+        if location is None or tree[location] != marker:
             fail(f"SC9820E DTB {path} {name} is not its canonical session marker")
+        changes.append((location, replacement))
+
+    chosen = properties.get("/chosen", {})
     if initrd is None:
-        if any(
-            ("/chosen", name) in properties for name in ("linux,initrd-start", "linux,initrd-end")
-        ):
+        if "linux,initrd-start" in chosen or "linux,initrd-end" in chosen:
             fail("SC9820E external root DTB must not contain initramfs properties")
     else:
         for name, expected in (
             ("linux,initrd-start", initrd["load_address"]),
             ("linux,initrd-end", initrd["load_address"] + initrd["size"]),
         ):
-            location = properties.get(("/chosen", name))
-            if (
-                location is None
-                or location[1] != 4
-                or tree[location[0] : location[0] + 4] != struct.pack(">I", expected)
-            ):
+            location = chosen.get(name)
+            if location is None or tree[location] != struct.pack(">I", expected):
                 fail(f"SC9820E DTB {name} differs from the uploaded initramfs")
-    result = bytearray(tree)
-    for path, name, _marker, replacement in replacements:
-        offset, length = properties[path, name]
-        result[offset : offset + length] = replacement
+
     if initramfs_bytes is not None:
         if (
             initrd is None
             or not initrd["size"] <= initramfs_bytes <= 0xFFFFFFFF - initrd["load_address"]
         ):
             fail("SC9820E supplemental initramfs has invalid RAM bounds")
-        offset, length = properties["/chosen", "linux,initrd-end"]
-        result[offset : offset + length] = struct.pack(
-            ">I", initrd["load_address"] + initramfs_bytes
-        )
+        end = struct.pack(">I", initrd["load_address"] + initramfs_bytes)
+        changes.append((chosen["linux,initrd-end"], end))
+
+    result = bytearray(tree)
+    for location, replacement in changes:
+        result[location] = replacement
     return bytes(result)
 
 

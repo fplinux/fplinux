@@ -99,7 +99,7 @@ def bootstrap_settings(target_config: dict[str, Any]) -> bytes:
 
 
 def bootstrap_display_header(display: dict[str, Any]) -> bytes:
-    """Project the selected panel geometry into either target bootstrap main."""
+    """Make the selected loader display geometry available to the bootstrap."""
     license_tag = "SPDX-License-" + "Identifier"
     return (
         f"/* {license_tag}: GPL-2.0-only */\n"

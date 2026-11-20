@@ -229,32 +229,24 @@ class DeviceTreeCardDetectKconfigTests:
             ],
         )
 
-    @pytest.mark.parametrize(
-        ("value", "error"),
-        [
-            ("y", None),
-            ("n", "requires CONFIG_MMC_REMOVABLE=y"),
-            ("m", "requires CONFIG_MMC_REMOVABLE=y"),
-        ],
-        ids=["built-in", "disabled", "module"],
-    )
-    def test_card_detect_requires_built_in_removable_support(
-        self, value: str, error: str | None
-    ) -> None:
+    @pytest.mark.parametrize("required", ["CONFIG_MMC_REMOVABLE", "CONFIG_MMC_GPIO"])
+    @pytest.mark.parametrize("value", ["y", "n", "m"], ids=["built-in", "disabled", "module"])
+    def test_card_detect_requires_built_in_support(self, required: str, value: str) -> None:
         """A card-detect GPIO cannot silently become a startup-only card."""
         checks = load_platform("ums9117")["linux"]["dt_config_checks"]
         config = {
             "CONFIG_USB_MUSB_UMS9117_COLD": "y",
             "CONFIG_KEYBOARD_UMS9117": "y",
             "CONFIG_MMC_SDHCI_UMS9117": "y",
-            "CONFIG_MMC_REMOVABLE": value,
+            "CONFIG_MMC_REMOVABLE": "y",
             "CONFIG_MMC_GPIO": "y",
         }
+        config[required] = value
         tree = self.platform_tree(removable=True)
-        if error is None:
+        if value == "y":
             verify_dtb_kconfig(tree, config, checks)
         else:
-            with pytest.raises(DeviceTreeError, match=error):
+            with pytest.raises(DeviceTreeError, match=f"requires {required}=y"):
                 verify_dtb_kconfig(tree, config, checks)
 
     def test_fixed_card_needs_no_card_detect_code(self) -> None:

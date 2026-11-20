@@ -196,13 +196,15 @@ def _combined_bootstrap(
             fail("resident U-Boot stage has no layout")
         if stage0_layout["resident_start"] != platform["load_address"]:
             fail("resident stage must start at the platform load address")
+        source = profile_bootstrap["source"]
+    elif backend == "ums9117":
+        source = platform["ram_source"]
+    else:
+        source = f"targets/{target}/bootstrap"
     if selected_profile["linux"]["root"]["kind"] == "external":
         initramfs_delivery = "none"
     else:
         initramfs_delivery = "external"
-    source = (
-        profile_bootstrap["source"] if kind == "uboot-stage0" else f"targets/{target}/bootstrap"
-    )
     result: dict[str, Any] = {
         "backend": backend,
         "kind": kind,

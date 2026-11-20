@@ -298,17 +298,16 @@ def load_runtime_manifest(path: Path) -> dict[str, Any]:
     if not isinstance(root.get("adapter"), dict):
         fail("runtime adapter must be an object")
     selected_adapter = adapter_path(root)
-    root["nand"] = validate_nand(root["nand"], platform=root["identity"]["platform"]["name"])
-    root["emmc"] = validate_emmc(root["emmc"], platform=root["identity"]["platform"]["name"])
+    platform = root["identity"]["platform"]["name"]
+    root["nand"] = validate_nand(root["nand"], platform=platform)
+    root["emmc"] = validate_emmc(root["emmc"], platform=platform)
     if root["nand"] is not None and root["emmc"] is not None:
         fail("runtime must select one physical phone-data reader")
 
     root["device_data"] = validate_device_data(root["device_data"])
     if root["device_data"] is not None and root["nand"] is None and root["emmc"] is None:
         fail("runtime preparation requires a declared physical reader")
-    if boots_system_card(root) and (
-        root["identity"]["platform"]["name"] != "ums9117" or root["device_data"] is not None
-    ):
+    if boots_system_card(root) and (platform != "ums9117" or root["device_data"] is not None):
         fail("The system-card runtime must use UMS9117 Stage0 without RAM phone-data preparation")
     expected_paths = {
         root["image"],
@@ -328,6 +327,8 @@ def load_runtime_manifest(path: Path) -> dict[str, Any]:
             for name in ("cli", "workflow", "bundle", "boot", "phone_data")
         ),
     }
+    if platform == "sc9820e":
+        expected_paths.add("scripts/fplinux_cli/fdt.py")
     if root["device_data"] is not None:
         for field in ("parser", "originals_parser", "ecc_module"):
             if root["device_data"][field] is not None:

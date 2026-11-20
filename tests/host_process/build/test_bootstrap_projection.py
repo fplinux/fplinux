@@ -64,10 +64,10 @@ def test_make_consumer_receives_selected_names_and_mode(
         (240, 320, False, "0 0\n"),
     ],
 )
-def test_target_main_passes_selected_geometry_to_the_boot_runtime(
+def test_ram_main_passes_selected_geometry_to_the_boot_runtime(
     tmp_path: Path, width: int, height: int, *, loader_display: bool, expected: str
 ) -> None:
-    """Link the target main to a host runtime stub using the actual bootstrap headers."""
+    """Run the RAM entry point with selected display geometry and a host runtime stub."""
     generated = tmp_path / "generated"
     generated.mkdir()
     (generated / "fplinux-bootstrap-display.h").write_bytes(
@@ -101,7 +101,7 @@ def test_target_main_passes_selected_geometry_to_the_boot_runtime(
             str(ROOT / "bootstrap"),
             "-I",
             str(ROOT / "include/fplinux"),
-            str(ROOT / "platforms/ums9117/target-template/bootstrap/main.c"),
+            str(ROOT / "platforms/ums9117/bootstrap/ram/main.c"),
             str(stub),
             "-o",
             str(executable),

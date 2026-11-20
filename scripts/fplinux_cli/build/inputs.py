@@ -47,6 +47,7 @@ _SC9820E_BOOTSTRAP_IMPLEMENTATION_SOURCES = (
     "scripts/fplinux_cli/build/bootstrap/result.py",
     "scripts/fplinux_cli/build/bootstrap/sc9820e.py",
     "scripts/fplinux_cli/build/bootstrap/verify.py",
+    "scripts/fplinux_cli/fdt.py",
 )
 _KERNEL_IMPLEMENTATION_SOURCES = (
     *_CORE_IMPLEMENTATION_SOURCES,
@@ -63,6 +64,7 @@ _KERNEL_IMPLEMENTATION_SOURCES = (
     "scripts/fplinux_cli/build/kernel/receipts.py",
     "scripts/fplinux_cli/build/storage/layout.py",
     "scripts/fplinux_cli/device_data/inputs.py",
+    "scripts/fplinux_cli/fdt.py",
     "scripts/fplinux_cli/manifests/identity.py",
     "scripts/fplinux_cli/manifests/audio.py",
     "scripts/fplinux_cli/manifests/display.py",

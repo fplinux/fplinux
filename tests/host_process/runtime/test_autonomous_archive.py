@@ -794,6 +794,9 @@ def sc9820e_archive(autonomous_archive: AutonomousArchive) -> AutonomousArchive:
         root / "platforms/ums9117/host/adapter.py",
         root / "platforms/sc9820e/host/adapter.py",
     )
+    fdt_module = "scripts/fplinux_cli/fdt.py"
+    shutil.copyfile(ROOT / fdt_module, root / fdt_module)
+    runtime["sha256"][fdt_module] = ""
     for relative in runtime["assets"].values():
         runtime["sha256"][relative] = ""
     refresh_archive(root, runtime)

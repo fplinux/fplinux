@@ -112,6 +112,7 @@ def emmc_manifest() -> dict[str, Any]:
     for relative in (
         "platforms/sc9820e/host/adapter.py",
         "targets/demo/phone_data.py",
+        "scripts/fplinux_cli/fdt.py",
         "scripts/fplinux_cli/device_data/emmc.py",
         "scripts/fplinux_cli/device_data/emmc-files/read_files.py",
         "scripts/fplinux_cli/runtime/emmc_files.py",
@@ -125,6 +126,14 @@ def emmc_manifest() -> dict[str, Any]:
     ):
         manifest["sha256"][relative] = "c" * 64
     return manifest
+
+
+def test_sc9820e_runtime_requires_a_hash_for_its_fdt_parser(
+    runtime_manifest_path: Path, emmc_manifest: dict[str, Any]
+) -> None:
+    del emmc_manifest["sha256"]["scripts/fplinux_cli/fdt.py"]
+    with pytest.raises(SystemExit, match="runtime hashes do not include"):
+        load_manifest(runtime_manifest_path, emmc_manifest)
 
 
 @pytest.mark.parametrize("required", [[], ["audio-profile"]])

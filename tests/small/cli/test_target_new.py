@@ -47,6 +47,7 @@ def target_checkout() -> Iterator[TargetCheckout]:
         shutil.copytree(
             REPOSITORY / "platforms/ums9117/target-template", platform / "target-template"
         )
+        shutil.copytree(REPOSITORY / "platforms/ums9117/bootstrap/ram", platform / "bootstrap/ram")
         shutil.copytree(REPOSITORY / "platforms/ums9117/loader", platform / "loader")
         shutil.copytree(REPOSITORY / "alpine/aports", root / "alpine/aports")
         shutil.copytree(REPOSITORY / "profiles", root / "profiles")
@@ -113,6 +114,10 @@ class NewTargetTests:
         assert DISPLAY_KEYS.isdisjoint(config["runtime"]["adapter"])
         assert (config["runtime"]["adapter"]["exec_distance"]) == (0)
         assert config["device_data"] == {"groups": {}}
+        bootstrap_source = target_checkout.root / config["bootstrap"]["source"]
+        assert bootstrap_source == target_checkout.root / "platforms/ums9117/bootstrap/ram"
+        assert (bootstrap_source / "main.c").is_file()
+        assert not (target_checkout.targets / "hammer-horizon-lte/bootstrap").exists()
         assert (paths.discover_profiles("hammer-horizon-lte")) == (("default",))
         with pytest.raises(SystemExit, match="does not support profile microsd-uboot"):
             targets.load_target("hammer-horizon-lte", "microsd-uboot")

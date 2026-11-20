@@ -193,6 +193,8 @@ def runtime_source_files(
     """Map delivered paths to their sole build-time source, preserving module ownership."""
     source_root = common.ROOT if root is None else root
     selected = list(_RUNTIME_MODULES)
+    if config["platform"] == "sc9820e":
+        selected.append("fdt.py")
     if config.get("emmc") is not None:
         selected.extend(_EMMC_RUNTIME_MODULES)
     descriptor = device_data_descriptor(target, config)

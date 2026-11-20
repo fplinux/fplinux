@@ -10,7 +10,7 @@ from pathlib import Path
 from unittest import mock
 
 import pytest
-from fplinux_cli.build.device_tree import all_path_properties
+from fplinux_cli.build.device_tree import DeviceTreeError, all_path_properties
 from fplinux_cli.runtime.connection import SessionResumedError
 
 from tests import ROOT
@@ -137,27 +137,58 @@ def test_bootrom_selection_rejects_ambiguity_while_waiting_for_node_access(
         )
 
 
-def test_dtb_personalization_changes_only_exact_properties_and_preserves_decoys() -> None:
-    tree, record = session_tree(), session_record()
-    expected = all_path_properties(tree)
-    expected["/chosen"]["rng-seed"] = bytes(range(64))
-    expected["/fplinux-session"]["fplinux,session-id"] = bytes(range(1, 33))
-    expected["/fplinux-session"]["fplinux,ssh-client-key"] = record[112:180]
-    expected["/fplinux-session"]["fplinux,usb-session"] = record[180:436]
-    result = ADAPTER.personalize_dtb(tree, record, {"load_address": 0x85500000, "size": 7})
-    assert all_path_properties(result) == expected
-    assert len(result) == len(tree)
-
-
-@pytest.mark.parametrize(
-    "tree",
-    [session_tree(seed_path="wrong-chosen"), session_tree(duplicate=True)],
-    ids=["wrong-node", "duplicate-property"],
-)
-def test_dtb_personalization_rejects_misplaced_or_duplicate_session_properties(
-    tree: bytes,
+@pytest.mark.parametrize("initramfs_bytes", [None, 0x1C], ids=["canonical", "supplemental"])
+def test_dtb_personalization_changes_only_exact_properties_and_preserves_decoys(
+    initramfs_bytes: int | None,
 ) -> None:
-    with pytest.raises(SystemExit, match="DTB"):
+    tree, record = session_tree(), session_record()
+    expected = bytearray(tree)
+    for marker, value in (
+        (b"\xa1" * 64, bytes(range(64))),
+        (b"\xc3" * 32, bytes(range(1, 33))),
+        (b"\xb2" * 68, record[112:180]),
+        (b"\xd4" * 256, record[180:436]),
+    ):
+        # The fixture puts a decoy before each real property, in the root node.
+        assert tree.count(marker) == 2
+        offset = tree.rindex(marker)
+        expected[offset : offset + len(marker)] = value
+    if initramfs_bytes is not None:
+        offset = tree.index(bytes.fromhex("85500007"))
+        expected[offset : offset + 4] = bytes.fromhex("8550001c")
+    result = ADAPTER.personalize_dtb(
+        tree, record, {"load_address": 0x85500000, "size": 7}, initramfs_bytes=initramfs_bytes
+    )
+    assert result == bytes(expected)
+
+
+def test_build_accepts_zero_structure_padding_but_loader_requires_an_exact_end() -> None:
+    original = session_tree()
+    strings = struct.unpack_from(">I", original, 12)[0]
+    size = struct.unpack_from(">I", original, 36)[0]
+    extended = bytearray(original[:strings] + bytes(4) + original[strings:])
+    struct.pack_into(">I", extended, 4, len(extended))
+    struct.pack_into(">I", extended, 12, strings + 4)
+    struct.pack_into(">I", extended, 36, size + 4)
+    tree = bytes(extended)
+
+    assert all_path_properties(tree)["/chosen"]["rng-seed"] == b"\xa1" * 64
+    with pytest.raises(SystemExit, match=r"structure (termination|token)"):
+        ADAPTER.personalize_dtb(tree, session_record(), {"load_address": 0x85500000, "size": 7})
+
+
+def test_dtb_personalization_rejects_session_marker_on_the_wrong_node() -> None:
+    tree = session_tree(seed_path="wrong-chosen")
+    with pytest.raises(SystemExit, match="canonical session marker"):
+        ADAPTER.personalize_dtb(tree, session_record(), {"load_address": 0x85500000, "size": 7})
+
+
+def test_build_and_loader_reject_duplicate_properties_on_an_exact_path() -> None:
+    tree = session_tree(duplicate=True)
+
+    with pytest.raises(DeviceTreeError, match="repeats property rng-seed"):
+        all_path_properties(tree)
+    with pytest.raises(SystemExit, match=r"repeats.*property"):
         ADAPTER.personalize_dtb(tree, session_record(), {"load_address": 0x85500000, "size": 7})
 
 

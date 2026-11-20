@@ -60,7 +60,7 @@ def linux_dt_config_checks(value: object, name: str) -> list[dict[str, str]]:
     if not isinstance(value, list):
         fail(f"{name} must be an array")
     result: list[dict[str, str]] = []
-    identities: set[tuple[str, str, str | None]] = set()
+    identities: set[tuple[str, str, str | None, str | None]] = set()
     for index, raw in enumerate(value):
         item_name = f"{name}[{index}]"
         fields = {"path", "compatible", "config"}
@@ -81,7 +81,8 @@ def linux_dt_config_checks(value: object, name: str) -> list[dict[str, str]]:
             if "property" in check
             else None
         )
-        identity = (path, compatible, property_name)
+        # A node has one built-in owner. A property can require several symbols.
+        identity = (path, compatible, property_name, symbol if property_name is not None else None)
         if identity in identities:
             condition = f" property {property_name}" if property_name is not None else ""
             fail(f"{name} repeats ownership for {path} compatible {compatible}{condition}")

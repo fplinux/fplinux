@@ -7,8 +7,10 @@ import json
 import os
 import struct
 import sys
+from itertools import groupby, pairwise
 from typing import TYPE_CHECKING
 
+import fplinux_ui_fonts
 import fplinux_ui_profile
 import pytest
 
@@ -22,14 +24,23 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
+type BootScreen = tuple[str, Path, fplinux_ui_fonts.ParsedFont]
+type Ink = set[tuple[int, int]]
+
+
 @pytest.fixture(scope="module", params=["128x128", "128x160", "176x220", "240x320", "320x240"])
 def boot_screen(
     request: pytest.FixtureRequest, tmp_path_factory: pytest.TempPathFactory, ui_host_inputs: Path
-) -> Iterator[tuple[str, Path]]:
+) -> Iterator[BootScreen]:
     profile = str(request.param)
     with c_build_directory(tmp_path_factory, f"boot-screen-{profile}") as directory:
         fonts = generate(directory, ui_host_inputs, profile)
         tokens = json.loads((ROOT / "lib/fplinux/fplinux-ui-profile.json").read_text())
+        body = fplinux_ui_profile.font_slots(profile, tokens["profiles"][profile]["fonts"])[
+            "font_body"
+        ]
+        body_asset = ui_host_inputs / "fonts" / fplinux_ui_fonts.font_spec(body).c_name
+        body_font = fplinux_ui_fonts.parse_c_font(body_asset.read_text())
         generated = directory / "generated"
         generated.mkdir()
         (generated / "fplinux-status-profile.h").write_text(
@@ -74,11 +85,11 @@ def boot_screen(
             ],
             name="compile selected bootstrap status screen",
         )
-        yield profile, executable
+        yield profile, executable, body_font
 
 
-def test_boot_and_failure_are_visible(boot_screen: tuple[str, Path], tmp_path: Path) -> None:
-    profile, executable = boot_screen
+def test_boot_and_failure_are_visible(boot_screen: BootScreen, tmp_path: Path) -> None:
+    profile, executable, _ = boot_screen
     width, height = map(int, profile.split("x"))
     images = []
     for state in ("boot", "expected", "boot-offline", "expected-offline", "error", "error2"):
@@ -111,6 +122,40 @@ def test_boot_and_failure_are_visible(boot_screen: tuple[str, Path], tmp_path: P
     )
 
 
+def ink_lines(pixels: tuple[int, ...], width: int) -> list[Ink]:
+    background = pixels[0]
+    rows = (
+        {(x, y) for x, pixel in enumerate(pixels[start : start + width]) if pixel != background}
+        for y, start in enumerate(range(0, len(pixels), width))
+    )
+    return [
+        {point for row in band for point in row}
+        for visible, band in groupby(rows, bool)
+        if visible
+    ]
+
+
+def normalized_ink(ink: Ink) -> Ink:
+    left = min(x for x, _ in ink)
+    top = min(y for _, y in ink)
+    return {(x - left, y - top) for x, y in ink}
+
+
+def glyph_ink(font: fplinux_ui_fonts.ParsedFont, text: str) -> Ink:
+    # Read the uncompressed LVGL font asset. Compose one line with no clipping or wrapping.
+    ink: Ink = set()
+    pen_x = 0
+    for code, following in pairwise(map(ord, text + "\0")):
+        glyph = font.glyphs[code]
+        for index, alpha in enumerate(glyph.bitmap.hex()[: glyph.box_w * glyph.box_h]):
+            if alpha != "0":
+                row, column = divmod(index, glyph.box_w)
+                ink.add((pen_x + glyph.ofs_x + column, row - glyph.box_h - glyph.ofs_y))
+        adjustment = font.kerning.get((code, following), 0) * font.kern_scale // 16
+        pen_x += (glyph.advance + adjustment + 8) // 16
+    return normalized_ink(ink)
+
+
 @pytest.mark.parametrize(
     "message",
     [
@@ -120,9 +165,9 @@ def test_boot_and_failure_are_visible(boot_screen: tuple[str, Path], tmp_path: P
     ids=["card-error", "image-error"],
 )
 def test_boot_instructions_fit_and_remain_visible(
-    boot_screen: tuple[str, Path], tmp_path: Path, message: str
+    boot_screen: BootScreen, tmp_path: Path, message: str
 ) -> None:
-    profile, executable = boot_screen
+    profile, executable, body_font = boot_screen
     width, height = map(int, profile.split("x"))
     margin = {"128x128": 4, "128x160": 4, "176x220": 6, "240x320": 8, "320x240": 6}[profile]
 
@@ -143,18 +188,19 @@ def test_boot_instructions_fit_and_remain_visible(
         )
         return struct.unpack(f"={width * height}H", output.read_bytes())
 
-    # Each successive word must add visible pixels in the instruction area.
-    previous = render("")
+    heading_lines = len(ink_lines(render(""), width))
+    instruction_lines = ink_lines(render(message), width)[heading_lines:]
     words = message.split()
-    for count, word in enumerate(words, start=1):
-        current = render(" ".join(words[:count]))
-        added = [
-            (index % width, index // width)
-            for index, (before, after) in enumerate(zip(previous, current, strict=True))
-            if before == 0x1082 and after != 0x1082
-        ]
-        assert added, f"{profile}: {word!r} has no visible pixels"
-        assert all(
-            margin <= x < width - margin and margin <= y < height - margin for x, y in added
-        )
-        previous = current
+    # A line can consume any whole-word prefix of the remaining instruction.
+    for line in instruction_lines:
+        assert all(margin <= x < width - margin and margin <= y < height - margin for x, y in line)
+        observed = normalized_ink(line)
+        for count in range(1, len(words) + 1):
+            if observed == glyph_ink(body_font, " ".join(words[:count])):
+                words = words[count:]
+                break
+        else:
+            pytest.fail(
+                f"{profile}: unexpected or clipped instruction line, expected {' '.join(words)!r}"
+            )
+    assert not words, f"{profile}: missing instruction text {' '.join(words)!r}"

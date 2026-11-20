@@ -133,6 +133,7 @@ _PLATFORM_ORDER = {
         "vendor_source_lock",
         "vendor_cache_name",
         "archive_prefix",
+        "ram_source",
         "stage0_source",
         "source_destination",
         "vendor_destination",

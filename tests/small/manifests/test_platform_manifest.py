@@ -162,10 +162,10 @@ class PlatformManifestTests:
         )
 
     @pytest.mark.parametrize("value", ['""', "1"], ids=['""', "1"])
-    def test_property_requirement_refuses_empty_or_ambiguous_declarations(
+    def test_property_requirement_refuses_empty_or_duplicate_declarations(
         self, platform_manifest: PlatformManifest, value: str
     ) -> None:
-        """A feature requirement must name a property and have one owner per condition."""
+        """A feature requirement names a property and lists each required symbol once."""
         declaration = (
             '[{path="/soc/keypad", compatible="example,keypad", '
             f'property={value}, config="CONFIG_AUX_KEY"}}]'
@@ -178,7 +178,7 @@ class PlatformManifestTests:
             '[{path="/soc/keypad", compatible="example,keypad", property="aux-gpios",'
             'config="CONFIG_AUX_KEY"},'
             '{path="/soc/keypad", compatible="example,keypad", property="aux-gpios",'
-            'config="CONFIG_OTHER"}]'
+            'config="CONFIG_AUX_KEY"}]'
         )
         with pytest.raises(SystemExit, match=r"repeats ownership .*property aux-gpios"):
             load_manifest(platform_manifest, with_dt_checks(platform_manifest, declaration))

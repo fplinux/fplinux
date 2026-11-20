@@ -571,6 +571,8 @@ class WorkspaceSnapshotTests:
         ("relative", "ram_changes", "card_changes"),
         [
             ("alpine/ramroot-init.sh", True, False),
+            ("platforms/ums9117/bootstrap/ram/main.c", True, False),
+            ("targets/nokia-ta1618/bootstrap/lcd_config.h", True, True),
             ("platforms/ums9117/bootstrap-microsd/Makefile", False, True),
         ],
     )

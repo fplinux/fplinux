@@ -145,6 +145,7 @@ _KERNEL_IMPLEMENTATION = _MANIFEST_IMPLEMENTATION | frozenset(
         "scripts/fplinux_cli/build/process.py",
         "scripts/fplinux_cli/build/sources.py",
         "scripts/fplinux_cli/environment/downloads.py",
+        "scripts/fplinux_cli/fdt.py",
         "scripts/fplinux_cli/build/kernel/__init__.py",
         "scripts/fplinux_cli/build/kernel/configuration.py",
         "scripts/fplinux_cli/build/kernel/prepare.py",

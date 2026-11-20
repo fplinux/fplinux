@@ -257,6 +257,7 @@ def _bootstrap(value: object) -> dict[str, Any]:
             "backend",
             "vendor_source_lock",
             "archive_prefix",
+            "ram_source",
             "stage0_source",
             "source_destination",
             "vendor_destination",
@@ -280,6 +281,7 @@ def _bootstrap(value: object) -> dict[str, Any]:
     for key in ("vendor_source_lock", "archive_prefix", "safety_target"):
         nonempty_string(bootstrap.get(key), f"platform bootstrap {key}")
     for key in (
+        "ram_source",
         "stage0_source",
         "source_destination",
         "vendor_destination",
