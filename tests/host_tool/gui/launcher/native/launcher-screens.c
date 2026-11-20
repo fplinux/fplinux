@@ -1167,7 +1167,8 @@ static void ring_active(struct capture *capture, uint64_t event_id)
 
 static uint32_t stop_ring(struct capture *capture, uint64_t event_id)
 {
-	char expected[FPLINUX_UI_SESSION_CLOCK_BYTES];
+	struct clock_request request;
+	const char *json = capture->clock_request.clock_data;
 	uint64_t deadline = fplinux_ui_frame_now_ms() + 3000;
 
 	press(capture, KEY_F14);
@@ -1176,11 +1177,11 @@ static uint32_t stop_ring(struct capture *capture, uint64_t event_id)
 		pump(capture);
 	assert(capture->has_clock_request);
 	capture->has_clock_request = false;
-	snprintf(expected, sizeof(expected),
-		 "{\"op\":\"dismiss\",\"event_id\":%llu}",
-		 (unsigned long long)event_id);
 	assert(!strcmp(capture->clock_request.name, "dismiss"));
-	assert(!strcmp(capture->clock_request.clock_data, expected));
+	assert(clock_wire_request_decode(json, strlen(json), &request) ==
+	       CLOCK_OK);
+	assert(request.op == CLOCK_REQUEST_DISMISS);
+	assert(request.event_id == event_id);
 	return capture->clock_request.serial;
 }
 

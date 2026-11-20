@@ -10,6 +10,16 @@
 
 #include <json-c/json.h>
 
+static void assert_json_fields(const char *json, const char *literal)
+{
+	struct json_object *actual = json_tokener_parse(json);
+	struct json_object *expected = json_tokener_parse(literal);
+
+	assert(actual && expected && json_object_equal(actual, expected));
+	json_object_put(expected);
+	json_object_put(actual);
+}
+
 static void apply(struct fplinux_session_clock *clock, const char *json,
 		  int64_t wall_utc, uint64_t mono_ms)
 {
@@ -28,7 +38,7 @@ static void literal_requests_drive_the_session_owner(const char *directory)
 	struct fplinux_ui_session_clock_presentation presentation;
 	char json[256];
 	static const char large_id[] =
-		"{\"op\":\"dismiss\",\"event_id\":9223372036854775817}";
+		"{\"event_id\":9223372036854775817,\"op\":\"dismiss\"}";
 
 	assert(fplinux_session_clock_init(&clock, 1704067200, 1000, directory)
 		       .status == CLOCK_OK);
@@ -85,7 +95,9 @@ static void literal_requests_drive_the_session_owner(const char *directory)
 	assert(request.event_id == UINT64_C(9223372036854775817));
 	assert(clock_wire_request_encode(&request, json, sizeof(json)) ==
 	       CLOCK_OK);
-	assert(!strcmp(json, large_id));
+	assert(clock_wire_request_decode(json, strlen(json), &request) ==
+	       CLOCK_OK);
+	assert_json_fields(json, large_id);
 	fplinux_session_clock_cleanup(&clock);
 }
 
@@ -105,9 +117,9 @@ static void malformed_requests_leave_the_output_unchanged(void)
 		"{\"op\":\"timer-set\",\"seconds\":-1}",
 		"{\"op\":\"timer-set\",\"seconds\":360000}",
 		"{\"op\":\"dismiss\",\"event_id\":0}",
-		"{\"op\":\"dismiss\",\"event_id\":18446744073709551616}",
+		"{\"event_id\":18446744073709551616,\"op\":\"dismiss\"}",
 		"{\"op\":\"alarm-delete\",\"id\":4294967296,\"cancel_active\":false}",
-		"{\"op\":\"alarm-enable\",\"id\":1,\"enabled\":1,\"cancel_active\":false}",
+		"{\"enabled\":1,\"id\":1,\"cancel_active\":false,\"op\":\"alarm-enable\"}",
 		"{\"op\":\"alarm-add\",\"alarm\":{\"label\":\"\",\"hour\":1,\"minute\":0,\"repeat_days\":0,\"enabled\":true}}",
 		"{\"op\":\"alarm-add\",\"alarm\":{\"label\":\"\",\"schedule\":1,\"once_utc\":0,\"hour\":24,\"minute\":0,\"repeat_days\":1,\"enabled\":true}}",
 		"{\"op\":\"alarm-add\",\"alarm\":{\"label\":\"\",\"schedule\":1,\"once_utc\":0,\"hour\":1,\"hour\":1,\"minute\":0,\"repeat_days\":1,\"enabled\":true}}",
@@ -137,7 +149,7 @@ static void malformed_requests_leave_the_output_unchanged(void)
 		"{\"op\":\"world-add\",\"offset_minutes\":4294967296}",
 		"{\"op\":\"world-add\",\"offset_minutes\":18446744073709551615}",
 		"{\"op\":\"world-add\",\"offset_minutes\":-9223372036854775809}",
-		"{\"op\":\"world-add\",\"offset_minutes\":0,\"offset_minutes\":0}",
+		"{\"offset_minutes\":0,\"op\":\"world-add\",\"offset_minutes\":0}",
 		"{\"op\":\"world-add\",\"extra\":\"label\",\"offset_minutes\":0}",
 		"{\"op\":\"world-edit\",\"offset_minutes\":345}",
 		"{\"op\":\"world-edit\",\"id\":0,\"offset_minutes\":345}",
@@ -168,7 +180,7 @@ static void explicit_schedules_and_selections_encode_literal_fields(void)
 {
 	static const char *const messages[] = {
 		"{\"op\":\"alarm-add\",\"alarm\":{\"label\":\"День\",\"schedule\":0,\"once_utc\":1706745600,\"hour\":0,\"minute\":0,\"repeat_days\":0,\"enabled\":true}}",
-		"{\"op\":\"alarm-edit\",\"id\":37,\"cancel_active\":false,\"alarm\":{\"label\":\"Утро\",\"schedule\":1,\"once_utc\":0,\"hour\":7,\"minute\":30,\"repeat_days\":42,\"enabled\":true}}",
+		"{\"id\":37,\"alarm\":{\"enabled\":true,\"hour\":7,\"minute\":30,\"label\":\"Утро\",\"schedule\":1,\"once_utc\":0,\"repeat_days\":42},\"op\":\"alarm-edit\",\"cancel_active\":false}",
 		"{\"op\":\"world-add\",\"offset_minutes\":-720}",
 		"{\"op\":\"world-add\",\"offset_minutes\":-210}",
 		"{\"op\":\"world-add\",\"offset_minutes\":0}",
@@ -191,7 +203,9 @@ static void explicit_schedules_and_selections_encode_literal_fields(void)
 						 &request) == CLOCK_OK);
 		assert(clock_wire_request_encode(&request, json,
 						 sizeof(json)) == CLOCK_OK);
-		assert(!strcmp(json, messages[index]));
+		assert(clock_wire_request_decode(json, strlen(json),
+						 &request) == CLOCK_OK);
+		assert_json_fields(json, messages[index]);
 	}
 }
 
@@ -469,12 +483,12 @@ static void
 literal_ring_preserves_large_identity_and_rejects_partial_output(void)
 {
 	static const char message[] =
-		"{\"op\":\"ring\",\"serial\":18446744073709551615,"
-		"\"event\":{\"id\":9223372036854775817,\"kind\":1,\"source_id\":37,"
+		"{\"missed_total\":9,\"op\":\"ring\","
+		"\"event\":{\"kind\":1,\"id\":9223372036854775817,\"source_id\":37,"
 		"\"generation\":2,\"label\":\"Чай\",\"due_wall_utc\":1704067260,"
 		"\"due_monotonic_ms\":2000,\"ring_started_ms\":2000,"
 		"\"snoozed\":true,\"missed_reason\":0},"
-		"\"snooze_minutes\":7,\"missed_total\":9}";
+		"\"snooze_minutes\":7,\"serial\":18446744073709551615}";
 	struct clock_ring ring, before;
 	uint64_t serial;
 	char json[CLOCK_WIRE_CAPACITY];
@@ -488,7 +502,9 @@ literal_ring_preserves_large_identity_and_rejects_partial_output(void)
 	assert(serial == UINT64_C(18446744073709551615));
 	assert(clock_wire_ring_encode(&ring, serial, json, sizeof(json)) ==
 	       CLOCK_OK);
-	assert(!strcmp(json, message));
+	assert(clock_wire_ring_decode(json, strlen(json), &ring, &serial) ==
+	       CLOCK_OK);
+	assert_json_fields(json, message);
 	strcpy(json, "unchanged");
 	assert(clock_wire_ring_encode(&ring, serial, json, 5) == CLOCK_FULL);
 	assert(!strcmp(json, "unchanged"));

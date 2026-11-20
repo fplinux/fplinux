@@ -1016,11 +1016,11 @@ static lv_obj_t *find_label(lv_obj_t *root, const char *prefix)
 struct view_settings_state {
 	size_t focus;
 	size_t choice_focus;
-	bool choosing, current_marked;
+	bool choosing;
 	enum fplinux_rgb565_scale scale;
 	enum fplinux_rgb565_rotation rotation;
 	bool scale_label, rotation_label, fit_label, zero_label;
-	bool integer_label, rotate_270_label;
+	char focused_title[16], marked_title[16];
 };
 
 struct view_settings_application {
@@ -1030,6 +1030,51 @@ struct view_settings_application {
 	struct fplinux_ui_view_settings settings;
 	enum fplinux_ui_view_setting setting;
 };
+
+static lv_obj_t *find_marked_row(lv_obj_t *root)
+{
+	if (!lv_obj_is_visible(root))
+		return NULL;
+	if (lv_obj_has_state(root, LV_STATE_CHECKED))
+		return root;
+	for (uint32_t i = 0; i < lv_obj_get_child_count(root); ++i) {
+		lv_obj_t *row = find_marked_row(lv_obj_get_child(root, i));
+
+		if (row)
+			return row;
+	}
+	return NULL;
+}
+
+static void observe_choice_titles(struct fplinux_ui *ui,
+				  struct view_settings_state *state)
+{
+	lv_obj_t *marked = find_marked_row(fplinux_ui_screen(ui));
+	uint32_t focus_ink = lv_color_to_u32(fplinux_ui_theme(ui)->accent_text);
+	lv_obj_t *rows;
+
+	if (!marked)
+		return;
+	rows = lv_obj_get_parent(marked);
+	for (uint32_t i = 0; i < lv_obj_get_child_count(rows); ++i) {
+		lv_obj_t *row = lv_obj_get_child(rows, i);
+		lv_obj_t *label = find_label(row, "");
+		const char *title;
+
+		if (!label)
+			continue;
+		title = lv_label_get_text(label);
+		if (row == marked)
+			snprintf(state->marked_title,
+				 sizeof(state->marked_title), "%s", title);
+		if (lv_color_to_u32(lv_obj_get_style_text_color(
+			    label, LV_PART_MAIN)) == focus_ink) {
+			assert(!state->focused_title[0]);
+			snprintf(state->focused_title,
+				 sizeof(state->focused_title), "%s", title);
+		}
+	}
+}
 
 static void view_settings_changed(struct fplinux_ui *ui,
 				  struct fplinux_ui_screen *screen,
@@ -1075,7 +1120,6 @@ static void view_settings_input(struct fplinux_ui *ui, int fd, short events,
 {
 	struct view_settings_application *application = context;
 	struct view_settings_state state;
-	size_t current;
 	char command;
 
 	assert(events == POLLIN && read(fd, &command, 1) == 1);
@@ -1093,9 +1137,6 @@ static void view_settings_input(struct fplinux_ui *ui, int fd, short events,
 	}
 	lv_obj_update_layout(fplinux_ui_screen(ui));
 	lv_refr_now(NULL);
-	current = application->setting == FPLINUX_UI_VIEW_SCALE ?
-			  application->settings.scale :
-			  application->settings.rotation;
 	state = (struct view_settings_state){
 		.focus = fplinux_ui_list_get_focused(application->list),
 		.choice_focus = application->choice ?
@@ -1103,9 +1144,6 @@ static void view_settings_input(struct fplinux_ui *ui, int fd, short events,
 						application->choice) :
 					SIZE_MAX,
 		.choosing = application->choice != NULL,
-		.current_marked = application->choice &&
-				  fplinux_ui_list_is_selected(
-					  application->choice, current),
 		.scale = application->settings.scale,
 		.rotation = application->settings.rotation,
 		.scale_label = find_label(fplinux_ui_screen(ui), "Scale") !=
@@ -1114,11 +1152,9 @@ static void view_settings_input(struct fplinux_ui *ui, int fd, short events,
 			find_label(fplinux_ui_screen(ui), "Rotation") != NULL,
 		.fit_label = find_label(fplinux_ui_screen(ui), "Fit") != NULL,
 		.zero_label = find_label(fplinux_ui_screen(ui), "0°") != NULL,
-		.integer_label = find_label(fplinux_ui_screen(ui), "Integer") !=
-				 NULL,
-		.rotate_270_label = find_label(fplinux_ui_screen(ui), "270°") !=
-				    NULL,
 	};
+	if (state.choosing)
+		observe_choice_titles(ui, &state);
 	assert(write(fd, &state, sizeof(state)) == (ssize_t)sizeof(state));
 }
 
@@ -2596,6 +2632,27 @@ static void view_settings_key(struct fplinux_ui_frame_peer *compositor,
 	fplinux_ui_frame_send_key(&compositor->keyboards[0], code, false);
 }
 
+static void assert_choice_titles(const struct view_settings_state *state,
+				 const char *focused, const char *marked)
+{
+	assert(!strcmp(state->focused_title, focused));
+	assert(!strcmp(state->marked_title, marked));
+}
+
+static struct view_settings_state
+wait_choice_focus(struct fplinux_ui_frame_peer *compositor, int control,
+		  size_t index)
+{
+	uint64_t deadline = fplinux_ui_frame_now_ms() + 3000;
+	struct view_settings_state state;
+
+	do {
+		assert(fplinux_ui_frame_now_ms() < deadline);
+		state = view_settings_request(compositor, control, 'Q');
+	} while (state.choice_focus != index);
+	return state;
+}
+
 static void wait_changed_pixels(struct fplinux_ui_frame_peer *compositor,
 				uint16_t *previous)
 {
@@ -2633,12 +2690,14 @@ static void check_view_settings(struct fplinux_ui_frame_peer *compositor,
 	do {
 		assert(fplinux_ui_frame_now_ms() < deadline);
 		state = view_settings_request(compositor, control, 'Q');
-	} while (!state.integer_label);
-	assert(state.choosing && state.choice_focus == 0 &&
-	       state.current_marked);
+	} while (!state.choosing);
+	assert(state.choice_focus == 0);
+	assert_choice_titles(&state, "Fit", "Fit");
 	wait_changed_pixels(compositor, previous);
 	view_settings_key(compositor, KEY_DOWN);
 	view_settings_key(compositor, KEY_DOWN);
+	state = wait_choice_focus(compositor, control, 2);
+	assert_choice_titles(&state, "Integer", "Fit");
 	view_settings_key(compositor, KEY_ENTER);
 	deadline = fplinux_ui_frame_now_ms() + 3000;
 	do {
@@ -2654,7 +2713,8 @@ static void check_view_settings(struct fplinux_ui_frame_peer *compositor,
 		assert(fplinux_ui_frame_now_ms() < deadline);
 		state = view_settings_request(compositor, control, 'Q');
 	} while (!state.choosing);
-	assert(state.choice_focus == 2 && state.current_marked);
+	assert(state.choice_focus == 2);
+	assert_choice_titles(&state, "Integer", "Integer");
 	wait_changed_pixels(compositor, previous);
 	view_settings_key(compositor, KEY_ENTER);
 	deadline = fplinux_ui_frame_now_ms() + 3000;
@@ -2674,12 +2734,14 @@ static void check_view_settings(struct fplinux_ui_frame_peer *compositor,
 	do {
 		assert(fplinux_ui_frame_now_ms() < deadline);
 		state = view_settings_request(compositor, control, 'Q');
-	} while (!state.rotate_270_label);
-	assert(state.choosing && state.choice_focus == 0 &&
-	       state.current_marked);
+	} while (!state.choosing);
+	assert(state.choice_focus == 0);
+	assert_choice_titles(&state, "0°", "0°");
 	wait_changed_pixels(compositor, previous);
 	view_settings_key(compositor, KEY_DOWN);
 	view_settings_key(compositor, KEY_DOWN);
+	state = wait_choice_focus(compositor, control, 2);
+	assert_choice_titles(&state, "270°", "0°");
 	view_settings_key(compositor, KEY_ENTER);
 	deadline = fplinux_ui_frame_now_ms() + 3000;
 	do {
@@ -2695,7 +2757,8 @@ static void check_view_settings(struct fplinux_ui_frame_peer *compositor,
 		assert(fplinux_ui_frame_now_ms() < deadline);
 		state = view_settings_request(compositor, control, 'Q');
 	} while (!state.choosing);
-	assert(state.choice_focus == 2 && state.current_marked);
+	assert(state.choice_focus == 2);
+	assert_choice_titles(&state, "270°", "270°");
 	free(previous);
 }
 

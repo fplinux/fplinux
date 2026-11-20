@@ -119,10 +119,10 @@ def phone_data_inputs(tmp_path: Path) -> PhoneDataInputs:
     return PhoneDataInputs(root, linux, dtb, config)
 
 
-def test_acquisition_reuses_backup_after_unrelated_build_and_display_changes(
+def test_acquisition_recipe_ignores_unrelated_build_and_display_inputs(
     phone_data_inputs: PhoneDataInputs,
 ) -> None:
-    """A display, release, preparation or transport edit cannot require another raw read."""
+    """Unrelated display, release, preparation and transport bytes retain the acquisition key."""
     before = phone_data_inputs.acquisition()
     phone_data_inputs.config["release_id"] = "another-release"
     phone_data_inputs.config["runtime"] = {"transport": "usb-ncm", "timeout": 60}
@@ -138,7 +138,7 @@ def test_acquisition_reuses_backup_after_unrelated_build_and_display_changes(
     assert phone_data_inputs.acquisition() == before
 
 
-def test_acquisition_reuses_backup_when_unrelated_nodes_renumber_phandles(
+def test_acquisition_recipe_ignores_unrelated_phandle_numbering(
     phone_data_inputs: PhoneDataInputs,
 ) -> None:
     """The resource reference identifies its node rather than the DT compiler's number."""
@@ -159,7 +159,7 @@ def test_acquisition_reuses_backup_when_unrelated_nodes_renumber_phandles(
         "interface",
     ],
 )
-def test_acquisition_rejects_backup_after_reader_contract_changes(
+def test_acquisition_recipe_tracks_reader_contract_changes(
     phone_data_inputs: PhoneDataInputs, change: str
 ) -> None:
     """Each changed input can alter physical bytes or the chip admitted for the target."""
@@ -203,10 +203,10 @@ def test_live_reader_changes_invalidate_acquisition_without_changing_saved_prepa
 @pytest.mark.parametrize(
     "change", ["parser", "audio", "eq", "groups", "interpretation", "receipt", "compatible"]
 )
-def test_preparation_changes_without_invalidating_raw_backup(
+def test_preparation_recipe_changes_without_affecting_acquisition_key(
     phone_data_inputs: PhoneDataInputs, change: str
 ) -> None:
-    """New derived output is prepared from the same raw acquisition when its policy changes."""
+    """Derived-output policy changes only the preparation digest."""
     acquisition = phone_data_inputs.acquisition()
     preparation = phone_data_inputs.preparation()
     if change == "parser":

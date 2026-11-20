@@ -343,6 +343,21 @@ static void assert_failed_ring(struct fplinux_ui *ui,
 				   "Action failed. Try again."));
 }
 
+static void
+assert_ring_request(const struct fplinux_ui_session_message *message,
+		    enum clock_request_op op, uint64_t event_id,
+		    unsigned int minutes)
+{
+	struct clock_request request;
+
+	assert(clock_wire_request_decode(message->clock_data,
+					 strlen(message->clock_data),
+					 &request) == CLOCK_OK);
+	assert(request.op == op);
+	assert(request.event_id == event_id);
+	assert(request.minutes == minutes);
+}
+
 /* A reply within the threshold: the ring leaves in one step, never busy. */
 static void test_alarm(struct fplinux_ui *ui,
 		       struct fplinux_launcher_clock *clock)
@@ -364,9 +379,8 @@ static void test_alarm(struct fplinux_ui *ui,
 	assert(ui->sent_count == 1 && ui->sent[0].serial != 0);
 	assert(ui->sent[0].type == FPLINUX_UI_SESSION_CLOCK);
 	assert(!strcmp(ui->sent[0].name, "snooze"));
-	assert(!strcmp(
-		ui->sent[0].clock_data,
-		"{\"op\":\"snooze\",\"event_id\":9007199254740993,\"minutes\":0}"));
+	assert_ring_request(&ui->sent[0], CLOCK_REQUEST_SNOOZE,
+			    UINT64_C(9007199254740993), 0);
 	assert_ring_waits(ui, clock, alert);
 	assert(fplinux_launcher_clock_is_ringing(clock));
 	reply(clock, ui->sent[0].serial, 0, CLOCK_EVENT_NONE, "");
@@ -392,8 +406,7 @@ static void test_timer(struct fplinux_ui *ui,
 	assert(!find_command(alert, FPLINUX_UI_COMMAND_SCREEN));
 	alert_response(ui, FPLINUX_UI_COMMAND_STOP);
 	assert(ui->sent_count == 1 && !strcmp(ui->sent[0].name, "dismiss"));
-	assert(!strcmp(ui->sent[0].clock_data,
-		       "{\"op\":\"dismiss\",\"event_id\":7}"));
+	assert_ring_request(&ui->sent[0], CLOCK_REQUEST_DISMISS, 7, 0);
 	assert_ring_waits(ui, clock, alert);
 	assert(!ui->busy_alerts);
 	pass_threshold(ui);
@@ -441,8 +454,7 @@ static void test_stale(struct fplinux_ui *ui,
 	assert(fplinux_launcher_clock_is_ringing(clock) && ui->depth == 2);
 	alert_response(ui, FPLINUX_UI_COMMAND_STOP);
 	assert(ui->sent_count == 2 && ui->sent[1].serial != first);
-	assert(!strcmp(ui->sent[1].clock_data,
-		       "{\"op\":\"dismiss\",\"event_id\":8}"));
+	assert_ring_request(&ui->sent[1], CLOCK_REQUEST_DISMISS, 8, 0);
 	assert_ring_waits(ui, clock, fplinux_ui_current(ui));
 	reply(clock, ui->sent[1].serial, 0, CLOCK_EVENT_NONE, "");
 	run_loop(ui);
@@ -468,8 +480,7 @@ static void test_superseded(struct fplinux_ui *ui,
 	assert(fplinux_launcher_clock_is_visible(clock));
 	assert(!fplinux_launcher_clock_is_waiting(clock));
 	alert_response(ui, FPLINUX_UI_COMMAND_STOP);
-	assert(!strcmp(ui->sent[1].clock_data,
-		       "{\"op\":\"dismiss\",\"event_id\":8}"));
+	assert_ring_request(&ui->sent[1], CLOCK_REQUEST_DISMISS, 8, 0);
 	pass_threshold(ui);
 	reply(clock, ui->sent[1].serial, 8, CLOCK_EVENT_ALARM, "clock-failed");
 	assert(waiting(ui) && ui->wait.ending);
@@ -481,8 +492,7 @@ static void test_superseded(struct fplinux_ui *ui,
 	/* Nothing is left of either request: the next answer waits as usual. */
 	alert_response(ui, FPLINUX_UI_COMMAND_STOP);
 	assert(ui->sent_count == 3);
-	assert(!strcmp(ui->sent[2].clock_data,
-		       "{\"op\":\"dismiss\",\"event_id\":9}"));
+	assert_ring_request(&ui->sent[2], CLOCK_REQUEST_DISMISS, 9, 0);
 	assert_ring_waits(ui, clock, fplinux_ui_current(ui));
 	reply(clock, ui->sent[2].serial, 0, CLOCK_EVENT_NONE, "");
 	run_loop(ui);

@@ -13,6 +13,7 @@ import shutil
 import struct
 import zlib
 from dataclasses import dataclass
+from functools import cache
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING, TypedDict, cast
@@ -32,7 +33,7 @@ from tests.host_tool.gui.support.private_bus import private_bus
 from tests.process import run_process
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Callable, Iterator
 
 SCREENS = ROOT / "tests/host_tool/gui/launcher/native"
 
@@ -150,11 +151,10 @@ def red_tile_png(size: int) -> bytes:
     )
 
 
-@pytest.fixture
-def launcher_catalogue(tmp_path: Path) -> tuple[Path, Path]:
+def make_launcher_catalogue(directory: Path) -> tuple[Path, Path]:
     """Own twelve installed entries and tiles for every supported tile size."""
-    applications = tmp_path / "applications"
-    icons = tmp_path / "icons"
+    applications = directory / "applications"
+    icons = directory / "icons"
     applications.mkdir()
     for index in range(1, 13):
         entry = applications / f"org.test.app{index:02}.desktop"
@@ -172,6 +172,11 @@ def launcher_catalogue(tmp_path: Path) -> tuple[Path, Path]:
         tile.write_bytes(red_tile_png(size))
         tile.chmod(0o600)
     return applications, icons
+
+
+@pytest.fixture
+def launcher_catalogue(tmp_path: Path) -> tuple[Path, Path]:
+    return make_launcher_catalogue(tmp_path)
 
 
 @pytest.mark.parametrize("theme", ["light", "dark"])
@@ -419,32 +424,46 @@ def capture_standby(  # noqa: PLR0913 -- independent native boundary inputs.
     )
 
 
+@pytest.fixture(scope="module")
+def home_with_clock_capture(
+    launcher_native: Path, tmp_path_factory: pytest.TempPathFactory
+) -> Callable[[tuple[int, int], str, str], Path]:
+    """Share a Home and installed Clock capture at matching screen, theme and locale."""
+
+    @cache
+    def capture(screen: tuple[int, int], theme: str, locale: str) -> Path:
+        directory = tmp_path_factory.mktemp("launcher-home")
+        catalogue = make_launcher_catalogue(directory)
+        install_clock_entry(catalogue[0])
+        capture_standby(
+            launcher_native,
+            catalogue,
+            directory,
+            screen,
+            theme=theme,
+            locale=locale,
+            clock_installed=True,
+        )
+        return directory
+
+    return capture
+
+
 @pytest.mark.parametrize("screen", [(128, 128), (128, 160), (176, 220), (240, 320), (320, 240)])
 @pytest.mark.parametrize("theme", ["light", "dark"])
 @pytest.mark.parametrize("locale", ["en", "ru"])
-def test_actual_home_shows_simultaneous_events_and_selected_clock(  # noqa: PLR0913 -- explicit matrix inputs.
-    launcher_native: Path,
-    launcher_catalogue: tuple[Path, Path],
-    tmp_path: Path,
+def test_actual_home_shows_simultaneous_events_and_selected_clock(
+    home_with_clock_capture: Callable[[tuple[int, int], str, str], Path],
     screen: tuple[int, int],
     *,
     theme: str,
     locale: str,
 ) -> None:
     """Home keeps all events, ticks local deadlines and launches the installed Clock."""
-    install_clock_entry(launcher_catalogue[0])
-    capture_standby(
-        launcher_native,
-        launcher_catalogue,
-        tmp_path,
-        screen,
-        theme=theme,
-        locale=locale,
-        clock_installed=True,
-    )
-    idle = observed_frame(tmp_path, "launcher-home-idle")
-    events = observed_frame(tmp_path, "launcher-home-events")
-    analog = observed_frame(tmp_path, "launcher-home-analog")
+    capture = home_with_clock_capture(screen, theme, locale)
+    idle = observed_frame(capture, "launcher-home-idle")
+    events = observed_frame(capture, "launcher-home-events")
+    analog = observed_frame(capture, "launcher-home-analog")
     idle_text = [label["text"] for label in idle["labels"]]
     event_text = [label["text"] for label in events["labels"]]
     date_fragment = "октября" if locale == "ru" else "October"
@@ -460,8 +479,8 @@ def test_actual_home_shows_simultaneous_events_and_selected_clock(  # noqa: PLR0
     assert any(date_fragment in text for text in event_text) == (screen != (128, 128))
     assert idle["lines"] == 0
     assert analog["lines"] == 3
-    assert (tmp_path / "launcher-home-events.rgb565").read_bytes() != (
-        tmp_path / "launcher-home-analog.rgb565"
+    assert (capture / "launcher-home-events.rgb565").read_bytes() != (
+        capture / "launcher-home-analog.rgb565"
     ).read_bytes()
     body_top, body_bottom = {
         (128, 128): (16, 112),
@@ -509,27 +528,16 @@ HOME_COLOURS = {
 @pytest.mark.parametrize("theme", ["light", "dark"])
 @pytest.mark.parametrize("screen", list(HOME_BODY), ids=lambda screen: "x".join(map(str, screen)))
 def test_actual_home_clocks_use_brand_for_colon_and_second_hand(
-    launcher_native: Path,
-    launcher_catalogue: tuple[Path, Path],
-    tmp_path: Path,
+    home_with_clock_capture: Callable[[tuple[int, int], str, str], Path],
     screen: tuple[int, int],
     theme: str,
 ) -> None:
     """The 07:00 colon and the 07:00:00 second hand carry the brand colour."""
-    install_clock_entry(launcher_catalogue[0])
-    capture_standby(
-        launcher_native,
-        launcher_catalogue,
-        tmp_path,
-        screen,
-        theme=theme,
-        locale="en",
-        clock_installed=True,
-    )
+    capture = home_with_clock_capture(screen, theme, "en")
     width, _ = screen
     body_top, body_bottom, gap = HOME_BODY[screen]
     colours = {name: rgb565(colour) for name, colour in HOME_COLOURS[theme].items()}
-    frame = (tmp_path / "launcher-home-analog.rgb565").read_bytes()
+    frame = (capture / "launcher-home-analog.rgb565").read_bytes()
     dial = measure_dial(frame, width, body_top, colours["background"], colours["second"])
     last_ink = max(
         y
@@ -548,10 +556,10 @@ def test_actual_home_clocks_use_brand_for_colon_and_second_hand(
     assert brand
     assert all(dial.top <= y <= dial.bottom for _, y in brand)
 
-    digital = (tmp_path / "launcher-home-idle.rgb565").read_bytes()
+    digital = (capture / "launcher-home-idle.rgb565").read_bytes()
     label = next(
         item
-        for item in observed_frame(tmp_path, "launcher-home-idle")["labels"]
+        for item in observed_frame(capture, "launcher-home-idle")["labels"]
         if item["text"] == "07:00"
     )
     _, top, _, height = label["bounds"]
@@ -807,15 +815,28 @@ STATUS_COLOURS = {
 }
 
 
+@pytest.fixture(scope="module")
+def status_bar_capture(
+    launcher_native: Path, ui_icon_resources: Path, tmp_path_factory: pytest.TempPathFactory
+) -> Callable[[tuple[int, int], str], Path]:
+    """Share one capture of the status bar across its pixel and positioning checks."""
+
+    @cache
+    def capture(screen: tuple[int, int], theme: str) -> Path:
+        directory = tmp_path_factory.mktemp("launcher-status")
+        catalogue = make_launcher_catalogue(directory)
+        capture_status_bar(launcher_native, catalogue, ui_icon_resources, directory, screen, theme)
+        return directory
+
+    return capture
+
+
 @pytest.mark.parametrize("theme", ["light", "dark"])
 @pytest.mark.parametrize(
     "screen", list(BATTERY_PIXELS), ids=lambda screen: "x".join(map(str, screen))
 )
-def test_actual_battery_icon_pixels(  # noqa: PLR0913, PLR0917 -- explicit matrix inputs.
-    launcher_native: Path,
-    launcher_catalogue: tuple[Path, Path],
-    ui_icon_resources: Path,
-    tmp_path: Path,
+def test_actual_battery_icon_pixels(
+    status_bar_capture: Callable[[tuple[int, int], str], Path],
     screen: tuple[int, int],
     theme: str,
 ) -> None:
@@ -824,16 +845,14 @@ def test_actual_battery_icon_pixels(  # noqa: PLR0913, PLR0917 -- explicit matri
     The outline leaves its corner pixels out, the bars keep 1 px from it on
     all sides and between each other, and the bolt and "!" are crisp.
     """
-    capture_status_bar(
-        launcher_native, launcher_catalogue, ui_icon_resources, tmp_path, screen, theme
-    )
+    capture = status_bar_capture(screen, theme)
     width, height = screen
     packed = {name: rgb565(colour) for name, colour in STATUS_COLOURS[theme].items()}
     icon = BATTERY_PIXELS[screen]
     # From one bar-coloured column left of the bolt to the right screen edge.
     left = icon.bolt_origin[0] - 1
     for state in BATTERY_STATES:
-        frame = (tmp_path / f"launcher-battery-{state}.rgb565").read_bytes()
+        frame = (capture / f"launcher-battery-{state}.rgb565").read_bytes()
         assert len(frame) == width * height * 2
         painted = expected_battery(icon, state, packed)
         wrong = [
@@ -854,11 +873,8 @@ def ink_rows(frame: bytes, width: int, columns: range, rows: int, bar: int) -> l
 @pytest.mark.parametrize(
     "screen", list(BATTERY_PIXELS), ids=lambda screen: "x".join(map(str, screen))
 )
-def test_actual_status_bar_items_are_centred_above_the_divider(  # noqa: PLR0913, PLR0917 -- explicit matrix inputs.
-    launcher_native: Path,
-    launcher_catalogue: tuple[Path, Path],
-    ui_icon_resources: Path,
-    tmp_path: Path,
+def test_actual_status_bar_items_are_centred_above_the_divider(
+    status_bar_capture: Callable[[tuple[int, int], str], Path],
     screen: tuple[int, int],
     theme: str,
 ) -> None:
@@ -867,9 +883,7 @@ def test_actual_status_bar_items_are_centred_above_the_divider(  # noqa: PLR0913
     Each item's ink has as many bar rows above it as above the divider below
     it, or one more below when their sum is odd; the divider is not space.
     """
-    capture_status_bar(
-        launcher_native, launcher_catalogue, ui_icon_resources, tmp_path, screen, theme
-    )
+    capture = status_bar_capture(screen, theme)
     width, _ = screen
     rows = STATUS_ROWS[screen]
     bar = rgb565(STATUS_COLOURS[theme]["bar"])
@@ -884,15 +898,15 @@ def test_actual_status_bar_items_are_centred_above_the_divider(  # noqa: PLR0913
     }
     for item, (state, columns) in items.items():
         name = state if state == "status-locked" else f"battery-{state}"
-        frame = (tmp_path / f"launcher-{name}.rgb565").read_bytes()
+        frame = (capture / f"launcher-{name}.rgb565").read_bytes()
         ink = ink_rows(frame, width, columns, rows, bar)
         assert ink, f"{item} is not drawn"
         above, below = ink[0], rows - 1 - ink[-1]
         assert below - above in (0, 1), f"{item}: {above} rows above, {below} below"
-    idle = (tmp_path / "launcher-playback-idle.rgb565").read_bytes()
-    playing = (tmp_path / "launcher-playback-playing.rgb565").read_bytes()
-    locked = (tmp_path / "launcher-status-locked.rgb565").read_bytes()
-    locked_playing = (tmp_path / "launcher-playback-locked.rgb565").read_bytes()
+    idle = (capture / "launcher-playback-idle.rgb565").read_bytes()
+    playing = (capture / "launcher-playback-playing.rgb565").read_bytes()
+    locked = (capture / "launcher-status-locked.rgb565").read_bytes()
+    locked_playing = (capture / "launcher-playback-locked.rgb565").read_bytes()
     ink_colour = rgb565(STATUS_COLOURS[theme]["ink"])
     for before, after in ((idle, playing), (locked, locked_playing)):
         changed = [

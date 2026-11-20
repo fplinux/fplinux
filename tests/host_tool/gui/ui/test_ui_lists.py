@@ -7,6 +7,7 @@ import os
 import shutil
 import struct
 from dataclasses import dataclass
+from functools import cache
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -18,7 +19,7 @@ from tests.host_tool.gui.support.list_rows import ListArea, frame_pixels, is_lin
 from tests.process import run_process
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Callable, Iterator
     from types import ModuleType
 
 
@@ -215,6 +216,39 @@ def test_check_rows_centre_crisp_marks_in_cells_between_dividers(
         assert not wrong, f"row {selected} selected: {len(wrong)} pixels differ, first {wrong[:8]}"
 
 
+@pytest.fixture(scope="module")
+def bar_line_capture(
+    ui_lists: Path, tmp_path_factory: pytest.TempPathFactory
+) -> Callable[[int, int, str, str], bytes]:
+    """Share one native capture between the divider and scrollbar checks."""
+
+    @cache
+    def capture(width: int, height: int, theme: str, presentation: str) -> bytes:
+        directory = tmp_path_factory.mktemp("ui-list-bar-line")
+        output = directory / "bar-line.rgb565"
+        result = run_process(
+            [
+                str(ui_lists),
+                f"bar-line-{presentation}",
+                str(width),
+                str(height),
+                theme,
+                str(output),
+            ],
+            name=f"render native {presentation} rows at the bar, {width}x{height} ({theme})",
+            timeout=10,
+        )
+        log_root = os.environ.get("FPLINUX_LOG_ROOT")
+        if log_root and output.is_file():
+            retained = Path(log_root) / f"ui-list-bar-line-{presentation}-{width}x{height}-{theme}"
+            retained.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(output, retained)
+        assert result.returncode == 0, result.stdout + result.stderr
+        return output.read_bytes()
+
+    return capture
+
+
 @pytest.mark.parametrize(
     "screen",
     # width, height and row pitch
@@ -232,8 +266,7 @@ def test_check_rows_centre_crisp_marks_in_cells_between_dividers(
 )
 @pytest.mark.parametrize("presentation", ["stored", "virtual"])
 def test_list_ending_on_a_bar_shows_its_line_once_with_the_selection_touching_it(
-    ui_lists: Path,
-    tmp_path: Path,
+    bar_line_capture: Callable[[int, int, str, str], bytes],
     screen: tuple[int, int, int],
     palette: tuple[str, int, int],
     presentation: str,
@@ -246,24 +279,13 @@ def test_list_ending_on_a_bar_shows_its_line_once_with_the_selection_touching_it
     """
     theme, divider, accent = palette
     width, height, pitch = screen
-    output = tmp_path / "bar-line.rgb565"
-    result = run_process(
-        [str(ui_lists), f"bar-line-{presentation}", str(width), str(height), theme, str(output)],
-        name=f"render native {presentation} rows ending on a bar at {width}x{height} ({theme})",
-        timeout=10,
-    )
-    log_root = os.environ.get("FPLINUX_LOG_ROOT")
-    if log_root:
-        retained = Path(log_root) / f"ui-list-bar-line-{presentation}-{width}x{height}-{theme}"
-        retained.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(output, retained)
     # A title band's line at y 0, then three rows of the pitch, the last
     # one's divider at the bar's line.
     bar = 3 * pitch
     area = ListArea(
         width=width, top=1, bottom=bar, pitch=pitch, edge=(0, 2), divider=divider, highlight=accent
     )
-    data = output.read_bytes()
+    data = bar_line_capture(width, height, theme, presentation)
     assert len(data) == 4 * width * height * 2
     for index, name in enumerate(("first page", "next page", "last row")):
         pixels = frame_pixels(
@@ -274,7 +296,6 @@ def test_list_ending_on_a_bar_shows_its_line_once_with_the_selection_touching_it
         assert [y for y in range(1, bar) if is_line(pixels, area, y, accent)] == list(
             range(bar - pitch + 1, bar)
         ), name
-    assert result.returncode == 0, result.stdout + result.stderr
 
 
 @pytest.mark.parametrize(
@@ -294,8 +315,7 @@ def test_list_ending_on_a_bar_shows_its_line_once_with_the_selection_touching_it
 )
 @pytest.mark.parametrize("presentation", ["stored", "virtual"])
 def test_overflowing_list_fills_its_scroll_channel_between_the_lines_around_it(
-    ui_lists: Path,
-    tmp_path: Path,
+    bar_line_capture: Callable[[int, int, str, str], bytes],
     screen: tuple[int, int, int],
     palette: tuple[str, int, int],
     presentation: str,
@@ -309,16 +329,9 @@ def test_overflowing_list_fills_its_scroll_channel_between_the_lines_around_it(
     """
     theme, border, focus = palette
     width, height, pitch = screen
-    output = tmp_path / "bar-line.rgb565"
-    run_process(
-        [str(ui_lists), f"bar-line-{presentation}", str(width), str(height), theme, str(output)],
-        name=f"render native {presentation} list scroll channel at {width}x{height} ({theme})",
-        timeout=10,
-        check=True,
-    )
     # The title band's line at y 0 and the bar's line three rows below it.
     bar = 3 * pitch
-    data = output.read_bytes()
+    data = bar_line_capture(width, height, theme, presentation)
     assert len(data) == 4 * width * height * 2
     frames = [
         frame_pixels(data[index * width * height * 2 : (index + 1) * width * height * 2], width)

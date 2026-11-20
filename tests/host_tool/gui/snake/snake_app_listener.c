@@ -685,8 +685,11 @@ int fplinux_ui_run(struct fplinux_ui *instance)
 	else if (strcmp(scenario, "close-playing") == 0) {
 		key(KEY_OK);
 		assert(!game_timer.paused && ui.kept_on);
+		prefs.saved_last = -1;
+		prefs.saved_best = -1;
 		send_event(FPLINUX_UI_EVENT_CLOSE, false, 0, false);
 		assert(game_timer.paused && !ui.kept_on);
+		assert(prefs.saved_last == 0 && prefs.saved_best == 20);
 	} else if (!strcmp(scenario, "save-failure")) {
 		key(KEY_OK);
 		assert(!game_timer.paused);

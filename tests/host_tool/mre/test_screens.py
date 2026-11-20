@@ -42,6 +42,33 @@ def test_actual_mre_menu_frames(
     )
 
 
+def test_mre_menu_capture_keeps_committed_layout_while_both_buffers_are_held(
+    mre_native: Path, tmp_path: Path
+) -> None:
+    capture_menu_frames(
+        mre_native,
+        tmp_path,
+        (240, 320),
+        "en",
+        "light",
+        application="mre",
+        document=tmp_path / "unused.vxp",
+        scenario="held-buffers",
+    )
+    before = tmp_path / "before-settings"
+    held = tmp_path / "settings-with-buffers-held"
+    released = tmp_path / "settings-after-release"
+    for extension in (".rgb565", ".layout.json", ".labels"):
+        assert (
+            before.with_suffix(extension).read_bytes() == held.with_suffix(extension).read_bytes()
+        ), extension
+    assert (
+        before.with_suffix(".rgb565").read_bytes() != released.with_suffix(".rgb565").read_bytes()
+    )
+    assert "|Open VXP|" in held.with_suffix(".labels").read_text(encoding="utf-8")
+    assert "|Scale|" in released.with_suffix(".labels").read_text(encoding="utf-8")
+
+
 def test_actual_mre_settings_survive_reopen_and_reset_to_global_values(
     mre_native: Path, tmp_path: Path
 ) -> None:

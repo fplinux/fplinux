@@ -16,10 +16,10 @@ mkdir -p "$work/locale/ru/LC_MESSAGES"
 msgfmt --check --output-file="$work/locale/ru/LC_MESSAGES/org.fplinux.phoneme.mo" "$aport/port/app/ru.po"
 msgfmt --check --output-file="$work/locale/ru/LC_MESSAGES/fplinux-ui.mo" "$root/alpine/aports/fplinux-ui/ru.po"
 # shellcheck disable=SC2046
-ui_host_build_application -I"$aport/port/app" -I"$aport/vm" \
+ui_host_build_application -I"$aport/port/app" -I"$aport/vm" -I"$shared" \
 	"$aport/port/app/fplinux-pm-app.c" "$aport/port/app/fplinux-pm-lifecycle.c" \
 	"$aport/port/app/fplinux-pm-store.c" "$aport/vm/fplinux-pm-jar.c" \
-	"$fixtures/vm-peer.c" "$shared/ui-observer.c" \
+	"$fixtures/vm-peer.c" "$shared/ui-observer.c" "$shared/commit-layout.c" \
 	"$screens/native-glyph-resources.c" \
 	-Wl,--wrap=open -Wl,--wrap=fsync -Wl,--wrap=fplinux_language_load \
 	-Wl,--wrap=libintl_bindtextdomain -Wl,--wrap=lv_display_flush_ready \

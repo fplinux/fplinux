@@ -98,10 +98,10 @@ def test_sc_ram_manifest_selects_source_loaders_and_runtime_asset_roles() -> Non
     }
 
 
-def test_sc_microsd_root_uses_ram_linux_and_a_real_ext4_root_without_uboot(
+def test_sc_microsd_root_manifest_declares_direct_linux_boot_and_ext4_bootargs(
     sc_checkout: Path,
 ) -> None:
-    """The board admits direct external root while retaining its unchanged RAM loader."""
+    """Check the external root declaration, its boot arguments and the loader selection."""
     manifest = sc_checkout / "targets/phone/target.toml"
     original = manifest.read_text(encoding="utf-8")
     manifest.write_text(original + "\n[microsd]\n", encoding="utf-8")

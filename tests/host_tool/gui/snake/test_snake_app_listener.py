@@ -105,8 +105,8 @@ def test_hidden_home_and_close_pause_and_save_scores(snake_app: Path, scenario: 
     assert result.stdout == "snake-app-listener: all checks passed\n"
 
 
-def test_close_during_ui_open_saves_scores_before_view_creation(snake_app: Path) -> None:
-    """The UI boundary can deliver CLOSE synchronously before open returns."""
+def test_close_during_ui_open_creates_neither_view_nor_timer(snake_app: Path) -> None:
+    """A synchronous CLOSE saves scores and stops initialization before the view and timer."""
     result = run_process(
         [str(snake_app), "close-during-open", "128", "160", "16", "16", "1", "17", "126", "126"],
         name="run Snake close during UI open harness",

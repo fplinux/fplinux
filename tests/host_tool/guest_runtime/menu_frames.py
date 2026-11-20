@@ -7,6 +7,7 @@ import json
 import os
 import shutil
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 from tests import ROOT
 from tests.process import run_process
@@ -27,35 +28,38 @@ def capture_menu_frames(  # noqa: PLR0913 -- peer, geometry and scenario inputs 
     scenario: str | None = None,
 ) -> None:
     width, height = screen
-    result = run_process(
-        [
-            str(native / "menu-screens"),
-            str(native / application),
-            str(ROOT / "tests/host_tool/files/native/keyboard.xkb"),
-            str(directory / "session.sock"),
-            str(directory),
-            str(width),
-            str(height),
-            locale,
-            f"org.fplinux.{application}",
-            str(document),
-            theme,
-            *([scenario] if scenario else []),
-        ],
-        name=f"actual {application} menus at {width}x{height} ({locale}/{theme})",
-        env=os.environ
-        | {
-            "FPLINUX_NATIVE_LANGUAGE_DIR": str(ROOT / "alpine/aports/fplinux-language"),
-            "FPLINUX_UI_LOCALE_DIRECTORY": str(native / "locale"),
-            "FPLINUX_NATIVE_GLYPHS": str(native / "icons/usr/share/fplinux/glyphs"),
-            "FPLINUX_MRE_TEST_ENGINE": str(native / "engine-peer"),
-            "FPLINUX_MRE_ENGINE_RECORD": str(directory / "engine.log"),
-            "FPLINUX_APP_FRAME_RECORD": str(directory / "frames.log"),
-            "FPLINUX_APP_SAVE_FAULT": str(directory / "save-fault"),
-            "XDG_STATE_HOME": str(directory / "state"),
-        },
-        timeout=30,
-    )
+    command = [
+        str(native / "menu-screens"),
+        str(native / application),
+        str(ROOT / "tests/host_tool/files/native/keyboard.xkb"),
+        str(directory / "session.sock"),
+        str(directory),
+        str(width),
+        str(height),
+        locale,
+        f"org.fplinux.{application}",
+        str(document),
+        theme,
+        *([scenario] if scenario else []),
+    ]
+    with TemporaryDirectory(dir=directory) as commits:
+        result = run_process(
+            command,
+            name=f"actual {application} menus at {width}x{height} ({locale}/{theme})",
+            env=os.environ
+            | {
+                "FPLINUX_NATIVE_LANGUAGE_DIR": str(ROOT / "alpine/aports/fplinux-language"),
+                "FPLINUX_UI_LOCALE_DIRECTORY": str(native / "locale"),
+                "FPLINUX_NATIVE_GLYPHS": str(native / "icons/usr/share/fplinux/glyphs"),
+                "FPLINUX_MRE_TEST_ENGINE": str(native / "engine-peer"),
+                "FPLINUX_MRE_ENGINE_RECORD": str(directory / "engine.log"),
+                "FPLINUX_APP_FRAME_RECORD": str(directory / "frames.log"),
+                "FPLINUX_APP_COMMIT_DIRECTORY": commits,
+                "FPLINUX_APP_SAVE_FAULT": str(directory / "save-fault"),
+                "XDG_STATE_HOME": str(directory / "state"),
+            },
+            timeout=30,
+        )
     (directory / "surface.json").write_text(
         json.dumps({"width": width, "height": height - BAR_HEIGHTS[screen]}) + "\n",
         encoding="utf-8",
