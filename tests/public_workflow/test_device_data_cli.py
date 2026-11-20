@@ -59,6 +59,7 @@ def device_data_cli(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> DeviceDa
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "local"))
+    monkeypatch.setenv("FPLINUX_DATA_DIR", str(tmp_path / ".data"))
     for destination, source in (
         ("platforms/sc9820e/platform.toml", "tests/fixtures/sc9820e-manifest/platform.toml"),
         ("targets/example/target.toml", "tests/fixtures/sc9820e-manifest/target.toml"),
@@ -281,7 +282,7 @@ def test_public_original_target_rejects_unsupported_modes_before_source_or_loade
     assert result.returncode == status, result.stderr
     assert message in result.stderr
     assert "Traceback" not in result.stderr
-    assert not (device_data_cli.root / ".data/device-data").exists()
+    assert not device_data_cli.phone().parent.exists()
     assert not (device_data_cli.root / ".data/out").exists()
     assert not (device_data_cli.root / "events.jsonl").exists()
 
@@ -300,7 +301,8 @@ def test_public_nand_target_rejects_original_manifest_without_changing_its_sourc
 
     assert result.returncode == 1, result.stderr
     assert "requires physical NAND data and does not support --from-originals" in result.stderr
-    assert not (device_data_cli.root / ".data/device-data").exists()
+    assert not device_data_cli.phone().parent.exists()
+    assert not (device_data_cli.root / ".data/out").exists()
 
 
 @pytest.fixture

@@ -16,7 +16,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 APORT = ROOT / "alpine/aports/fplinux-audiod"
-FIXTURE = ROOT / "tests/host_tool/media/fixtures/fplinux-jack"
+FIXTURE = ROOT / "tests/host_tool/gui/audio/fixtures/audio-device"
 
 
 @pytest.fixture(scope="module")

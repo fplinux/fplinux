@@ -19,7 +19,7 @@ def test_previous_threshold_manual_wrap_and_natural_repeat(tmp_path: Path) -> No
             "-Wextra",
             "-Werror",
             f"-I{aport}",
-            str(Path(__file__).with_name("music-model.c")),
+            str(Path(__file__).parent / "native/music-model.c"),
             str(aport / "music-model.c"),
         ],
         name="compile the music transport decision model",

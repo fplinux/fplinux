@@ -496,7 +496,9 @@ def test_target_selection_is_absent_from_the_archive_entry(
 
     assert result.returncode == 2
     assert "unrecognized arguments: --target unregistered-phone" in result.stderr
-    assert not (archive.root / ".cache").exists()
+    assert not archive.data.exists()
+    assert not archive.backup.exists()
+    assert not archive.phone.exists()
 
 
 def test_corrupt_runtime_identity_is_logged_before_preparation(

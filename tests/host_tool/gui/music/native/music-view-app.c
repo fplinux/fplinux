@@ -121,7 +121,28 @@ static void event(struct fplinux_ui *ui, const struct fplinux_ui_event *message,
 	}
 }
 
-static void assert_layout(const struct music_view *view)
+static void assert_now_playing(const struct music_view *view, const char *state)
+{
+	const char title_prefix[] = "A long track";
+	assert(lv_obj_is_visible(view->title));
+	assert(!strncmp(lv_label_get_text(view->title), title_prefix,
+			sizeof(title_prefix) - 1));
+	assert(lv_obj_is_visible(view->state));
+	assert(!strcmp(lv_label_get_text(view->state), state));
+	assert(lv_obj_is_visible(view->time));
+	assert(!strcmp(lv_label_get_text(view->time), "1:02 / 3:00"));
+	assert(lv_obj_is_visible(view->progress));
+	int64_t minimum = lv_bar_get_min_value(view->progress);
+	int64_t range = lv_bar_get_max_value(view->progress) - minimum;
+	int64_t filled = lv_bar_get_value(view->progress) - minimum;
+
+	/* After 1:02 of a three-minute track, about a third is filled. */
+	assert(range > 0 && 33 * range <= 100 * filled &&
+	       100 * filled <= 35 * range);
+}
+
+static void assert_layout(const struct music_view *view, const char *state,
+			  bool empty)
 {
 	lv_obj_t *canvas = fplinux_ui_canvas_object(view->screen);
 	lv_obj_t *objects[] = { view->title, view->artist,   view->state,
@@ -132,7 +153,8 @@ static void assert_layout(const struct music_view *view)
 	int width = lv_obj_get_width(canvas);
 	int height = lv_obj_get_height(canvas);
 	assert(width > 0 && height > 0);
-	assert(lv_label_get_long_mode(view->title) == LV_LABEL_LONG_MODE_DOTS);
+	if (!empty)
+		assert_now_playing(view, state);
 	for (size_t i = 0; i < sizeof(objects) / sizeof(objects[0]); i++) {
 		lv_obj_t *object = objects[i];
 
@@ -173,7 +195,7 @@ int main(int argc, char **argv)
 	assert(fplinux_ui_screen_add_command(view->screen, &action));
 	assert(fplinux_ui_push(ui, view->screen));
 	music_view_layout(view, ui);
-	assert_layout(view);
+	assert_layout(view, state, empty);
 	int result = fplinux_ui_run(ui);
 	assert(app.level_events == 5);
 	fplinux_ui_close(ui);

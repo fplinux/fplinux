@@ -574,6 +574,7 @@ def test_windows_direct_boot_reuses_its_transport_capsule_identity(
     monkeypatch.setattr(windows_host, "WindowsHost", WindowsAcl)
     monkeypatch.setattr(boot, "run_bundle", start_phone)
     monkeypatch.setattr(boot, "reconnect_live_bundle", live_phone)
+    store = tmp_path / "phone-store"
     try:
         for _ in range(2):
             workflow._run_phone(  # noqa: SLF001 -- real shared launch selection and lifetime.
@@ -581,15 +582,15 @@ def test_windows_direct_boot_reuses_its_transport_capsule_identity(
                 data,
                 log,
                 lambda _stage: None,
-                phone_data=tmp_path / "phone-store",
+                phone_data=store,
                 from_dump=None,
                 prepare_only=False,
                 replace=False,
                 loader_trace=False,
             )
         assert commands == []
-        assert not (data / "nand.bin").exists()
-        assert not (data / "phone").exists()
+        assert not (store / "nand.bin").exists()
+        assert not (store / "phone").exists()
         assert not (data / "reader").exists()
         assert not list(data.glob(".boot-*"))
         assert len(capsules) == 1
@@ -598,9 +599,7 @@ def test_windows_direct_boot_reuses_its_transport_capsule_identity(
         expected_identity = hashlib.sha256(capsules[0]).hexdigest()
         assert boot_hashes == [expected_identity]
         assert (
-            phone_data.prepared_content_identity(
-                tmp_path, runtime, phone_data=tmp_path / "phone-store"
-            )
+            phone_data.prepared_content_identity(tmp_path, runtime, phone_data=store)
             == expected_identity
         )
 
@@ -612,7 +611,7 @@ def test_windows_direct_boot_reuses_its_transport_capsule_identity(
                 log,
                 action="identify",
                 output=None,
-                phone_data=tmp_path / "phone-store",
+                phone_data=store,
             )
             assert reconnect_hashes == [
                 expected_identity,

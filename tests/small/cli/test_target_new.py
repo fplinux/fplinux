@@ -229,11 +229,12 @@ class NewTargetTests:
         self, target_checkout: TargetCheckout, name: str
     ) -> None:
         """Only lowercase hyphen-separated names reach the target directory."""
+        before = set(target_checkout.root.rglob("*"))
         with (
             pytest.raises(SystemExit, match="invalid target name"),
         ):
             create_target(name)
-        assert (list(target_checkout.root.rglob("*hammer*"))) == ([])
+        assert set(target_checkout.root.rglob("*")) == before
 
     @pytest.mark.parametrize(
         ("product", "compatible", "message"),

@@ -13,16 +13,16 @@ from fplinux_cli.manifests import targets
 def test_declared_bch12_format_preserves_the_chip_expectation() -> None:
     """A selected correction format retains the identity used for backup admission."""
     raw = common.load_toml(common.ROOT / "targets/nokia-ta1618/target.toml")
-    declaration = {
+    expected = {
         "raw_device": "/dev/ums9117-nand-raw",
         "id": 0x81C8,
         "raw_page_bytes": 2176,
         "ecc_format": "ums9117-bch12",
     }
-    raw["nand"] = declaration
+    raw["nand"] = expected.copy()
     with mock.patch.object(targets, "load_toml", return_value=raw):
         config = targets.load_target("nokia-ta1618")
-    assert config["nand"] == declaration
+    assert config["nand"] == expected
 
 
 @pytest.mark.parametrize(

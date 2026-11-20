@@ -8,13 +8,13 @@ from pathlib import Path
 
 from tests import ROOT
 from tests.c_harness import compile_c
-from tests.host_tool.media.test_media_decode import (
+from tests.host_tool.media.decoder_fixtures import (
     media_decoder_args as media_decoder_args,  # noqa: PLC0414 -- pytest fixture export.
 )
-from tests.host_tool.media.test_media_decode import (
+from tests.host_tool.media.decoder_fixtures import (
     native_mpg123 as native_mpg123,  # noqa: PLC0414 -- pytest fixture dependency.
 )
-from tests.host_tool.media.test_media_decode import (
+from tests.host_tool.media.decoder_fixtures import (
     tone_mp3 as tone_mp3,  # noqa: PLC0414 -- pytest fixture export.
 )
 from tests.host_tool.media.test_midi_render import (

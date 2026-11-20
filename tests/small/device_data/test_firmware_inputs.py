@@ -235,7 +235,6 @@ class FirmwareInputTests:
         if personal_data_is_build_input:
             assert (staged_profile.read_bytes()) == (b"profile")
             assert (staged_profile.stat().st_mode & 0o777) == (0o600)
-            assert (".cache") not in (staged_profile.relative_to(staged).parts)
             assert (
                 staged_other
                 / ".fplinux-inputs/device-data/demo/groups/audio-profile/fplinux/profile.bin"

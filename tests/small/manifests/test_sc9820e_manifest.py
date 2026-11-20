@@ -39,10 +39,9 @@ def sc_checkout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return tmp_path
 
 
-def test_sc_ram_target_declares_source_loaders_without_reading_firmware(
-    sc_checkout: Path,
-) -> None:
-    """A normal build selects source loaders and publishes their three runtime asset roles."""
+@pytest.mark.usefixtures("sc_checkout")
+def test_sc_ram_manifest_selects_source_loaders_and_runtime_asset_roles() -> None:
+    """The RAM manifest selects source loaders and their three runtime asset roles."""
     platform = load_platform("sc9820e")
     config = load_target("phone")
 
@@ -97,7 +96,6 @@ def test_sc_ram_target_declares_source_loaders_without_reading_firmware(
         "fdl2_source": "u_boot",
         "sml_source": "trusted_firmware",
     }
-    assert not (sc_checkout / ".cache").exists()
 
 
 def test_sc_microsd_root_uses_ram_linux_and_a_real_ext4_root_without_uboot(

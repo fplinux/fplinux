@@ -23,7 +23,7 @@ if TYPE_CHECKING:
 
 
 @pytest.mark.parametrize("audit_available", [True, False], ids=["audit", "older-kernel"])
-def test_identify_preserves_geometry_and_records_audit_with_only_one_reader_open(
+def test_identify_records_geometry_and_audit_without_consuming_raw_bytes(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
@@ -48,13 +48,13 @@ def test_identify_preserves_geometry_and_records_audit_with_only_one_reader_open
             str(geometry),
             str(audit),
         ],
-        stdin=subprocess.DEVNULL,
+        stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
     )
     try:
         result = workflow.run_phone(tmp_path, data, logs, nand_action="identify")
-        stdout, stderr = writer.communicate(timeout=5)
+        stdout, stderr = writer.communicate(b"reader exited\n", timeout=5)
         assert writer.returncode == 0, (stdout, stderr)
     finally:
         if writer.poll() is None:

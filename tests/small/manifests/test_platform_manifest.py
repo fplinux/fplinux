@@ -122,15 +122,23 @@ class PlatformManifestTests:
             pytest.raises(SystemExit, match=message),
         ):
             load_manifest(platform_manifest, with_dt_checks(platform_manifest, declaration))
-        load_manifest(platform_manifest, with_dt_checks(platform_manifest, "[]"))
-        load_manifest(
-            platform_manifest,
-            with_dt_checks(
-                platform_manifest,
+
+    @pytest.mark.parametrize(
+        "declaration",
+        [
+            pytest.param("[]", id="no-ownership-checks"),
+            pytest.param(
                 '[{path="/soc/usb", compatible="example,usb-cold", config="CONFIG_COLD"},'
                 '{path="/soc/usb", compatible="example,usb-live", config="CONFIG_LIVE"}]',
+                id="distinct-compatible-owners",
             ),
-        )
+        ],
+    )
+    def test_dt_ownership_accepts_a_complete_unambiguous_declaration(
+        self, platform_manifest: PlatformManifest, declaration: str
+    ) -> None:
+        """Accept an empty rule set and distinct compatibles on one path."""
+        load_manifest(platform_manifest, with_dt_checks(platform_manifest, declaration))
 
     def test_property_requirement_preserves_the_unconditional_owner(
         self, platform_manifest: PlatformManifest
@@ -162,10 +170,10 @@ class PlatformManifestTests:
         )
 
     @pytest.mark.parametrize("value", ['""', "1"], ids=['""', "1"])
-    def test_property_requirement_refuses_empty_or_duplicate_declarations(
+    def test_property_requirement_needs_a_nonempty_name(
         self, platform_manifest: PlatformManifest, value: str
     ) -> None:
-        """A feature requirement names a property and lists each required symbol once."""
+        """A feature requirement names a nonempty DT property."""
         declaration = (
             '[{path="/soc/keypad", compatible="example,keypad", '
             f'property={value}, config="CONFIG_AUX_KEY"}}]'
@@ -174,6 +182,11 @@ class PlatformManifestTests:
             pytest.raises(SystemExit, match="property must be a non-empty string"),
         ):
             load_manifest(platform_manifest, with_dt_checks(platform_manifest, declaration))
+
+    def test_property_requirement_rejects_repeated_ownership(
+        self, platform_manifest: PlatformManifest
+    ) -> None:
+        """The same property and required symbol cannot be declared twice."""
         declaration = (
             '[{path="/soc/keypad", compatible="example,keypad", property="aux-gpios",'
             'config="CONFIG_AUX_KEY"},'
@@ -199,11 +212,14 @@ class PlatformManifestTests:
         self, platform_manifest: PlatformManifest, key: str, message: str
     ) -> None:
         """Omitting any new key names the incomplete table instead of falling back to a path."""
-        load_manifest(platform_manifest, platform_manifest.base)
         with (
             pytest.raises(SystemExit, match=message),
         ):
             load_manifest(platform_manifest, with_line(platform_manifest, key, ""))
+
+    def test_complete_base_manifest_is_admitted(self, platform_manifest: PlatformManifest) -> None:
+        """Accept the base Linux and U-Boot declarations together."""
+        load_manifest(platform_manifest, platform_manifest.base)
 
     @pytest.mark.parametrize(
         ("key", "replacement", "message"),
@@ -251,6 +267,10 @@ class PlatformManifestTests:
         ):
             load_manifest(platform_manifest, with_line(platform_manifest, key, replacement))
 
+    def test_uboot_config_accepts_quoted_commands_and_unset_lines(
+        self, platform_manifest: PlatformManifest
+    ) -> None:
+        """Accept complete .config lines with quoted commands and unset symbols."""
         load_manifest(
             platform_manifest,
             with_line(

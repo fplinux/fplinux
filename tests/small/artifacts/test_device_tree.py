@@ -96,6 +96,8 @@ class DeviceTreeKconfigTests:
         """A secondary generic compatible does not replace the platform owner."""
         tree = self.usb_tree(b"sprd,ums9117-musb\0example,generic-musb\0")
         verify_dtb_kconfig(tree, {"CONFIG_USB_MUSB_UMS9117_COLD": "y"}, self.checks)
+        with pytest.raises(DeviceTreeError, match="requires CONFIG_USB_MUSB_UMS9117_COLD=y"):
+            verify_dtb_kconfig(tree, {}, self.checks)
 
 
 class DeviceTreePropertyKconfigTests:

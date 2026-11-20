@@ -258,11 +258,21 @@ def test_target_without_groups_rejects_explicit_preparation_before_build_or_sour
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Headless targets have no synthetic preparation prerequisite."""
+    managed = tmp_path / "managed"
+    personal = tmp_path / "personal"
+    monkeypatch.setenv("FPLINUX_DATA_DIR", str(managed))
+    monkeypatch.setenv("XDG_DATA_HOME", str(personal))
     monkeypatch.setattr(cli, "ROOT", tmp_path)
     monkeypatch.setattr(cli, "load_target", lambda _target: {"device_data": {"groups": {}}})
+
+    def unexpected_build(*_args: object, **_kwargs: object) -> None:
+        pytest.fail("unsupported preparation reached the build")
+
+    monkeypatch.setattr(cli, "build", unexpected_build)
     with pytest.raises(SystemExit, match="not supported for target demo-phone"):
         cli.prepare_device_data(TARGET, from_dump=None, jobs=1)
-    assert not (tmp_path / ".cache/device-data").exists()
+    assert not managed.exists()
+    assert not personal.exists()
 
 
 @pytest.mark.parametrize(
