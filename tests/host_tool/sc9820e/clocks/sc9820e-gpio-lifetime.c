@@ -282,6 +282,8 @@ static void release_irq(void *data)
 int devm_gpiochip_add_data(struct device *dev, struct gpio_chip *chip,
 			   void *data)
 {
+	u32 *bank_direction = &active->registers[0x88 / sizeof(u32)];
+
 	(void)dev;
 	assert_clock_available();
 	assert(active->mapped);
@@ -292,6 +294,13 @@ int devm_gpiochip_add_data(struct device *dev, struct gpio_chip *chip,
 		return active->registration_error;
 	chip->data = data;
 	assert(chip->request(chip, 0) == 0);
+	assert(chip->get_direction);
+	*bank_direction = 0x0004;
+	assert(chip->get_direction(chip, 18) == GPIO_LINE_DIRECTION_OUT);
+	assert(chip->get_direction(chip, 17) == GPIO_LINE_DIRECTION_IN);
+	assert(chip->get_direction(chip, 2) == GPIO_LINE_DIRECTION_IN);
+	assert(*bank_direction == 0x0004);
+	*bank_direction = 0;
 	active->registered = true;
 	add_resource(release_gpio, chip);
 	add_resource(release_irq, chip);

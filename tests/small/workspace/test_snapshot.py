@@ -575,7 +575,8 @@ class WorkspaceSnapshotTests:
             ("alpine/card-data-directories", False, True),
             ("platforms/ums9117/bootstrap/ram/main.c", True, False),
             ("targets/nokia-ta1618/bootstrap/lcd_config.h", True, True),
-            ("platforms/ums9117/bootstrap-microsd/Makefile", False, True),
+            ("platforms/ums9117/bootstrap/sd-stage0/Makefile", False, True),
+            ("platforms/ums9117/bootstrap/sd-stage0/sd-stage0.c", False, True),
         ],
     )
     def test_boot_input_edit_changes_only_its_profile_recipe(

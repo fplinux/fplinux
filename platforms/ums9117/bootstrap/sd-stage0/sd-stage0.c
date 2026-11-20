@@ -8,10 +8,10 @@
 #include "generated/fplinux-bootstrap-identity.h"
 #include "generated/fplinux-boot-layout.h"
 #include "generated/fplinux-uboot-build.h"
+#include "sd-stage0.h"
 #include "syscode.h"
 #include "ums9117-bootstrap/bootstrap.h"
 #include "ums9117-bootstrap/boot-common.h"
-#include "ums9117-bootstrap/sd-stage0.h"
 #include "ums9117-common/ums9117-boot-contract.h"
 
 #if FPLINUX_BOOTSTRAP_DISPLAY_WIDTH

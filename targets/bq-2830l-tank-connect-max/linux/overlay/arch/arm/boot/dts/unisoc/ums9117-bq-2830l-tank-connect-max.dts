@@ -62,7 +62,7 @@
 	};
 };
 
-#include "ums9117-ram-session.dtsi"
+#include "fplinux-ram-session.dtsi"
 #include "radio.dtsi"
 #include "camera.dtsi"
 #include "audio.dtsi"

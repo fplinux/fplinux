@@ -3,13 +3,10 @@
 
 from __future__ import annotations
 
-import contextlib
-import io
 import shutil
 import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
-from unittest import mock
 
 import pytest
 from fplinux_cli import common
@@ -491,93 +488,42 @@ def test_nokia110_compiled_microsd_tree_preserves_the_boot_display_reservation(
 
 
 class NewTargetDeviceTreeTests:
-    """Compile the generated target's identity with minimal platform include stubs."""
+    """Compile a generated board with its declared platform and target overlays."""
 
-    def test_new_target_compiles_with_its_own_board_identity(self) -> None:
-        """CPP and DTC resolve the generated include and preserve the requested identity."""
-        with tempfile.TemporaryDirectory() as name:
-            root = Path(name)
-            platform_directory = root / "platforms/ums9117"
-            (platform_directory / "host").mkdir(parents=True)
-            (platform_directory / "linux/overlay").mkdir(parents=True)
-            shutil.copy2(ROOT / "platforms/ums9117/platform.toml", platform_directory)
-            shutil.copy2(
-                ROOT / "platforms/ums9117/host/target_skeleton.py", platform_directory / "host"
-            )
-            shutil.copytree(
-                ROOT / "platforms/ums9117/target-template", platform_directory / "target-template"
-            )
-            shutil.copytree(ROOT / "platforms/ums9117/loader", platform_directory / "loader")
-            shutil.copytree(ROOT / "profiles", root / "profiles")
-            shutil.copy2(ROOT / "sources.lock.toml", root)
-            (root / "targets").mkdir()
-            with (
-                mock.patch.object(common, "ROOT", root),
-                contextlib.redirect_stdout(io.StringIO()),
-            ):
-                target_new.create_target(
-                    "hammer-horizon-lte",
-                    platform=None,
-                    brand="HAMMER",
-                    product="Horizon LTE",
-                    compatible=None,
-                )
-                config = targets.load_target("hammer-horizon-lte")
-                platform = platforms.load_platform(config["platform"])
+    def test_new_target_compiles_with_its_own_board_identity(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The projected DTB carries the requested identity and required boot nodes."""
+        root = tmp_path / "checkout"
+        for relative in ("platforms/ums9117", "platforms/shared/linux", "include", "profiles"):
+            shutil.copytree(ROOT / relative, root / relative)
+        shutil.copy2(ROOT / "sources.lock.toml", root)
+        (root / "targets").mkdir()
+        monkeypatch.setattr(common, "ROOT", root)
 
-            source = root / "targets/hammer-horizon-lte/linux/overlay/arch/arm/boot/dts/unisoc"
-            (source / linux_identity_dtsi_name("hammer-horizon-lte")).write_bytes(
-                linux_identity_dtsi(config["identity"], platform["identity"])
-            )
-            # Stub base SoC nodes while resolving the template's actual USB include.
-            (source / "dt-bindings/leds").mkdir(parents=True)
-            for relative in (
-                "dt-bindings/leds/common.h",
-                "ums9117-sc2720.dtsi",
-                "ums9117-nand-readonly.dtsi",
-                "ums9117-ram-session.dtsi",
-            ):
-                (source / relative).write_text("", encoding="utf-8")
-            (source / "ums9117.dtsi").write_bytes(
-                (TREE_FIXTURES / "ums9117.dtsi.fixture").read_bytes()
-            )
-            preprocessed = root / "board.dts"
-            dtb = root / "board.dtb"
-            run_process(
-                [
-                    "cpp",
-                    "-nostdinc",
-                    "-undef",
-                    "-D__DTS__",
-                    "-x",
-                    "assembler-with-cpp",
-                    "-I",
-                    str(source),
-                    "-I",
-                    str(ROOT / "platforms/ums9117/linux/overlay/arch/arm/boot/dts/unisoc"),
-                    str(source / "ums9117-hammer-horizon-lte.dts"),
-                    "-o",
-                    str(preprocessed),
-                ],
-                name="preprocess generated target identity",
-                timeout=30,
-                check=True,
-            )
-            run_process(
-                ["dtc", "-I", "dts", "-O", "dtb", "-o", str(dtb), str(preprocessed)],
-                name="compile generated target identity",
-                timeout=30,
-                check=True,
-            )
-            nodes = exact_path_properties(dtb, ("/", "/usb@20200000", "/regulators/LDO_USB33"))
-            usb = nodes["/usb@20200000"]
-            assert parse_nul_string(usb["compatible"], "compatible") == "sprd,ums9117-musb"
-            assert usb["vddusb-supply"] == nodes["/regulators/LDO_USB33"]["phandle"]
-            properties = nodes["/"]
-            assert (parse_nul_string(properties["model"], "model")) == ("HAMMER Horizon LTE")
-            assert (parse_nul_string_list(properties["compatible"], "compatible")) == (
-                ("hammer,horizon-lte", "sprd,ums9117")
-            )
+        target = "hammer-horizon-lte"
+        target_new.create_target(
+            target,
+            platform=None,
+            brand="HAMMER",
+            product="Horizon LTE",
+            compatible=None,
+        )
+        dtb = _compile_target_dtb(tmp_path, target)
+
+        usb_path = "/soc/usb@20200000"
+        supply_path = "/soc/spi@40600000/pmic@0/regulators/LDO_USB33"
+        nodes = exact_path_properties(dtb, ("/", usb_path, supply_path, "/fplinux-session"))
+        usb = nodes[usb_path]
+        assert parse_nul_string(usb["compatible"], "compatible") == "sprd,ums9117-musb"
+        assert usb["vddusb-supply"] == nodes[supply_path]["phandle"]
+        assert nodes["/fplinux-session"]["compatible"] == b"fplinux,ram-session\0"
+        properties = nodes["/"]
+        assert parse_nul_string(properties["model"], "model") == "HAMMER Horizon LTE"
+        assert parse_nul_string_list(properties["compatible"], "compatible") == (
+            "hammer,horizon-lte",
+            "sprd,ums9117",
+        )
 
 
 class LinuxMachineBindingTests:

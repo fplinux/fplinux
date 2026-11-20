@@ -92,7 +92,7 @@ source = "include/fplinux/fplinux-keypad.h"
 destination = "include/dt-bindings/input/fplinux-keypad.h"
 
 [[linux.copies]]
-source = "platforms/ums9117/linux/overlay/arch/arm/boot/dts/unisoc/ums9117-ram-session.dtsi"
+source = "platforms/shared/linux/overlay/arch/arm/boot/dts/unisoc/fplinux-ram-session.dtsi"
 destination = "arch/arm/boot/dts/unisoc/fplinux-ram-session.dtsi"
 
 [[linux.appends]]

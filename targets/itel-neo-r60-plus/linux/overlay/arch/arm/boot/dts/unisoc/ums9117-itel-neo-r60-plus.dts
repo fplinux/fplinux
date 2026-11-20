@@ -65,7 +65,7 @@
 	};
 };
 
-#include "ums9117-ram-session.dtsi"
+#include "fplinux-ram-session.dtsi"
 
 &codec_dma {
 	size = <0x00400000>;

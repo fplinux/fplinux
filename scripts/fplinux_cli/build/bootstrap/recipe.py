@@ -115,7 +115,7 @@ def bootstrap_payload(target_config: dict[str, Any], platform: dict[str, Any]) -
     """Select the existing assembly payload with the manifest's DTB filename."""
     license_tag = "SPDX-License-" + "Identifier"
     if target_config["bootstrap"]["kind"] == "uboot-stage0":
-        body = '\t.include "ums9117-bootstrap/sd-payload.s"\n'
+        body = '\t.include "sd-payload.s"\n'
     else:
         output = platform["bootstrap"]["output_destination"]
         dtb = target_config["bootstrap"]["dtb_destination"]

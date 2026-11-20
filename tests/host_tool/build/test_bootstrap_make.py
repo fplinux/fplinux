@@ -3,16 +3,13 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from pathlib import Path
 
 import pytest
 from fplinux_cli.build.bootstrap import recipe as bootstrap_build
 
 from tests import ROOT
 from tests.process import run_process
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 
 @pytest.mark.parametrize(
@@ -70,7 +67,7 @@ def test_bootstrap_make_selects_display_objects_and_blocks_storage_overrides(
             "LIBC_SDIO=1",
             "APP_SRCS=unsafe",
             "FPLINUX_STATUS_SRCS=unsafe",
-            f"FPLINUX_BOOTSTRAP_HAS_DISPLAY={int(width == 0)}",
+            f"FPLINUX_BOOTSTRAP_HAS_DISPLAY={int(not loader_display)}",
         ],
         name="inspect protected bootstrap source closure",
         cwd=bootstrap,
@@ -86,5 +83,5 @@ def test_bootstrap_make_selects_display_objects_and_blocks_storage_overrides(
     assert ("obj/app/fplinux-boot-screen/boot-screen.o" in objects) == loader_display
     assert ("obj/app/fplinux-status-screen.o" in objects) == loader_display
     assert ("obj/app/generated/fplinux-status-fonts.o" in objects) == loader_display
-    stage = "sd-stage0" if mode == "uboot" else "boot-main"
-    assert f"obj/app/ums9117-bootstrap/{stage}.o" in objects
+    stages = {Path(path).name for path in objects} & {"sd-stage0.o", "boot-main.o"}
+    assert stages == ({"sd-stage0.o"} if mode == "uboot" else {"boot-main.o"})

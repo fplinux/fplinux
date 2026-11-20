@@ -74,7 +74,7 @@ def gpio_lifetime_component(tmp_path_factory: pytest.TempPathFactory) -> Iterato
 def test_gpio_probe_releases_controller_resources_before_clock(
     gpio_lifetime_component: Path, scenario: str
 ) -> None:
-    """Kernel subsystem doubles release resources through actual GPIO/IRQ callbacks."""
+    """Check direction reads during registration and release through GPIO/IRQ callbacks."""
     result = run_process(
         [str(gpio_lifetime_component), scenario],
         name=f"run SC9820E GPIO managed-lifetime host component: {scenario}",

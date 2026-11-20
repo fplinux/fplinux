@@ -88,7 +88,7 @@
 	};
 };
 
-#include "ums9117-ram-session.dtsi"
+#include "fplinux-ram-session.dtsi"
 
 &audio {
 	firmware-name = "fplinux/inoi240-audio-profile.bin";

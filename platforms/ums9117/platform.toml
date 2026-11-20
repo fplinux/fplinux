@@ -199,6 +199,10 @@ destination = "include/linux/soc/sprd/vbc-eq6.h"
 source = "platforms/shared/linux/overlay/include/linux/soc/sprd/vbc-eq6-io.h"
 destination = "include/linux/soc/sprd/vbc-eq6-io.h"
 
+[[linux.copies]]
+source = "platforms/shared/linux/overlay/arch/arm/boot/dts/unisoc/fplinux-ram-session.dtsi"
+destination = "arch/arm/boot/dts/unisoc/fplinux-ram-session.dtsi"
+
 [[linux.appends]]
 source = "platforms/ums9117/linux/fragments/lib/fm-wire.Kconfig"
 destination = "lib/Kconfig"
@@ -365,7 +369,7 @@ config = "CONFIG_MMC_GPIO"
 vendor_source_lock = "fpdoom_bootstrap"
 archive_prefix = "fpdoom-{commit}/"
 ram_source = "platforms/ums9117/bootstrap/ram"
-stage0_source = "platforms/ums9117/bootstrap-microsd"
+stage0_source = "platforms/ums9117/bootstrap/sd-stage0"
 source_destination = "bootstrap"
 vendor_destination = "vendor/fpdoom"
 output_destination = "out"

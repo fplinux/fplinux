@@ -8,6 +8,8 @@ typedef uint16_t u16;
 typedef unsigned int raw_spinlock_t;
 
 #define GENMASK(high, low) ((~0UL << (low)) & (~0UL >> (63 - (high))))
+#define GPIO_LINE_DIRECTION_IN 1
+#define GPIO_LINE_DIRECTION_OUT 0
 #define IRQ_TYPE_NONE 0
 #define IRQ_TYPE_EDGE_RISING 1
 #define IRQ_TYPE_EDGE_FALLING 2
@@ -69,6 +71,7 @@ struct gpio_chip {
 	int (*request)(struct gpio_chip *chip, unsigned int offset);
 	void (*free)(struct gpio_chip *chip, unsigned int offset);
 	int (*get)(struct gpio_chip *chip, unsigned int offset);
+	int (*get_direction)(struct gpio_chip *chip, unsigned int offset);
 	int (*set)(struct gpio_chip *chip, unsigned int offset, int value);
 	int (*direction_input)(struct gpio_chip *chip, unsigned int offset);
 	int (*direction_output)(struct gpio_chip *chip, unsigned int offset,

@@ -42,7 +42,7 @@ override SYS_EXTRA :=
 override SYS_SRCS := asmcode usbio common libc syscomm syscode
 override SYS_SRCS2 := start entry $(SYS_SRCS)
 ifeq ($(FPLINUX_BOOTSTRAP_MODE),uboot)
-override APP_SRCS := main $(FPLINUX_STATUS_SRCS) ums9117-bootstrap/sd-stage0 ums9117-bootstrap/boot-common ums9117-bootstrap/boot-session ums9117-bootstrap/bootstrap ums9117-bootstrap/handoff ums9117-bootstrap/uboot-handoff payload
+override APP_SRCS := main $(FPLINUX_STATUS_SRCS) sd-stage0 ums9117-bootstrap/boot-common ums9117-bootstrap/boot-session ums9117-bootstrap/bootstrap ums9117-bootstrap/handoff uboot-handoff payload
 else
 override APP_SRCS := main $(FPLINUX_STATUS_SRCS) ums9117-bootstrap/boot-main ums9117-bootstrap/boot-common ums9117-bootstrap/boot-session ums9117-bootstrap/bootstrap ums9117-bootstrap/handoff payload
 endif
@@ -111,7 +111,7 @@ ifneq ($(strip $(SYS_SRCS)),asmcode usbio common libc syscomm syscode)
 $(error FPLinux bootstrap source closure changed: $(SYS_SRCS))
 endif
 ifeq ($(FPLINUX_BOOTSTRAP_MODE),uboot)
-ifneq ($(strip $(filter-out $(FPLINUX_STATUS_SRCS),$(APP_SRCS))),main ums9117-bootstrap/sd-stage0 ums9117-bootstrap/boot-common ums9117-bootstrap/boot-session ums9117-bootstrap/bootstrap ums9117-bootstrap/handoff ums9117-bootstrap/uboot-handoff payload)
+ifneq ($(strip $(filter-out $(FPLINUX_STATUS_SRCS),$(APP_SRCS))),main sd-stage0 ums9117-bootstrap/boot-common ums9117-bootstrap/boot-session ums9117-bootstrap/bootstrap ums9117-bootstrap/handoff uboot-handoff payload)
 $(error FPLinux U-Boot stage0 source closure changed: $(APP_SRCS))
 endif
 else
@@ -142,12 +142,12 @@ ifeq ($(FPLINUX_COLD_SD),1)
 $(OBJDIR)/sys/entry.o: $(FPLINUX_BOOTSTRAP_OPTIONS_HEADER)
 endif
 $(OBJDIR)/app/ums9117-bootstrap/boot-common.o: $(FPLINUX_BOOT_LAYOUT_HEADER)
-$(OBJDIR)/app/ums9117-bootstrap/sd-stage0.o: $(FPLINUX_BOOTSTRAP_IDENTITY_HEADER) $(FPLINUX_BOOT_LAYOUT_HEADER) $(FPLINUX_UBOOT_BUILD_HEADER) $(FPLINUX_BOOTSTRAP_DISPLAY_HEADER)
+$(OBJDIR)/app/sd-stage0.o: $(FPLINUX_BOOTSTRAP_IDENTITY_HEADER) $(FPLINUX_BOOT_LAYOUT_HEADER) $(FPLINUX_UBOOT_BUILD_HEADER) $(FPLINUX_BOOTSTRAP_DISPLAY_HEADER)
 
 $(OBJDIR)/app/fplinux-boot-screen/boot-screen.o: generated/fplinux-status-profile.h generated/fplinux-boot-mark.h
 
 ifeq ($(FPLINUX_BOOTSTRAP_MODE),uboot)
-$(OBJDIR)/app/payload.o: payload.s generated/fplinux-bootstrap-payload.s ../out/u-boot.bin | objdir
+$(OBJDIR)/app/payload.o: payload.s generated/fplinux-bootstrap-payload.s sd-payload.s ../out/u-boot.bin | objdir
 	$(call compile_asm,)
 else
 $(OBJDIR)/app/payload.o: payload.s generated/fplinux-bootstrap-payload.s ums9117-bootstrap/ram-payload.s ../out/zImage ../out/$(FPLINUX_BOOTSTRAP_DTB) ../out/initramfs.cpio | objdir

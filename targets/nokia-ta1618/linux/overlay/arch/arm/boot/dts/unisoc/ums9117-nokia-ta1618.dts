@@ -150,7 +150,7 @@
 	};
 };
 
-#include "ums9117-ram-session.dtsi"
+#include "fplinux-ram-session.dtsi"
 
 &audio {
 	firmware-name = "fplinux/ta1618-audio-profile.bin";

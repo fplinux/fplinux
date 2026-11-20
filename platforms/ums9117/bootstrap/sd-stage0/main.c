@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
-#include "ums9117-bootstrap/sd-stage0.h"
+#include "sd-stage0.h"
 
 int main(int argc, char **argv)
 {
