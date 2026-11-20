@@ -15,10 +15,16 @@ if TYPE_CHECKING:
 
 
 def test_scoped_inventory_bypasses_directory_policy_and_source_checks_binary_resources(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, git_environment: dict[str, str]
 ) -> None:
     """The source-wide gate includes resources and excludes ignored local files."""
-    run_process(["git", "init", "--quiet", str(tmp_path)], name="source Git setup", timeout=10)
+    run_process(
+        ["git", "init", "--quiet", str(tmp_path)],
+        name="source Git setup",
+        env=git_environment,
+        timeout=10,
+        check=True,
+    )
     (tmp_path / ".gitignore").write_text(".data/\nignored_dir/\n", encoding="utf-8")
     for directory in ("resource_names", ".data", "ignored_dir"):
         path = tmp_path / directory / "image.png"
@@ -38,10 +44,16 @@ def test_scoped_inventory_bypasses_directory_policy_and_source_checks_binary_res
 
 
 def test_deleted_package_marker_does_not_exempt_remaining_resources(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, git_environment: dict[str, str]
 ) -> None:
     """A tracked deletion changes package classification to the current resource inventory."""
-    run_process(["git", "init", "--quiet", str(tmp_path)], name="source Git setup", timeout=10)
+    run_process(
+        ["git", "init", "--quiet", str(tmp_path)],
+        name="source Git setup",
+        env=git_environment,
+        timeout=10,
+        check=True,
+    )
     package = tmp_path / "phone_tools"
     package.mkdir()
     initializer = package / "__init__.py"
@@ -51,7 +63,9 @@ def test_deleted_package_marker_does_not_exempt_remaining_resources(
     run_process(
         ["git", "-C", str(tmp_path), "add", "phone_tools/__init__.py"],
         name="source package marker setup",
+        env=git_environment,
         timeout=10,
+        check=True,
     )
     monkeypatch.setattr(quality_inputs, "ROOT", tmp_path)
     assert quality_inputs.quality_files(enforce_source_policy=True) == [
@@ -61,6 +75,14 @@ def test_deleted_package_marker_does_not_exempt_remaining_resources(
 
     initializer.unlink()
 
+    deleted = run_process(
+        ["git", "-C", str(tmp_path), "ls-files", "--deleted"],
+        name="check the tracked package-marker deletion",
+        env=git_environment,
+        timeout=10,
+        check=True,
+    )
+    assert deleted.stdout == "phone_tools/__init__.py\n"
     with pytest.raises(
         SystemExit,
         match=r"^fplinux: source directory must use kebab-case: phone_tools$",

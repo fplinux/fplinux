@@ -7,6 +7,7 @@ import hashlib
 import json
 import subprocess
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -18,8 +19,7 @@ from tests import distribution_support
 from tests.distribution_support import SELECTIONS, project_sources, write_release, write_transport
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
-    from pathlib import Path
+    from collections.abc import Callable, Iterable
 
 
 @pytest.fixture
@@ -103,23 +103,26 @@ class GitHubProcess:
     prerelease: bool = True
     records: list[dict[str, Any]] = field(default_factory=list)
     operations: list[str] = field(default_factory=list)
-    uploaded: list[str] = field(default_factory=list)
+    uploaded: list[tuple[str, bytes]] = field(default_factory=list)
     damage: str | None = None
     body: str = ""
     publication: dict[str, object] | None = None
     name: str = ""
+
+    def upload(self, paths: Iterable[Path]) -> None:
+        """Retain the bytes from each transferred path at the upload boundary."""
+        self.uploaded.extend((path.name, path.read_bytes()) for path in paths)
 
     def remote_assets(self) -> list[dict[str, Any]]:
         """Expose uploaded assets as the remote API's independent file records."""
         return [
             {
                 "name": name,
-                "size": (self.assets / name).stat().st_size,
-                "digest": "sha256:"
-                + hashlib.sha256((self.assets / name).read_bytes()).hexdigest(),
+                "size": len(contents),
+                "digest": "sha256:" + hashlib.sha256(contents).hexdigest(),
                 "state": "uploaded",
             }
-            for name in self.uploaded
+            for name, contents in self.uploaded
         ]
 
     def run(self, command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
@@ -188,7 +191,7 @@ class GitHubProcess:
             self.operations.append("upload")
             if self.damage == "upload-failure":
                 return subprocess.CompletedProcess(command, 1, "", "unavailable")
-            self.uploaded.extend(path.rsplit("/", 1)[-1] for path in command[4:-2])
+            self.upload(map(Path, command[4:-2]))
             response = None
         elif "POST" in command:
             self.operations.append("create-draft")
@@ -296,7 +299,7 @@ def test_initial_release_publishes_only_after_all_remote_assets_match(
     ]
     assert github.publication == {"draft": False, "prerelease": True, "make_latest": "false"}
     assert github.body.startswith("Initial release.")
-    assert set(github.uploaded) == {path.name for path in assets.iterdir()}
+    assert {name for name, _ in github.uploaded} == {path.name for path in assets.iterdir()}
 
 
 @pytest.mark.parametrize("damage", ["upload-failure", "missing-remote", "wrong-digest"])
@@ -313,7 +316,7 @@ def test_remote_failure_keeps_the_release_private(
 def test_retry_of_a_complete_published_release_only_verifies_bytes(
     assets: Path, github: GitHubProcess, commit: str
 ) -> None:
-    github.uploaded = sorted(path.name for path in assets.iterdir())
+    github.upload(sorted(github.assets.iterdir()))
     github.records.append(
         {
             "id": 7,
@@ -332,8 +335,8 @@ def test_retry_fills_only_missing_matching_draft_assets(
     assets: Path, stable: GitHubProcess, commit: str
 ) -> None:
     github = stable
-    github.uploaded = sorted(path.name for path in assets.iterdir())[:-1]
-    missing = {path.name for path in assets.iterdir()} - set(github.uploaded)
+    github.upload(sorted(github.assets.iterdir())[:-1])
+    missing = {path.name for path in assets.iterdir()} - {name for name, _ in github.uploaded}
     github.records.append(
         {
             "id": 7,
@@ -354,7 +357,7 @@ def test_retry_fills_only_missing_matching_draft_assets(
         "resolve-tag",
         "publish",
     ]
-    assert set(github.uploaded) >= missing
+    assert {name for name, _ in github.uploaded} >= missing
     assert len(github.uploaded) == len(list(assets.iterdir()))
 
 

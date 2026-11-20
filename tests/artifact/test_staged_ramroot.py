@@ -24,27 +24,34 @@ class StagedRamrootTests:
 
     def test_staged_ram_producer_reads_causal_bootstrap_snapshot(self, tmp_path: Path) -> None:
         """The normal staged producer reads boot source captured by the target snapshot."""
-        snapshot = workspace_module.target_workspace_snapshot("nokia-ta1618")
         directory = tmp_path
-        with mock.patch.object(workspace_staging, "ROOT", directory):
-            source = workspace_staging.stage_workspace_snapshot(snapshot)
+        cache = directory / "build-data"
+        snapshot = workspace_module.target_workspace_snapshot(
+            "nokia-ta1618", include_device_data=False, selected_data_root=cache
+        )
+        source = workspace_staging.stage_workspace_snapshot(snapshot, selected_data_root=cache)
         bootstrap = source / "alpine/ramroot-init.sh"
         expected_init = (ROOT / "tests/fixtures/ram-tool/successful_bootstrap.sh").read_bytes()
         bootstrap.write_bytes(expected_init)
         with (
             mock.patch.object(workspace_module, "ROOT", source),
-            mock.patch.object(workspace_staging, "ROOT", source),
             mock.patch.object(common, "ROOT", source),
         ):
-            before = workspace_module.target_workspace_snapshot("nokia-ta1618")
-            staged = workspace_staging.stage_workspace_snapshot(before)
+            before = workspace_module.target_workspace_snapshot(
+                "nokia-ta1618", include_device_data=False, selected_data_root=cache
+            )
+            staged = workspace_staging.stage_workspace_snapshot(before, selected_data_root=cache)
             (source / "unrelated.txt").write_bytes(b"not a build input\n")
-            unrelated = workspace_module.target_workspace_snapshot("nokia-ta1618")
+            unrelated = workspace_module.target_workspace_snapshot(
+                "nokia-ta1618", include_device_data=False, selected_data_root=cache
+            )
             assert (before.recipe) == (unrelated.recipe)
             bootstrap.write_bytes(
                 (ROOT / "tests/artifact/fixtures/staged-ramroot/failing_bootstrap.sh").read_bytes()
             )
-            changed = workspace_module.target_workspace_snapshot("nokia-ta1618")
+            changed = workspace_module.target_workspace_snapshot(
+                "nokia-ta1618", include_device_data=False, selected_data_root=cache
+            )
             assert (before.recipe) != (changed.recipe)
         root = directory / "root"
         output = directory / "output"

@@ -13,7 +13,6 @@ import fplinux_cli.workspace.staging as workspace_staging
 import pytest
 
 from tests import ROOT
-from tests.small.workspace.workspace_fixtures import workspace_root
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -30,8 +29,9 @@ class WorkspaceSnapshotImportTests:
         snapshot = workspace_capture.workspace_snapshot(
             workspace_inputs.target_build_source_files("nokia-ta1618", profile)
         )
-        with workspace_root(tmp_path):
-            staged = workspace_staging.stage_workspace_snapshot(snapshot)
+        staged = workspace_staging.stage_workspace_snapshot(
+            snapshot, selected_data_root=tmp_path / "build-data"
+        )
         cache = tmp_path / "downloads"
         cache.mkdir()
         (cache / "source.tar").write_bytes(b"abc")

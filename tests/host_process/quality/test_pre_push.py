@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import json
-import os
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -20,6 +19,7 @@ class PushRepository:
 
     root: Path
     remote: Path
+    data: Path
     commit: str
     marker: Path
     environment: dict[str, str]
@@ -40,11 +40,12 @@ class PushRepository:
             capture_output=True,
             check=False,
             text=True,
+            timeout=20,
         )
 
     def receipt(self, *, commit: str | None = None) -> Path:
         """Publish a controlled successful preparation for one selected source commit."""
-        path = self.root / ".data/preflight" / f"{self.commit}.json"
+        path = self.data / "preflight" / f"{self.commit}.json"
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(
             json.dumps(
@@ -63,12 +64,19 @@ class PushRepository:
 
 
 @pytest.fixture
-def push_repository(tmp_path: Path) -> PushRepository:
+def push_repository(tmp_path: Path, git_environment: dict[str, str]) -> PushRepository:
     root = tmp_path / "repository"
     root.mkdir()
     remote = tmp_path / "remote.git"
+    data = tmp_path / "prepared-data"
     fixture = Path(__file__).parent / "fixtures/pre-push"
     source_root = Path(__file__).parents[3]
+    marker = tmp_path / "executed-incoming-code"
+    environment = git_environment | {
+        "PYTHONPATH": str(source_root / "scripts"),
+        "FPLINUX_DATA_DIR": str(data),
+        "FPLINUX_PRE_PUSH_TEST_MARKER": str(marker),
+    }
     entry = root / "fplinux"
     shutil.copyfile(fixture / "incoming.sh", entry)
     entry.chmod(0o755)
@@ -84,27 +92,33 @@ def push_repository(tmp_path: Path) -> PushRepository:
         ("add", "."),
         ("commit", "--quiet", "--no-gpg-sign", "-m", "Push fixture"),
     ):
-        subprocess.run(["git", "-C", str(root), *arguments], capture_output=True, check=True)
+        subprocess.run(
+            ["git", "-C", str(root), *arguments],
+            env=environment,
+            capture_output=True,
+            check=True,
+        )
     subprocess.run(
-        ["git", "init", "--quiet", "--bare", str(remote)], capture_output=True, check=True
+        ["git", "init", "--quiet", "--bare", str(remote)],
+        env=environment,
+        capture_output=True,
+        check=True,
     )
     subprocess.run(
         ["git", "-C", str(root), "remote", "add", "origin", str(remote)],
+        env=environment,
         capture_output=True,
         check=True,
     )
     commit = subprocess.run(
         ["git", "-C", str(root), "rev-parse", "HEAD"],
+        env=environment,
         capture_output=True,
         check=True,
         text=True,
     ).stdout.strip()
     shutil.copyfile(fixture / "fplinux.py", entry)
-    environment = os.environ.copy()
-    environment["PYTHONPATH"] = str(source_root / "scripts")
-    marker = tmp_path / "executed-incoming-code"
-    environment["FPLINUX_PRE_PUSH_TEST_MARKER"] = str(marker)
-    return PushRepository(root, remote, commit, marker, environment)
+    return PushRepository(root, remote, data, commit, marker, environment)
 
 
 def test_pre_push_selects_only_non_deleted_incoming_main_oids() -> None:
@@ -133,10 +147,12 @@ def test_local_main_push_rejects_missing_or_another_commit_preparation(
     assert repository.commit in pushed.stderr
     assert not repository.marker.exists()
     assert (repository.root / "fplinux").read_bytes() == entry_before
-    assert not (repository.root / ".data/downloads").exists()
-    assert not (repository.root / ".data/environment").exists()
+    assert not (repository.data / "downloads").exists()
+    assert not (repository.data / "environment").exists()
+    assert not (repository.root / ".data").exists()
     refs = subprocess.run(
         ["git", "--git-dir", str(repository.remote), "show-ref", "--verify", "refs/heads/main"],
+        env=repository.environment,
         capture_output=True,
         check=False,
     )
@@ -157,6 +173,7 @@ def test_local_main_push_accepts_matching_receipt_without_executing_incoming_cod
     assert pushed.returncode == 0, pushed.stderr
     remote = subprocess.run(
         ["git", "--git-dir", str(repository.remote), "rev-parse", "refs/heads/main"],
+        env=repository.environment,
         capture_output=True,
         check=True,
         text=True,
@@ -165,13 +182,15 @@ def test_local_main_push_accepts_matching_receipt_without_executing_incoming_cod
     assert receipt.read_bytes() == receipt_before
     assert index.read_bytes() == index_before
     assert not repository.marker.exists()
-    assert not (repository.root / ".data/downloads").exists()
-    assert not (repository.root / ".data/environment").exists()
+    assert not (repository.data / "downloads").exists()
+    assert not (repository.data / "environment").exists()
+    assert not (repository.root / ".data").exists()
 
 
 def test_unrelated_ref_push_needs_no_preparation(push_repository: PushRepository) -> None:
     pushed = push_repository.push("topic")
 
     assert pushed.returncode == 0, pushed.stderr
+    assert not push_repository.data.exists()
     assert not (push_repository.root / ".data").exists()
     assert not push_repository.marker.exists()

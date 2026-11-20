@@ -31,10 +31,11 @@ class PruneApplySafetyTests:
         candidate.mkdir(parents=True)
         (candidate / "payload").write_text("stale\n")
         plan = plan_prune(cache)
+        assert tuple(entry.path for entry in plan.candidates) == ("workspaces/stale",)
         external = tmp_path / "external"
-        external.mkdir()
-        sentinel = external / "sentinel"
-        sentinel.write_text("keep\n")
+        sentinel = external / "stale/sentinel"
+        sentinel.parent.mkdir(parents=True)
+        sentinel.write_bytes(b"keep\n")
         shutil.rmtree(cache / "workspaces")
         (cache / "workspaces").symlink_to(external, target_is_directory=True)
 
@@ -43,7 +44,7 @@ class PruneApplySafetyTests:
             pytest.raises(PruneSafetyError, match="not a real directory"),
         ):
             apply_prune(cache)
-        assert sentinel.exists()
+        assert sentinel.read_bytes() == b"keep\n"
 
     @staticmethod
     def test_unrelated_cache_paths_are_not_inventoried(tmp_path: Path) -> None:

@@ -10,7 +10,10 @@ from __future__ import annotations
 
 import os
 import shutil
+import socket
+from contextlib import chdir
 from pathlib import Path
+from select import select
 from typing import TYPE_CHECKING
 
 import pytest
@@ -51,14 +54,19 @@ def showcase_native(
     ],
 )
 def test_showcase_cli_finishes_before_opening_ui(
-    showcase_native: Path, arguments: list[str], status: int
+    showcase_native: Path, tmp_path: Path, arguments: list[str], status: int
 ) -> None:
-    result = run_process(
-        [str(showcase_native / "showcase"), *arguments],
-        name="parse Showcase help or unsupported syntax without Session",
-        env={"FPLINUX_GUI_SESSION": "/nonexistent/showcase-session.sock"},
-        timeout=5,
-    )
+    endpoint = "session.sock"
+    with socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET) as listener, chdir(tmp_path):
+        listener.bind(endpoint)
+        listener.listen()
+        result = run_process(
+            [str(showcase_native / "showcase"), *arguments],
+            name="parse Showcase help or unsupported syntax without Session",
+            env={"FPLINUX_UI_SESSION_SOCKET": endpoint},
+            timeout=5,
+        )
+        assert not select([listener], [], [], 0)[0]
     assert result.returncode == status
     assert "fplinux_ui_open" not in result.stderr
     if status == 0:

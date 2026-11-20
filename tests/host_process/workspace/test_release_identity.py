@@ -59,7 +59,7 @@ def source_checkout(tmp_path: Path) -> Path:
     return root
 
 
-def test_clean_sources_use_full_commit_prefix_for_every_target(source_checkout: Path) -> None:
+def test_clean_source_identity_uses_the_exact_commit_and_its_prefix(source_checkout: Path) -> None:
     """Target and host selection do not enter the prebuild source release identity."""
     commit = git(source_checkout, "rev-parse", "HEAD")
     captured = capture_public_sources(source_checkout)
@@ -179,15 +179,19 @@ def test_checkout_placement_accepts_a_new_nested_data_directory(source_checkout:
     assert not selected.exists()
 
 
-@pytest.mark.parametrize("name", ["generated [data] ", "!state?*", "back\\slash"])
+@pytest.mark.parametrize(
+    ("name", "neighbor"),
+    [("generated [data] ", "generated d"), ("!state?*", "!state-x"), ("back\\slash", "backslash")],
+)
 def test_git_source_inventory_excludes_literal_data_paths_and_preserves_neighbor_sources(
-    source_checkout: Path, monkeypatch: pytest.MonkeyPatch, name: str
+    source_checkout: Path, monkeypatch: pytest.MonkeyPatch, name: str, neighbor: str
 ) -> None:
     """Git pattern syntax in a directory name cannot hide neighboring public sources."""
     selected = source_checkout / "scripts" / name
     selected.mkdir()
     (selected / "payload.py").write_bytes(b"generated data\n")
-    sibling = source_checkout / "scripts/generated d/source.py"
+    sibling_name = f"scripts/{neighbor}/source.py"
+    sibling = source_checkout / sibling_name
     sibling.parent.mkdir()
     sibling.write_bytes(b"public source\n")
     monkeypatch.setenv("FPLINUX_DATA_DIR", str(selected))
@@ -196,8 +200,8 @@ def test_git_source_inventory_excludes_literal_data_paths_and_preserves_neighbor
     captured = capture_public_sources(source_checkout)
     quality = dict(quality_inputs.quality_files(enforce_source_policy=False))
 
-    assert "scripts/generated d/source.py" in {source.path for source in captured.files}
-    assert quality["scripts/generated d/source.py"].read_bytes() == b"public source\n"
+    assert sibling_name in {source.path for source in captured.files}
+    assert quality[sibling_name].read_bytes() == b"public source\n"
     assert not any(source.path.startswith(f"scripts/{name}/") for source in captured.files)
     assert not any(path.startswith(f"scripts/{name}/") for path in quality)
     sibling.write_bytes(b"changed public source\n")

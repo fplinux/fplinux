@@ -12,7 +12,6 @@ import tarfile
 import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
-from unittest import mock
 
 import pytest
 from fplinux_cli.alpine import aports as alpine_aports
@@ -449,8 +448,9 @@ class AlpineRegistrationTests:
         snapshot = workspace_capture.workspace_snapshot(
             workspace_build_inputs.target_build_source_files("nokia-ta1618")
         )
-        with mock.patch.object(workspace_staging, "ROOT", registered_sources.directory):
-            staged = workspace_staging.stage_workspace_snapshot(snapshot)
+        staged = workspace_staging.stage_workspace_snapshot(
+            snapshot, selected_data_root=registered_sources.directory / "build-data"
+        )
         state = registered_sources.state(root=staged, names=names, selected=names)
 
         assert ({name: record["recipe"] for name, record in state["packages"].items()}) == (

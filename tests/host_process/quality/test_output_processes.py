@@ -272,10 +272,14 @@ class StageProcessTests:
                     timeout=_STAGE_TIMEOUT,
                 )
             output = terminal.getvalue()
-            assert ("line-000") not in (output)
-            assert ("line-099") in (output)
-            assert ("?red? invalid=?") in (output)
-            assert ("utf8=проверка") in (output)
+            lines = output.splitlines()
+            start = lines.index("--- last 40 lines; at most 32 KiB ---")
+            end = lines.index("--- end ---", start)
+            assert lines[start + 1 : end] == [
+                *(f"line-{number:03d}" for number in range(62, 100)),
+                "?red? invalid=?",
+                "utf8=проверка",
+            ]
             assert ("[31m") not in (output)
             assert ("\x1b") not in (output)
             log = (root / "01-tail.log").read_bytes()

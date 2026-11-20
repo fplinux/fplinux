@@ -34,10 +34,14 @@ class StagedWorkspaceTests:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """The selected workspace delivers the card producer and its runtime template."""
-        sources = workspace_module.target_build_source_files("xiaomi-qin-1s-plus", "microsd-root")
+        cache = tmp_path / "build-data"
+        inherited = tmp_path / "inherited-data"
+        monkeypatch.setenv("FPLINUX_DATA_DIR", str(inherited))
+        sources = workspace_module.target_build_source_files(
+            "xiaomi-qin-1s-plus", "microsd-root", selected_data_root=cache
+        )
         snapshot = workspace_capture.workspace_snapshot(sources)
-        monkeypatch.setattr(workspace_staging, "ROOT", tmp_path)
-        staged = workspace_staging.stage_workspace_snapshot(snapshot)
+        staged = workspace_staging.stage_workspace_snapshot(snapshot, selected_data_root=cache)
 
         result = run_process(
             [
@@ -55,12 +59,14 @@ class StagedWorkspaceTests:
         )
 
         rendered = json.loads(result.stdout)
+        assert staged.is_relative_to(cache)
+        assert not inherited.exists()
         assert rendered["image"] == "FPLINUX.img.xz"
         configuration = rendered["configuration"]
         assert "image FPLINUX.img {" in configuration
-        assert 'image = "FPLROOT.ext4"' in configuration
-        assert "offset = 68157440" in configuration
-        assert "size = 536870912" in configuration
+        root_partition = configuration.partition("partition root {")[2].partition("}")[0]
+        fields = {line.strip() for line in root_partition.splitlines()}
+        assert {'image = "FPLROOT.ext4"', "offset = 68157440", "size = 536870912"} <= fields
         assert "FPLINUX.ITB" not in configuration
 
     def test_microsd_source_snapshot_supports_build_imports_and_both_configurations(self) -> None:
@@ -68,8 +74,9 @@ class StagedWorkspaceTests:
         sources = workspace_module.target_build_source_files("nokia-ta1618", "microsd-uboot")
         snapshot = workspace_capture.workspace_snapshot(sources)
         with tempfile.TemporaryDirectory() as temporary:
-            with mock.patch.object(workspace_staging, "ROOT", Path(temporary)):
-                staged = workspace_staging.stage_workspace_snapshot(snapshot)
+            staged = workspace_staging.stage_workspace_snapshot(
+                snapshot, selected_data_root=Path(temporary) / "build-data"
+            )
             imported = subprocess.run(
                 [sys.executable, "-B", "-c", "import fplinux_cli.build.__main__"],
                 cwd=staged,
@@ -93,8 +100,9 @@ class StagedWorkspaceTests:
             workspace_module.target_build_source_files("nokia-ta1618")
         )
         with tempfile.TemporaryDirectory() as temporary:
-            with mock.patch.object(workspace_staging, "ROOT", Path(temporary)):
-                staged = workspace_staging.stage_workspace_snapshot(snapshot)
+            staged = workspace_staging.stage_workspace_snapshot(
+                snapshot, selected_data_root=Path(temporary) / "build-data"
+            )
             imported = subprocess.run(
                 [sys.executable, "-B", "-c", "import fplinux_cli.build.__main__"],
                 cwd=staged,
@@ -121,8 +129,9 @@ class StagedWorkspaceTests:
             workspace_module.target_build_source_files("nokia-ta1618", profile)
         )
         with tempfile.TemporaryDirectory() as temporary:
-            with mock.patch.object(workspace_staging, "ROOT", Path(temporary)):
-                staged = workspace_staging.stage_workspace_snapshot(snapshot)
+            staged = workspace_staging.stage_workspace_snapshot(
+                snapshot, selected_data_root=Path(temporary) / "build-data"
+            )
             command = (
                 "import sys; from fplinux_cli import common; "
                 "from fplinux_cli.build.bootstrap.recipe import bootstrap_recipe_digest; "
