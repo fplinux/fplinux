@@ -75,12 +75,12 @@ def _remove_candidates(cache: Path, entries: Sequence[InventoryEntry]) -> PruneA
 
 
 def discard_obsolete_rootfs(cache: Path) -> tuple[str, ...]:
-    """Discard only rootfs generations superseded by every current target/profile recipe."""
+    """Discard rootfs generations unused by any current target, profile or build type."""
     return _remove_candidates(cache, rootfs_entries(cache)).removed
 
 
 def discard_obsolete_apks(cache: Path) -> tuple[str, ...]:
-    """Discard only aport cache slots absent from every current target/profile closure."""
+    """Discard APK slots unused by any current target, profile or build type."""
     return _remove_candidates(cache, apk_entries(cache)).removed
 
 

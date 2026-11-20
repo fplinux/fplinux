@@ -19,6 +19,7 @@ from fplinux_cli.environment.definition import (
     environment_recipe_digest,
 )
 from fplinux_cli.environment.state import load_environment_state
+from fplinux_cli.manifests.identity import BUILD_TYPES
 from fplinux_cli.manifests.paths import discover_profiles, discover_targets
 from fplinux_cli.manifests.platforms import load_platform
 from fplinux_cli.manifests.targets import load_target
@@ -27,7 +28,18 @@ from .model import InventoryEntry
 from .paths import tree_size
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
     from pathlib import Path
+    from typing import Any
+
+
+def _current_targets() -> Iterator[tuple[str, dict[str, Any], dict[str, Any]]]:
+    """Load each currently supported target, profile and build type."""
+    for target in discover_targets():
+        for profile in discover_profiles(target):
+            for build_type in BUILD_TYPES:
+                config = load_target(target, profile, build_type=build_type)
+                yield target, config, load_platform(config["platform"])
 
 
 def _current_rootfs_recipes(cache: Path) -> frozenset[str] | None:
@@ -44,54 +56,49 @@ def _current_rootfs_recipes(cache: Path) -> frozenset[str] | None:
             environment_state.content,
         )
         recipes: set[str] = set()
-        for target in discover_targets():
-            for profile in discover_profiles(target):
-                target_config = load_target(target, profile)
-                device_data_groups = target_config["device_data"]["groups"]
-                device_data = firmware_inputs.capture_external_device_data(
-                    target,
-                    device_data_groups,
+        for target, target_config, platform in _current_targets():
+            device_data_groups = target_config["device_data"]["groups"]
+            device_data = firmware_inputs.capture_external_device_data(
+                target,
+                device_data_groups,
+            )
+            root_kind = target_config["linux"]["root"]["kind"]
+            firmware = (
+                firmware_inputs.rootfs_firmware_inputs(device_data)
+                if firmware_inputs.rootfs_receives_firmware(root_kind=root_kind)
+                else ()
+            )
+            packages = selected_packages(platform, target_config)
+            ram_base_recipe = None
+            base_packages = shared_ram_packages(platform, target_config)
+            if root_kind == "initramfs" and base_packages is not None:
+                ram_base_recipe = alpine_rootfs_recipe(
+                    environment_recipe, signing_key, base_packages, release_id=release_id
                 )
-                root_kind = target_config["linux"]["root"]["kind"]
-                firmware = (
-                    firmware_inputs.rootfs_firmware_inputs(device_data)
-                    if firmware_inputs.rootfs_receives_firmware(
-                        root_kind=root_kind,
-                    )
-                    else ()
-                )
-                platform = load_platform(target_config["platform"])
-                packages = selected_packages(platform, target_config)
-                ram_base_recipe = None
-                base_packages = shared_ram_packages(platform, target_config)
-                if root_kind == "initramfs" and base_packages is not None:
-                    ram_base_recipe = alpine_rootfs_recipe(
-                        environment_recipe, signing_key, base_packages, release_id=release_id
-                    )
-                    recipes.add(ram_base_recipe)
-                card_base_packages = shared_card_packages(platform, target_config)
-                if card_base_packages is not None:
-                    recipes.add(
-                        alpine_rootfs_recipe(
-                            environment_recipe,
-                            signing_key,
-                            card_base_packages,
-                            release_id=release_id,
-                            root_kind="external",
-                        )
-                    )
-                firmware_selections = (firmware, ()) if firmware else ((),)
-                for selected_firmware in firmware_selections:
-                    recipe = alpine_rootfs_recipe(
+                recipes.add(ram_base_recipe)
+            card_base_packages = shared_card_packages(platform, target_config)
+            if card_base_packages is not None:
+                recipes.add(
+                    alpine_rootfs_recipe(
                         environment_recipe,
                         signing_key,
-                        packages,
+                        card_base_packages,
                         release_id=release_id,
-                        firmware_inputs=selected_firmware,
-                        display_brightness=target_config.get("display_brightness"),
-                        root_kind=root_kind,
+                        root_kind="external",
                     )
-                    recipes.add(layered_rootfs_recipe(recipe, ram_base_recipe))
+                )
+            firmware_selections = (firmware, ()) if firmware else ((),)
+            for selected_firmware in firmware_selections:
+                recipe = alpine_rootfs_recipe(
+                    environment_recipe,
+                    signing_key,
+                    packages,
+                    release_id=release_id,
+                    firmware_inputs=selected_firmware,
+                    display_brightness=target_config.get("display_brightness"),
+                    root_kind=root_kind,
+                )
+                recipes.add(layered_rootfs_recipe(recipe, ram_base_recipe))
     except OSError, ValueError, SystemExit:
         return None
     return frozenset(recipes)
@@ -152,22 +159,16 @@ def _current_apk_packages() -> frozenset[str] | None:
     """Return every current aport name, or ``None`` when declarations are unavailable."""
     try:
         packages: set[str] = set()
-        for target in discover_targets():
-            for profile in discover_profiles(target):
-                target_config = load_target(target, profile)
-                platform_config = load_platform(target_config["platform"])
-                rootfs_packages = selected_packages(
+        for _target, target_config, platform_config in _current_targets():
+            rootfs_packages = selected_packages(platform_config, target_config)
+            packages.update(rootfs_packages)
+            packages.update(
+                bundle_packages(
                     platform_config,
                     target_config,
+                    rootfs_packages,
                 )
-                packages.update(rootfs_packages)
-                packages.update(
-                    bundle_packages(
-                        platform_config,
-                        target_config,
-                        rootfs_packages,
-                    )
-                )
+            )
         return frozenset(aport_build_order(tuple(packages)))
     except KeyError, OSError, TypeError, ValueError, SystemExit:
         return None

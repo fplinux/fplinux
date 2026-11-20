@@ -1192,26 +1192,16 @@ class CliCacheLockTests:
         logs_gc.assert_not_called()
         assert not ((dispatch_root / ".data").exists())
 
-    @pytest.mark.parametrize(
-        ("command", "target", "expected_build_cleanup"),
-        [("build", "nokia", True), ("check", None, False)],
-        ids=["build", "check"],
-    )
-    def test_failed_profile_commands_keep_the_initial_data_root_for_cleanup(
+    def test_failed_profile_check_keeps_the_initial_data_root_for_log_cleanup(
         self,
         dispatch_root: Path,
         monkeypatch: pytest.MonkeyPatch,
-        *,
-        command: str,
-        target: str | None,
-        expected_build_cleanup: bool,
     ) -> None:
-        """A failed action still reaches the cleanup boundary with its selected context."""
+        """A failed check still prunes its selected profile logs under its original cache lock."""
         profile = "microsd-uboot"
         cache = dispatch_root / ".data"
         arguments = argparse.Namespace(
-            command=command,
-            target=target,
+            command="check",
             profile=profile,
             list_scopes=False,
         )
@@ -1230,10 +1220,6 @@ class CliCacheLockTests:
                 return_value=contextlib.nullcontext(),
             ),
             mock.patch(
-                "fplinux_cli.cache.prune.operations.discard_obsolete_rootfs"
-            ) as rootfs_cleanup,
-            mock.patch("fplinux_cli.cache.prune.operations.discard_obsolete_apks") as apks_cleanup,
-            mock.patch(
                 "fplinux_cli.cache.prune.operations.discard_superseded_profile_logs",
             ) as log_cleanup,
             pytest.raises(SystemExit, match="forced profile failure"),
@@ -1243,12 +1229,7 @@ class CliCacheLockTests:
                 action,
             )
 
-        expected_calls = [mock.call(cache)] if expected_build_cleanup else []
-        assert (rootfs_cleanup.call_args_list) == (expected_calls)
-        assert (apks_cleanup.call_args_list) == (expected_calls)
-        assert (log_cleanup.call_args) == (
-            mock.call(cache, command, profile=profile, target=target)
-        )
+        log_cleanup.assert_called_once_with(cache, "check", profile=profile)
         assert not (dispatch_root / "different-data").exists()
 
     @pytest.mark.parametrize(

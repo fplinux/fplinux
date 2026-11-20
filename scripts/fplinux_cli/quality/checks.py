@@ -6,7 +6,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from fplinux_cli.build import DEFAULT_BUILD_MEMORY_MIB
-from fplinux_cli.cache.prune.operations import discard_superseded_profile_logs
 from fplinux_cli.common import ROOT, fail, load_toml
 from fplinux_cli.data_paths import data_root
 from fplinux_cli.dependencies.inputs import acquire_inputs, aport_source_inputs, source_input
@@ -354,5 +353,3 @@ def check(  # noqa: PLR0913 -- public check options stay explicit.
         discard_staged_quality_workspace_snapshot(snapshot, workspace, selected_data_root=cache)
     print("check: OK")
     reporter.finish()
-    if profile is not None:
-        discard_superseded_profile_logs(cache, "check", profile=profile)

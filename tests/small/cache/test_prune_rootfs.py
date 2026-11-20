@@ -110,7 +110,7 @@ class RootfsPruneTests:
             mock.patch.object(
                 prune_alpine,
                 "load_target",
-                side_effect=lambda target, _profile: target_configs[target],
+                side_effect=lambda target, _profile, **_kwargs: target_configs[target],
             ),
             mock.patch.object(
                 prune_alpine,
@@ -250,7 +250,9 @@ class RootfsPruneTests:
         firmware_directory.mkdir(parents=True)
         (firmware_directory / "controller.bin").write_bytes(b"firmware")
 
-        def target_config(_target: str, profile: str | None = None) -> dict[str, object]:
+        def target_config(
+            _target: str, profile: str | None = None, *, build_type: str = "release"
+        ) -> dict[str, object]:
             firmware = (
                 [
                     {
@@ -265,6 +267,7 @@ class RootfsPruneTests:
             return {
                 "platform": "platform",
                 "profile": profile,
+                "build_type": build_type,
                 "linux": {"root": {"kind": "external" if profile == "host" else "initramfs"}},
                 "device_data": {
                     "groups": (

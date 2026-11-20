@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import sys
+from contextlib import ExitStack
 from typing import TYPE_CHECKING, Any
 
 from fplinux_cli import common
@@ -255,89 +256,19 @@ def _print_build_result(  # noqa: PLR0913 -- result and selected build context s
         silence_broken_pipe(sys.stdout)
 
 
-def build(  # noqa: PLR0913 -- CLI options and caller-owned reporting remain explicit.
+def _build_missing_bundle(  # noqa: PLR0913 -- the selected build inputs remain explicit.
     target: str,
     jobs: int,
     *,
-    memory_mib: int = DEFAULT_BUILD_MEMORY_MIB,
-    profile: str | None = None,
-    build_type: str = "release",
-    include_device_data: bool = True,
-    release_context: ReleaseContext | None = None,
-    verbose: bool = False,
-    reporter: RunReporter | None = None,
-    phone_data: Path | None = None,
-    prepared_firmware: dict[str, tuple[FirmwareInput, ...]] | None = None,
+    cache: Path,
+    memory_mib: int,
+    profile: str | None,
+    build_type: str,
+    snapshot: WorkspaceSnapshot,
+    image_name: str,
+    reporter: RunReporter,
 ) -> tuple[CurrentBundle, dict[str, Any]]:
-    """Build or reuse a bundle, leaving a supplied reporter to its caller."""
-    own_reporter = reporter is None
-    cache = data_root(common.ROOT)
-    if jobs < 1:
-        fail("--jobs must be positive")
-    release = releases.load_release(target)
-    snapshot = workspace_build_inputs.target_workspace_snapshot(
-        target,
-        profile,
-        build_type=build_type,
-        include_device_data=include_device_data,
-        release_context=release_context,
-        phone_data=phone_data,
-        selected_data_root=cache,
-        prepared_firmware=prepared_firmware,
-    )
-    environment_lock = definition.load_environment_lock()
-    environment_recipe = definition.environment_recipe_digest(environment_lock)
-    environment_state = environment_states.load_environment_state(cache, environment_recipe)
-    identity = bundles_commands.build_identity(snapshot, environment_state, cache)
-    current = bundles_commands.matching_target_bundle(
-        target,
-        identity,
-        release["image"],
-        profile,
-        build_type=build_type,
-        cache=cache,
-    )
-    if current is not None:
-        bundle, _manifest = current
-        discard_superseded_bundle_generations(
-            cache / "out",
-            target,
-            bundle,
-            profile,
-            build_type=build_type,
-        )
-        cache_prune.discard_obsolete_rootfs(cache)
-        cache_prune.discard_obsolete_apks(cache)
-        if reporter is None:
-            reporter = RunReporter.create(
-                "build",
-                target=bundles_commands.profile_log_target(target, profile),
-                verbose=verbose,
-                build_type=build_type,
-                selected_data_root=cache,
-            )
-        _print_build_result(
-            target, bundle, release, cached=True, profile=profile, build_type=build_type
-        )
-        if own_reporter:
-            reporter.finish()
-        if profile is not None:
-            cache_prune.discard_superseded_profile_logs(
-                cache,
-                "build",
-                profile=profile,
-                target=target,
-            )
-        return current
-
-    if reporter is None:
-        reporter = RunReporter.create(
-            "build",
-            target=bundles_commands.profile_log_target(target, profile),
-            verbose=verbose,
-            build_type=build_type,
-            selected_data_root=cache,
-        )
+    """Run the build in its staged source tree and validate the published bundle."""
     kern, environment_rootfs, current_environment = require_environment(target=target, cache=cache)
     apk_signing = ensure_build_directory(cache / "apk-signing")
     downloads = ensure_build_directory(cache / "downloads")
@@ -404,37 +335,121 @@ def build(  # noqa: PLR0913 -- CLI options and caller-owned reporting remain exp
         current = bundles_commands.matching_target_bundle(
             target,
             identity,
-            release["image"],
+            image_name,
             profile,
             build_type=build_type,
             cache=cache,
         )
         if current is None:
             fail("build completed without publishing an exact valid current bundle")
-        bundle, _manifest = current
-        discard_superseded_bundle_generations(
-            output,
-            target,
-            bundle,
-            profile,
-            build_type=build_type,
+    finally:
+        workspace_staging.discard_staged_workspace_snapshot(
+            snapshot, workspace, selected_data_root=cache
         )
-        cache_prune.discard_obsolete_rootfs(cache)
-        cache_prune.discard_obsolete_apks(cache)
-        _print_build_result(
-            target, bundle, release, cached=False, profile=profile, build_type=build_type
-        )
-        if own_reporter:
-            reporter.finish()
+    return current
+
+
+def build(  # noqa: PLR0913 -- CLI options and caller-owned reporting remain explicit.
+    target: str,
+    jobs: int,
+    *,
+    memory_mib: int = DEFAULT_BUILD_MEMORY_MIB,
+    profile: str | None = None,
+    build_type: str = "release",
+    include_device_data: bool = True,
+    release_context: ReleaseContext | None = None,
+    verbose: bool = False,
+    reporter: RunReporter | None = None,
+    phone_data: Path | None = None,
+    prepared_firmware: dict[str, tuple[FirmwareInput, ...]] | None = None,
+) -> tuple[CurrentBundle, dict[str, Any]]:
+    """Build or reuse a bundle, leaving a supplied reporter to its caller."""
+    own_reporter = reporter is None
+    cache = data_root(common.ROOT)
+    with ExitStack() as completion:
         if profile is not None:
-            cache_prune.discard_superseded_profile_logs(
+            completion.callback(
+                cache_prune.discard_superseded_profile_logs,
                 cache,
                 "build",
                 profile=profile,
                 target=target,
             )
-    finally:
-        workspace_staging.discard_staged_workspace_snapshot(
-            snapshot, workspace, selected_data_root=cache
+        failure: BaseException | None = None
+        try:
+            if jobs < 1:
+                fail("--jobs must be positive")
+            release = releases.load_release(target)
+            snapshot = workspace_build_inputs.target_workspace_snapshot(
+                target,
+                profile,
+                build_type=build_type,
+                include_device_data=include_device_data,
+                release_context=release_context,
+                phone_data=phone_data,
+                selected_data_root=cache,
+                prepared_firmware=prepared_firmware,
+            )
+            environment_lock = definition.load_environment_lock()
+            environment_recipe = definition.environment_recipe_digest(environment_lock)
+            environment_state = environment_states.load_environment_state(
+                cache, environment_recipe
+            )
+            identity = bundles_commands.build_identity(snapshot, environment_state, cache)
+            image_name = release["image"]
+            current = bundles_commands.matching_target_bundle(
+                target,
+                identity,
+                image_name,
+                profile,
+                build_type=build_type,
+                cache=cache,
+            )
+            cached = current is not None
+            if reporter is None:
+                reporter = RunReporter.create(
+                    "build",
+                    target=bundles_commands.profile_log_target(target, profile),
+                    verbose=verbose,
+                    build_type=build_type,
+                    selected_data_root=cache,
+                )
+            if current is None:
+                current = _build_missing_bundle(
+                    target,
+                    jobs,
+                    cache=cache,
+                    memory_mib=memory_mib,
+                    profile=profile,
+                    build_type=build_type,
+                    snapshot=snapshot,
+                    image_name=image_name,
+                    reporter=reporter,
+                )
+            bundle, _manifest = current
+            discard_superseded_bundle_generations(
+                cache / "out",
+                target,
+                bundle,
+                profile,
+                build_type=build_type,
+            )
+        except BaseException as error:
+            failure = error
+            raise
+        finally:
+            if failure is None or profile is not None:
+                try:
+                    cache_prune.discard_obsolete_rootfs(cache)
+                    cache_prune.discard_obsolete_apks(cache)
+                except Exception as error:
+                    if failure is None:
+                        raise
+                    failure.add_note(f"build cache retention failed: {error}")
+
+        _print_build_result(
+            target, bundle, release, cached=cached, profile=profile, build_type=build_type
         )
+        if own_reporter:
+            reporter.finish()
     return current

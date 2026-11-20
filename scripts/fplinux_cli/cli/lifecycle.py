@@ -84,33 +84,9 @@ def execute_command(
         try:
             action()
         finally:
-            _discard_profile_build_or_check_cache(args, selected_root)
+            if args.command == "check" and profile is not None:
+                from fplinux_cli.cache.prune.operations import (  # noqa: PLC0415 -- profile-only cleanup.
+                    discard_superseded_profile_logs,
+                )
 
-
-def _discard_profile_build_or_check_cache(args: argparse.Namespace, cache: Path) -> None:
-    """Bound one named profile's logs even when its command exits unsuccessfully."""
-    profile = getattr(args, "profile", None)
-    if not isinstance(profile, str) or args.command not in {"build", "check"}:
-        return
-    from fplinux_cli.cache.prune.operations import (  # noqa: PLC0415 -- profile-only cleanup.
-        discard_superseded_profile_logs,
-    )
-
-    target = getattr(args, "target", None)
-    if args.command == "build":
-        if not isinstance(target, str):
-            message = "build cache retention requires a target"
-            raise AssertionError(message)
-        from fplinux_cli.cache.prune.operations import (  # noqa: PLC0415 -- build-only cleanup.
-            discard_obsolete_apks,
-            discard_obsolete_rootfs,
-        )
-
-        discard_obsolete_rootfs(cache)
-        discard_obsolete_apks(cache)
-    discard_superseded_profile_logs(
-        cache,
-        args.command,
-        profile=profile,
-        target=target if isinstance(target, str) else None,
-    )
+                discard_superseded_profile_logs(selected_root, "check", profile=profile)

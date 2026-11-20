@@ -48,8 +48,10 @@ class PackagePruneTests:
         regular = apks / "fplinux-file"
         regular.write_text("keep\n")
 
-        def load_target(_target: str, profile: str | None = None) -> dict[str, object]:
-            return {"platform": "platform", "profile": profile}
+        def load_target(
+            _target: str, profile: str | None = None, *, build_type: str = "release"
+        ) -> dict[str, object]:
+            return {"platform": "platform", "profile": profile, "build_type": build_type}
 
         def selected_packages(
             _platform: dict[str, object], config: dict[str, object]

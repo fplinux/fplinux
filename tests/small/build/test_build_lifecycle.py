@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import argparse
 import contextlib
 import functools
 import io
@@ -23,6 +24,7 @@ import fplinux_cli.workspace.staging as workspace_staging
 import pytest
 from fplinux_cli import common
 from fplinux_cli.artifacts.bundles import bundle_pointer, publish_current_bundle
+from fplinux_cli.cli import lifecycle
 from fplinux_cli.dependencies.inputs import DependencyInput
 from fplinux_cli.environment import definition, runtime
 from fplinux_cli.environment.state import EnvironmentState
@@ -39,14 +41,21 @@ if TYPE_CHECKING:
 class BuildLifecycleTests:
     """Keep cache hits and readers ahead of every mutable or external action."""
 
+    @pytest.mark.parametrize("profile", [None, "microsd-uboot"], ids=["default", "microsd"])
     def test_release_debug_release_hits_keep_both_types_and_ignore_resource_limits(
-        self, command_bundle: CommandBundleContext
+        self, command_bundle: CommandBundleContext, profile: str | None
     ) -> None:
         """Switching type reuses its own generation without starting build work."""
-        debug = command_bundle.create_generation("d" * 64, build_type="debug")
-        publish_current_bundle(command_bundle.output, "phone", debug, build_type="debug")
+        release = command_bundle.bundle_path
+        if profile is not None:
+            release = command_bundle.create_generation("a" * 64, profile=profile)
+            publish_current_bundle(command_bundle.output, "phone", release, profile)
+        debug = command_bundle.create_generation("d" * 64, profile=profile, build_type="debug")
+        publish_current_bundle(command_bundle.output, "phone", debug, profile, build_type="debug")
+        args = argparse.Namespace(command="build", target="phone", profile=profile)
         with (
             mock.patch.object(common, "ROOT", command_bundle.root),
+            mock.patch.object(lifecycle, "ROOT", command_bundle.root),
             mock.patch.object(output, "ROOT", command_bundle.root),
             mock.patch.object(targets, "load_target", return_value=command_bundle.target_config),
             mock.patch.object(releases, "load_release", return_value=command_bundle.release),
@@ -76,34 +85,45 @@ class BuildLifecycleTests:
             ),
             mock.patch.object(prune_operations, "discard_obsolete_rootfs") as rootfs_gc,
             mock.patch.object(prune_operations, "discard_obsolete_apks") as apks_gc,
+            mock.patch.object(prune_operations, "discard_superseded_profile_logs") as log_gc,
         ):
             for build_type, jobs, memory_mib in (
                 ("release", 1, 2048),
                 ("debug", 8, 2048),
                 ("release", 8, 4096),
             ):
-                old = command_bundle.create_generation("b" * 64, build_type=build_type)
+                old = command_bundle.create_generation(
+                    "b" * 64, profile=profile, build_type=build_type
+                )
                 stdout = io.StringIO()
                 journals_before = set((command_bundle.cache / "logs").rglob("run.json"))
+                build = functools.partial(
+                    build_commands.build,
+                    "phone",
+                    jobs,
+                    profile=profile,
+                    memory_mib=memory_mib,
+                    verbose=True,
+                    build_type=build_type,
+                )
                 with contextlib.redirect_stdout(stdout):
                     output.run_entrypoint(
                         functools.partial(
-                            build_commands.build,
-                            "phone",
-                            jobs,
-                            memory_mib=memory_mib,
-                            verbose=True,
-                            build_type=build_type,
+                            lifecycle.execute_command,
+                            args,
+                            build,
+                            data_directory=command_bundle.cache,
                         )
                     )
 
-                assert (f"build phone --build-type {build_type}: OK (cached)") in (
-                    stdout.getvalue()
-                )
-                expected = command_bundle.bundle_path if build_type == "release" else debug
+                label = f"build phone --build-type {build_type}"
+                if profile is not None:
+                    label += f" --profile {profile}"
+                assert f"{label}: OK (cached)" in stdout.getvalue()
+                expected = release if build_type == "release" else debug
                 assert (str(expected.relative_to(command_bundle.root))) in (stdout.getvalue())
                 assert not (old.exists())
-                assert command_bundle.bundle_path.is_dir()
+                assert release.is_dir()
                 assert debug.is_dir()
                 new_journals = set((command_bundle.cache / "logs").rglob("run.json")) - (
                     journals_before
@@ -114,6 +134,13 @@ class BuildLifecycleTests:
                 assert metadata["status"] == "success"
             assert (rootfs_gc.call_args_list) == ([mock.call(command_bundle.cache)] * 3)
             assert (apks_gc.call_args_list) == ([mock.call(command_bundle.cache)] * 3)
+            if profile is None:
+                log_gc.assert_not_called()
+            else:
+                log_cleanup = mock.call(
+                    command_bundle.cache, "build", profile=profile, target="phone"
+                )
+                assert log_gc.call_args_list == [log_cleanup] * 3
 
     def test_build_result_ignores_closed_stdout_pipe(
         self, command_bundle: CommandBundleContext
@@ -241,13 +268,14 @@ class BuildLifecycleTests:
                 is None
             )
 
+    @pytest.mark.parametrize("profile", [None, "microsd-uboot"], ids=["default", "microsd"])
     def test_build_miss_requires_host_validation_after_container_success(
-        self, command_bundle: CommandBundleContext
+        self, command_bundle: CommandBundleContext, profile: str | None
     ) -> None:
         """Container exit zero is insufficient without an exact published generation."""
         workspace = command_bundle.root / ".data/workspaces/current"
         workspace.mkdir(parents=True)
-        old = command_bundle.create_generation("b" * 64)
+        old = command_bundle.create_generation("b" * 64, profile=profile)
         command_bundle.clear_current_bundle()
         with (
             mock.patch.object(common, "ROOT", command_bundle.root),
@@ -284,18 +312,27 @@ class BuildLifecycleTests:
             mock.patch.object(workspace_staging, "discard_staged_workspace_snapshot") as discard,
             mock.patch.object(prune_operations, "discard_obsolete_rootfs") as rootfs_gc,
             mock.patch.object(prune_operations, "discard_obsolete_apks") as apks_gc,
+            mock.patch.object(prune_operations, "discard_superseded_profile_logs") as log_gc,
             mock.patch.object(output.Stage, "run", autospec=True),
             pytest.raises(SystemExit, match="without publishing an exact valid current bundle"),
         ):
-            output.run_entrypoint(lambda: build_commands.build("phone", 4))
+            output.run_entrypoint(lambda: build_commands.build("phone", 4, profile=profile))
 
-        assert not (bundle_pointer(command_bundle.output, "phone").exists())
+        assert not (bundle_pointer(command_bundle.output, "phone", profile).exists())
         assert old.exists()
         discard.assert_called_once_with(
             command_bundle.snapshot, workspace, selected_data_root=command_bundle.cache
         )
-        rootfs_gc.assert_not_called()
-        apks_gc.assert_not_called()
+        if profile is None:
+            rootfs_gc.assert_not_called()
+            apks_gc.assert_not_called()
+            log_gc.assert_not_called()
+        else:
+            rootfs_gc.assert_called_once_with(command_bundle.cache)
+            apks_gc.assert_called_once_with(command_bundle.cache)
+            log_gc.assert_called_once_with(
+                command_bundle.cache, "build", profile=profile, target="phone"
+            )
         metadata = next((command_bundle.root / ".data/logs/build/phone").rglob("run.json"))
         assert (json.loads(metadata.read_text(encoding="utf-8"))["status"]) == ("failed")
 
