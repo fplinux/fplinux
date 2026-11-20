@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-2.0-only
 [kern]
 source = "kern"
-binary_sha256 = "c16b3b2d4e06e551be5edb9bba8dcfc80001f112177e48ed69d628413a8fe1ff"
+binary_sha256 = "1623841224866130bb64c55b040e57aae0cc8dce1c5febe41e0cd74e5a801d4d"
 
 [base]
 source = "alpine_environment"

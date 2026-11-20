@@ -1110,12 +1110,12 @@ checksum = "f631c04d2c48c52b84d0d0549c99ff3859c98df65b3101406327ecc7d53fbf12"
 bytes = 7484
 
 [kern]
-version = "0.33.0"
+version = "0.51.3"
 name = "kern.tar.gz"
-url = "https://github.com/getkern/kern/releases/download/v0.33.0/kern-x86_64-unknown-linux-musl.tar.gz"
+url = "https://github.com/getkern/kern/releases/download/v0.51.3/kern-x86_64-unknown-linux-musl.tar.gz"
 algorithm = "sha256"
-checksum = "3cf562cce7645d8b6320baceb30508af094b083109132ee89ae5f7e81d27a633"
-bytes = 1084292
+checksum = "8cfa991c4274cc5a760a5bfaef06b30c2b15d48cb52c0c1674035f0c421ca182"
+bytes = 1637584
 
 [libtsm]
 version = "4.8.0"
