@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import lzma
 import os
 import shutil
 import stat
@@ -12,8 +13,10 @@ from pathlib import Path
 from unittest import mock
 
 from fplinux_cli.alpine import rootfs_files as alpine_builder
+from fplinux_cli.artifacts.newc import newc_entries
 
 from tests import ROOT
+from tests.artifact.ramroot_archive import ram_bootstrap_xz_offset
 from tests.process import run_process
 
 
@@ -113,9 +116,7 @@ def test_board_ram_images_share_base_and_preserve_apk_and_board_files(tmp_path: 
 class RamrootCompositionTests:
     """Packing preserves lower metadata without embedding an unpacked second root."""
 
-    def test_boot_archive_keeps_runtime_bytes_and_lower_content_metadata(
-        self, tmp_path: Path
-    ) -> None:
+    def test_ram_archive_keeps_raw_lower_and_compressed_runtime(self, tmp_path: Path) -> None:
         """Real archive readers verify runtime metadata and exclude inherited host labels."""
         directory = tmp_path
         root = directory / "root"
@@ -148,7 +149,17 @@ class RamrootCompositionTests:
 
         boot = directory / "boot"
         boot.mkdir()
-        with (staging / "initramfs.cpio").open("rb") as archive:
+        archive = (staging / "initramfs.cpio").read_bytes()
+        [squashfs] = [entry for entry in newc_entries(archive) if entry.name != "."]
+        assert squashfs.name == "root.squashfs"
+        xz_offset = ram_bootstrap_xz_offset(archive)
+        assert xz_offset % 4 == len(archive) % 4 == 0
+        decoder = lzma.LZMADecompressor(format=lzma.FORMAT_XZ)
+        bootstrap = decoder.decompress(archive[xz_offset:])
+        assert decoder.eof
+        assert decoder.unused_data == b""
+        assert decoder.check == lzma.CHECK_CRC32
+        for member in (archive[:xz_offset], bootstrap):
             subprocess.run(
                 [
                     "cpio",
@@ -157,7 +168,7 @@ class RamrootCompositionTests:
                     "--make-directories",
                     "--no-absolute-filenames",
                 ],
-                stdin=archive,
+                input=member,
                 cwd=boot,
                 capture_output=True,
                 check=True,
@@ -194,9 +205,7 @@ class RamrootCompositionTests:
                 check=True,
             )
             assert (" x security.selinux=") not in (metadata.stdout)
-        assert ((staging / "rootfs.cpio").read_bytes()) != (
-            (staging / "initramfs.cpio").read_bytes()
-        )
+        assert ((staging / "rootfs.cpio").read_bytes()) != (archive)
         lower = directory / "lower"
         run_process(
             [

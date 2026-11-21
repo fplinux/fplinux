@@ -166,7 +166,7 @@ static void load_initramfs(size_t dtb_bytes)
 		ums9117_boot_fail(11,
 				  ums9117_bootstrap_device_data_error(status));
 
-	/* Linux unpacks both newc members in order into the same root. */
+	/* Linux unpacks the initramfs and device data into the same root. */
 	root_end = device_data ? (uint32_t)(uintptr_t)device_data : limit;
 	start = root_end - root_bytes;
 	end = root_end + device_data_bytes;

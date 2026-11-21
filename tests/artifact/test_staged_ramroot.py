@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import lzma
 import os
 import subprocess
 import sys
@@ -14,6 +15,7 @@ from fplinux_cli.workspace import build_inputs as workspace_module
 from fplinux_cli.workspace import staging as workspace_staging
 
 from tests import ROOT
+from tests.artifact.ramroot_archive import ram_bootstrap_xz_offset
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -80,14 +82,15 @@ class StagedRamrootTests:
         assert (packed.returncode) == (0), packed.stdout + packed.stderr
         boot = directory / "boot"
         boot.mkdir()
-        with (output / "initramfs.cpio").open("rb") as archive:
-            extracted = subprocess.run(
-                ["cpio", "--quiet", "--extract", "--make-directories", "init"],
-                stdin=archive,
-                cwd=boot,
-                capture_output=True,
-                check=False,
-                timeout=10,
-            )
+        archive = (output / "initramfs.cpio").read_bytes()
+        xz_offset = ram_bootstrap_xz_offset(archive)
+        extracted = subprocess.run(
+            ["cpio", "--quiet", "--extract", "--make-directories", "init"],
+            input=lzma.decompress(archive[xz_offset:]),
+            cwd=boot,
+            capture_output=True,
+            check=False,
+            timeout=10,
+        )
         assert (extracted.returncode) == (0), extracted.stderr
         assert ((boot / "init").read_bytes()) == (expected_init)

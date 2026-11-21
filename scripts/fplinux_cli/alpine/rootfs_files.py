@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import lzma
 import os
 import shlex
 import shutil
@@ -220,9 +221,7 @@ def write_card_rootfs_layer(rootfs: Path, base_rootfs: Path, destination: Path) 
         )
 
 
-def _write_board_squashfs(
-    root: Path, staging: Path, bootstrap: Path, base_initramfs: Path
-) -> None:
+def _write_board_squashfs(root: Path, staging: Path, images: Path, base_initramfs: Path) -> None:
     process_build.run(
         [
             "cpio",
@@ -232,7 +231,7 @@ def _write_board_squashfs(
             "--file",
             str(base_initramfs),
             "--directory",
-            str(bootstrap),
+            str(images),
             "root.squashfs",
         ]
     )
@@ -245,21 +244,17 @@ def _write_board_squashfs(
             "1",
             "-d",
             str(base),
-            str(require_file(bootstrap / "root.squashfs")),
+            str(require_file(images / "root.squashfs")),
         ]
     )
     board = staging / "board"
     _stage_board_layer(root, base, board)
-    _write_squashfs(board, bootstrap / "board.squashfs")
+    _write_squashfs(board, images / "board.squashfs")
     shutil.rmtree(board)
     shutil.rmtree(base)
 
 
-def _write_ramroot_initramfs(
-    root: Path, staging: Path, *, base_initramfs: Path | None = None
-) -> None:
-    """Pack the verified composition behind a small boot-only RAM filesystem."""
-    bootstrap = staging / "bootstrap"
+def _write_ram_bootstrap(root: Path, bootstrap: Path, archive: Path) -> None:
     bootstrap.mkdir()
     for directory in ("bin", "lib", "usr", "usr/lib", "dev", "proc", "sys", "run", "newroot"):
         (bootstrap / directory).mkdir(mode=0o755)
@@ -274,13 +269,37 @@ def _write_ramroot_initramfs(
     (bootstrap / "bin/sh").symlink_to("busybox")
     shutil.copyfile(require_file(ROOT / "alpine/ramroot-init.sh"), bootstrap / "init")
     (bootstrap / "init").chmod(0o755)
-    if base_initramfs is None:
-        _write_squashfs(root, bootstrap / "root.squashfs")
-    else:
-        _write_board_squashfs(root, staging, bootstrap, base_initramfs)
     _normalize_rootfs(bootstrap)
-    _write_rootfs_cpio(bootstrap, staging / INITRAMFS_NAME)
-    shutil.rmtree(bootstrap)
+    _write_rootfs_cpio(bootstrap, archive)
+
+
+def _write_ramroot_initramfs(
+    root: Path, staging: Path, *, base_initramfs: Path | None = None
+) -> None:
+    """Pack the verified composition behind a small boot-only RAM filesystem."""
+    with tempfile.TemporaryDirectory(dir=staging, prefix=".ram-initramfs.") as name:
+        temporary = Path(name)
+        images = temporary / "images"
+        images.mkdir()
+        if base_initramfs is None:
+            _write_squashfs(root, images / "root.squashfs")
+        else:
+            _write_board_squashfs(root, temporary, images, base_initramfs)
+        _normalize_rootfs(images)
+
+        # The shared SquashFS must remain directly addressable in the published RAM image.
+        output = staging / INITRAMFS_NAME
+        _write_rootfs_cpio(images, output)
+        bootstrap_archive = temporary / "bootstrap.cpio"
+        _write_ram_bootstrap(root, temporary / "bootstrap", bootstrap_archive)
+        compressed_bootstrap = lzma.compress(
+            bootstrap_archive.read_bytes(),
+            format=lzma.FORMAT_XZ,
+            check=lzma.CHECK_CRC32,
+            filters=[{"id": lzma.FILTER_LZMA2, "dict_size": 64 * 1024}],
+        )
+        with output.open("ab") as stream:
+            stream.write(compressed_bootstrap)
 
 
 def write_card_initramfs(  # noqa: PLR0913 -- the composed root and FIT inputs stay explicit.
