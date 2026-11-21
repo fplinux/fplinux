@@ -20,6 +20,21 @@ transfer)
 already-active)
 	printf 'active 222222222222\n'
 	;;
+wrong-update-build)
+	printf 'updated 111111111111\n'
+	;;
+wrong-update-action)
+	printf 'rolled-back 222222222222\n'
+	;;
+extra-output)
+	printf 'updated 222222222222\nready\n'
+	;;
+rollback)
+	printf 'rolled-back 111111111111\n'
+	;;
+wrong-rollback-action)
+	printf 'active 111111111111\n'
+	;;
 disconnect)
 	head -c 4096 >/dev/null
 	printf 'connection lost during input\n' >&2

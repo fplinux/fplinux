@@ -10,6 +10,8 @@ import subprocess
 import tarfile
 import tempfile
 from contextlib import suppress
+from dataclasses import dataclass
+from enum import StrEnum
 from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -47,6 +49,28 @@ _UNCERTAIN = (
 )
 
 
+class _ReaderOutcome(StrEnum):
+    UPDATED = "updated"
+    ACTIVE = "active"
+    ROLLED_BACK = "rolled-back"
+
+
+@dataclass(frozen=True)
+class _ReaderResult:
+    outcome: _ReaderOutcome
+    build_id: str
+
+
+def _decode_reader_result(output: str) -> _ReaderResult | None:
+    outcome, _, build_id = output.strip().partition(" ")
+    if _BUILD_ID.fullmatch(build_id) is None:
+        return None
+    try:
+        return _ReaderResult(_ReaderOutcome(outcome), build_id)
+    except ValueError:
+        return None
+
+
 def _write_archive(assets: Mapping[str, Path], destination: IO[bytes]) -> None:
     with tarfile.open(fileobj=destination, mode="w|", format=tarfile.USTAR_FORMAT) as archive:
         for name, path in sorted(assets.items()):
@@ -81,7 +105,7 @@ def _run_reader(
     *,
     files: tuple[Path, ...],
     write: Callable[[IO[bytes]], None] | None = None,
-) -> str:
+) -> _ReaderResult | None:
     transport, session = connection
     result: subprocess.CompletedProcess[str] = transport.run_remote(
         session,
@@ -128,7 +152,7 @@ def _run_reader(
             log.message(_UNCERTAIN)
         detail = details.splitlines()
         fail("System card operation failed" + (f": {detail[-1]}" if detail else ""))
-    return result.stdout.strip()
+    return _decode_reader_result(result.stdout)
 
 
 def update_card(
@@ -186,13 +210,17 @@ def update_card(
             files=(CARD_UPDATE_STAGE, CARD_APK_WORLD, manifest, preflight),
             write=partial(_write_archive, payload),
         )
-    if result == f"updated {layout.release_id}":
-        log.message(f"System card build {layout.release_id} was written and the card unmounted.")
-    elif result == f"active {layout.release_id}":
-        log.message(f"System card build {layout.release_id} is already selected.")
-    else:
+    if (
+        result is None
+        or result.build_id != layout.release_id
+        or result.outcome not in {_ReaderOutcome.UPDATED, _ReaderOutcome.ACTIVE}
+    ):
         log.message(_UNCERTAIN)
         fail("The reader returned an invalid system card update result")
+    if result.outcome == _ReaderOutcome.UPDATED:
+        log.message(f"System card build {result.build_id} was written and the card unmounted.")
+    else:
+        log.message(f"System card build {result.build_id} is already selected.")
 
 
 def rollback_card(
@@ -205,7 +233,8 @@ def rollback_card(
 ) -> None:
     """Select the requested confirmed pair even if the currently selected FIT is missing."""
     arguments = _reader_arguments("rollback", card, layout, build_id)
-    if _run_reader(connection, arguments, log, files=()) != f"rolled-back {build_id}":
+    result = _run_reader(connection, arguments, log, files=())
+    if result != _ReaderResult(_ReaderOutcome.ROLLED_BACK, build_id):
         log.message(_UNCERTAIN)
         fail("The reader returned an invalid system card rollback result")
     log.message(f"System card build {build_id} was selected and the card unmounted.")

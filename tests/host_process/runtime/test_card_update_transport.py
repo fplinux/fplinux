@@ -18,6 +18,8 @@ from fplinux_cli.runtime.card import SdCard
 from fplinux_cli.runtime.events import RunLog
 from fplinux_cli.runtime.ssh import transport
 
+from tests.process import run_process
+
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
@@ -98,11 +100,16 @@ def remote(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     copyfile(_PEER, peer)
     peer.chmod(0o700)
 
-    def control(_session: dict[str, Any], command: str, **_kwargs: object) -> ProcessResult[str]:
+    def control(session: dict[str, Any], command: str, **_kwargs: object) -> ProcessResult[str]:
         with (remote / "control").open("a", encoding="ascii") as stream:
             stream.write(f"{command}\n")
-        assert command == "mktemp -d /tmp/fplinux-card-update.XXXXXXXX"
-        return ProcessResult(command, 0, f"{_REMOTE}\n", "")
+        if command == "mktemp -d /tmp/fplinux-card-update.XXXXXXXX":
+            return ProcessResult(command, 0, f"{_REMOTE}\n", "")
+        return run_process(
+            [str(peer), "-T", session["scenario"], str(remote), command],
+            name="run local authenticated reader peer",
+            timeout=5,
+        )
 
     def upload(_session: dict[str, Any], local: str, destination: str) -> None:
         assert destination == f"{_REMOTE}/{Path(local).name}"
@@ -205,3 +212,34 @@ def test_update_reports_the_package_rejected_before_bulk_extraction(
             (transport, {"scenario": "preflight-rejected"}), _CARD, layout, assets=payload, log=log
         )
     assert not (remote / "received").exists()
+
+
+@pytest.mark.parametrize("scenario", ["wrong-update-build", "wrong-update-action", "extra-output"])
+def test_update_rejects_unrelated_or_ambiguous_confirmation(
+    remote: Path, layout: CardLayout, payload: dict[str, Path], log: RunLog, scenario: str
+) -> None:
+    with pytest.raises(SystemExit, match="invalid system card update result"):
+        card_update.update_card(
+            (transport, {"scenario": scenario}), _CARD, layout, assets=payload, log=log
+        )
+
+    diagnostics = log.path.read_text(encoding="utf-8")
+    assert "may still be working on the SD card" in diagnostics
+    assert "was written and the card unmounted" not in diagnostics
+
+
+@pytest.mark.parametrize("scenario", ["rollback", "wrong-rollback-action"])
+def test_rollback_accepts_only_a_rollback_receipt_for_the_requested_build(
+    remote: Path, layout: CardLayout, log: RunLog, scenario: str
+) -> None:
+    connection = (transport, {"scenario": scenario})
+    if scenario == "rollback":
+        card_update.rollback_card(connection, _CARD, layout, build_id="111111111111", log=log)
+    else:
+        with pytest.raises(SystemExit, match="invalid system card rollback result"):
+            card_update.rollback_card(connection, _CARD, layout, build_id="111111111111", log=log)
+
+    command = shlex.split((remote / "command").read_text(encoding="ascii"))
+    assert command[2:7] == ["rollback", "/dev/mmcblk1", "0" * 32, "example-target", "111111111111"]
+    diagnostics = log.path.read_text(encoding="utf-8")
+    assert ("was selected and the card unmounted" in diagnostics) is (scenario == "rollback")

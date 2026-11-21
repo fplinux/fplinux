@@ -6,15 +6,16 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
-from contextlib import nullcontext
+from contextlib import nullcontext, suppress
 from dataclasses import dataclass
+from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
 from . import boot
 from . import phone_data as phone_data_runtime
 from .bundle import admit_bundle, boots_system_card, fail, host_preflight, load_runtime_manifest
 from .card_access import enrolled_endpoints
-from .connection import RunningBuild, read_running_build, read_running_card
+from .connection import CardBootEntry, RunningBuild, read_running_build, read_running_card
 from .events import RunLog
 from .operations import BundlePaths, LiveRequest, SelectedConnection, file_transfer_available
 from .screenshot import capture_screenshot
@@ -94,7 +95,7 @@ class SelectedCard:
 
     connection: tuple[Any, dict[str, Any]]
     cid: str
-    entry: str
+    entry: CardBootEntry
     pins: dict[str, str]
 
 
@@ -126,7 +127,10 @@ def _select_card(
     if attached:
         endpoint = attached[0]
         return SelectedCard(
-            (transport, endpoint), cid, "sd", {endpoint["usb_serial"]: endpoint["host_key"]}
+            (transport, endpoint),
+            cid,
+            CardBootEntry.SD,
+            {endpoint["usb_serial"]: endpoint["host_key"]},
         )
 
     # USB-assisted startup uses the transient launcher binding, not the card keys.
@@ -145,7 +149,7 @@ def _select_card(
     if len(connected) > 1:
         fail("More than one saved USB-assisted phone session is connected")
     pins = {profile["usb_serial"]: profile["host_key"] for profile in profiles}
-    return SelectedCard((transport, connected[0]), cid, "usb", pins)
+    return SelectedCard((transport, connected[0]), cid, CardBootEntry.USB, pins)
 
 
 def _checked_card_build(
@@ -194,17 +198,30 @@ def _show_running_build(
     )
 
 
-def _shutdown_mountpoint(admitted: ValidatedBundle | None) -> str:
+class _CardMountpoint(StrEnum):
+    SLOT_ROOT = "/run/fplinux-card"
+    DIRECT_ROOT = "/"
+
+
+def _shutdown_mountpoint(admitted: ValidatedBundle | None) -> _CardMountpoint:
     if admitted is not None:
         if boots_system_card(admitted.runtime):
-            return "/run/fplinux-card"
+            return _CardMountpoint.SLOT_ROOT
         if admitted.runtime.get("profile") == "microsd-root":
-            return "/"
+            return _CardMountpoint.DIRECT_ROOT
     return fail("Shutdown requires a selected microSD system build")
 
 
+def _decode_readonly_mountpoint(output: str) -> _CardMountpoint | None:
+    status, separator, mountpoint = output.strip().partition(" ")
+    if status == "readonly" and separator:
+        with suppress(ValueError):
+            return _CardMountpoint(mountpoint)
+    return None
+
+
 def _shutdown_card(
-    connection: tuple[Any, dict[str, Any]], log: RunLog, *, mountpoint: str
+    connection: tuple[Any, dict[str, Any]], log: RunLog, *, mountpoint: _CardMountpoint
 ) -> None:
     """Require a complete read-only receipt before sending a separate power-off request."""
     transport, session = connection
@@ -218,7 +235,7 @@ def _shutdown_card(
         log.record(detail)
     if prepared.returncode:
         fail(detail or f"Could not prepare system-card shutdown (exit {prepared.returncode})")
-    if prepared.stdout.strip() != f"readonly {mountpoint}":
+    if _decode_readonly_mountpoint(prepared.stdout) != mountpoint:
         fail("The phone did not confirm a synchronized, read-only system card")
     log.message(f"System card synchronized and confirmed read-only at {mountpoint}.")
 

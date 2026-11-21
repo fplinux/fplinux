@@ -4,7 +4,9 @@
 from __future__ import annotations
 
 import re
+from contextlib import suppress
 from dataclasses import dataclass
+from enum import StrEnum
 from textwrap import dedent
 from typing import TYPE_CHECKING, Any
 
@@ -49,12 +51,33 @@ def device_identity(kernel_localversion: str, boot_recipe: str) -> str:
     return sha256_bytes(f"{kernel_localversion}\n{boot_recipe}\n".encode("ascii"))
 
 
+def _decode_device_identity(kernel_release: str, boot_recipe: str) -> str | None:
+    if not is_sha256(boot_recipe):
+        return None
+    version = _KERNEL_LOCALVERSION.search(kernel_release)
+    return None if version is None else device_identity(version[1], boot_recipe)
+
+
 def observed_device_identity(lines: Sequence[str]) -> str | None:
     """Derive the identity from the authenticated phone's reported kernel and DTB."""
-    if len(lines) != 2 or not is_sha256(lines[1]):
+    if len(lines) != 2:
         return None
-    version = _KERNEL_LOCALVERSION.search(lines[0])
-    return None if version is None else device_identity(version[1], lines[1])
+    kernel_release, boot_recipe = lines
+    return _decode_device_identity(kernel_release, boot_recipe)
+
+
+class CardBootEntry(StrEnum):
+    """Boot entry used by an enrolled system card."""
+
+    SD = "sd"
+    USB = "usb"
+
+
+class CardSlot(StrEnum):
+    """A mounted slot in the system-card layout."""
+
+    A = "a"
+    B = "b"
 
 
 @dataclass(frozen=True)
@@ -63,7 +86,7 @@ class RunningBuild:
 
     kernel_release: str
     build_id: str
-    card_slot: str | None = None
+    card_slot: CardSlot | None = None
 
 
 @dataclass(frozen=True)
@@ -72,11 +95,43 @@ class RunningCard:
 
     build: RunningBuild
     device_identity: str
-    entry: str
+    entry: CardBootEntry
     target: str
     cid: str
     serial: str
     host_key: str
+
+
+def _decode_card_slot(record: str) -> CardSlot | None:
+    field, separator, value = record.partition("=")
+    if field == "slot" and separator:
+        with suppress(ValueError):
+            return CardSlot(value)
+    return None
+
+
+def _decode_running_card(output: str) -> RunningCard | None:
+    lines = output.splitlines()
+    if len(lines) != 9:
+        return None
+    release, recipe, boot_entry, build_id, slot_record, target, cid, serial, host_key = lines
+    identity = _decode_device_identity(release, recipe)
+    slot = _decode_card_slot(slot_record)
+    if identity is None or slot is None or re.fullmatch(r"[a-f0-9]{12}", build_id) is None:
+        return None
+    try:
+        entry = CardBootEntry(boot_entry)
+    except ValueError:
+        return None
+    return RunningCard(
+        build=RunningBuild(kernel_release=release, build_id=build_id, card_slot=slot),
+        device_identity=identity,
+        entry=entry,
+        target=target,
+        cid=cid,
+        serial=serial,
+        host_key=host_key,
+    )
 
 
 def read_running_card(connection: tuple[Any, dict[str, Any]]) -> RunningCard:
@@ -88,24 +143,24 @@ def read_running_card(connection: tuple[Any, dict[str, Any]]) -> RunningCard:
     if result.returncode:
         detail = result.stderr.strip()
         fail(detail or f"Cannot inspect the enrolled microSD root (exit {result.returncode})")
-    lines = result.stdout.splitlines()
-    identity = observed_device_identity(lines[:2])
-    if (
-        len(lines) != 9
-        or identity is None
-        or lines[2] not in {"sd", "usb"}
-        or re.fullmatch(r"[a-f0-9]{12}", lines[3]) is None
-        or lines[4] not in {"slot=a", "slot=b"}
-    ):
+    card = _decode_running_card(result.stdout)
+    if card is None:
         fail("Cannot verify the running microSD boot recipe and mounted slot")
-    return RunningCard(
-        build=RunningBuild(lines[0], lines[3], lines[4][-1]),
-        device_identity=identity,
-        entry=lines[2],
-        target=lines[5],
-        cid=lines[6],
-        serial=lines[7],
-        host_key=lines[8],
+    return card
+
+
+def _decode_running_build(output: str, *, inspect_card: bool) -> RunningBuild:
+    lines = output.splitlines()
+    if not lines or not lines[0].strip():
+        fail("Cannot read the running phone kernel release")
+    kernel_release, *metadata = lines
+    build_id = metadata[0].strip() if metadata else ""
+    card_slot = None
+    if inspect_card:
+        if len(metadata) != 2 or (card_slot := _decode_card_slot(metadata[1])) is None:
+            fail("Cannot verify the running microSD slot")
+    return RunningBuild(
+        kernel_release=kernel_release.strip(), build_id=build_id or "unknown", card_slot=card_slot
     )
 
 
@@ -127,16 +182,7 @@ def read_running_build(
     if result.returncode:
         detail = result.stderr.strip()
         fail(detail or f"Cannot read the running phone build (exit {result.returncode})")
-    lines = result.stdout.splitlines()
-    if not lines or not lines[0].strip():
-        fail("Cannot read the running phone kernel release")
-    build_id = lines[1].strip() if len(lines) > 1 and lines[1].strip() else "unknown"
-    card_slot = None
-    if inspect_card:
-        if len(lines) != 3 or lines[2] not in {"slot=a", "slot=b"}:
-            fail("Cannot verify the running microSD slot")
-        card_slot = lines[2][-1]
-    return RunningBuild(lines[0].strip(), build_id, card_slot)
+    return _decode_running_build(result.stdout, inspect_card=inspect_card)
 
 
 class ConnectionLostError(Exception):

@@ -333,8 +333,13 @@ def test_shutdown_reports_the_read_only_receipt_poweroff_reply_and_usb_observati
     [
         (1, "", "Cannot remount the system card read-only"),
         (0, "readonly /\n", "did not confirm a synchronized, read-only system card"),
+        (
+            0,
+            "readonly /run/fplinux-card\nunexpected extra record\n",
+            "did not confirm a synchronized, read-only system card",
+        ),
     ],
-    ids=["busy-card", "wrong-mountpoint"],
+    ids=["busy-card", "wrong-mountpoint", "extra-output"],
 )
 def test_shutdown_never_requests_poweroff_without_the_expected_read_only_receipt(  # noqa: PLR0913 -- fixtures and transport responses.
     tmp_path: Path,
