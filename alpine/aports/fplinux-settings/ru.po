@@ -584,3 +584,120 @@ msgstr "Открыть файл"
 
 msgid "Stop the current file transfer and close Settings?"
 msgstr "Остановить текущую передачу файлов и закрыть настройки?"
+
+msgid "Wi-Fi"
+msgstr "Wi-Fi"
+
+msgid "Wi-Fi unavailable"
+msgstr "Wi-Fi недоступен"
+
+msgid "Open network"
+msgstr "Открытая сеть"
+
+msgid "Enterprise"
+msgstr "Корпоративная сеть"
+
+msgid "Unsupported"
+msgstr "Не поддерживается"
+
+msgid "Disconnected"
+msgstr "Нет подключения"
+
+msgid "Getting IP address…"
+msgstr "Получение IP…"
+
+msgid "No IP address"
+msgstr "Не получен IP-адрес"
+
+msgid "Connection"
+msgstr "Подключение"
+
+msgid "Properties"
+msgstr "Свойства"
+
+msgid "Available networks"
+msgstr "Доступные сети"
+
+msgid "Saved networks"
+msgstr "Сохранённые сети"
+
+msgid "No saved networks"
+msgstr "Нет сохранённых сетей"
+
+msgid "Scanning…"
+msgstr "Поиск…"
+
+msgid "Scan failed"
+msgstr "Ошибка поиска"
+
+msgid "Waiting to scan…"
+msgstr "Ожидание поиска…"
+
+msgid "No networks found"
+msgstr "Сетей не найдено"
+
+msgid "Refresh"
+msgstr "Обновить"
+
+msgid "Add network"
+msgstr "Добавить сеть"
+
+msgid "Network name"
+msgstr "Имя сети"
+
+msgid "Security"
+msgstr "Защита"
+
+msgid "IP address"
+msgstr "IP-адрес"
+
+msgid "Retry"
+msgstr "Повторить"
+
+msgid "Open networks are unavailable"
+msgstr "Открытые сети недоступны"
+
+msgid "This security type is unsupported"
+msgstr "Этот тип защиты не поддерживается"
+
+msgid "Password"
+msgstr "Пароль"
+
+msgid "Save network"
+msgstr "Сохранить сеть"
+
+msgid "Enter a network name of up to 32 bytes"
+msgstr "Введите имя сети длиной до 32 байт"
+
+msgid "Enter 8–63 ASCII characters or 64 hex digits"
+msgstr "Введите 8–63 символа ASCII или 64 шестнадцатеричные цифры"
+
+msgid "Forget network"
+msgstr "Забыть сеть"
+
+msgid "Forget this network and disconnect?"
+msgstr "Забыть сеть и разорвать соединение?"
+
+msgid "Forget this saved network?"
+msgstr "Забыть сохранённую сеть?"
+
+msgid "Wi-Fi busy"
+msgstr "Wi-Fi занят"
+
+msgid "Network unavailable"
+msgstr "Сеть недоступна"
+
+msgid "Incorrect password"
+msgstr "Неверный пароль"
+
+msgid "Could not join the network"
+msgstr "Не удалось войти в сеть"
+
+msgid "Could not save network changes"
+msgstr "Не удалось сохранить изменения сети"
+
+msgid "Wi-Fi operation failed"
+msgstr "Ошибка Wi-Fi"
+
+msgid "Enter another password"
+msgstr "Ввести другой пароль"

@@ -6,9 +6,9 @@ pkgdesc="Graphical phone session and application lifecycle"
 url="https://github.com/fplinux/fplinux"
 arch="armv7"
 license="GPL-2.0-only AND OFL-1.1 AND MIT"
-depends="fplinux-base fplinux-libweston fplinux-brand fplinux-audio fplinux-audiod json-c"
+depends="dbus-libs fplinux-base fplinux-libweston fplinux-brand fplinux-audio fplinux-audiod json-c"
 makedepends_build="clang23 lld23 pkgconf python3 py3-fonttools nodejs"
-makedepends_host="musl-dev linux-headers fplinux-libweston-dev json-c-dev pixman-dev fplinux-libdrm-dev"
+makedepends_host="dbus-dev musl-dev linux-headers fplinux-libweston-dev json-c-dev pixman-dev fplinux-libdrm-dev"
 subpackages="$pkgname-openrc"
 install="$pkgname.pre-install"
 options="!check"
@@ -35,6 +35,11 @@ source="
 	session-volume.c
 	session-wireless.c
 	session-wireless.h
+	session-wifi-station.c
+	session-wifi-station.h
+	session-wifi-dhcp.c
+	session-wifi-dhcp.h
+	wifi-udhcpc-hook
 	session-vibration.c
 	session-vibration.h
 	session-vibrator.c
@@ -120,17 +125,18 @@ build() {
 		--masks-header generated/fplinux-indicator-masks.h
 	"$CC" $CPPFLAGS $CFLAGS -Os -std=c11 -Wall -Wextra -Werror \
 		-fPIC -shared -I"$srcdir" -Igenerated \
-		$(pkg-config --cflags libweston-16 weston json-c pixman-1) \
+		$(pkg-config --cflags libweston-16 weston json-c pixman-1 dbus-1) \
 		fplinux-shell.c session-core.c session-child.c session-storage.c session-power.c session-settings.c \
 		session-indicator-render.c fplinux-status-screen.c generated/fplinux-status-fonts.c \
 		session-audio.c session-volume.c session-wireless.c session-vibration.c session-vibrator.c \
+		session-wifi-station.c session-wifi-dhcp.c \
 		fplinux-settings-values.c \
 		session-battery.c session-clock.c fplinux-clock-model.c fplinux-clock-wire.c \
 		session-launch-surface.c fplinux-activity.c fplinux-ui-session.c fplinux-ui-prefs.c \
 		fplinux-ui-profile.c fplinux-keypad-light.c \
 		fplinux-brightness-client.c fplinux-language.c fplinux-desktop-entry.c \
 		fplinux-utf8.c -pthread \
-		$(pkg-config --libs libweston-16 json-c pixman-1) \
+		$(pkg-config --libs libweston-16 json-c pixman-1 dbus-1) \
 		$LDFLAGS -o fplinux-shell.so
 	"$CC" $CPPFLAGS $CFLAGS -Os -std=c11 -Wall -Wextra -Werror \
 		-I"$srcdir" -Igenerated $(pkg-config --cflags libdrm json-c) \
@@ -153,6 +159,7 @@ package() {
 	install -Dm755 "$builddir/fplinux-shell.so" "$pkgdir/usr/lib/weston/fplinux-shell.so"
 	install -Dm755 "$srcdir/fplinux-session" "$pkgdir/usr/bin/fplinux-session"
 	install -Dm755 "$srcdir/fplinux-session.initd" "$pkgdir/etc/init.d/fplinux-session"
+	install -Dm755 "$srcdir/wifi-udhcpc-hook" "$pkgdir/usr/libexec/fplinux/wifi-udhcpc-hook"
 	install -Dm755 "$builddir/preparation" "$pkgdir/usr/libexec/fplinux/preparation"
 	install -Dm755 "$builddir/clock-signal" "$pkgdir/usr/libexec/fplinux/clock-signal"
 	install -Dm755 "$builddir/screenshot" "$pkgdir/usr/libexec/fplinux/screenshot"
@@ -177,9 +184,9 @@ e12dee17d9fcf4453156114da187b474ab1a9a2633ef827a0b6aad8f0e00fe24e0831decd3007f99
 6ec70e50c1ff3c00635b5b468b2c3b6bbfc7d1728c9b6fb6a1150170c7142eb8e58dbd4f2d68d86b56f577a7e8f5478a27510b7c48b1d02545579079351a0cc1  session-indicator.h
 7e8d0840bd122462ba35964f932a7c2a127c18a384ebb94ca8920eab53f32bf0eac20f9abe712928ad1571014822556d034dd346476fe1c8e3d69f55014c4a5d  session-indicator-render.c
 d14cbf2e3f875a133e197d89afc952bb5f406f6b0acb34665682a515c29de77484ad7ce162f2cc24caa872aaa1ce357cb164d2fd39522bfdce2a1307c021aa85  session-indicator-render.h
-9c64c95d230220be749ecaeedeac787e8090684777045eabc4867fc90e7aefe8fbf21f79b30a2cde6c4748cb5f6b4b4dc77dc6266e1ddda10bdcc7b9689e9b67  session-core.c
+54048aae77afe4c34a9d834949c3914c7dcce91c9e76926a64170483535435ef4f82ec8759527618bdbcb7d7ffc82f8995f4c0739e42a0b01417a0b1bc751693  session-core.c
 ebb380a7dd289f5e73023dd04275a8ea9eeecd0e0ebf3df5d4a432744b49f5905d1f7d6ef93aaae9140b0f819b53064a6c9f2a54bfa9d1e092d6324e5ba39838  session-core.h
-0b784bc4084aee6334705263352fd66126df521b03549c5b6fd78041b41776391089f42c46636e5be313782e14242386f32d169ac0d871462c320c755495f73a  session-core-internal.h
+42f572a9d70fb2d880558c650ada0251a1b65f3c41a6ac9755cb5babf4f181317c69f82f28464cfbe00f216fa238e2adabc1f91f6b0ee7b47536ac68514c2abc  session-core-internal.h
 6992611b222bb52350b16022fa975ad5354189ea78a9561e0c4fb8b86af8d75b34ea11fab4e30a5ddc1a9899d5535bd98e41bd998eedb56594b9c2ee48ae15c0  session-child.c
 a7ff16856e8f2a031c2c8e188bfec406600a277e6df24683ac327877cfac2aa61dbb28cb976948bae4541bf3ab4be67d1efe84bb080501ba1a0fbbe80f693ef7  session-child.h
 6a245b7bb22cd2fb7a3facb2f684e2bd624451c2117837f4a55dfbbf015523706008933b5fa1c4465aeec4db898cddf1735092377651d784335c255d3813bb3d  session-storage.c
@@ -189,8 +196,13 @@ fd31a114afc7ae879ee82b273f1b69858dc871a57e89b04d02cc6051d1eeb795e36c6dc1c4ec1323
 b271885c632b6ab57a3318572c280e61c272443fd5d4802cc1af0f11583b5a4e9ea04344990b12784cada09e491dd3479ef27274c4ffffabc1295c6e1b497ebc  session-audio.c
 2e5922cb148eba969fc522ad7f086f5d4e50287196d92c00e92cd7f8f2e92f76089d490ecca70b7cd338b4d5c174f87bc75141d59d28426ef303af79fb7ec82b  session-audio.h
 0d30d690e57c8c71de42bb9e12398d201cbec2f9dc0334e174cbcf77be23e9803f4ad61e1eece1cad779b97762568cd66f52788a5a288d38168fd9b97bf4d6ea  session-volume.c
-caf17d1c9f06f1ff110106940626f7768e4b9ca8121866fdcdbed5e4504801ef02875166fac3909804c9d49ba7288ac1bba394f9ed30a65f596c3bb81a520368  session-wireless.c
-e68a7852553b85fec5d6d6f66cd82928528330b3f5525c8365132bbe62001625dffbf1ba214a1a1788a5e0e5aa170658f44dcf201f2b7cd7f3c465bd95ef33ae  session-wireless.h
+01377bace637a88b728feb9d91c4c6e14531542f53d979ff22d4cb2f2c0802ae87b47d90729ff70f0542a686957a55002337d153cc6da6deccb0096bed285246  session-wireless.c
+21c680e499e18b469e19e61774e3edd2f3453b84c587885d83220e3de5863bd71ddab4f52e238596d7b9bc767265a1a172f3e9c633791dcb4e708d2e64178035  session-wireless.h
+cb5191a83fa9c640a404ca64ea2e008be1be400ee01262832915f085457170d3453ec434b582379fcc77899c4ee3f75916df7209bcc9594923e06b2415d19464  session-wifi-station.c
+13487009d4138f473e104026f5c53b275d10fa1eb77463a6bd3bc17eef194e92daa143b02ab39ef77c59cba073ca4eb98e5e648b7e40fdce3940b63c189fcb3c  session-wifi-station.h
+ffc2f3df40d39d105dd4f4311a0d7e4db230c901b2a39712e01e698062291c8ea7d476a3230f69ac53acbcb88bc12df04094ce92aecd17cf3963322674ed7de5  session-wifi-dhcp.c
+1da1782736d9e99563f7397969cd5889a031d9d1aa865ce6a28b8e33859485b2e05b4b80516ef5ff5a609e269df9b5ac7f39f5a99ffb12011d34f8bc750cc81b  session-wifi-dhcp.h
+2c68c13abcfe24aeee004e5716d34069367367adaafbc126119d751e8d79b544d2523af2504a9180d24937af331f4c65a164a04d5f220d6303c69b454d3d8fc0  wifi-udhcpc-hook
 1f92ad5fc7748a02644da7aca206a31ed248b85fef4829f0b9637327ce9aa96fa6da9cf88397513bdade948d7faffa2ce042b6f17d49370ab74fc7a3ea46ca83  session-vibration.c
 59e0d63ede350974f02112eb98b40305803ca765e40edba5fc0eb662117b347af680c0ae7c7bd77c350abde5df2b86ab110e2749b5c342473b4d5cc665934f89  session-vibration.h
 264a6733f5de5695017e65af095e8136fb5ed77e906e243e286888ef2e4c52fa6791e780e2dfaf1201f615c576ee8f2a07d5e8e18acc6c99234c645f7cfe6a97  session-vibrator.c
@@ -221,11 +233,11 @@ eaa30b6f75ba81bc9c4a457f12053b22a427c0b8afef79b27cb5e83502034de2694755468635f74d
 3480003e1eef1f3bb8958a917d6e38aaa33e85f7beb249cd9ff9b9acc8e7cc7c255cc32a72037139ff0f5d31c27cb511d7796e92536d6f2ecd17d108dc2d7a5b  clock-signal.c
 8019a820bdd9f7b3cd6b4f21ba66780e3a5b2fc2c6e59b3b35dc706d496f7eeb3c0745163fc40af7855f15ef978c4aa00bc02226f7f6ce58ffff74890ad81050  screenshot.c
 a92ee71c17395912f8c4fbd93fafc40d573ecb9411423d165f50b2e3b39ff07d95d781c49b7ab3e9c8ba053fac3aa18b4af072981a2a2931b60bf74b49f81a71  fplinux-session
-f246a7f8c70514a3758a0c79ab67deaa68fcf193330ea8c77141da2e6d7d7e24313216a1a92540be16e94de376728c0542dd1ddf8f0a65f017edf75bd7fd88cb  fplinux-session.initd
+3b07930a6c0b826bbd91c93d329577b094b15a646f93fadcc0b107f5963fbc77f49800d4fe877adcd9c6c305213d6d61d6b764c9ffcf0f61d03522512c32b343  fplinux-session.initd
 ae69b5c4cfee0889018c3e232b4f342e5bc7fdc0ffb2fbabdd5b3b80bdb42e9ffd0600822c8155853159c90df122f1969ea65b701f26464f10b0ecc1e013f529  weston.ini
 e252576c42bdc2b6baee904c9943c2523be58d57e976d348a764a050e8c0cbcaee771c8bc3a82d885b5174fe79cff8bd39493bf16773ac91114c3b0cd463d04c  10-fplinux.quirks
-974ea5b46bd7bddb25b2cc7e09bbb8a146b6224e41d7058cce232fa53a752e389f2e5fc5136f311bf508eb6a7ec3b5fad389c594ef57b749a1f0ca3123c59bae  fplinux-ui-session.c
-1477304e9e1fc552eb0e39845d762335138254b666019c0543120904ffdc72f1e7e53b5900355ba550f954cdd31c22fa7be227b719b0c44c88d2549466d06320  fplinux-ui-session.h
+3ed3bc34663f0e43fb0ec67f62cbb6bba35fcbfb2ccd8a48798ea6e446b348b1b7adda8ac426b515eb6f1ad4eb54bdc76cdc593496a00851e0609d9f39488d15  fplinux-ui-session.c
+087e3662e5301085bb9a0c60bd113cd943b9cc3eb6de161e219de7977f8d0d7457ae47ac7831c8cbe3d78cf4f1fc96f95af4fe76be339cfb151123c3167b1bcd  fplinux-ui-session.h
 2c0d70040a37dd0dd19cc53c7a89a5b28ae17366b499643c60195e1bbbf38f2200461f010222928c3619d693fad85c67b7efc93feedd2be2b46d06098b1bd12f  fplinux-system-levels.h
 8a506e48f500cf5082d1424a14bc3b2b482f0ca86f925553cd34abd852e1c1cd5b6a04a129d547c0ac22ebb266e222ca6518886ef0bcb7734c5c616c868f631c  fplinux-ui-session-internal.h
 f37be5986cb01f613a4d6e2b590803078a1035939cf7df5f6cf8d135fe6182a96666929accf2377ffe726fa40a8ef2b7b0b2c84b1f253cd37d9b1435bd14c735  fplinux-ui-prefs.c

@@ -4,6 +4,7 @@
 #include "fplinux-language.h"
 #include "settings-session-boundary.h"
 #include "settings-bluetooth.h"
+#include "settings-wifi.h"
 
 #include <fplinux/fplinux-ui.h>
 #include <fplinux/fplinux-ui-locale.h>
@@ -1856,6 +1857,56 @@ void fplinux_ui_set_storage_handler(struct fplinux_ui *ui,
 	(void)ui;
 	(void)callback;
 	(void)context;
+}
+
+/* The native keyboard fixture exercises the Wi-Fi controller. */
+struct fplinux_settings_wifi *fplinux_settings_wifi_new(struct fplinux_ui *ui)
+{
+	(void)ui;
+	assert(!"the synthetic Settings boundary has no Wi-Fi Session");
+	return NULL;
+}
+
+void fplinux_settings_wifi_free(struct fplinux_settings_wifi *wifi)
+{
+	assert(!wifi);
+}
+
+void fplinux_settings_wifi_show(struct fplinux_settings_wifi *wifi)
+{
+	assert(!wifi);
+}
+
+void fplinux_settings_wifi_reset(struct fplinux_settings_wifi *wifi)
+{
+	assert(!wifi);
+}
+
+void fplinux_settings_wifi_background(struct fplinux_settings_wifi *wifi)
+{
+	assert(!wifi);
+}
+
+bool fplinux_settings_wifi_shown(const struct fplinux_settings_wifi *wifi)
+{
+	assert(!wifi);
+	return false;
+}
+
+enum fplinux_ui_wifi_power
+fplinux_settings_wifi_power(const struct fplinux_settings_wifi *wifi)
+{
+	assert(!wifi);
+	return FPLINUX_UI_WIFI_UNAVAILABLE;
+}
+
+void fplinux_settings_wifi_receive(
+	struct fplinux_settings_wifi *wifi,
+	const struct fplinux_ui_session_message *message)
+{
+	(void)wifi;
+	(void)message;
+	assert(!"the synthetic Settings boundary has no Wi-Fi Session");
 }
 
 bool fplinux_ui_watch_fd(struct fplinux_ui *ui, int fd, short events,

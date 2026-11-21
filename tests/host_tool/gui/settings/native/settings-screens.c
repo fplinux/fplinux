@@ -37,6 +37,8 @@ struct capture {
 	unsigned int close_replies;
 	bool keep_screen_on;
 	bool has_request;
+	uint32_t wifi_serial;
+	struct fplinux_ui_wifi_request wifi_request;
 	char left[128];
 	char centre[128];
 	char right[128];
@@ -146,6 +148,10 @@ static void read_messages(struct capture *capture)
 			strcpy(capture->left, message.left);
 			strcpy(capture->centre, message.centre);
 			strcpy(capture->right, message.right);
+		} else if (message.type == FPLINUX_UI_SESSION_WIFI_REQUEST) {
+			assert(!capture->wifi_serial);
+			capture->wifi_serial = message.serial;
+			capture->wifi_request = message.wifi_request;
 		} else if (message.type == FPLINUX_UI_SESSION_REDRAW_ACK) {
 			capture->redraw_ack = message.serial;
 		} else if (message.type == FPLINUX_UI_SESSION_CLOSE_REPLY) {
@@ -437,6 +443,9 @@ static void start(struct capture *capture, char **arguments)
 		snprintf(descriptor, sizeof(descriptor), "%d", observer[1]);
 		assert(setenv("FPLINUX_SETTINGS_OBSERVER_FD", descriptor, 1) ==
 		       0);
+		if (arguments[6] && !strcmp(arguments[6], "wifi"))
+			assert(setenv("FPLINUX_SETTINGS_TEST_WIFI", "1", 1) ==
+			       0);
 		assert(snprintf(catalogues, sizeof(catalogues), "%.*s/locale",
 				(int)(slash - arguments[1]),
 				arguments[1]) < (int)sizeof(catalogues));
@@ -1654,6 +1663,410 @@ static void bluetooth_conflict(struct capture *capture, const char *choice)
 	reap_obex(capture, obex);
 }
 
+static void wifi_publish(struct capture *capture,
+			 const struct fplinux_ui_wifi_state *state)
+{
+	assert(fplinux_ui_session_send(
+		capture->session, &(const struct fplinux_ui_session_message){
+					  .type = FPLINUX_UI_SESSION_WIFI_STATE,
+					  .wifi_state = *state,
+				  }));
+}
+
+static uint32_t wifi_request(struct capture *capture,
+			     enum fplinux_ui_wifi_action action,
+			     uint32_t target, const char *key)
+{
+	uint64_t deadline = fplinux_ui_frame_now_ms() + 3000;
+	uint32_t serial;
+
+	while (!capture->wifi_serial && fplinux_ui_frame_now_ms() < deadline)
+		pump(capture);
+	serial = capture->wifi_serial;
+	if (!serial)
+		fprintf(stderr,
+			"Settings (%s): missing Wi-Fi action %u target %u; legends [%s | %s | %s]\n",
+			capture->stage, (unsigned int)action, target,
+			capture->left, capture->centre, capture->right);
+	assert(serial);
+	assert(capture->wifi_request.action == action);
+	assert(capture->wifi_request.target == target);
+	assert(!strcmp(capture->wifi_request.key, key));
+	explicit_bzero(capture->wifi_request.key,
+		       sizeof(capture->wifi_request.key));
+	capture->wifi_serial = 0;
+	return serial;
+}
+
+static void wifi_result(struct capture *capture, uint32_t serial,
+			enum fplinux_ui_wifi_result result)
+{
+	assert(fplinux_ui_session_send(
+		capture->session,
+		&(const struct fplinux_ui_session_message){
+			.type = FPLINUX_UI_SESSION_WIFI_RESULT,
+			.serial = serial,
+			.wifi_result = result,
+		}));
+}
+
+static void wifi_numeric_key(struct capture *capture)
+{
+	hold(capture, KEY_NUMERIC_POUND);
+	wait_label(capture, "123");
+	for (unsigned int i = 0; i < 8; ++i)
+		press(capture, KEY_NUMERIC_1 + i);
+}
+
+static void wifi_choose_option(struct capture *capture, const char *label,
+			       unsigned int menu_row)
+{
+	press(capture, KEY_F13);
+	wait_label(capture, label);
+	for (unsigned int i = 0; i < menu_row; ++i)
+		press(capture, KEY_DOWN);
+	press(capture, KEY_OK);
+}
+
+static void wifi_submit_editor(struct capture *capture, unsigned int rows)
+{
+	bool ru = !strcmp(capture->observed.locale, "ru");
+
+	for (unsigned int i = 0; i < rows; ++i)
+		press(capture, KEY_DOWN);
+	wait_legends(capture, "", ru ? "Подключить" : "Connect",
+		     ru ? "Отмена" : "Cancel");
+	press(capture, KEY_OK);
+}
+
+static void wifi_screens(struct capture *capture)
+{
+	bool ru = !strcmp(capture->observed.locale, "ru");
+	struct fplinux_ui_wifi_state state = { 0 };
+	struct fplinux_ui_wifi_network open = {
+		.id = 411,
+		.security = FPLINUX_UI_WIFI_OPEN,
+		.name = "Twin",
+	};
+	struct fplinux_ui_wifi_network wpa2 = {
+		.id = 912,
+		.security = FPLINUX_UI_WIFI_WPA2,
+		.name = "Twin",
+	};
+	uint32_t serial, original;
+
+	capture->stage = "wifi qualification and root focus";
+	press(capture, KEY_DOWN);
+	press(capture, KEY_DOWN);
+	wait_label(capture, ru ? "Время и язык" : "Time & language");
+	assert(!has_label(capture, "Wi-Fi") && !capture->wifi_serial);
+	state.power = FPLINUX_UI_WIFI_OFF;
+	wifi_publish(capture, &state);
+	pump_for(capture, 100);
+	press(capture, KEY_OK);
+	wait_label(capture, ru ? "Дата и время" : "Date and time");
+	press(capture, KEY_F14);
+	press(capture, KEY_UP);
+	press(capture, KEY_OK);
+	wait_label(capture, ru ? "Выкл." : "Off");
+	assert(!has_label(capture,
+			  ru ? "Доступные сети" : "Available networks"));
+	assert(!capture->wifi_serial);
+	press(capture, KEY_OK);
+	serial = wifi_request(capture, FPLINUX_UI_WIFI_SET_POWER, 0, "");
+	assert(capture->wifi_request.enabled);
+	assert(has_label(capture, ru ? "Выкл." : "Off"));
+	state.power = FPLINUX_UI_WIFI_ON;
+	state.open_supported = true;
+	wifi_publish(capture, &state);
+	wifi_result(capture, serial, FPLINUX_UI_WIFI_APPLIED);
+	wait_label(capture, ru ? "Вкл." : "On");
+	save_frame(capture, "wifi-on");
+	assert(!capture->wifi_serial);
+
+	capture->stage = "wifi scan refusal without a snapshot";
+	press(capture, KEY_DOWN);
+	press(capture, KEY_DOWN);
+	press(capture, KEY_OK);
+	serial = wifi_request(capture, FPLINUX_UI_WIFI_SCAN, 0, "");
+	wifi_result(capture, serial, FPLINUX_UI_WIFI_BUSY);
+	wait_label(capture, ru ? "Wi-Fi занят" : "Wi-Fi busy");
+	assert(!has_label(capture,
+			  ru ? "Ожидание поиска…" : "Waiting to scan…"));
+	wifi_choose_option(capture, ru ? "Обновить" : "Refresh", 0);
+	serial = wifi_request(capture, FPLINUX_UI_WIFI_SCAN, 0, "");
+	wifi_result(capture, serial, FPLINUX_UI_WIFI_FAILED);
+	wait_label(capture, ru ? "Ошибка поиска" : "Scan failed");
+	assert(!has_label(capture,
+			  ru ? "Ожидание поиска…" : "Waiting to scan…"));
+	wifi_choose_option(capture, ru ? "Обновить" : "Refresh", 0);
+	serial = wifi_request(capture, FPLINUX_UI_WIFI_SCAN, 0, "");
+
+	capture->stage = "wifi scan and stable network identity";
+	state.scan = FPLINUX_UI_WIFI_SCANNING;
+	wifi_publish(capture, &state);
+	wait_label(capture, ru ? "Поиск…" : "Scanning…");
+	state.available[0] = open;
+	state.available[1] = (struct fplinux_ui_wifi_network){
+		.id = 919,
+		.security = FPLINUX_UI_WIFI_WPA2,
+		.name = "Long name of 32 bytes for a WLAN",
+	};
+	state.available[2] = wpa2;
+	state.available[3] = (struct fplinux_ui_wifi_network){
+		.id = 513,
+		.security = FPLINUX_UI_WIFI_WPA3,
+		.name = "WPA3-only",
+	};
+	state.available_count = 4;
+	state.scan = FPLINUX_UI_WIFI_SCAN_READY;
+	wifi_publish(capture, &state);
+	wifi_result(capture, serial, FPLINUX_UI_WIFI_APPLIED);
+	wait_label(capture, "Twin");
+	wait_legends(capture, ru ? "Опции" : "Options",
+		     ru ? "Выбрать" : "Select", ru ? "Назад" : "Back");
+	press(capture, KEY_DOWN);
+	wait_label(capture, state.available[1].name);
+	save_frame(capture, "wifi-available-long");
+	press(capture, KEY_DOWN);
+	wifi_choose_option(capture, ru ? "Обновить" : "Refresh", 0);
+	serial = wifi_request(capture, FPLINUX_UI_WIFI_SCAN, 0, "");
+	state.scan = FPLINUX_UI_WIFI_SCANNING;
+	wifi_publish(capture, &state);
+	wait_label(capture, ru ? "Поиск…" : "Scanning…");
+	assert(has_label(capture, "Twin"));
+	state.available[0] = wpa2;
+	state.available[2] = open;
+	state.scan = FPLINUX_UI_WIFI_SCAN_READY;
+	wifi_publish(capture, &state);
+	wifi_result(capture, serial, FPLINUX_UI_WIFI_APPLIED);
+	pump_for(capture, 100);
+	press(capture, KEY_OK);
+	wait_label(capture, ru ? "Пароль" : "Password");
+
+	capture->stage = "wifi masked password and cancellation";
+	wait_legends(capture, "", "", ru ? "Отмена" : "Cancel");
+	wifi_submit_editor(capture, 2);
+	wait_label(
+		capture,
+		ru ? "Введите 8–63 символа ASCII или 64 шестнадцатеричные цифры" :
+		     "Enter 8–63 ASCII characters or 64 hex digits");
+	assert(!capture->wifi_serial);
+	press(capture, KEY_F14);
+	press(capture, KEY_UP);
+	press(capture, KEY_UP);
+	wifi_numeric_key(capture);
+	wait_label(capture, "••••••••");
+	wait_legends(capture, ru ? "Опции" : "Options", "",
+		     ru ? "Стереть" : "Clear");
+	assert(!has_label(capture, "12345678"));
+	save_frame(capture, "wifi-masked");
+	wifi_choose_option(capture, ru ? "Отмена" : "Cancel", 0);
+	wait_label(capture, ru ? "Доступные сети" : "Available networks");
+	assert(!capture->wifi_serial);
+	press(capture, KEY_OK);
+	wait_label(capture, ru ? "Пароль" : "Password");
+	assert(!has_label(capture, "••••••••"));
+	wifi_numeric_key(capture);
+	wifi_submit_editor(capture, 2);
+	original =
+		wifi_request(capture, FPLINUX_UI_WIFI_CONNECT, 912, "12345678");
+	assert(!capture->wifi_request.save);
+	wait_label(capture, ru ? "Подключение…" : "Connecting…");
+	state.current = wpa2;
+	state.link = FPLINUX_UI_WIFI_ADDRESSING;
+	wifi_publish(capture, &state);
+	wait_label(capture, ru ? "Получение IP…" : "Getting IP address…");
+	press(capture, KEY_F14);
+	serial = wifi_request(capture, FPLINUX_UI_WIFI_CANCEL, original, "");
+	state.link = FPLINUX_UI_WIFI_DISCONNECTED;
+	wifi_publish(capture, &state);
+	wifi_result(capture, original, FPLINUX_UI_WIFI_BAD_PASSWORD);
+	wifi_result(capture, serial, FPLINUX_UI_WIFI_APPLIED);
+	wait_label(capture, ru ? "Доступные сети" : "Available networks");
+	pump_for(capture, 80);
+	assert(!has_label(capture,
+			  ru ? "Неверный пароль" : "Incorrect password"));
+
+	capture->stage = "wifi available open network and scan failure";
+	press(capture, KEY_DOWN);
+	press(capture, KEY_DOWN);
+	press(capture, KEY_OK);
+	serial = wifi_request(capture, FPLINUX_UI_WIFI_CONNECT, 411, "");
+	wifi_result(capture, serial, FPLINUX_UI_WIFI_NETWORK_UNAVAILABLE);
+	wait_label(capture, ru ? "Сеть недоступна" : "Network unavailable");
+	press(capture, KEY_F14);
+	press(capture, KEY_DOWN);
+	wait_legends(capture, ru ? "Опции" : "Options",
+		     ru ? "Свойства" : "Properties", ru ? "Назад" : "Back");
+	press(capture, KEY_OK);
+	wait_label(capture, "WPA3");
+	assert(!capture->wifi_serial);
+	press(capture, KEY_F14);
+	wifi_choose_option(capture, ru ? "Обновить" : "Refresh", 0);
+	serial = wifi_request(capture, FPLINUX_UI_WIFI_SCAN, 0, "");
+	state.scan = FPLINUX_UI_WIFI_SCAN_FAILED;
+	wifi_publish(capture, &state);
+	wifi_result(capture, serial, FPLINUX_UI_WIFI_FAILED);
+	wait_label(capture, ru ? "Ошибка поиска" : "Scan failed");
+	assert(has_label(capture, "Twin"));
+	wifi_choose_option(capture, ru ? "Обновить" : "Refresh", 0);
+	serial = wifi_request(capture, FPLINUX_UI_WIFI_SCAN, 0, "");
+	state.available_count = 0;
+	state.scan = FPLINUX_UI_WIFI_SCAN_READY;
+	wifi_publish(capture, &state);
+	wifi_result(capture, serial, FPLINUX_UI_WIFI_APPLIED);
+	wait_label(capture, ru ? "Сетей не найдено" : "No networks found");
+	wifi_choose_option(capture, ru ? "Добавить сеть" : "Add network", 1);
+	wait_label(capture, ru ? "Имя сети" : "Network name");
+	wifi_submit_editor(capture, 4);
+	wait_label(capture, ru ? "Введите имя сети длиной до 32 байт" :
+				 "Enter a network name of up to 32 bytes");
+	assert(!capture->wifi_serial);
+	press(capture, KEY_F14);
+	for (unsigned int i = 0; i < 4; ++i)
+		press(capture, KEY_UP);
+	wifi_numeric_key(capture);
+	press(capture, KEY_DOWN);
+	press(capture, KEY_OK);
+	wait_label(capture, ru ? "Открытая сеть" : "Open network");
+	press(capture, KEY_DOWN);
+	press(capture, KEY_OK);
+	wifi_submit_editor(capture, 2);
+	serial = wifi_request(capture, FPLINUX_UI_WIFI_CONNECT_HIDDEN, 0, "");
+	assert(capture->wifi_request.security == FPLINUX_UI_WIFI_OPEN);
+	assert(!strcmp(capture->wifi_request.ssid, "12345678"));
+	wifi_result(capture, serial, FPLINUX_UI_WIFI_BUSY);
+	wait_label(capture, ru ? "Wi-Fi занят" : "Wi-Fi busy");
+	press(capture, KEY_F14);
+	wait_label(capture, ru ? "Сетей не найдено" : "No networks found");
+
+	capture->stage = "wifi saved network, replacement password and IP";
+	press(capture, KEY_F14);
+	press(capture, KEY_DOWN);
+	press(capture, KEY_OK);
+	wait_label(capture, ru ? "Нет сохранённых сетей" : "No saved networks");
+	state.saved[0] = wpa2;
+	state.saved[0].id = 731;
+	state.saved[0].profile_id = 731;
+	state.saved_count = 1;
+	wifi_publish(capture, &state);
+	wait_label(capture, "Twin");
+	press(capture, KEY_OK);
+	serial = wifi_request(capture, FPLINUX_UI_WIFI_CONNECT_SAVED, 731, "");
+	wifi_result(capture, serial, FPLINUX_UI_WIFI_AUTH_FAILED);
+	wait_label(capture, ru ? "Не удалось войти в сеть" :
+				 "Could not join the network");
+	wifi_choose_option(
+		capture, ru ? "Ввести другой пароль" : "Enter another password",
+		0);
+	wait_label(capture, ru ? "Пароль" : "Password");
+	wifi_numeric_key(capture);
+	wifi_submit_editor(capture, 1);
+	serial = wifi_request(capture, FPLINUX_UI_WIFI_CONNECT_SAVED, 731,
+			      "12345678");
+	assert(capture->wifi_request.save);
+	state.current = wpa2;
+	state.current.profile_id = 731;
+	state.link = FPLINUX_UI_WIFI_NO_ADDRESS;
+	wifi_publish(capture, &state);
+	wifi_result(capture, serial, FPLINUX_UI_WIFI_ADDRESS_FAILED);
+	wait_label(capture, ru ? "Не получен IP-адрес" : "No IP address");
+	wait_legends(capture, ru ? "Опции" : "Options", "",
+		     ru ? "Закрыть" : "Close");
+	press(capture, KEY_F13);
+	wait_label(capture, ru ? "Повторить" : "Retry");
+	wait_label(capture, ru ? "Отключить" : "Disconnect");
+	press(capture, KEY_F14);
+	press(capture, KEY_F14);
+	wait_label(capture, ru ? "Сохранённые сети" : "Saved networks");
+	press(capture, KEY_F14);
+	press(capture, KEY_UP);
+	press(capture, KEY_UP);
+	press(capture, KEY_OK);
+	wait_label(capture, ru ? "Свойства" : "Properties");
+	wait_legends(capture, ru ? "Опции" : "Options", "",
+		     ru ? "Назад" : "Back");
+	wifi_choose_option(capture, ru ? "Повторить" : "Retry", 0);
+	serial = wifi_request(capture, FPLINUX_UI_WIFI_RETRY_ADDRESS, 0, "");
+	state.link = FPLINUX_UI_WIFI_CONNECTED;
+	strcpy(state.address, "192.0.2.33");
+	wifi_publish(capture, &state);
+	wifi_result(capture, serial, FPLINUX_UI_WIFI_APPLIED);
+	wait_label(capture, "Twin");
+	press(capture, KEY_OK);
+	wait_label(capture, ru ? "Свойства" : "Properties");
+	for (unsigned int i = 0; i < 4; ++i)
+		press(capture, KEY_DOWN);
+	wait_label(capture, "192.0.2.33");
+
+	capture->stage = "wifi disconnect and deferred scan";
+	wifi_choose_option(capture, ru ? "Отключить" : "Disconnect", 0);
+	serial = wifi_request(capture, FPLINUX_UI_WIFI_DISCONNECT, 0, "");
+	press(capture, KEY_DOWN);
+	press(capture, KEY_OK);
+	wait_label(capture, ru ? "Доступные сети" : "Available networks");
+	wait_label(capture, ru ? "Ожидание поиска…" : "Waiting to scan…");
+	wait_legends(capture, "", "", ru ? "Назад" : "Back");
+	assert(!has_label(capture,
+			  ru ? "Сетей не найдено" : "No networks found"));
+	assert(!capture->wifi_serial);
+	state.available[0] = wpa2;
+	state.available_count = 1;
+	wifi_publish(capture, &state);
+	wait_label(capture, "Twin");
+	wait_label(capture, ru ? "Ожидание поиска…" : "Waiting to scan…");
+	wait_legends(capture, "", "", ru ? "Назад" : "Back");
+	press(capture, KEY_OK);
+	pump_for(capture, 80);
+	assert(has_label(capture, "Twin"));
+	assert(!has_label(capture, ru ? "Пароль" : "Password"));
+	assert(!capture->wifi_serial);
+	state.link = FPLINUX_UI_WIFI_DISCONNECTED;
+	state.address[0] = '\0';
+	wifi_publish(capture, &state);
+	wifi_result(capture, serial, FPLINUX_UI_WIFI_APPLIED);
+	serial = wifi_request(capture, FPLINUX_UI_WIFI_SCAN, 0, "");
+	wifi_result(capture, serial, FPLINUX_UI_WIFI_APPLIED);
+	press(capture, KEY_F14);
+	press(capture, KEY_DOWN);
+	press(capture, KEY_OK);
+	wait_label(capture, "Twin");
+
+	capture->stage = "wifi connected Forget and adapter loss";
+	state.link = FPLINUX_UI_WIFI_CONNECTED;
+	strcpy(state.address, "192.0.2.33");
+	wifi_publish(capture, &state);
+	pump_for(capture, 80);
+	wifi_choose_option(capture, ru ? "Забыть сеть" : "Forget network", 0);
+	wait_label(capture, ru ? "Забыть сеть и разорвать соединение?" :
+				 "Forget this network and disconnect?");
+	press(capture, KEY_F14);
+	pump_for(capture, 80);
+	assert(!capture->wifi_serial);
+	wifi_choose_option(capture, ru ? "Забыть сеть" : "Forget network", 0);
+	wait_label(capture, ru ? "Забыть сеть и разорвать соединение?" :
+				 "Forget this network and disconnect?");
+	wait_legends(capture, "", ru ? "Забыть" : "Forget",
+		     ru ? "Отмена" : "Cancel");
+	press(capture, KEY_OK);
+	serial = wifi_request(capture, FPLINUX_UI_WIFI_FORGET, 731, "");
+	state.link = FPLINUX_UI_WIFI_DISCONNECTED;
+	state.saved_count = 0;
+	state.address[0] = '\0';
+	wifi_publish(capture, &state);
+	wifi_result(capture, serial, FPLINUX_UI_WIFI_APPLIED);
+	wait_label(capture, ru ? "Нет сохранённых сетей" : "No saved networks");
+	state.power = FPLINUX_UI_WIFI_UNAVAILABLE;
+	wifi_publish(capture, &state);
+	wait_label(capture, ru ? "Wi-Fi недоступен" : "Wi-Fi unavailable");
+	press(capture, KEY_F14);
+	wait_label(capture, ru ? "Настройки" : "Settings");
+	assert(!has_label(capture, "Wi-Fi"));
+	assert(!capture->wifi_serial);
+	puts("settings-wifi: keyboard station routes followed confirmed state and exact request identities");
+}
+
 int main(int argc, char **argv)
 {
 	struct capture capture = { 0 };
@@ -1670,7 +2083,8 @@ int main(int argc, char **argv)
 		 !strcmp(argv[6], "bluetooth-transfers") ||
 		 !strcmp(argv[6], "section-values") ||
 		 !strcmp(argv[6], "sound") || !strcmp(argv[6], "root-sound") ||
-		 !strcmp(argv[6], "about-edges") || conflict_choice)));
+		 !strcmp(argv[6], "about-edges") || !strcmp(argv[6], "wifi") ||
+		 conflict_choice)));
 	capture.bluetooth = argc == 7 &&
 			    (!strcmp(argv[6], "bluetooth") ||
 			     !strcmp(argv[6], "bluetooth-devices") ||
@@ -1708,6 +2122,8 @@ int main(int argc, char **argv)
 			sound_values_outputs_and_editors(&capture);
 		else if (!strcmp(argv[6], "root-sound"))
 			root_sound_summary(&capture);
+		else if (!strcmp(argv[6], "wifi"))
+			wifi_screens(&capture);
 		else
 			root_values_fit_and_follow_current_settings(&capture);
 		close_and_reap(&capture);

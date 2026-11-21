@@ -348,6 +348,8 @@ struct fplinux_session {
 	struct fplinux_session_wireless *wireless;
 	bool wireless_initialized;
 	struct setting_request wireless_request;
+	struct setting_request wifi_request;
+	uint32_t wifi_ticket;
 	struct fplinux_session_vibration vibration;
 	struct fplinux_session_vibrator vibrator;
 	bool has_vibrator;

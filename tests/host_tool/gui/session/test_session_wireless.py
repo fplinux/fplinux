@@ -15,6 +15,13 @@ if TYPE_CHECKING:
 
 def test_wireless_state_requests_and_external_changes(tmp_path: Path) -> None:
     executable = tmp_path / "session-wireless"
+    package_flags = run_process(
+        ["pkg-config", "--cflags", "--libs", "dbus-1"],
+        name="resolve the supplicant control dependency",
+        timeout=10,
+        check=True,
+    ).stdout.split()
+    session = ROOT / "alpine/aports/fplinux-session"
     compile_c(
         executable,
         [
@@ -23,15 +30,20 @@ def test_wireless_state_requests_and_external_changes(tmp_path: Path) -> None:
             "-Wextra",
             "-Werror",
             "-pthread",
-            f"-I{ROOT / 'alpine/aports/fplinux-session'}",
+            f"-I{session}",
+            f"-I{ROOT / 'include/fplinux'}",
             str(ROOT / "tests/host_tool/gui/session/session-wireless-test.c"),
-            str(ROOT / "alpine/aports/fplinux-session/session-wireless.c"),
+            str(session / "session-wireless.c"),
+            str(session / "session-wifi-station.c"),
+            str(session / "session-wifi-dhcp.c"),
+            str(ROOT / "lib/fplinux/fplinux-utf8.c"),
             "-Wl,--wrap=if_nameindex",
             "-Wl,--wrap=if_freenameindex",
             "-Wl,--wrap=stat",
             "-Wl,--wrap=ioctl",
             "-Wl,--wrap=socket",
             "-Wl,--wrap=bind",
+            *package_flags,
         ],
         name="compile session wireless backend peer",
     )

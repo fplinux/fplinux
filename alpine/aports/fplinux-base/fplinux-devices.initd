@@ -6,7 +6,7 @@ description="FPLinux device access policy"
 
 depend() {
 	need devfs sysfs
-	before fplinux-session
+	before dbus fplinux-session
 }
 
 start() {

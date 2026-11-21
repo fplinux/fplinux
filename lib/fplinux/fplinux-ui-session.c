@@ -122,6 +122,9 @@ static const char *const message_names[] = {
 	[FPLINUX_UI_SESSION_STORAGE_RESULT] = "STORAGE_RESULT",
 	[FPLINUX_UI_SESSION_SYSTEM_LEVELS] = "SYSTEM_LEVELS",
 	[FPLINUX_UI_SESSION_LIGHT_EFFECT] = "LIGHT_EFFECT",
+	[FPLINUX_UI_SESSION_WIFI_REQUEST] = "WIFI_REQUEST",
+	[FPLINUX_UI_SESSION_WIFI_STATE] = "WIFI_STATE",
+	[FPLINUX_UI_SESSION_WIFI_RESULT] = "WIFI_RESULT",
 };
 
 static const char *const level_names[] = {
@@ -249,6 +252,7 @@ static const char *const field_names[] = {
 	"levels",
 	"light_effects",
 	"light_effect",
+	"wifi",
 };
 
 static void add_string(struct json_object *object, const char *name,
@@ -337,6 +341,304 @@ static bool get_bool(struct json_object *object, const char *name, bool *value)
 		return false;
 	*value = json_object_get_boolean(field);
 	return true;
+}
+
+static bool wifi_text_valid(const char *text, size_t capacity)
+{
+	const unsigned char *cursor = (const unsigned char *)text;
+	size_t length = strnlen(text, capacity);
+	const unsigned char *end = cursor + length;
+	uint32_t scalar;
+
+	if (length == capacity)
+		return false;
+	while (cursor != end)
+		if (!fplinux_utf8_next(&cursor, end, &scalar) ||
+		    scalar < 0x20 || scalar == 0x7f)
+			return false;
+	return true;
+}
+
+static bool wifi_network_valid(const struct fplinux_ui_wifi_network *network)
+{
+	return network->id && network->name[0] &&
+	       wifi_text_valid(network->name, sizeof(network->name)) &&
+	       (unsigned int)network->security <= FPLINUX_UI_WIFI_UNSUPPORTED;
+}
+
+static bool wifi_rows_valid(const struct fplinux_ui_wifi_network *rows,
+			    size_t count, bool saved)
+{
+	if (count > FPLINUX_UI_WIFI_ROW_COUNT)
+		return false;
+	for (size_t i = 0; i < count; ++i) {
+		if (!wifi_network_valid(&rows[i]) ||
+		    (saved && rows[i].profile_id != rows[i].id))
+			return false;
+		for (size_t j = 0; j < i; ++j)
+			if (rows[i].id == rows[j].id)
+				return false;
+	}
+	return true;
+}
+
+static bool wifi_fields_valid(const struct fplinux_ui_session_message *message)
+{
+	const struct fplinux_ui_wifi_state *state = &message->wifi_state;
+	const struct fplinux_ui_wifi_request *request = &message->wifi_request;
+
+	switch (message->type) {
+	case FPLINUX_UI_SESSION_WIFI_STATE:
+		return !message->serial &&
+		       (unsigned int)state->power <= FPLINUX_UI_WIFI_ON &&
+		       (unsigned int)state->scan <=
+			       FPLINUX_UI_WIFI_SCAN_FAILED &&
+		       (unsigned int)state->link <=
+			       FPLINUX_UI_WIFI_NO_ADDRESS &&
+		       (state->link == FPLINUX_UI_WIFI_DISCONNECTED ||
+			(state->power == FPLINUX_UI_WIFI_ON &&
+			 wifi_network_valid(&state->current))) &&
+		       (state->link != FPLINUX_UI_WIFI_CONNECTED ||
+			state->address[0]) &&
+		       wifi_text_valid(state->address,
+				       sizeof(state->address)) &&
+		       wifi_rows_valid(state->available, state->available_count,
+				       false) &&
+		       wifi_rows_valid(state->saved, state->saved_count, true);
+	case FPLINUX_UI_SESSION_WIFI_REQUEST:
+		if (!message->serial ||
+		    !wifi_text_valid(request->ssid, sizeof(request->ssid)) ||
+		    !wifi_text_valid(request->key, sizeof(request->key)) ||
+		    (unsigned int)request->security > FPLINUX_UI_WIFI_WPA2 ||
+		    (request->action != FPLINUX_UI_WIFI_CONNECT_HIDDEN &&
+		     request->ssid[0]) ||
+		    (request->action != FPLINUX_UI_WIFI_CONNECT_HIDDEN &&
+		     request->action != FPLINUX_UI_WIFI_CONNECT &&
+		     request->action != FPLINUX_UI_WIFI_CONNECT_SAVED &&
+		     (request->key[0] || request->save)))
+			return false;
+		switch (request->action) {
+		case FPLINUX_UI_WIFI_CONNECT_HIDDEN:
+			return !request->target && request->ssid[0];
+		case FPLINUX_UI_WIFI_CONNECT:
+		case FPLINUX_UI_WIFI_CONNECT_SAVED:
+		case FPLINUX_UI_WIFI_CANCEL:
+		case FPLINUX_UI_WIFI_FORGET:
+			return request->target != 0;
+		case FPLINUX_UI_WIFI_SET_POWER:
+		case FPLINUX_UI_WIFI_SCAN:
+		case FPLINUX_UI_WIFI_DISCONNECT:
+		case FPLINUX_UI_WIFI_RETRY_ADDRESS:
+			return !request->target;
+		}
+		return false;
+	case FPLINUX_UI_SESSION_WIFI_RESULT:
+		return message->serial && (unsigned int)message->wifi_result <=
+						  FPLINUX_UI_WIFI_FAILED;
+	default:
+		return true;
+	}
+}
+
+static void add_wifi_u32(struct json_object *object, const char *name,
+			 uint32_t value)
+{
+	json_object_object_add(object, name, json_object_new_int64(value));
+}
+
+static bool get_wifi_u32(struct json_object *object, const char *name,
+			 uint32_t *value)
+{
+	struct json_object *field;
+	int64_t number;
+
+	if (!json_object_object_get_ex(object, name, &field) ||
+	    !json_object_is_type(field, json_type_int))
+		return false;
+	number = json_object_get_int64(field);
+	if (number < 0 || number > UINT32_MAX)
+		return false;
+	*value = (uint32_t)number;
+	return true;
+}
+
+static struct json_object *
+wifi_network_object(const struct fplinux_ui_wifi_network *network)
+{
+	struct json_object *entry = json_object_new_object();
+
+	add_wifi_u32(entry, "id", network->id);
+	add_wifi_u32(entry, "profile", network->profile_id);
+	add_wifi_u32(entry, "security", network->security);
+	add_string(entry, "name", network->name);
+	return entry;
+}
+
+static bool get_wifi_network(struct json_object *object,
+			     struct fplinux_ui_wifi_network *network)
+{
+	uint32_t security;
+
+	if (!json_object_is_type(object, json_type_object) ||
+	    !get_wifi_u32(object, "id", &network->id) ||
+	    !get_wifi_u32(object, "profile", &network->profile_id) ||
+	    !get_wifi_u32(object, "security", &security) ||
+	    security > FPLINUX_UI_WIFI_UNSUPPORTED ||
+	    !get_string(object, "name", network->name, sizeof(network->name)))
+		return false;
+	network->security = security;
+	return true;
+}
+
+static struct json_object *
+wifi_rows_object(const struct fplinux_ui_wifi_network *rows, size_t count)
+{
+	struct json_object *array = json_object_new_array();
+
+	for (size_t i = 0; i < count; ++i)
+		json_object_array_add(array, wifi_network_object(&rows[i]));
+	return array;
+}
+
+static bool get_wifi_rows(struct json_object *object, const char *name,
+			  struct fplinux_ui_wifi_network *rows, size_t *count)
+{
+	struct json_object *array;
+
+	if (!json_object_object_get_ex(object, name, &array) ||
+	    !json_object_is_type(array, json_type_array))
+		return false;
+	*count = json_object_array_length(array);
+	if (*count > FPLINUX_UI_WIFI_ROW_COUNT)
+		return false;
+	for (size_t i = 0; i < *count; ++i)
+		if (!get_wifi_network(json_object_array_get_idx(array, i),
+				      &rows[i]))
+			return false;
+	return true;
+}
+
+static void add_wifi_fields(struct json_object *object,
+			    const struct fplinux_ui_session_message *message)
+{
+	const struct fplinux_ui_wifi_state *state = &message->wifi_state;
+	const struct fplinux_ui_wifi_request *request = &message->wifi_request;
+	struct json_object *wifi;
+
+	if (message->type != FPLINUX_UI_SESSION_WIFI_STATE &&
+	    message->type != FPLINUX_UI_SESSION_WIFI_REQUEST &&
+	    message->type != FPLINUX_UI_SESSION_WIFI_RESULT)
+		return;
+	wifi = json_object_new_object();
+	json_object_object_add(object, "wifi", wifi);
+	if (message->serial)
+		add_wifi_u32(object, "serial", message->serial);
+	switch (message->type) {
+	case FPLINUX_UI_SESSION_WIFI_STATE:
+		add_wifi_u32(wifi, "power", state->power);
+		add_wifi_u32(wifi, "scan", state->scan);
+		add_wifi_u32(wifi, "link", state->link);
+		json_object_object_add(
+			wifi, "open_supported",
+			json_object_new_boolean(state->open_supported));
+		if (state->link != FPLINUX_UI_WIFI_DISCONNECTED)
+			json_object_object_add(
+				wifi, "current",
+				wifi_network_object(&state->current));
+		add_string(wifi, "address", state->address);
+		json_object_object_add(
+			wifi, "available",
+			wifi_rows_object(state->available,
+					 state->available_count));
+		json_object_object_add(wifi, "saved",
+				       wifi_rows_object(state->saved,
+							state->saved_count));
+		break;
+	case FPLINUX_UI_SESSION_WIFI_REQUEST:
+		add_wifi_u32(wifi, "action", request->action);
+		add_wifi_u32(wifi, "target", request->target);
+		add_wifi_u32(wifi, "security", request->security);
+		json_object_object_add(
+			wifi, "enabled",
+			json_object_new_boolean(request->enabled));
+		json_object_object_add(wifi, "save",
+				       json_object_new_boolean(request->save));
+		add_string(wifi, "ssid", request->ssid);
+		add_string(wifi, "key", request->key);
+		break;
+	case FPLINUX_UI_SESSION_WIFI_RESULT:
+		add_wifi_u32(wifi, "result", message->wifi_result);
+		break;
+	default:
+		break;
+	}
+}
+
+static bool get_wifi_state(struct json_object *wifi,
+			   struct fplinux_ui_wifi_state *state)
+{
+	struct json_object *current;
+	uint32_t power, scan, link;
+
+	if (!get_wifi_u32(wifi, "power", &power) ||
+	    !get_wifi_u32(wifi, "scan", &scan) ||
+	    !get_wifi_u32(wifi, "link", &link) || power > FPLINUX_UI_WIFI_ON ||
+	    scan > FPLINUX_UI_WIFI_SCAN_FAILED ||
+	    link > FPLINUX_UI_WIFI_NO_ADDRESS)
+		return false;
+	state->power = power;
+	state->scan = scan;
+	state->link = link;
+	if (link != FPLINUX_UI_WIFI_DISCONNECTED &&
+	    (!json_object_object_get_ex(wifi, "current", &current) ||
+	     !get_wifi_network(current, &state->current)))
+		return false;
+	return get_bool(wifi, "open_supported", &state->open_supported) &&
+	       get_string(wifi, "address", state->address,
+			  sizeof(state->address)) &&
+	       get_wifi_rows(wifi, "available", state->available,
+			     &state->available_count) &&
+	       get_wifi_rows(wifi, "saved", state->saved, &state->saved_count);
+}
+
+static bool get_wifi_fields(struct json_object *object,
+			    struct fplinux_ui_session_message *message)
+{
+	struct fplinux_ui_wifi_request *request = &message->wifi_request;
+	struct json_object *wifi = NULL;
+	uint32_t action, security, result;
+
+	json_object_object_get_ex(object, "wifi", &wifi);
+	switch (message->type) {
+	case FPLINUX_UI_SESSION_WIFI_STATE:
+		return json_object_is_type(wifi, json_type_object) &&
+		       get_wifi_state(wifi, &message->wifi_state);
+	case FPLINUX_UI_SESSION_WIFI_REQUEST:
+		if (!json_object_is_type(wifi, json_type_object) ||
+		    !get_wifi_u32(wifi, "action", &action) ||
+		    !get_wifi_u32(wifi, "security", &security) ||
+		    action > FPLINUX_UI_WIFI_FORGET ||
+		    security > FPLINUX_UI_WIFI_WPA2)
+			return false;
+		request->action = action;
+		request->security = security;
+		return get_wifi_u32(wifi, "target", &request->target) &&
+		       get_bool(wifi, "enabled", &request->enabled) &&
+		       get_bool(wifi, "save", &request->save) &&
+		       get_string(wifi, "ssid", request->ssid,
+				  sizeof(request->ssid)) &&
+		       get_string(wifi, "key", request->key,
+				  sizeof(request->key));
+	case FPLINUX_UI_SESSION_WIFI_RESULT:
+		if (!json_object_is_type(wifi, json_type_object) ||
+		    !get_wifi_u32(wifi, "result", &result) ||
+		    result > FPLINUX_UI_WIFI_FAILED)
+			return false;
+		message->wifi_result = result;
+		return true;
+	default:
+		return !wifi;
+	}
 }
 
 static bool
@@ -1333,7 +1635,7 @@ bool fplinux_ui_session_send(int fd,
 	    !clock_presentation_valid(message) ||
 	    !storage_result_valid(message) || !document_fields_valid(message) ||
 	    !volume_fields_valid(message) || !system_levels_valid(message) ||
-	    !light_fields_valid(message) ||
+	    !light_fields_valid(message) || !wifi_fields_valid(message) ||
 	    (message->tasks_view &&
 	     message->type != FPLINUX_UI_SESSION_ACTIVE) ||
 	    (message->background_playing &&
@@ -1389,6 +1691,7 @@ bool fplinux_ui_session_send(int fd,
 	if (message->type == FPLINUX_UI_SESSION_ACTIVE)
 		add_clock_presentation(object, &message->clock_presentation);
 	add_string(object, "type", message_names[message->type]);
+	add_wifi_fields(object, message);
 	if (message->type == FPLINUX_UI_SESSION_SYSTEM_LEVELS)
 		add_system_levels(object, &message->system_levels);
 	if (message->type == FPLINUX_UI_SESSION_STORAGE_REQUEST ||
@@ -1846,6 +2149,9 @@ int fplinux_ui_session_receive(int fd,
 		valid = volume_fields_valid(message);
 	if (valid)
 		valid = light_fields_valid(message);
+	if (valid)
+		valid = get_wifi_fields(object, message) &&
+			wifi_fields_valid(message);
 	json_object_put(object);
 	if (valid && (type == FPLINUX_UI_SESSION_ACTIVE_ACK ||
 		      type == FPLINUX_UI_SESSION_ACTIVATION ||

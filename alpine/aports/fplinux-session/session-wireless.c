@@ -1,6 +1,8 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 #define _GNU_SOURCE
 #include "session-wireless.h"
+#include "session-wifi-dhcp.h"
+#include "session-wifi-station.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -17,9 +19,35 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#define WIFI_CONFIG "/var/lib/fplinux/wifi/wpa_supplicant.conf"
+#define WIFI_ACTIVE_POLL_MS 250
+#define WIFI_IDLE_POLL_MS 1000
+
 struct wireless_interface {
 	unsigned int index;
 	char name[IFNAMSIZ];
+};
+
+struct wifi_request {
+	uint32_t ticket;
+	struct fplinux_ui_wifi_request action;
+};
+
+struct wifi_result {
+	uint32_t ticket;
+	enum fplinux_ui_wifi_result result;
+};
+
+struct wifi_worker {
+	struct fplinux_session_wifi_station *station;
+	unsigned int interface_index;
+	struct fplinux_session_wifi_dhcp *dhcp;
+	enum fplinux_session_wifi_dhcp_state dhcp_state;
+	bool association;
+	char address[16];
+	uint32_t operation;
+	bool connecting;
+	bool waiting_for_address;
 };
 
 struct fplinux_session_wireless {
@@ -34,6 +62,9 @@ struct fplinux_session_wireless {
 	int worker_error;
 	int result_error;
 	struct fplinux_session_wireless_state state;
+	struct fplinux_ui_wifi_state wifi_state;
+	struct wifi_request wifi_request;
+	struct wifi_result wifi_result;
 };
 
 /* A zero index means absent; ambiguity and failures are explicit errors. */
@@ -100,37 +131,35 @@ static int interface_flags(const struct wireless_interface *interface, bool set,
 	return error;
 }
 
-static unsigned int snapshot(struct fplinux_session_wireless_state *state)
+static void snapshot(struct fplinux_session_wireless_state *state,
+		     struct wireless_interface *interface)
 {
-	struct wireless_interface interface;
-
 	memset(state, 0, sizeof(*state));
-	state->error = find_interface(&interface);
-	if (!state->error && interface.index) {
+	state->error = find_interface(interface);
+	if (!state->error && interface->index) {
 		state->supported = true;
-		state->error = interface_flags(&interface, false, false,
+		state->error = interface_flags(interface, false, false,
 					       &state->enabled);
 		state->known = !state->error;
 	}
-	return state->error ? 0 : interface.index;
 }
 
-static int operate(bool enabled, struct fplinux_session_wireless_state *state)
+static int operate(bool enabled, struct fplinux_session_wireless_state *state,
+		   struct wireless_interface *observed)
 {
 	struct wireless_interface interface;
-	unsigned int index;
 	int error = find_interface(&interface);
 
 	if (!error && !interface.index)
 		error = ENODEV;
 	if (!error)
 		error = interface_flags(&interface, true, enabled, NULL);
-	index = snapshot(state);
+	snapshot(state, observed);
 	if (error)
 		return error;
 	if (state->error)
 		return state->error;
-	if (!index || index != interface.index)
+	if (!observed->index || observed->index != interface.index)
 		return ENODEV;
 	if (!state->known || state->enabled != enabled)
 		return EIO;
@@ -159,17 +188,32 @@ static void drain(int fd)
 
 static void publish(struct fplinux_session_wireless *wireless,
 		    const struct fplinux_session_wireless_state *state,
-		    bool result_ready, int error)
+		    const struct fplinux_ui_wifi_state *wifi_state,
+		    struct wifi_result wifi_result, bool result_ready,
+		    int error, bool force_notification)
 {
+	bool changed;
+
 	pthread_mutex_lock(&wireless->mutex);
+	changed =
+		force_notification || result_ready || wifi_result.ticket ||
+		wireless->state.supported != state->supported ||
+		wireless->state.known != state->known ||
+		wireless->state.enabled != state->enabled ||
+		wireless->state.error != state->error ||
+		memcmp(&wireless->wifi_state, wifi_state, sizeof(*wifi_state));
 	wireless->state = *state;
+	wireless->wifi_state = *wifi_state;
+	if (wifi_result.ticket)
+		wireless->wifi_result = wifi_result;
 	if (result_ready) {
 		wireless->pending = false;
 		wireless->ready = true;
 		wireless->result_error = error;
 	}
 	pthread_mutex_unlock(&wireless->mutex);
-	wake(wireless->notification[1]);
+	if (changed)
+		wake(wireless->notification[1]);
 }
 
 static int open_listener(void)
@@ -204,10 +248,190 @@ static int drain_listener(int fd)
 	return result == 0 ? EIO : 0;
 }
 
+static void stop_address(struct wifi_worker *wifi)
+{
+	fplinux_session_wifi_dhcp_destroy(wifi->dhcp);
+	wifi->dhcp = NULL;
+	wifi->association = false;
+	wifi->address[0] = '\0';
+	wifi->dhcp_state = FPLINUX_SESSION_WIFI_DHCP_WAITING;
+}
+
+static struct wifi_result complete_wifi(struct wifi_worker *wifi,
+					enum fplinux_ui_wifi_result result)
+{
+	struct wifi_result reply = { .ticket = wifi->operation,
+				     .result = result };
+
+	wifi->operation = 0;
+	wifi->connecting = false;
+	wifi->waiting_for_address = false;
+	return reply;
+}
+
+static struct wifi_result stop_wifi(struct wifi_worker *wifi)
+{
+	stop_address(wifi);
+	fplinux_session_wifi_station_destroy(wifi->station);
+	wifi->station = NULL;
+	wifi->interface_index = 0;
+	return complete_wifi(wifi, FPLINUX_UI_WIFI_NETWORK_UNAVAILABLE);
+}
+
+static struct wifi_result refresh_wifi(
+	struct wifi_worker *wifi, const struct wireless_interface *interface,
+	const struct fplinux_session_wireless_state *state, bool has_supplicant)
+{
+	struct wifi_result result = { 0 };
+
+	if (wifi->station &&
+	    (!has_supplicant || !state->known || !state->enabled ||
+	     wifi->interface_index != interface->index))
+		result = stop_wifi(wifi);
+	if (!wifi->station && has_supplicant && state->known &&
+	    state->enabled) {
+		wifi->station = fplinux_session_wifi_station_create(
+			interface->name, WIFI_CONFIG);
+		if (wifi->station) {
+			wifi->interface_index = interface->index;
+			fplinux_session_wifi_station_acquire(wifi->station);
+		}
+	}
+	return result;
+}
+
+static struct wifi_result request_wifi(struct wifi_worker *wifi,
+				       const struct wifi_request *request)
+{
+	struct wifi_result reply = {
+		.ticket = request->ticket,
+		.result = FPLINUX_UI_WIFI_FAILED,
+	};
+	struct fplinux_ui_wifi_request action = request->action;
+
+	if (!wifi->station)
+		goto clear;
+	if (action.action == FPLINUX_UI_WIFI_CANCEL) {
+		if (!wifi->operation || action.target != wifi->operation)
+			goto clear;
+		if (wifi->waiting_for_address)
+			action.action = FPLINUX_UI_WIFI_DISCONNECT;
+	} else if (wifi->operation) {
+		reply.result = FPLINUX_UI_WIFI_BUSY;
+		goto clear;
+	}
+	if (action.action == FPLINUX_UI_WIFI_RETRY_ADDRESS) {
+		if (!wifi->association ||
+		    wifi->dhcp_state != FPLINUX_SESSION_WIFI_DHCP_FAILED)
+			goto clear;
+		stop_address(wifi);
+		wifi->operation = request->ticket;
+		wifi->waiting_for_address = true;
+		reply.ticket = 0;
+		goto clear;
+	}
+	if (!fplinux_session_wifi_station_request(
+		    wifi->station, &action, request->ticket, &reply.result)) {
+		wifi->operation = request->ticket;
+		wifi->connecting =
+			action.action == FPLINUX_UI_WIFI_CONNECT ||
+			action.action == FPLINUX_UI_WIFI_CONNECT_SAVED ||
+			action.action == FPLINUX_UI_WIFI_CONNECT_HIDDEN;
+		reply.ticket = 0;
+	} else if (reply.result == FPLINUX_UI_WIFI_APPLIED &&
+		   (request->action.action == FPLINUX_UI_WIFI_CANCEL ||
+		    action.action == FPLINUX_UI_WIFI_DISCONNECT)) {
+		stop_address(wifi);
+		complete_wifi(wifi, FPLINUX_UI_WIFI_APPLIED);
+	}
+clear:
+	explicit_bzero(action.key, sizeof(action.key));
+	return reply;
+}
+
+static void wifi_address(struct wifi_worker *wifi, const char *interface)
+{
+	if (!wifi->association) {
+		wifi->association = true;
+		wifi->dhcp = fplinux_session_wifi_dhcp_start(interface);
+		wifi->dhcp_state = wifi->dhcp ?
+					   FPLINUX_SESSION_WIFI_DHCP_WAITING :
+					   FPLINUX_SESSION_WIFI_DHCP_FAILED;
+	}
+	if (wifi->dhcp)
+		wifi->dhcp_state = fplinux_session_wifi_dhcp_read(
+			wifi->dhcp, wifi->address);
+}
+
+static struct wifi_result
+update_wifi(struct wifi_worker *wifi,
+	    const struct wireless_interface *interface,
+	    struct fplinux_ui_wifi_state *state)
+{
+	struct wifi_result reply = { 0 };
+	const struct fplinux_ui_wifi_state *station_state;
+	uint32_t ticket;
+
+	if (!wifi->station)
+		return reply;
+	fplinux_session_wifi_station_update(wifi->station);
+	station_state = fplinux_session_wifi_station_state(wifi->station);
+	*state = *station_state;
+	state->power = FPLINUX_UI_WIFI_ON;
+	if (fplinux_session_wifi_station_take_result(wifi->station, &ticket,
+						     &reply.result) &&
+	    wifi->operation && ticket == wifi->operation) {
+		if (wifi->connecting &&
+		    state->link == FPLINUX_UI_WIFI_ADDRESSING &&
+		    reply.result == FPLINUX_UI_WIFI_APPLIED) {
+			wifi->waiting_for_address = true;
+		} else {
+			reply = complete_wifi(wifi, reply.result);
+		}
+	}
+	if (state->link != FPLINUX_UI_WIFI_ADDRESSING) {
+		stop_address(wifi);
+		if (wifi->waiting_for_address)
+			return complete_wifi(
+				wifi, FPLINUX_UI_WIFI_NETWORK_UNAVAILABLE);
+		return reply;
+	}
+	wifi_address(wifi, interface->name);
+	if (wifi->waiting_for_address &&
+	    wifi->dhcp_state != FPLINUX_SESSION_WIFI_DHCP_WAITING) {
+		enum fplinux_ui_wifi_result result =
+			fplinux_session_wifi_station_commit(wifi->station);
+
+		*state = *station_state;
+		state->power = FPLINUX_UI_WIFI_ON;
+		if (result == FPLINUX_UI_WIFI_NETWORK_UNAVAILABLE) {
+			stop_address(wifi);
+			state->link = FPLINUX_UI_WIFI_DISCONNECTED;
+			state->current = (struct fplinux_ui_wifi_network){ 0 };
+			return complete_wifi(wifi, result);
+		}
+		if (result == FPLINUX_UI_WIFI_APPLIED &&
+		    wifi->dhcp_state == FPLINUX_SESSION_WIFI_DHCP_FAILED)
+			result = FPLINUX_UI_WIFI_ADDRESS_FAILED;
+		reply = complete_wifi(wifi, result);
+	}
+	if (wifi->dhcp_state == FPLINUX_SESSION_WIFI_DHCP_BOUND) {
+		state->link = FPLINUX_UI_WIFI_CONNECTED;
+		memcpy(state->address, wifi->address, sizeof(state->address));
+	} else if (wifi->dhcp_state == FPLINUX_SESSION_WIFI_DHCP_FAILED) {
+		state->link = FPLINUX_UI_WIFI_NO_ADDRESS;
+	}
+	return reply;
+}
+
 static void *worker(void *context)
 {
 	struct fplinux_session_wireless *wireless = context;
 	struct fplinux_session_wireless_state state = { 0 };
+	struct fplinux_ui_wifi_state wifi_state = { 0 };
+	struct wireless_interface interface = { 0 };
+	struct wifi_worker wifi = { 0 };
+	bool has_supplicant = access("/sbin/wpa_supplicant", X_OK) == 0;
 	struct pollfd fds[2] = { { .fd = wireless->command[0],
 				   .events = POLLIN },
 				 { .events = POLLIN } };
@@ -218,15 +442,30 @@ static void *worker(void *context)
 		listener_error = errno;
 		state.error = listener_error;
 	} else {
-		snapshot(&state);
+		snapshot(&state, &interface);
 	}
-	publish(wireless, &state, false, 0);
+	refresh_wifi(&wifi, &interface, &state, has_supplicant);
+	wifi_state.power = has_supplicant && state.known ?
+				   (state.enabled ? FPLINUX_UI_WIFI_ON :
+						    FPLINUX_UI_WIFI_OFF) :
+				   FPLINUX_UI_WIFI_UNAVAILABLE;
+	if (wifi.station)
+		update_wifi(&wifi, &interface, &wifi_state);
+	publish(wireless, &state, &wifi_state, (struct wifi_result){ 0 }, false,
+		0, true);
 	for (;;) {
+		struct wifi_request request;
+		struct wifi_result reply = { 0 };
+		struct wifi_result updated;
 		bool stop, pending, requested;
-		int ready, error;
+		int ready, error = 0;
+		int timeout = wifi.station ?
+				      (wifi.operation ? WIFI_ACTIVE_POLL_MS :
+							WIFI_IDLE_POLL_MS) :
+				      -1;
 
 		do {
-			ready = poll(fds, 2, -1);
+			ready = poll(fds, 2, timeout);
 		} while (ready < 0 && errno == EINTR);
 		if (ready < 0) {
 			listener_error = errno;
@@ -235,7 +474,20 @@ static void *worker(void *context)
 			};
 			pthread_mutex_lock(&wireless->mutex);
 			wireless->state = state;
+			wireless->wifi_state =
+				(struct fplinux_ui_wifi_state){ 0 };
 			wireless->worker_error = listener_error;
+			if (wireless->wifi_request.ticket || wifi.operation)
+				wireless->wifi_result = (struct wifi_result){
+					.ticket =
+						wireless->wifi_request.ticket ?
+							wireless->wifi_request
+								.ticket :
+							wifi.operation,
+					.result = FPLINUX_UI_WIFI_FAILED,
+				};
+			explicit_bzero(&wireless->wifi_request,
+				       sizeof(wireless->wifi_request));
 			if (wireless->pending) {
 				wireless->pending = false;
 				wireless->ready = true;
@@ -251,8 +503,21 @@ static void *worker(void *context)
 		stop = wireless->stop;
 		pending = wireless->pending;
 		requested = wireless->requested;
+		request = wireless->wifi_request;
+		explicit_bzero(&wireless->wifi_request,
+			       sizeof(wireless->wifi_request));
 		pthread_mutex_unlock(&wireless->mutex);
-		if (!stop && fds[1].revents) {
+		if (stop) {
+			if (pending && !listener_error) {
+				if (!requested)
+					stop_wifi(&wifi);
+				operate(requested, &state, &interface);
+			}
+			explicit_bzero(request.action.key,
+				       sizeof(request.action.key));
+			break;
+		}
+		if (fds[1].revents) {
 			listener_error = drain_listener(fds[1].fd);
 			if (listener_error) {
 				close(fds[1].fd);
@@ -261,21 +526,62 @@ static void *worker(void *context)
 					.error = listener_error
 				};
 			} else {
-				snapshot(&state);
+				snapshot(&state, &interface);
 			}
-			publish(wireless, &state, false, 0);
 		}
-		if (pending) {
-			if (listener_error) {
+		if (pending ||
+		    (request.ticket &&
+		     request.action.action == FPLINUX_UI_WIFI_SET_POWER)) {
+			bool enable = pending ? requested :
+						request.action.enabled;
+
+			if (!pending && (!has_supplicant || !state.known)) {
+				error = ENODEV;
+			} else if (listener_error) {
 				error = listener_error;
+			} else if (!enable && wifi.station &&
+				   fplinux_session_wifi_station_acquire(
+					   wifi.station) ==
+					   FPLINUX_UI_WIFI_BUSY) {
+				error = EBUSY;
 			} else {
-				error = operate(requested, &state);
+				if (!enable)
+					reply = stop_wifi(&wifi);
+				error = operate(enable, &state, &interface);
 			}
-			publish(wireless, &state, true, error);
 		}
-		if (stop)
-			break;
+		updated =
+			refresh_wifi(&wifi, &interface, &state, has_supplicant);
+		if (updated.ticket)
+			reply = updated;
+		if (request.ticket) {
+			reply = request.action.action ==
+						FPLINUX_UI_WIFI_SET_POWER ?
+					(struct wifi_result){
+						.ticket = request.ticket,
+						.result =
+							error == EBUSY ?
+								FPLINUX_UI_WIFI_BUSY :
+							error ? FPLINUX_UI_WIFI_FAILED :
+								FPLINUX_UI_WIFI_APPLIED
+					} :
+					request_wifi(&wifi, &request);
+			explicit_bzero(request.action.key,
+				       sizeof(request.action.key));
+		}
+		wifi_state = (struct fplinux_ui_wifi_state){ 0 };
+		wifi_state.power = has_supplicant && state.known ?
+					   (state.enabled ?
+						    FPLINUX_UI_WIFI_ON :
+						    FPLINUX_UI_WIFI_OFF) :
+					   FPLINUX_UI_WIFI_UNAVAILABLE;
+		updated = update_wifi(&wifi, &interface, &wifi_state);
+		if (updated.ticket)
+			reply = updated;
+		publish(wireless, &state, &wifi_state, reply, pending, error,
+			fds[1].revents != 0);
 	}
+	stop_wifi(&wifi);
 	if (fds[1].fd >= 0)
 		close(fds[1].fd);
 	return NULL;
@@ -373,7 +679,8 @@ int fplinux_session_wireless_request(struct fplinux_session_wireless *wireless,
 		pthread_mutex_unlock(&wireless->mutex);
 		return error;
 	}
-	if (wireless->pending || wireless->ready) {
+	if (wireless->pending || wireless->ready ||
+	    wireless->wifi_request.ticket) {
 		pthread_mutex_unlock(&wireless->mutex);
 		return EBUSY;
 	}
@@ -399,4 +706,78 @@ bool fplinux_session_wireless_take_result(
 	}
 	pthread_mutex_unlock(&wireless->mutex);
 	return ready;
+}
+
+void fplinux_session_wireless_wifi_state(
+	struct fplinux_session_wireless *wireless,
+	struct fplinux_ui_wifi_state *state)
+{
+	if (!wireless) {
+		*state = (struct fplinux_ui_wifi_state){ 0 };
+		return;
+	}
+	pthread_mutex_lock(&wireless->mutex);
+	*state = wireless->wifi_state;
+	pthread_mutex_unlock(&wireless->mutex);
+}
+
+int fplinux_session_wireless_wifi_request(
+	struct fplinux_session_wireless *wireless,
+	const struct fplinux_ui_wifi_request *request, uint32_t ticket)
+{
+	bool cancel_queued;
+	int error;
+
+	if (!wireless || !request || !ticket)
+		return EINVAL;
+	pthread_mutex_lock(&wireless->mutex);
+	cancel_queued =
+		request->action == FPLINUX_UI_WIFI_CANCEL && request->target &&
+		request->target == wireless->wifi_request.ticket &&
+		wireless->wifi_request.action.action != FPLINUX_UI_WIFI_CANCEL;
+	error = wireless->worker_error;
+	if (!error && (wireless->pending || wireless->ready ||
+		       (wireless->wifi_request.ticket && !cancel_queued) ||
+		       wireless->wifi_result.ticket))
+		error = EBUSY;
+	if (!error) {
+		if (cancel_queued) {
+			/* The worker has no state to undo before dequeueing. */
+			explicit_bzero(&wireless->wifi_request,
+				       sizeof(wireless->wifi_request));
+			wireless->wifi_result = (struct wifi_result){
+				.ticket = ticket,
+				.result = FPLINUX_UI_WIFI_APPLIED,
+			};
+		} else {
+			wireless->wifi_request = (struct wifi_request){
+				.ticket = ticket,
+				.action = *request,
+			};
+		}
+	}
+	pthread_mutex_unlock(&wireless->mutex);
+	if (!error)
+		wake(cancel_queued ? wireless->notification[1] :
+				     wireless->command[1]);
+	return error;
+}
+
+bool fplinux_session_wireless_take_wifi_result(
+	struct fplinux_session_wireless *wireless, uint32_t *ticket,
+	enum fplinux_ui_wifi_result *result)
+{
+	struct wifi_result reply;
+
+	if (!wireless)
+		return false;
+	pthread_mutex_lock(&wireless->mutex);
+	reply = wireless->wifi_result;
+	wireless->wifi_result.ticket = 0;
+	pthread_mutex_unlock(&wireless->mutex);
+	if (!reply.ticket)
+		return false;
+	*ticket = reply.ticket;
+	*result = reply.result;
+	return true;
 }

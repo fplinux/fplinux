@@ -18,6 +18,8 @@ source="
 	settings-core.h
 	settings-bluetooth.c
 	settings-bluetooth.h
+	settings-wifi.c
+	settings-wifi.h
 	fplinux-settings-values.c
 	fplinux-settings-values.h
 	fplinux-system-info.c
@@ -46,7 +48,8 @@ build() {
 	export PKG_CONFIG_LIBDIR="$CBUILDROOT/usr/lib/pkgconfig:$CBUILDROOT/usr/share/pkgconfig"
 	"$CC" $CPPFLAGS $CFLAGS -Os -std=c11 -Wall -Wextra -Werror -pthread \
 		$(pkg-config --cflags fplinux-ui dbus-1) \
-		fplinux-settings.c settings-core.c settings-bluetooth.c fplinux-cli.c fplinux-ui-profile.c \
+		fplinux-settings.c settings-core.c settings-bluetooth.c settings-wifi.c \
+		fplinux-cli.c fplinux-ui-profile.c \
 		fplinux-settings-values.c fplinux-system-info.c \
 		fplinux-language.c fplinux-multitap.c fplinux-utf8.c \
 		fplinux-bluez-adapter.c fplinux-bluetooth-common.c fplinux-bluetooth-opp.c \
@@ -66,13 +69,15 @@ package() {
 }
 
 sha512sums="
-5f18ea7a4ee65bec449e7b5b0c20c937747b695008fb7c4c9b5356ce390f469e8b049af0c15a6d44e1cb08b5196862f4afda673700c5c4a279d8e72fab726984  fplinux-settings.c
+5fc57c2023f6e7c75522735f7579d012aeb31fba3914f7f3dc812815892ec30586a506f84fc38b80d3045856452adfe491644012506213a17c3aaabfe9e00b0f  fplinux-settings.c
 60be1ccccf0215ea13bc64fd442a0498e7db203234ce74f92cec502295e8ac703a089438848b9a1850102836855537f561e9bd8313751574a069eb0ec6dcf31a  fplinux-cli.c
 9677a324ea1cbcca154f472c83eb0660badfa11c2b444116f27080bd839dee2ab9ea6ef3b0c495f6074207559b813c843f284786f8b1e3c89023121b5aacb453  fplinux-cli.h
 a05edee1134b36463ed50cfd796ab3e0424705ba1d1c3d692d9ec4d3db81dd1a684666e0a7809e8eccc99374498720c7e3ccb1a69274902d559d17dddbd77601  settings-core.c
 d5a2e3dcc110a7635a0f2cd6cdd6fb9971301bf42a0297517a1fa3ab92103a22f5e9317b65c7f63f74a64b9c392957e1825e60e8793e05d811fb7c533661b8c7  settings-core.h
 fbd6b489b10981bc4306b34e9b49316a1423eff2ab61c3f4e88a813818e64f562cbc792e60db71a78c15c7082b067f7e7f711a5519814306f6357985cd12505f  settings-bluetooth.c
 b01ed6e3d7ac24bd9e5f1d7f16b2075a6eeba4c2e00050f00bad0ced5c3a2f41e0abb4b4bc853eb091b41017dcf63269dc92c4b5f6f545db6a72e82d2db98567  settings-bluetooth.h
+cec1a3062deca0020d7a415492a65952b73b74a888821d7922ff032e1cf0719fa525992d21339eb69192561fde69336acdbce582716fdcc165dbe62ac8ee85c4  settings-wifi.c
+de3aad86d872e42851e5584cbd23d2019d8f030dbb5f58101be1ce01f29e92d5c31ee5616266cd50fb98e84a611e291a7e707bd6bd2e7212ec40ba3885c127b3  settings-wifi.h
 7608a917aad8485f71038c21855f044e567381a9ebb83ea986d4dca8129a3b681974adcbe25d5294ac89007e86b7e295a568458a9d5a95c9ab8285a6a2a9c526  fplinux-settings-values.c
 e85173937a9a7684ab606cf355878cb1a52ba20dc8dc738db00e64de6aa206b99828b59dd399563d5d983e6be2c95ec618f630078922e47b14e586a7f0bbee59  fplinux-settings-values.h
 16594a9d293eebb78db30d377d5e26f50f39616800cbcb9ef75b25a0f218772e898f2925d1caeb822b4d23309d8d543a8e18affbcf4225f28b75e8b2c8ad43a1  fplinux-system-info.c
@@ -92,5 +97,5 @@ d8ee187b2aeca1e44eace0f423420af8d9112a8a3d7a2565ecf15de413c136435b5a6c9d93cd7264
 0fbafad481eae89ec734d8e43b72a5923432e333544fae70d6dc82ae1e11f03f5e1291e8079f8c95596a5e2c4f03a4662a560309eb524a452ed0db7fb532835a  fplinux-bluetooth-common.h
 a65c9092cad5f08204d601c8c59901739de1c347b4b00d5c8b86db5feb7410746da07d199aaaffa8f4c47e95508e88fe8c7c73e0e4c57c2046c80e5e77e494bf  fplinux-bluetooth-opp.c
 6ffa817ef8aad1da80c1081aaca9e752986679e339dd0e181150610a7ea3e25c27e52c37c2d03774d56c9101065a9d9cf69b7b36e36c742c87357445b5637931  fplinux-bluetooth-opp.h
-dd3ab7237842c97485c807d9871b25849b25cdd3e237caff738dc07d351b3c2e38a11ff51e381fcc22eaad7aa90a4a8f583393f38a3fd2dfbe3966214a721ba7  ru.po
+f40260706065e599236506c1401f2103100551b658c1aeab6d8e1168b8f42e02d3062f270ea47e3530f1e1b15f65bc9b9e04da6a7b0c9219538ba0a96ddb22a8  ru.po
 "

@@ -165,6 +165,7 @@ def userspace_c_include_flags(source: str) -> list[str]:
         path.parts[:3] == (*APORT_ROOT, "fplinux-bluetooth")
         or source in registration.BLUEZ_ADAPTER_SOURCES
         or source in registration.BLUETOOTH_OPP_SOURCES
+        or source == "alpine/aports/fplinux-session/session-wifi-station.c"
     ):
         flags.extend(pkg_config_cflags("dbus-1"))
     if source == "lib/fplinux-shared/fplinux-input-session.c":

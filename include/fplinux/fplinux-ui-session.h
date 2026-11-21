@@ -3,6 +3,7 @@
 #define FPLINUX_UI_SESSION_H
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #include "fplinux-storage.h"
@@ -75,6 +76,97 @@ enum fplinux_ui_session_message_type {
 	FPLINUX_UI_SESSION_STORAGE_RESULT,
 	FPLINUX_UI_SESSION_SYSTEM_LEVELS,
 	FPLINUX_UI_SESSION_LIGHT_EFFECT,
+	FPLINUX_UI_SESSION_WIFI_REQUEST,
+	FPLINUX_UI_SESSION_WIFI_STATE,
+	FPLINUX_UI_SESSION_WIFI_RESULT,
+};
+
+#define FPLINUX_UI_WIFI_SSID_BYTES 32
+#define FPLINUX_UI_WIFI_KEY_BYTES 64
+#define FPLINUX_UI_WIFI_ROW_COUNT 64
+#define FPLINUX_UI_WIFI_DISPLAY_BYTES (4 * FPLINUX_UI_WIFI_SSID_BYTES + 1)
+
+enum fplinux_ui_wifi_power {
+	FPLINUX_UI_WIFI_UNAVAILABLE,
+	FPLINUX_UI_WIFI_OFF,
+	FPLINUX_UI_WIFI_ON,
+};
+
+enum fplinux_ui_wifi_scan {
+	FPLINUX_UI_WIFI_SCAN_IDLE,
+	FPLINUX_UI_WIFI_SCANNING,
+	FPLINUX_UI_WIFI_SCAN_READY,
+	FPLINUX_UI_WIFI_SCAN_FAILED,
+};
+
+enum fplinux_ui_wifi_link {
+	FPLINUX_UI_WIFI_DISCONNECTED,
+	FPLINUX_UI_WIFI_CONNECTING,
+	FPLINUX_UI_WIFI_ADDRESSING,
+	FPLINUX_UI_WIFI_CONNECTED,
+	FPLINUX_UI_WIFI_NO_ADDRESS,
+};
+
+enum fplinux_ui_wifi_security {
+	FPLINUX_UI_WIFI_OPEN,
+	FPLINUX_UI_WIFI_WPA2,
+	FPLINUX_UI_WIFI_WPA3,
+	FPLINUX_UI_WIFI_ENTERPRISE,
+	FPLINUX_UI_WIFI_UNSUPPORTED,
+};
+
+enum fplinux_ui_wifi_action {
+	FPLINUX_UI_WIFI_SET_POWER,
+	FPLINUX_UI_WIFI_SCAN,
+	FPLINUX_UI_WIFI_CONNECT,
+	FPLINUX_UI_WIFI_CONNECT_SAVED,
+	FPLINUX_UI_WIFI_CONNECT_HIDDEN,
+	FPLINUX_UI_WIFI_CANCEL,
+	FPLINUX_UI_WIFI_DISCONNECT,
+	FPLINUX_UI_WIFI_RETRY_ADDRESS,
+	FPLINUX_UI_WIFI_FORGET,
+};
+
+enum fplinux_ui_wifi_result {
+	FPLINUX_UI_WIFI_APPLIED,
+	FPLINUX_UI_WIFI_BUSY,
+	FPLINUX_UI_WIFI_NETWORK_UNAVAILABLE,
+	FPLINUX_UI_WIFI_AUTH_FAILED,
+	FPLINUX_UI_WIFI_BAD_PASSWORD,
+	FPLINUX_UI_WIFI_ADDRESS_FAILED,
+	FPLINUX_UI_WIFI_PROFILE_FAILED,
+	FPLINUX_UI_WIFI_FAILED,
+};
+
+struct fplinux_ui_wifi_network {
+	uint32_t id;
+	uint32_t profile_id;
+	enum fplinux_ui_wifi_security security;
+	char name[FPLINUX_UI_WIFI_DISPLAY_BYTES];
+};
+
+struct fplinux_ui_wifi_state {
+	enum fplinux_ui_wifi_power power;
+	enum fplinux_ui_wifi_scan scan;
+	enum fplinux_ui_wifi_link link;
+	bool open_supported;
+	struct fplinux_ui_wifi_network current;
+	char address[16];
+	size_t available_count;
+	size_t saved_count;
+	struct fplinux_ui_wifi_network available[FPLINUX_UI_WIFI_ROW_COUNT];
+	struct fplinux_ui_wifi_network saved[FPLINUX_UI_WIFI_ROW_COUNT];
+};
+
+struct fplinux_ui_wifi_request {
+	enum fplinux_ui_wifi_action action;
+	/* Network ID, profile ID or original request serial, depending on action. */
+	uint32_t target;
+	bool enabled;
+	bool save;
+	enum fplinux_ui_wifi_security security;
+	char ssid[FPLINUX_UI_WIFI_SSID_BYTES + 1];
+	char key[FPLINUX_UI_WIFI_KEY_BYTES + 1];
 };
 
 struct fplinux_ui_session_document_choice {
@@ -303,6 +395,20 @@ struct fplinux_ui_session_message {
 	struct fplinux_volume_result volume_result;
 	/* SYSTEM_LEVELS: one complete, read-only snapshot owned by Session. */
 	struct fplinux_system_levels system_levels;
+	/*
+	 * Session publishes WIFI_STATE only for qualified station support, using
+	 * UNAVAILABLE when it disappears. State is independent of request
+	 * completion. Row IDs stay stable for the same network/security or
+	 * persisted profile. A saved row carries its profile ID in both fields.
+	 * Only WIFI_REQUEST carries a key. Requests and their terminal
+	 * WIFI_RESULT carry the same nonzero serial. Cancel targets the serial
+	 * of a connection on this client's control socket.
+	 */
+	union {
+		struct fplinux_ui_wifi_request wifi_request;
+		struct fplinux_ui_wifi_state wifi_state;
+		enum fplinux_ui_wifi_result wifi_result;
+	};
 };
 
 struct fplinux_ui;

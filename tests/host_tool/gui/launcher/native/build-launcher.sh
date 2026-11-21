@@ -55,7 +55,7 @@ session=$root/alpine/aports/fplinux-session
 # shellcheck disable=SC2046
 ui_host_compile -pthread -I"$common" -I"$screens_dir" -I"$session" \
 	-I"$root/include" -I"$root/include/fplinux" -I"$ui_host_inputs" \
-	$(pkg-config --cflags wayland-server xkbcommon json-c) \
+	$(pkg-config --cflags wayland-server xkbcommon json-c dbus-1) \
 	"$screens_dir/launcher-session-volume.c" "$common/ui-frame-peer.c" \
 	"$session/session-core.c" "$session/session-child.c" \
 	"$session/session-storage.c" "$session/session-audio.c" "$session/session-volume.c" \
@@ -63,6 +63,7 @@ ui_host_compile -pthread -I"$common" -I"$screens_dir" -I"$session" \
 	"$session/session-power.c" "$session/session-settings.c" \
 	"$session/session-battery.c" "$session/session-clock.c" \
 	"$session/session-wireless.c" \
+	"$session/session-wifi-station.c" "$session/session-wifi-dhcp.c" \
 	"$ui_host_shared/fplinux-settings-values.c" \
 	"$ui_host_shared/fplinux-clock-model.c" "$ui_host_shared/fplinux-clock-wire.c" \
 	"$ui_host_shared/fplinux-brightness-client.c" "$ui_host_shared/fplinux-keypad-light.c" \
@@ -71,5 +72,5 @@ ui_host_compile -pthread -I"$common" -I"$screens_dir" -I"$session" \
 	"$ui_host_ui/fplinux-language.c" "$ui_host_ui/fplinux-utf8.c" \
 	"$ui_host_inputs/xdg-shell-protocol.c" \
 	-Wl,--wrap=fplinux_session_wireless_create \
-	$(pkg-config --libs wayland-server xkbcommon json-c) -lintl \
+	$(pkg-config --libs wayland-server xkbcommon json-c dbus-1) -lintl \
 	-o "$work/launcher-session-volume"

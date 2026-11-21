@@ -17,13 +17,16 @@ if TYPE_CHECKING:
 
 
 @pytest.mark.parametrize(
-    "setup",
+    ("setup", "dbus"),
     [
-        pytest.param(". /etc/init.d/fplinux-devices; start", id="boot"),
-        pytest.param("/bin/sh /pre-install", id="apk-install"),
+        pytest.param(". /etc/init.d/fplinux-devices; start", False, id="boot"),
+        pytest.param(". /etc/init.d/fplinux-devices; start", True, id="boot-with-dbus"),
+        pytest.param("/bin/sh /pre-install", False, id="apk-install"),
     ],
 )
-def test_account_creation_keeps_the_shared_home_identity(tmp_path: Path, setup: str) -> None:
+def test_account_creation_keeps_the_shared_home_identity(
+    tmp_path: Path, setup: str, *, dbus: bool
+) -> None:
     install_shell(tmp_path)
     for applet in ("addgroup", "adduser", "grep", "id"):
         (tmp_path / "bin" / applet).symlink_to("../libexec/busybox")
@@ -37,6 +40,10 @@ def test_account_creation_keeps_the_shared_home_identity(tmp_path: Path, setup: 
     (tmp_path / "dev" / "null").touch()
     libexec = tmp_path / "usr" / "libexec" / "fplinux"
     libexec.mkdir(parents=True)
+    if dbus:
+        daemon = tmp_path / "usr/bin/dbus-daemon"
+        daemon.parent.mkdir()
+        daemon.touch(mode=0o755)
 
     aports = ROOT / "alpine" / "aports"
     shutil.copyfile(aports / "fplinux-base" / "fplinux-accounts", libexec / "accounts")
@@ -52,7 +59,8 @@ def test_account_creation_keeps_the_shared_home_identity(tmp_path: Path, setup: 
             str(tmp_path),
             "/bin/sh",
             "-ec",
-            f"{setup}; {setup}; id -u fplinux; id -g fplinux; id -G fplinux",
+            f"{setup}; {setup}; id -u fplinux; id -g fplinux; id -G fplinux"
+            + ("; id -u messagebus; id -g messagebus; id -gn messagebus" if dbus else ""),
         ],
         name="create application accounts in a fresh root and repeat the operation",
         timeout=5,
@@ -60,7 +68,14 @@ def test_account_creation_keeps_the_shared_home_identity(tmp_path: Path, setup: 
     )
 
     assert result.returncode == 0, result.stderr
-    user_id, group_id, memberships = result.stdout.splitlines()
+    user_id, group_id, memberships, *messagebus = result.stdout.splitlines()
     assert user_id == "100"
     assert group_id == "102"
     assert set(memberships.split()) == {"101", "102"}
+    if dbus:
+        bus_user, bus_group, bus_name = messagebus
+        assert int(bus_user) > 0
+        assert int(bus_group) > 0
+        assert bus_name == "messagebus"
+        passwd = (account_files / "passwd").read_text().splitlines()
+        assert sum(line.startswith("messagebus:") for line in passwd) == 1

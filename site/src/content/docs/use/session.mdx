@@ -58,6 +58,7 @@ An untouched empty note creates no saved document. Clearing a previously saved n
 Open Settings from the catalog:
 
 - **Display** controls brightness from `1` to `10`, screen timeout, auto-lock and the light or dark theme.
+- **Wi-Fi** opens [network settings](#wi-fi) when a supported wireless interface is available.
 - **Bluetooth** turns the phone's Bluetooth on and off, as described in [Bluetooth](/fplinux/use/bluetooth/#turn-bluetooth-on-and-off). It is listed only while Bluetooth is available.
 - **Time & language** changes the date and time in UTC and the interface language.
 - **Input** selects the keypad input language independently of the interface language.
@@ -69,13 +70,21 @@ In **Time & language → Date and time**, select Date or Time and press Centre t
 
 The available languages come from installed language packages. The standard image includes English and Russian, with English as the default for the interface and keypad input. Saved language choices take precedence over these defaults. Changing a theme or interface language closes other graphical applications and reloads Home, so save your work first. The selection marker changes after confirmation; **Applying…** means the change is still pending. See [Clock and alarms](/fplinux/use/power/#clock-and-alarms) for clock synchronization and battery-backed time.
 
+## Wi-Fi
+
+Open **Settings → Wi-Fi** and turn on the interface. **Available networks** starts a scan. Select a WPA2 Personal network, enter its password and choose the **Connect** row. To enter a hidden network, choose **Options → Add network**. While typing, the right soft key clears text and **Options → Cancel** leaves the editor.
+
+**Save network** stores the profile after the network accepts the password. Reopen it from **Saved networks** to connect again or choose **Forget network** to remove it. The active connection survives returning Home and closing Settings. Use **Disconnect** to leave the network. If association succeeds and no address is available, **Options → Retry** in the connection details requests an address again.
+
+Saved profiles follow the [lifetime of the system root](#keeping-data). The power switch in Quick settings controls the same interface.
+
 ## Quick settings
 
 Press <Key>Dial</Key> on Home to open Quick settings. **Back**, <Key>Dial</Key> or a short press of <Key>Red</Key> returns to Home. Quick settings opens only from Home.
 
 - **Brightness** and **Volume** change with Left and Right. **Save** keeps the new level and **Cancel** restores the previous level. Leaving Quick settings without saving also restores it.
 - **Volume** controls application audio through the FPLinux audio service. Direct ALSA playback and FM radio use their own controls.
-- **Wi-Fi** turns the wireless interface on or off when available. Connecting to a network is a separate step.
+- **Wi-Fi** turns the wireless interface on or off when available. Use [Settings](#wi-fi) to select and connect to a network.
 - **Bluetooth** turns Bluetooth on and off as in [Settings](/fplinux/use/bluetooth/#turn-bluetooth-on-and-off). The row is shown only while Bluetooth is available.
 
 Where the phone's keymap provides dedicated volume keys, they change application volume while the keypad is unlocked. External keyboard volume keys work the same way. Hold a key to keep adjusting. During a Volume edit in Quick settings, they adjust the preview; **Save** keeps the level and **Cancel** restores it. A press that wakes a dark screen only wakes it, as with other keys.

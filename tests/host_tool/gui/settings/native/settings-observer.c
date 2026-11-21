@@ -284,7 +284,9 @@ void __wrap_lv_display_flush_ready(lv_display_t *display)
 		observation.theme = fplinux_ui_theme(application_ui)->kind;
 		struct fplinux_ui_screen *screen =
 			fplinux_ui_current(application_ui);
-		const char *text = fplinux_ui_form_get_text(screen, 0);
+		const char *text = getenv("FPLINUX_SETTINGS_TEST_WIFI") ?
+					   NULL :
+					   fplinux_ui_form_get_text(screen, 0);
 
 		if (text)
 			snprintf(observation.form_text,

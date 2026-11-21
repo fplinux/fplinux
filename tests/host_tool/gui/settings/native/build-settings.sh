@@ -25,6 +25,7 @@ msgfmt --check --output-file="$work/locale/ru/LC_MESSAGES/fplinux-ui.mo" "$root/
 ui_host_build_application -pthread -I"$common" -I"$settings" $(pkg-config --cflags dbus-1) \
 	"$settings/fplinux-settings.c" "$settings/settings-core.c" \
 	"$settings/settings-bluetooth.c" \
+	"$settings/settings-wifi.c" \
 	"$ui_host_shared/fplinux-settings-values.c" \
 	"$ui_host_shared/fplinux-system-info.c" \
 	"$ui_host_shared/fplinux-bluez-adapter.c" \

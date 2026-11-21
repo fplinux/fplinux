@@ -212,6 +212,51 @@ static void wait_for_ioctl(atomic_int *entered, const char *message)
 	require(atomic_load(entered), message);
 }
 
+static void cancel_queued_connection(struct fplinux_session_wireless *wireless)
+{
+	const struct fplinux_ui_wifi_request connect = {
+		.action = FPLINUX_UI_WIFI_CONNECT_HIDDEN,
+		.security = FPLINUX_UI_WIFI_WPA2,
+		.save = true,
+		.ssid = "test-network",
+		.key = "test-password",
+	};
+	struct fplinux_ui_wifi_request cancel = {
+		.action = FPLINUX_UI_WIFI_CANCEL,
+		.target = 99,
+	};
+	enum fplinux_ui_wifi_result result;
+	uint32_t ticket;
+
+	atomic_store(&network.entered_get, 0);
+	atomic_store(&network.hold_get, 1);
+	signal_change();
+	wait_for_ioctl(&network.entered_get,
+		       "hold worker before reading Wi-Fi requests");
+	require(fplinux_session_wireless_wifi_request(wireless, &connect,
+						      100) == 0,
+		"connection request is queued");
+	require(fplinux_session_wireless_wifi_request(wireless, &cancel, 101) ==
+			EBUSY,
+		"a different ticket does not cancel the queued connection");
+	cancel.target = 100;
+	require(fplinux_session_wireless_wifi_request(wireless, &cancel, 102) ==
+			0,
+		"cancel is accepted before the worker dequeues the connection");
+	wait_notification(wireless);
+	require(fplinux_session_wireless_take_wifi_result(wireless, &ticket,
+							  &result) &&
+			ticket == 102 && result == FPLINUX_UI_WIFI_APPLIED,
+		"result acknowledges cancel while the worker is still held");
+	require(fplinux_session_wireless_request(wireless, false) == 0,
+		"cancelled connection no longer occupies the request queue");
+	atomic_store(&network.hold_get, 0);
+	require(finish(wireless) == 0, "worker continues after cancellation");
+	require(!fplinux_session_wireless_take_wifi_result(wireless, &ticket,
+							   &result),
+		"cancelled connection does not produce a second result");
+}
+
 int main(void)
 {
 	struct fplinux_session_wireless *wireless;
@@ -234,6 +279,7 @@ int main(void)
 	expect_change(wireless, false, false, false, 0);
 	atomic_store(&network.wireless, 1);
 	expect_change(wireless, true, true, false, 0);
+	cancel_queued_connection(wireless);
 	require(fplinux_session_wireless_request(wireless, true) == 0,
 		"enable requested");
 	require(finish(wireless) == 0, "enable confirmed");

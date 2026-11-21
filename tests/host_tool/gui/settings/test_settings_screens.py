@@ -197,6 +197,48 @@ def settings_native(
         yield directory
 
 
+@pytest.mark.parametrize("screen", list(ROOT_ROWS))
+@pytest.mark.parametrize("locale", ["en", "ru"])
+def test_actual_settings_wifi_follows_station_peer_through_keypad(
+    settings_native: Path, tmp_path: Path, screen: tuple[int, int], locale: str
+) -> None:
+    """The compositor and Settings are real; Session supplies station state."""
+    width, height = screen
+    result = run_process(
+        [
+            str(settings_native / "settings-screens"),
+            str(settings_native / "settings"),
+            str(ROOT / "tests/host_tool/gui/screens/keypad.xkb"),
+            str(tmp_path / "session.sock"),
+            str(tmp_path),
+            str(ROOT / "alpine/aports/fplinux-language"),
+            "wifi",
+        ],
+        name=f"Settings Wi-Fi station navigation at {width}x{height} in {locale}",
+        env={
+            "FPLINUX_SETTINGS_TEST_WIDTH": str(width),
+            "FPLINUX_SETTINGS_TEST_HEIGHT": str(height),
+            "FPLINUX_SETTINGS_TEST_LOCALE": locale,
+            "FPLINUX_SETTINGS_TEST_THEME": "dark",
+        },
+        timeout=25,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout == (
+        "settings-wifi: keyboard station routes followed confirmed state "
+        "and exact request identities\n"
+    )
+    _, _, bars = ROOT_ROWS[screen]
+    for capture in ("wifi-on", "wifi-available-long", "wifi-masked"):
+        framebuffer = tmp_path / f"{capture}.rgb565"
+        assert framebuffer.stat().st_size == width * (height - bars) * 2
+        log_root = os.environ.get("FPLINUX_LOG_ROOT")
+        if log_root:
+            shutil.copyfile(
+                framebuffer, Path(log_root) / f"{width}x{height}-{locale}-{capture}.rgb565"
+            )
+
+
 def test_actual_settings_applied_storage_errors_commit_before_ack_and_keep_notice(
     settings_native: Path, tmp_path: Path
 ) -> None:

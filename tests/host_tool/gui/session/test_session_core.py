@@ -286,6 +286,7 @@ def session_core_harness(tmp_path_factory: pytest.TempPathFactory) -> Path:
         "volume-output-error",
         "wifi-controls",
         "wifi-unsupported",
+        "wifi-station-requests",
         "wake-stays-dark-before-presentation",
         "wake-late-commit",
         "wake-integrated-buffers",

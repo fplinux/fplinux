@@ -2,6 +2,8 @@
 #ifndef FPLINUX_SESSION_WIRELESS_H
 #define FPLINUX_SESSION_WIRELESS_H
 
+#include "fplinux-ui-session.h"
+
 #include <stdbool.h>
 
 struct fplinux_session_wireless_state {
@@ -29,5 +31,15 @@ int fplinux_session_wireless_request(struct fplinux_session_wireless *wireless,
 /* Returns true exactly once per accepted request; error is an errno value. */
 bool fplinux_session_wireless_take_result(
 	struct fplinux_session_wireless *wireless, int *error);
+
+void fplinux_session_wireless_wifi_state(
+	struct fplinux_session_wireless *wireless,
+	struct fplinux_ui_wifi_state *state);
+int fplinux_session_wireless_wifi_request(
+	struct fplinux_session_wireless *wireless,
+	const struct fplinux_ui_wifi_request *request, uint32_t ticket);
+bool fplinux_session_wireless_take_wifi_result(
+	struct fplinux_session_wireless *wireless, uint32_t *ticket,
+	enum fplinux_ui_wifi_result *result);
 
 #endif

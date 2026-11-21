@@ -156,6 +156,10 @@ struct fplinux_session_wireless {
 	bool requested;
 	bool ready;
 	int result;
+	uint32_t wifi_request;
+	uint32_t wifi_cancel;
+	uint32_t wifi_ready;
+	enum fplinux_ui_wifi_result wifi_result;
 };
 
 static struct fplinux_session_wireless *test_wireless;
@@ -237,6 +241,55 @@ bool fplinux_session_wireless_take_result(
 		return false;
 	wireless->ready = false;
 	*error = wireless->result;
+	return true;
+}
+
+void fplinux_session_wireless_wifi_state(
+	struct fplinux_session_wireless *wireless,
+	struct fplinux_ui_wifi_state *state)
+{
+	*state = (struct fplinux_ui_wifi_state){
+		.power = !wireless->state.known	 ? FPLINUX_UI_WIFI_UNAVAILABLE :
+			 wireless->state.enabled ? FPLINUX_UI_WIFI_ON :
+						   FPLINUX_UI_WIFI_OFF,
+		.link = wireless->wifi_request ? FPLINUX_UI_WIFI_CONNECTING :
+						 FPLINUX_UI_WIFI_DISCONNECTED,
+	};
+	if (wireless->wifi_request)
+		state->current = (struct fplinux_ui_wifi_network){
+			.id = 5,
+			.security = FPLINUX_UI_WIFI_WPA2,
+			.name = "Hidden fixture",
+		};
+}
+
+int fplinux_session_wireless_wifi_request(
+	struct fplinux_session_wireless *wireless,
+	const struct fplinux_ui_wifi_request *request, uint32_t ticket)
+{
+	if (request->action == FPLINUX_UI_WIFI_CONNECT_HIDDEN) {
+		CHECK(!wireless->wifi_request && wireless->state.enabled);
+		CHECK(!strcmp(request->ssid, "Hidden fixture"));
+		CHECK(!strcmp(request->key, "test-password"));
+		wireless->wifi_request = ticket;
+	} else {
+		CHECK(request->action == FPLINUX_UI_WIFI_CANCEL);
+		CHECK(request->target == wireless->wifi_request);
+		wireless->wifi_cancel = ticket;
+	}
+	wireless_notify(wireless);
+	return 0;
+}
+
+bool fplinux_session_wireless_take_wifi_result(
+	struct fplinux_session_wireless *wireless, uint32_t *ticket,
+	enum fplinux_ui_wifi_result *result)
+{
+	if (!wireless->wifi_ready)
+		return false;
+	*ticket = wireless->wifi_ready;
+	*result = wireless->wifi_result;
+	wireless->wifi_ready = 0;
 	return true;
 }
 
@@ -4152,6 +4205,79 @@ static void test_wireless_controls(struct fixture *fixture, bool supported)
 			    &response));
 }
 
+static void test_wifi_station_requests(struct fixture *fixture)
+{
+	struct peer *launcher = start_launcher(fixture);
+	struct peer *settings;
+	struct fplinux_ui_session_message response;
+	const struct fplinux_ui_session_message connect = {
+		.type = FPLINUX_UI_SESSION_WIFI_REQUEST,
+		.serial = 17,
+		.wifi_request = {
+			.action = FPLINUX_UI_WIFI_CONNECT_HIDDEN,
+			.security = FPLINUX_UI_WIFI_WPA2,
+			.ssid = "Hidden fixture",
+			.key = "test-password",
+			.save = true,
+		},
+	};
+	struct fplinux_ui_session_message cancel = {
+		.type = FPLINUX_UI_SESSION_WIFI_REQUEST,
+		.serial = 18,
+		.wifi_request = {
+			.action = FPLINUX_UI_WIFI_CANCEL,
+			.target = 16,
+		},
+	};
+
+	test_wireless->state.enabled = true;
+	settings = show_app(fixture, launcher, TEST_SETTINGS);
+	response = wait_message(fixture, settings,
+				FPLINUX_UI_SESSION_WIFI_STATE, NULL);
+	CHECK(response.wifi_state.power == FPLINUX_UI_WIFI_ON);
+	issue(fixture, settings, &connect);
+	response = wait_message(fixture, settings,
+				FPLINUX_UI_SESSION_WIFI_STATE, NULL);
+	CHECK(response.wifi_state.link == FPLINUX_UI_WIFI_CONNECTING);
+	CHECK(test_wireless->wifi_request &&
+	      test_wireless->wifi_request != connect.serial);
+	issue(fixture, settings, &cancel);
+	response = wait_message(fixture, settings,
+				FPLINUX_UI_SESSION_WIFI_RESULT, NULL);
+	CHECK(response.serial == cancel.serial &&
+	      response.wifi_result == FPLINUX_UI_WIFI_FAILED &&
+	      !test_wireless->wifi_cancel);
+
+	cancel.serial = 19;
+	cancel.wifi_request.target = connect.serial;
+	issue(fixture, settings, &cancel);
+	CHECK(test_wireless->wifi_cancel &&
+	      test_wireless->wifi_cancel != cancel.serial);
+	test_wireless->wifi_ready = test_wireless->wifi_request;
+	test_wireless->wifi_result = FPLINUX_UI_WIFI_APPLIED;
+	wireless_notify(test_wireless);
+	pump(fixture, 16);
+	CHECK(!take_message(settings, FPLINUX_UI_SESSION_WIFI_RESULT, NULL,
+			    &response));
+
+	test_wireless->wifi_request = 0;
+	test_wireless->wifi_ready = test_wireless->wifi_cancel;
+	wireless_notify(test_wireless);
+	response = wait_message(fixture, settings,
+				FPLINUX_UI_SESSION_WIFI_RESULT, NULL);
+	CHECK(response.serial == cancel.serial &&
+	      response.wifi_result == FPLINUX_UI_WIFI_APPLIED);
+	fplinux_session_home(fixture->session);
+	response = active_for(fixture, launcher, "");
+	acknowledge(fixture, launcher, &response);
+	issue(fixture, settings, &connect);
+	response = wait_message(fixture, settings,
+				FPLINUX_UI_SESSION_WIFI_RESULT, NULL);
+	CHECK(response.serial == connect.serial &&
+	      response.wifi_result == FPLINUX_UI_WIFI_FAILED &&
+	      !test_wireless->wifi_request);
+}
+
 static void test_wake_stays_dark_before_presentation(struct fixture *fixture)
 {
 	struct peer *launcher = start_launcher(fixture);
@@ -7378,7 +7504,8 @@ int main(int argc, char **argv)
 	CHECK(argc == 3 || argc == 7);
 	if (!strncmp(argv[1], "storage-", 8))
 		CHECK(setenv("FPLINUX_TEST_STORAGE", "1", 1) == 0);
-	if (!strcmp(argv[1], "wifi-controls"))
+	if (!strcmp(argv[1], "wifi-controls") ||
+	    !strcmp(argv[1], "wifi-station-requests"))
 		CHECK(setenv("FPLINUX_TEST_WIFI", "1", 1) == 0);
 	if (!strcmp(argv[1], "volume-loaded"))
 		CHECK(setenv("FPLINUX_TEST_VOLUME_PRESET", "1", 1) == 0);
@@ -7507,6 +7634,8 @@ int main(int argc, char **argv)
 		 !strcmp(argv[1], "wifi-unsupported"))
 		test_wireless_controls(fixture,
 				       !strcmp(argv[1], "wifi-controls"));
+	else if (!strcmp(argv[1], "wifi-station-requests"))
+		test_wifi_station_requests(fixture);
 	else if (!strcmp(argv[1], "storage-no-card"))
 		test_storage_no_card(fixture);
 	else if (!strcmp(argv[1], "storage-busy-lifecycle"))

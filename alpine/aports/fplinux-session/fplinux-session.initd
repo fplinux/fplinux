@@ -18,6 +18,9 @@ leds_dir=/sys/class/leds
 
 depend() {
 	need localmount fplinux-devices
+	if [ -x /etc/init.d/fplinux-wifi ]; then
+		need fplinux-wifi
+	fi
 	after fplinux-input fplinux-brightness
 }
 

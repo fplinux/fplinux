@@ -75,19 +75,22 @@ fplinux-mre = [
   "zstd-libs-1.5.7-r2.apk",
 ]
 fplinux-ncurses = ["ncurses-terminfo-base-6.6_p20260516-r0.apk"]
-fplinux-session = ["json-c-0.18-r1.apk"]
+fplinux-session = ["dbus-libs-1.16.2-r2.apk", "json-c-0.18-r1.apk"]
 fplinux-settings = ["dbus-libs-1.16.2-r2.apk"]
 fplinux-uclient = ["ca-certificates-bundle-20261020-r0.apk"]
 fplinux-ui = ["json-c-0.18-r1.apk"]
 fplinux-wayland = ["libffi-3.5.2-r1.apk"]
 fplinux-wifi = [
+  "dbus-1.16.2-r2.apk",
   "dbus-libs-1.16.2-r2.apk",
+  "dbus-openrc-1.16.2-r2.apk",
   "hostapd-2.11-r4.apk",
   "iw-6.17-r0.apk",
   "libcrypto3-3.5.9-r1.apk",
   "libexpat-2.10.0-r0.apk",
   "libnl3-3.11.0-r0.apk",
   "libssl3-3.5.9-r1.apk",
+  "openresolv-3.17.4-r0.apk",
   "pcsc-lite-libs-2.4.0-r4.apk",
   "wireless-regdb-2025.10.07-r0.apk",
   "wpa_supplicant-2.11-r4.apk",
@@ -774,6 +777,12 @@ repository = "main"
 file = "nghttp2-libs-1.70.0-r0.apk"
 sha256 = "d162d69667b1334ee62b7794b6f1ccd08c79361bb745105cc5a52472eeffc2bc"
 bytes = 56920
+
+[[package]]
+repository = "main"
+file = "openresolv-3.17.4-r0.apk"
+sha256 = "809b71c49ec10fa6743416b3f49d7abe003cb31778f0fd516e0c3c25f815763b"
+bytes = 19304
 
 [[package]]
 repository = "main"

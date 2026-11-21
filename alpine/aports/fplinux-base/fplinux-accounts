@@ -27,3 +27,19 @@ case " $(id -nG fplinux) " in
 *" render "*) ;;
 *) addgroup fplinux render ;;
 esac
+
+if [ -x /usr/bin/dbus-daemon ]; then
+	if ! grep -q '^messagebus:' /etc/group; then
+		addgroup -S messagebus
+	fi
+	if ! id messagebus >/dev/null 2>&1; then
+		adduser -S -D -H -h /dev/null -s /sbin/nologin \
+			-G messagebus -g messagebus messagebus
+	fi
+	if [ "$(id -u messagebus)" -eq 0 ] ||
+		[ "$(id -g messagebus)" -eq 0 ] ||
+		[ "$(id -gn messagebus)" != messagebus ]; then
+		printf 'fplinux-accounts: messagebus needs a non-root system account\n' >&2
+		exit 1
+	fi
+fi

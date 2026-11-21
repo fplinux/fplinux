@@ -850,6 +850,7 @@ static bool receive_session(struct fplinux_ui *ui)
 
 		/* These requests travel only from client to manager. */
 		if (message.type == FPLINUX_UI_SESSION_LAUNCH ||
+		    message.type == FPLINUX_UI_SESSION_WIFI_REQUEST ||
 		    message.type == FPLINUX_UI_SESSION_OPEN_FILE ||
 		    message.type == FPLINUX_UI_SESSION_DOCUMENT_CHOICE ||
 		    message.type == FPLINUX_UI_SESSION_STORAGE_REQUEST ||
@@ -2830,6 +2831,8 @@ bool fplinux_ui_send(struct fplinux_ui *ui,
 	    message->type == FPLINUX_UI_SESSION_STORAGE_REQUEST ||
 	    message->type == FPLINUX_UI_SESSION_STORAGE_RESULT ||
 	    message->type == FPLINUX_UI_SESSION_SYSTEM_LEVELS ||
+	    message->type == FPLINUX_UI_SESSION_WIFI_STATE ||
+	    message->type == FPLINUX_UI_SESSION_WIFI_RESULT ||
 	    (message->type >= FPLINUX_UI_SESSION_OPEN_FILE &&
 	     message->type <= FPLINUX_UI_SESSION_DOCUMENT_RESULT)) {
 		errno = EINVAL;

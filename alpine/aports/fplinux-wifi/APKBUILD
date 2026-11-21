@@ -6,9 +6,16 @@ pkgdesc="Wi-Fi station and access point tools for FPLinux"
 url="https://github.com/fplinux/fplinux"
 arch="armv7"
 license="GPL-2.0-only"
-depends="hostapd iw wireless-regdb wpa_supplicant"
+depends="dbus dbus-openrc hostapd iw openresolv wireless-regdb wpa_supplicant"
 options="!check"
+source="fplinux-wifi.initd"
+builddir="$srcdir"
 
 package() {
-	mkdir -p "$pkgdir"
+	install -Dm755 "$srcdir/fplinux-wifi.initd" "$pkgdir/etc/init.d/fplinux-wifi"
+	mkdir -p "$pkgdir/etc/runlevels/default"
+	ln -s /etc/init.d/fplinux-wifi "$pkgdir/etc/runlevels/default/fplinux-wifi"
 }
+sha512sums="
+2b9f2d985571da819beea272d1183e7f35a951c2aa166aa7f15a6a33222e3d821449a85870fbd99c81bcd1f89caae21ee013e27fd39363ff6dd566e664c0bfd1  fplinux-wifi.initd
+"

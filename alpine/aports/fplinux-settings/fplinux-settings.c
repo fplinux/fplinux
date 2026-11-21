@@ -5,6 +5,7 @@
 #include "fplinux-system-info.h"
 #include "settings-core.h"
 #include "settings-bluetooth.h"
+#include "settings-wifi.h"
 #include "fplinux-cli.h"
 
 #include <fplinux/fplinux-ui.h>
@@ -45,14 +46,16 @@ enum command {
 	COMMAND_CHANGE,
 };
 
-/* In this order; Bluetooth only while BlueZ has its adapter. */
+/* In this order; the two radio rows follow their own availability. */
 enum root_row {
 	ROOT_DISPLAY,
 	ROOT_SOUND,
 	ROOT_BLUETOOTH,
+	ROOT_WIFI,
 	ROOT_TIME_LANGUAGE,
 	ROOT_INPUT,
 	ROOT_ABOUT,
+	ROOT_COUNT,
 };
 
 enum sound_row {
@@ -233,6 +236,8 @@ struct settings_app {
 	struct fplinux_bluez_adapter *bluetooth;
 	struct fplinux_settings_bluetooth *bluetooth_view;
 	bool bluetooth_row;
+	struct fplinux_settings_wifi *wifi;
+	bool wifi_row;
 
 	/* Date and time: an item follows the clock until the user edits it. */
 	size_t date_item;
@@ -1472,16 +1477,31 @@ static const char *bluetooth_state(const struct settings_app *app)
 							       _("Off");
 }
 
-/* The root list's index of a row, which follows a hidden Bluetooth row. */
+static bool root_has_row(const struct settings_app *app, enum root_row row)
+{
+	if (row == ROOT_BLUETOOTH)
+		return app->bluetooth_row;
+	if (row == ROOT_WIFI)
+		return app->wifi_row;
+	return true;
+}
+
 static size_t root_index(const struct settings_app *app, enum root_row row)
 {
-	return row > ROOT_BLUETOOTH && !app->bluetooth_row ? row - 1 : row;
+	size_t index = 0;
+
+	for (enum root_row preceding = 0; preceding < row; ++preceding)
+		if (root_has_row(app, preceding))
+			++index;
+	return index;
 }
 
 static enum root_row root_row_at(const struct settings_app *app, size_t index)
 {
-	return index >= ROOT_BLUETOOTH && !app->bluetooth_row ? index + 1 :
-								index;
+	for (enum root_row row = 0; row < ROOT_COUNT; ++row)
+		if (root_has_row(app, row) && index-- == 0)
+			return row;
+	return ROOT_COUNT;
 }
 
 /* The root row comes and goes with the adapter; the focus stays on its row. */
@@ -1493,7 +1513,9 @@ static void show_root_bluetooth(struct settings_app *app)
 	if (!app->root)
 		return;
 	if (present && !app->bluetooth_row) {
-		fplinux_ui_list_insert(app->root, index, _("Bluetooth"), NULL);
+		if (fplinux_ui_list_insert(app->root, index, _("Bluetooth"),
+					   NULL) == SIZE_MAX)
+			return;
 		set_glyph(app, app->root, index, "bluetooth");
 	} else if (!present && app->bluetooth_row) {
 		fplinux_ui_list_delete(app->root, index);
@@ -1502,6 +1524,46 @@ static void show_root_bluetooth(struct settings_app *app)
 	if (present)
 		fplinux_ui_list_set(app->root, index, _("Bluetooth"),
 				    bluetooth_state(app));
+}
+
+static const char *wifi_state(const struct settings_app *app)
+{
+	return fplinux_settings_wifi_power(app->wifi) == FPLINUX_UI_WIFI_ON ?
+		       _("On") :
+		       _("Off");
+}
+
+static void show_root_wifi(struct settings_app *app)
+{
+	bool present = fplinux_settings_wifi_power(app->wifi) !=
+		       FPLINUX_UI_WIFI_UNAVAILABLE;
+	size_t index = root_index(app, ROOT_WIFI);
+
+	if (!app->root)
+		return;
+	if (present && !app->wifi_row) {
+		if (fplinux_ui_list_insert(app->root, index, _("Wi-Fi"),
+					   wifi_state(app)) == SIZE_MAX)
+			return;
+		set_glyph(app, app->root, index, "wifi");
+	} else if (!present && app->wifi_row) {
+		fplinux_ui_list_delete(app->root, index);
+	}
+	app->wifi_row = present;
+	if (present)
+		fplinux_ui_list_set(app->root, index, _("Wi-Fi"),
+				    wifi_state(app));
+}
+
+static void receive_wifi(struct settings_app *app,
+			 const struct fplinux_ui_session_message *message)
+{
+	if (!app->wifi && message->type == FPLINUX_UI_SESSION_WIFI_STATE &&
+	    message->wifi_state.power != FPLINUX_UI_WIFI_UNAVAILABLE)
+		app->wifi = fplinux_settings_wifi_new(app->ui);
+	if (app->wifi)
+		fplinux_settings_wifi_receive(app->wifi, message);
+	show_root_wifi(app);
 }
 
 static void bluetooth_finished(bool applied, void *context)
@@ -1559,6 +1621,9 @@ static void root_command(struct fplinux_ui *ui, struct fplinux_ui_screen *list,
 	case ROOT_BLUETOOTH:
 		open_bluetooth(app);
 		break;
+	case ROOT_WIFI:
+		fplinux_settings_wifi_show(app->wifi);
+		break;
 	case ROOT_DISPLAY:
 		open_display(app, DISPLAY_BRIGHTNESS);
 		break;
@@ -1573,6 +1638,8 @@ static void root_command(struct fplinux_ui *ui, struct fplinux_ui_screen *list,
 		break;
 	case ROOT_ABOUT:
 		open_about(app);
+		break;
+	case ROOT_COUNT:
 		break;
 	}
 }
@@ -1593,6 +1660,7 @@ static void show_root(struct settings_app *app)
 				    value :
 				    _("Unavailable"));
 	show_root_bluetooth(app);
+	show_root_wifi(app);
 	language_name(fplinux_ui_locale(app->ui), value, sizeof(value));
 	fplinux_ui_list_set(app->root, root_index(app, ROOT_TIME_LANGUAGE),
 			    _("Time & language"), value);
@@ -1612,11 +1680,15 @@ static struct fplinux_ui_screen *create_root(struct settings_app *app)
 		return NULL;
 	fplinux_ui_list_set_value_details(list);
 	app->bluetooth_row = bluetooth_present(app);
+	app->wifi_row = fplinux_settings_wifi_power(app->wifi) !=
+			FPLINUX_UI_WIFI_UNAVAILABLE;
 	fplinux_ui_list_append(list, _("Display"), NULL);
 	fplinux_ui_list_append(list, _("Sound"), NULL);
 	if (app->bluetooth_row)
 		fplinux_ui_list_append(list, _("Bluetooth"),
 				       bluetooth_state(app));
+	if (app->wifi_row)
+		fplinux_ui_list_append(list, _("Wi-Fi"), wifi_state(app));
 	fplinux_ui_list_append(list, _("Time & language"), NULL);
 	fplinux_ui_list_append(list, _("Input"), NULL);
 	fplinux_ui_list_append(
@@ -1630,6 +1702,8 @@ static struct fplinux_ui_screen *create_root(struct settings_app *app)
 	if (app->bluetooth_row)
 		set_glyph(app, list, root_index(app, ROOT_BLUETOOTH),
 			  "bluetooth");
+	if (app->wifi_row)
+		set_glyph(app, list, root_index(app, ROOT_WIFI), "wifi");
 	set_glyph(app, list, root_index(app, ROOT_TIME_LANGUAGE), "date-time");
 	set_glyph(app, list, root_index(app, ROOT_INPUT), "keyboard");
 	set_glyph(app, list, root_index(app, ROOT_ABOUT), "about");
@@ -1645,6 +1719,7 @@ static void return_root(struct settings_app *app)
 	};
 
 	fplinux_ui_menu_close(app->ui);
+	fplinux_settings_wifi_reset(app->wifi);
 	if (app->bluetooth_view)
 		fplinux_settings_bluetooth_reset(app->bluetooth_view);
 	end_preview(app);
@@ -1686,9 +1761,11 @@ static void rebuild(struct settings_app *app)
 	bool about = app->about != NULL;
 	bool bluetooth = app->bluetooth_view &&
 			 fplinux_settings_bluetooth_shown(app->bluetooth_view);
+	bool wifi = fplinux_settings_wifi_shown(app->wifi);
 	bool notice = app->notice_open;
 	bool root_requested = app->root_requested;
-	size_t focus = fplinux_ui_list_get_focused(app->root);
+	enum root_row focus =
+		root_row_at(app, fplinux_ui_list_get_focused(app->root));
 
 	if (notice)
 		close_screen(app, &app->notice_screen);
@@ -1699,7 +1776,7 @@ static void rebuild(struct settings_app *app)
 	root = create_root(app);
 	if (!root)
 		return;
-	fplinux_ui_list_set_focused(root, focus);
+	fplinux_ui_list_set_focused(root, root_index(app, focus));
 	fplinux_ui_replace(app->ui, root);
 	app->root = root;
 	show_root(app);
@@ -1715,6 +1792,8 @@ static void rebuild(struct settings_app *app)
 		open_about(app);
 	else if (!root_requested && bluetooth)
 		open_bluetooth(app);
+	else if (!root_requested && wifi)
+		fplinux_settings_wifi_show(app->wifi);
 	if (notice)
 		show_notice(app);
 }
@@ -2044,6 +2123,11 @@ static void handle_event(struct fplinux_ui *ui,
 		receive_system_levels(app);
 		break;
 	case FPLINUX_UI_EVENT_SESSION:
+		if (message->type == FPLINUX_UI_SESSION_WIFI_STATE ||
+		    message->type == FPLINUX_UI_SESSION_WIFI_RESULT) {
+			receive_wifi(app, message);
+			break;
+		}
 		if (app->volume_pending &&
 		    (!strcmp(message->name,
 			     volume_setting_name(app->volume_class, false)) ||
@@ -2108,6 +2192,7 @@ static void handle_event(struct fplinux_ui *ui,
 		break;
 	case FPLINUX_UI_EVENT_LIFECYCLE:
 		if (fplinux_ui_lifecycle(ui) == FPLINUX_UI_BACKGROUND) {
+			fplinux_settings_wifi_background(app->wifi);
 			/* The manager restores the level when the task is parked. */
 			app->previewing = false;
 			app->volume_previewing = false;
@@ -2240,6 +2325,7 @@ int main(int argc, char **argv)
 	result = fplinux_ui_run(app.ui);
 	lv_timer_delete(app.clock_timer);
 	close_bluetooth(&app);
+	fplinux_settings_wifi_free(app.wifi);
 	fplinux_ui_close(app.ui);
 	return result < 0;
 }

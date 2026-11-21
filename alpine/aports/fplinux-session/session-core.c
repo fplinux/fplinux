@@ -2544,15 +2544,101 @@ static void wireless_setting(struct fplinux_session *session,
 	session->wireless_request.level = !strcmp(message->value, "1");
 }
 
+static void wifi_state(struct fplinux_session *session, struct process *process)
+{
+	struct fplinux_ui_session_message message = {
+		.type = FPLINUX_UI_SESSION_WIFI_STATE,
+	};
+
+	if (!process || process->control_fd < 0 || !process->policy.ready ||
+	    process->policy.closing)
+		return;
+	fplinux_session_wireless_wifi_state(session->wireless,
+					    &message.wifi_state);
+	fplinux_ui_session_send(process->control_fd, &message);
+}
+
+static void wifi_result(struct process *process, uint32_t serial,
+			enum fplinux_ui_wifi_result result)
+{
+	const struct fplinux_ui_session_message message = {
+		.type = FPLINUX_UI_SESSION_WIFI_RESULT,
+		.serial = serial,
+		.wifi_result = result,
+	};
+
+	fplinux_ui_session_send(process->control_fd, &message);
+}
+
+static void wifi_request(struct fplinux_session *session,
+			 struct process *process,
+			 const struct fplinux_ui_session_message *message)
+{
+	struct fplinux_ui_wifi_request request = message->wifi_request;
+	struct setting_request *pending = &session->wifi_request;
+	uint32_t ticket = session->wifi_ticket + 1;
+	int error;
+
+	if (process != session->app || !app_in_foreground(session) ||
+	    launcher_on_top(session)) {
+		wifi_result(process, message->serial, FPLINUX_UI_WIFI_FAILED);
+		goto clear;
+	}
+	if (request.action == FPLINUX_UI_WIFI_CANCEL) {
+		if (!pending->pending || request.target != pending->serial ||
+		    pending->token != process->policy.token ||
+		    pending->pid != process->policy.pid) {
+			wifi_result(process, message->serial,
+				    FPLINUX_UI_WIFI_FAILED);
+			goto clear;
+		}
+		request.target = session->wifi_ticket;
+	} else if (pending->pending) {
+		wifi_result(process, message->serial, FPLINUX_UI_WIFI_BUSY);
+		goto clear;
+	}
+	if (!ticket)
+		++ticket;
+	error = fplinux_session_wireless_wifi_request(session->wireless,
+						      &request, ticket);
+	if (error) {
+		wifi_result(process, message->serial,
+			    error == EBUSY ? FPLINUX_UI_WIFI_BUSY :
+					     FPLINUX_UI_WIFI_FAILED);
+		goto clear;
+	}
+	session->wifi_ticket = ticket;
+	fplinux_session_remember_setting_request(pending, process, message);
+clear:
+	explicit_bzero(request.key, sizeof(request.key));
+}
+
 static void dispatch_wireless(struct fplinux_session *session)
 {
 	struct fplinux_session_wireless_state state;
 	struct process *process;
+	enum fplinux_ui_wifi_result result;
+	uint32_t ticket;
+	bool has_wifi_result;
 	int error;
 
 	fplinux_session_wireless_dispatch(session->wireless);
 	session->wireless_initialized = true;
 	state = fplinux_session_wireless_state(session->wireless);
+	has_wifi_result = fplinux_session_wireless_take_wifi_result(
+		session->wireless, &ticket, &result);
+	wifi_state(session, task_for_id(session, FPLINUX_SESSION_SETTINGS));
+	if (has_wifi_result && session->wifi_request.pending &&
+	    ticket == session->wifi_ticket) {
+		/* A backgrounded Settings may need to clear a pending request. */
+		const struct setting_request *request = &session->wifi_request;
+
+		process = process_for_pid(session, request->pid);
+		if (process && process->policy.token == request->token &&
+		    process->control_fd >= 0)
+			wifi_result(process, request->serial, result);
+		session->wifi_request.pending = false;
+	}
 	if (fplinux_session_wireless_take_result(session->wireless, &error)) {
 		process = session->wireless_request.pending ?
 				  fplinux_session_setting_requester(
@@ -3095,6 +3181,11 @@ static bool receive_message(struct fplinux_session *session, struct peer *peer,
 		return true;
 	}
 	switch (message->type) {
+	case FPLINUX_UI_SESSION_WIFI_REQUEST:
+		if (strcmp(process->policy.app_id, FPLINUX_SESSION_SETTINGS))
+			return false;
+		wifi_request(session, process, message);
+		break;
 	case FPLINUX_UI_SESSION_STORAGE_REQUEST:
 		if (process == &session->launcher)
 			return false;
@@ -3127,6 +3218,8 @@ static bool receive_message(struct fplinux_session *session, struct peer *peer,
 		if (process == session->app)
 			finish_activation(session);
 		send_active(session);
+		if (!strcmp(process->policy.app_id, FPLINUX_SESSION_SETTINGS))
+			wifi_state(session, process);
 		break;
 	case FPLINUX_UI_SESSION_LAUNCH:
 		if (process != &session->launcher)
@@ -4185,6 +4278,11 @@ void fplinux_session_dispatch(struct fplinux_session *session)
 				result > 0 &&
 				receive_message(session, peer, &message);
 
+			if (result > 0 &&
+			    message.type == FPLINUX_UI_SESSION_WIFI_REQUEST)
+				explicit_bzero(
+					message.wifi_request.key,
+					sizeof(message.wifi_request.key));
 			/* receive() owns ancillary fds until this borrowed callback ends. */
 			if (result > 0 && message.has_frame)
 				close(message.frame_fd);
