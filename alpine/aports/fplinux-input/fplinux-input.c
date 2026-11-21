@@ -23,6 +23,12 @@ struct channel_error {
 	int code;
 };
 
+struct keyboard_record {
+	char text[FPLINUX_INPUT_LINE_BYTES];
+	size_t filled;
+	bool discard;
+};
+
 static void report_channel_error(struct channel_error *last,
 				 const char *operation)
 {
@@ -95,15 +101,58 @@ static int open_device(void)
 	return fd;
 }
 
-static bool inject(int device, unsigned int type, unsigned int code, int value)
+static bool collect_record(struct keyboard_record *record, char byte)
 {
-	struct input_event event;
+	if (byte == '\n' || byte == '\r') {
+		bool complete = record->filled != 0 && !record->discard;
 
-	memset(&event, 0, sizeof(event));
-	event.type = (unsigned short)type;
-	event.code = (unsigned short)code;
-	event.value = value;
-	if (write(device, &event, sizeof(event)) != (ssize_t)sizeof(event)) {
+		record->text[record->filled] = '\0';
+		record->filled = 0;
+		record->discard = false;
+		return complete;
+	}
+	if (byte == '\0' || record->filled == sizeof(record->text) - 1)
+		record->discard = true;
+	if (!record->discard)
+		record->text[record->filled++] = byte;
+	return false;
+}
+
+static bool read_decimal(const char **text, unsigned long *number)
+{
+	char *end;
+
+	if (**text < '0' || **text > '9')
+		return false;
+	errno = 0;
+	*number = strtoul(*text, &end, 10);
+	*text = end;
+	return errno == 0;
+}
+
+static bool decode_event(const char *text, struct input_event *event)
+{
+	unsigned long type, code, value;
+
+	if (!read_decimal(&text, &type) || *text++ != ' ' ||
+	    !read_decimal(&text, &code) || *text++ != ' ' ||
+	    !read_decimal(&text, &value) || *text != '\0')
+		return false;
+	if (type == EV_KEY) {
+		if (code < KEY_ESC || code >= KEY_CNT || value > 2)
+			return false;
+	} else if (type != EV_SYN || code != SYN_REPORT || value != 0) {
+		return false;
+	}
+	*event = (struct input_event){ .type = type,
+				       .code = code,
+				       .value = value };
+	return true;
+}
+
+static bool inject(int device, const struct input_event *event)
+{
+	if (write(device, event, sizeof(*event)) != (ssize_t)sizeof(*event)) {
 		perror("fplinux-input: cannot write uinput event");
 		return false;
 	}
@@ -116,14 +165,34 @@ static void release_keys(int device, bool pressed[KEY_CNT])
 	bool any = false;
 
 	for (code = 0; code < KEY_CNT; ++code) {
+		const struct input_event release = { .type = EV_KEY,
+						     .code = code };
+
 		if (!pressed[code])
 			continue;
 		any = true;
-		if (inject(device, EV_KEY, code, 0))
+		if (inject(device, &release))
 			pressed[code] = false;
 	}
-	if (any)
-		inject(device, EV_SYN, SYN_REPORT, 0);
+	if (any) {
+		const struct input_event sync = { .type = EV_SYN,
+						  .code = SYN_REPORT };
+
+		inject(device, &sync);
+	}
+}
+
+static void apply_record(int device, bool pressed[KEY_CNT], const char *text)
+{
+	struct input_event event;
+
+	if (strcmp(text, "reset") == 0) {
+		release_keys(device, pressed);
+		return;
+	}
+	if (decode_event(text, &event) && inject(device, &event) &&
+	    event.type == EV_KEY && event.value != 2)
+		pressed[event.code] = event.value == 1;
 }
 
 int main(void)
@@ -131,8 +200,6 @@ int main(void)
 	const char *path = FPLINUX_INPUT_DEFAULT_CHANNEL;
 	struct channel_error channel_error = {};
 	bool pressed[KEY_CNT] = { false };
-	char line[FPLINUX_INPUT_LINE_BYTES];
-	size_t filled = 0;
 	int channel;
 	int device;
 
@@ -144,13 +211,14 @@ int main(void)
 
 	/* Keep the uinput device stable while the host reconnects. */
 	for (;;) {
+		struct keyboard_record record = {};
+
 		channel = open_channel(path);
 		if (channel < 0) {
 			report_channel_error(&channel_error, "open");
 			sleep(1);
 			continue;
 		}
-		filled = 0;
 		for (;;) {
 			struct pollfd waiting = {
 				.fd = channel,
@@ -169,7 +237,9 @@ int main(void)
 				break;
 			}
 			if (ready == 0) {
-				filled = 0;
+				/* A suffix after the lease is not a new record. */
+				if (record.filled != 0)
+					record.discard = true;
 				release_keys(device, pressed);
 				continue;
 			}
@@ -189,29 +259,8 @@ int main(void)
 				fflush(stdout);
 				channel_error.operation = NULL;
 			}
-			if (byte != '\n' && byte != '\r') {
-				if (filled + 1 < sizeof(line))
-					line[filled++] = byte;
-				continue;
-			}
-			line[filled] = '\0';
-			filled = 0;
-			if (strcmp(line, "reset") == 0) {
-				release_keys(device, pressed);
-				continue;
-			}
-			if (line[0] != '\0') {
-				unsigned int type;
-				unsigned int code;
-				int value;
-
-				if (sscanf(line, "%u %u %d", &type, &code,
-					   &value) == 3 &&
-				    inject(device, type, code, value) &&
-				    type == EV_KEY && code < KEY_CNT &&
-				    (value == 0 || value == 1))
-					pressed[code] = value == 1;
-			}
+			if (collect_record(&record, byte))
+				apply_record(device, pressed, record.text);
 		}
 		release_keys(device, pressed);
 		close(channel);

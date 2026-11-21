@@ -34,7 +34,8 @@ class InputBridgeLoggingTests:
                     "-Werror",
                     str(ROOT / "alpine/aports/fplinux-input/fplinux-input.c"),
                     str(ROOT / "tests/host_tool/input/fplinux-input-io.c"),
-                    "-Wl,--wrap=open,--wrap=ioctl,--wrap=poll,--wrap=read,--wrap=sleep",
+                    "-Wl,--wrap=open,--wrap=ioctl,--wrap=poll,"
+                    "--wrap=read,--wrap=write,--wrap=sleep",
                 ],
                 name="compile input bridge with controlled devices",
                 check=True,
@@ -51,3 +52,28 @@ class InputBridgeLoggingTests:
         assert (sum("cannot open" in line for line in errors)) == (2)
         assert (sum("cannot poll" in line for line in errors)) == (1)
         assert (result.stdout.count("input channel readable")) == (2)
+
+    def test_only_complete_supported_records_reach_uinput(
+        self, executable: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Observe valid key reports and releases on reset, lease expiry and EOF."""
+        monkeypatch.setenv("FPLINUX_TEST_INPUT_EVENTS", "1")
+        result = run_process([str(executable)], name="run keyboard record scenario", timeout=5)
+
+        assert result.returncode == 0, result.stderr
+        assert result.stderr == ""
+        assert result.stdout.splitlines() == [
+            "fplinux-input: /dev/ttyGS0 -> uinput",
+            "1 30 1",
+            "0 0 0",
+            "1 30 0",
+            "0 0 0",
+            "1 31 1",
+            "0 0 0",
+            "1 31 0",
+            "0 0 0",
+            "1 32 1",
+            "0 0 0",
+            "1 32 0",
+            "0 0 0",
+        ]
