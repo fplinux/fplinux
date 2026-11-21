@@ -50,8 +50,8 @@ def test_language_reader_loads_shipped_files_and_rejects_invalid_definitions(
     assert result.stdout == "fplinux-language: OK\n"
 
 
-def test_contextual_commands_translate_and_keep_plain_english_fallback(tmp_path: Path) -> None:
-    """The actual gettext catalogue distinguishes full and short command labels."""
+def test_contextual_gettext_translates_and_keeps_plain_english_fallback(tmp_path: Path) -> None:
+    """The shipped catalogue distinguishes meanings and falls back without a matching context."""
     executable = tmp_path / "gettext-context"
     catalogue = tmp_path / "ru/LC_MESSAGES/gettext-context.mo"
     catalogue.parent.mkdir(parents=True)
@@ -61,9 +61,9 @@ def test_contextual_commands_translate_and_keep_plain_english_fallback(tmp_path:
             "--check",
             "--output-file",
             str(catalogue),
-            str(ROOT / "alpine/aports/fplinux-notes/ru.po"),
+            str(ROOT / "alpine/aports/fplinux-example-apidemo/ru.po"),
         ],
-        name="compile contextual command catalogue",
+        name="compile catalogue with contextual translations",
         timeout=10,
         check=True,
     )
@@ -81,12 +81,12 @@ def test_contextual_commands_translate_and_keep_plain_english_fallback(tmp_path:
         name="compile contextual gettext consumer",
     )
     for locale, expected_lines in [
-        ("ru_RU.UTF-8", ["Повтор", "Повторить", "Retry", "Готово"]),
-        ("en_US.UTF-8", ["Retry", "Retry", "Retry", "Done"]),
+        ("ru_RU.UTF-8", ["Стереть", "Ясно", "Clear", "Стереть"]),
+        ("en_US.UTF-8", ["Clear", "Clear", "Clear", "Clear"]),
     ]:
         result = run_process(
             [str(executable), str(tmp_path)],
-            name=f"translate contextual commands with {locale} fallback",
+            name=f"translate contextual words with {locale} fallback",
             env={"LC_ALL": locale},
             timeout=10,
             check=True,

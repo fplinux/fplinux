@@ -90,8 +90,8 @@ def test_build_stage_delivers_snapshot_bytes_at_the_selected_loader_boundary(  #
     monkeypatch: pytest.MonkeyPatch,
     platform: str,
     profile: str | None,
-    root_kind: str,
     *,
+    root_kind: str,
     rootfs_delivery: bool,
 ) -> None:
     """Execute configuration and snapshot recapture, stopping at Alpine execution."""

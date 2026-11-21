@@ -12,9 +12,9 @@ int main(int argc, char **argv)
 	assert(bindtextdomain("gettext-context", argv[1]));
 	assert(bind_textdomain_codeset("gettext-context", "UTF-8"));
 	assert(textdomain("gettext-context"));
-	puts(fplinux_gettext_context("short command\004Retry"));
-	puts(gettext("Retry"));
-	puts(fplinux_gettext_context("missing context\004Retry"));
-	puts(fplinux_gettext_context("Done"));
+	puts(fplinux_gettext_context("soft key\004Clear"));
+	puts(fplinux_gettext_context("weather\004Clear"));
+	puts(fplinux_gettext_context("missing context\004Clear"));
+	puts(fplinux_gettext_context("Clear"));
 	return 0;
 }
