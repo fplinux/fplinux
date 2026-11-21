@@ -1095,6 +1095,10 @@ static void check_setting_packets(int sender, int receiver)
 		"{\"type\":\"SETTING\",\"setting\":{\"kind\":\"wifi\",\"op\":\"set\",\"enabled\":1}}",
 		"{\"type\":\"SETTING\",\"setting\":{\"kind\":\"wifi\",\"op\":\"get\",\"enabled\":true}}",
 		"{\"type\":\"SETTING\",\"setting\":{\"kind\":\"wifi\",\"op\":\"preview\",\"enabled\":true}}",
+		"{\"type\":\"SETTING\",\"setting\":{\"kind\":\"midi_soundfont\",\"op\":\"set\"}}",
+		"{\"type\":\"SETTING\",\"setting\":{\"kind\":\"midi_soundfont\",\"op\":\"set\",\"soundfont\":7}}",
+		"{\"type\":\"SETTING\",\"setting\":{\"kind\":\"midi_soundfont\",\"op\":\"set\",\"soundfont\":\"\"}}",
+		"{\"type\":\"SETTING\",\"setting\":{\"kind\":\"midi_soundfont\",\"op\":\"get\",\"soundfont\":\"fm1gm\"}}",
 		"{\"type\":\"SETTING\",\"setting\":{\"kind\":\"volume\",\"op\":\"set\",\"level\":\"3\"}}",
 		"{\"type\":\"SETTING\",\"setting\":{\"kind\":\"brightness_preview\",\"op\":\"cancel\",\"level\":0}}",
 		"{\"type\":\"SETTING\",\"setting\":{\"kind\":\"media_volume_step\",\"op\":\"step\",\"step\":0}}",
@@ -1118,6 +1122,17 @@ static void check_setting_packets(int sender, int receiver)
 		      received.setting.operation == FPLINUX_UI_SETTING_SET &&
 		      !received.setting.value.enabled,
 	      "Wi-Fi off is a boolean mutation");
+	check(receive_raw(
+		      sender, receiver,
+		      "{\"type\":\"SETTING\",\"applied\":true,\"setting\":{\"kind\":\"midi_soundfont\",\"op\":\"result\",\"soundfont\":\"fm1gm\"}}",
+		      &received) == 1 &&
+		      received.setting.kind ==
+			      FPLINUX_UI_SETTING_MIDI_SOUNDFONT &&
+		      received.setting.operation == FPLINUX_UI_SETTING_RESULT &&
+		      !strcmp(received.setting.value.soundfont, "fm1gm") &&
+		      !strcmp(received.name, "midi_soundfont") &&
+		      !strcmp(received.value, "fm1gm"),
+	      "A soundfont result carries its installed ID for C callers");
 	check(receive_raw(
 		      sender, receiver,
 		      "{\"type\":\"SETTING\",\"applied\":true,\"setting\":{\"kind\":\"audio_outputs\",\"op\":\"result\",\"routes\":[\"HEADPHONES\",\"AUTO\"]}}",

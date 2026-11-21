@@ -60,6 +60,7 @@ struct peer {
 	int fd;
 	pid_t pid;
 	char id[FPLINUX_UI_SESSION_ID_BYTES];
+	char soundfont[FPLINUX_UI_SESSION_PATH_BYTES];
 	struct fplinux_ui_session_message messages[TEST_MESSAGES];
 	size_t message_count;
 	unsigned int sent;
@@ -108,6 +109,7 @@ struct fixture {
 	char settings[PATH_MAX];
 	char clock_preferences[PATH_MAX];
 	char languages[PATH_MAX];
+	char soundfonts[PATH_MAX];
 	char brightness_socket[PATH_MAX];
 	char brightness_level[PATH_MAX];
 	char brightness_effective[PATH_MAX];
@@ -490,6 +492,7 @@ static void peer_termination(int signal_number)
 static int run_peer(void)
 {
 	const char *id = getenv("FPLINUX_APP_ID");
+	const char *soundfont = getenv("FPLINUX_MIDI_SOUNDFONT_PATH");
 	struct command command = { .type = COMMAND_HELLO, .pid = getpid() };
 	int channel = connect_at(getenv("FPLINUX_TEST_PEER_SOCKET"));
 	int session_fd = -1;
@@ -500,6 +503,10 @@ static int run_peer(void)
 	peer_manager = getppid();
 	CHECK(id && strlen(id) < sizeof(command.app_id));
 	strcpy(command.app_id, id);
+	if (soundfont) {
+		CHECK(strlen(soundfont) < sizeof(command.message.path));
+		strcpy(command.message.path, soundfont);
+	}
 	send_command(channel, &command);
 	for (;;) {
 		struct pollfd fds[] = {
@@ -854,6 +861,7 @@ static struct fixture *create_fixture(const char *root, int width, int height,
 	path_join(fixture->peer_socket, root, "peer.sock");
 	path_join(fixture->settings, root, "settings");
 	path_join(fixture->languages, root, "languages");
+	path_join(fixture->soundfonts, root, "soundfonts");
 	path_join(fixture->brightness_socket, root, "brightness.sock");
 	path_join(fixture->brightness_level, root, "brightness-level");
 	path_join(fixture->brightness_effective, root, "brightness-effective");
@@ -979,6 +987,7 @@ static struct fixture *create_fixture(const char *root, int width, int height,
 		.settings_path = fixture->settings,
 		.clock_preferences_directory = fixture->clock_preferences,
 		.languages_dir = fixture->languages,
+		.soundfonts_dir = fixture->soundfonts,
 		.brightness_socket = brightness ? fixture->brightness_socket :
 						  NULL,
 		.leds_dir = keypad_max ? fixture->leds : NULL,
@@ -1057,6 +1066,7 @@ static void pump(struct fixture *fixture, unsigned int duration_ms)
 			peer->pid = hello.pid;
 			peer->fd = channel;
 			strcpy(peer->id, hello.app_id);
+			strcpy(peer->soundfont, hello.message.path);
 			CHECK(fcntl(channel, F_SETFL, O_NONBLOCK) == 0);
 		}
 		for (size_t i = 0; i < fixture->peer_count; ++i)
@@ -2817,6 +2827,141 @@ static void setting(struct fixture *fixture, struct peer *settings,
 	strcpy(message.name, name);
 	strcpy(message.value, value);
 	issue(fixture, settings, &message);
+}
+
+static void write_soundfont_header(const char *path)
+{
+	static const char header[] = "RIFF\004\000\000\000sfbk";
+	FILE *file = fopen(path, "wb");
+
+	CHECK(file);
+	CHECK(fwrite(header, 1, sizeof(header) - 1, file) ==
+	      sizeof(header) - 1);
+	CHECK(fclose(file) == 0);
+}
+
+static void show_retained_app(struct fixture *fixture, struct peer *launcher,
+			      struct peer *app)
+{
+	CHECK(launch_app(fixture, launcher, app->id) == app);
+	struct fplinux_ui_session_message active =
+		active_for(fixture, launcher, app->id);
+
+	acknowledge(fixture, launcher, &active);
+	CHECK(fplinux_session_focused_pid(fixture->session) == app->pid);
+}
+
+static void test_midi_soundfont_changes(struct fixture *fixture)
+{
+	static const char *const consumers[] = {
+		"org.fplinux.phoneme",
+		"org.fplinux.mre",
+		"org.fplinux.music",
+	};
+	static const char *const invalid_ids[] = { "missing", "broken",
+						   "../outside" };
+	static const char default_settings[] =
+		"screen_off_seconds=30\nauto_lock_seconds=off\n"
+		"locale=en\ninput_locale=en\ntheme=light\nbrightness=7\n";
+	struct peer *peers[3];
+	char alias[PATH_MAX], selected[PATH_MAX], path[PATH_MAX];
+	struct fplinux_ui_session_message reply;
+
+	CHECK(mkdir(fixture->soundfonts, 0700) == 0);
+	path_join(alias, fixture->soundfonts, "default.sf2");
+	path_join(selected, fixture->soundfonts, "fm1gm.sf2");
+	path_join(path, fixture->soundfonts, "timgm6mb.sf2");
+	write_soundfont_header(path);
+	CHECK(symlink("timgm6mb.sf2", alias) == 0);
+	write_soundfont_header(selected);
+	path_join(path, fixture->root, "outside.sf2");
+	write_soundfont_header(path);
+	path_join(path, fixture->soundfonts, "broken.sf2");
+	write_file(path, "RIFF not sfbk");
+
+	struct peer *launcher = start_launcher(fixture);
+
+	for (size_t i = 0; i < 3; ++i) {
+		add_entry(fixture, consumers[i], "integrated");
+		peers[i] = show_app(fixture, launcher, consumers[i]);
+		CHECK(!strcmp(peers[i]->soundfont, alias));
+	}
+	struct peer *settings = show_app(fixture, launcher, TEST_SETTINGS);
+
+	CHECK(!settings->soundfont[0] && !launcher->soundfont[0]);
+	for (size_t i = 0; i < 3; ++i) {
+		setting(fixture, settings, "midi_soundfont", invalid_ids[i]);
+		reply = wait_message(fixture, settings,
+				     FPLINUX_UI_SESSION_ERROR,
+				     "midi_soundfont");
+		CHECK(!reply.applied && !strcmp(reply.reason, "invalid-value"));
+	}
+	setting(fixture, settings, "midi_soundfont", "");
+	reply = wait_message(fixture, settings, FPLINUX_UI_SESSION_SETTING,
+			     "midi_soundfont");
+	CHECK(!strcmp(reply.value, "default"));
+	expect_file(fixture->settings, default_settings);
+	for (size_t i = 0; i < 3; ++i) {
+		const struct fplinux_session_process *process =
+			fplinux_session_find_process(fixture->session,
+						     peers[i]->pid);
+
+		CHECK(process && !process->closing);
+	}
+
+	const struct fplinux_ui_session_message selection = {
+		.type = FPLINUX_UI_SESSION_SETTING,
+		.setting = { .kind = FPLINUX_UI_SETTING_MIDI_SOUNDFONT,
+			     .operation = FPLINUX_UI_SETTING_SET,
+			     .value.soundfont = "fm1gm" },
+	};
+
+	issue(fixture, settings, &selection);
+	reply = wait_message(fixture, settings, FPLINUX_UI_SESSION_SETTING,
+			     "midi_soundfont");
+	CHECK(reply.applied && !reply.serial &&
+	      reply.setting.kind == FPLINUX_UI_SETTING_MIDI_SOUNDFONT &&
+	      reply.setting.operation == FPLINUX_UI_SETTING_RESULT &&
+	      !strcmp(reply.setting.value.soundfont, "fm1gm"));
+	expect_file(fixture->settings,
+		    "screen_off_seconds=30\nauto_lock_seconds=off\n"
+		    "locale=en\ninput_locale=en\ntheme=light\nbrightness=7\n"
+		    "midi_soundfont=fm1gm\n");
+	for (size_t i = 0; i < 3; ++i) {
+		wait_message(fixture, peers[i], FPLINUX_UI_SESSION_CLOSE, NULL);
+		wait_reaped(fixture, peers[i]->pid);
+	}
+	CHECK(fplinux_session_focused_pid(fixture->session) == settings->pid);
+	struct peer *music = show_app(fixture, launcher, "org.fplinux.music");
+
+	CHECK(!strcmp(music->soundfont, selected));
+	show_retained_app(fixture, launcher, settings);
+	setting(fixture, settings, "midi_soundfont", "fm1gm");
+	wait_message(fixture, settings, FPLINUX_UI_SESSION_SETTING,
+		     "midi_soundfont");
+	const struct fplinux_session_process *process =
+		fplinux_session_find_process(fixture->session, music->pid);
+
+	CHECK(process && !process->closing);
+	CHECK(unlink(selected) == 0);
+	struct peer *java = show_app(fixture, launcher, "org.fplinux.phoneme");
+
+	CHECK(!strcmp(java->soundfont, alias));
+	show_retained_app(fixture, launcher, settings);
+	setting(fixture, settings, "midi_soundfont", "default");
+	reply = wait_message(fixture, settings, FPLINUX_UI_SESSION_SETTING,
+			     "midi_soundfont");
+	CHECK(reply.applied && !strcmp(reply.value, "default"));
+	for (size_t i = 0; i < 2; ++i) {
+		struct peer *consumer = i ? java : music;
+
+		wait_message(fixture, consumer, FPLINUX_UI_SESSION_CLOSE, NULL);
+		wait_reaped(fixture, consumer->pid);
+	}
+	expect_file(fixture->settings, default_settings);
+	struct peer *mre = show_app(fixture, launcher, "org.fplinux.mre");
+
+	CHECK(!strcmp(mre->soundfont, alias));
 }
 
 static void test_task_titles_follow_applied_locale(struct fixture *fixture,
@@ -7768,6 +7913,8 @@ int main(int argc, char **argv)
 		test_settings_retries_latest_value(fixture, false);
 	else if (!strcmp(argv[1], "settings-retry-unchanged"))
 		test_settings_retries_latest_value(fixture, true);
+	else if (!strcmp(argv[1], "midi-soundfont-changes"))
+		test_midi_soundfont_changes(fixture);
 	else if (!strcmp(argv[1], "settings-applied-error-view"))
 		test_settings_applied_error_rebuilds_before_ack(fixture);
 	else if (!strcmp(argv[1], "settings-preview-cancel-retry"))

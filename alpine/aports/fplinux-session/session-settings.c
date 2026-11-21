@@ -27,6 +27,7 @@ static const char *const setting_names[] = {
 	[FPLINUX_SESSION_SETTING_INPUT_LOCALE] = "input_locale",
 	[FPLINUX_SESSION_SETTING_TIME] = "time",
 	[FPLINUX_SESSION_SETTING_THEME] = "theme",
+	[FPLINUX_SESSION_SETTING_MIDI_SOUNDFONT] = "midi_soundfont",
 };
 
 static const char *const theme_names[] = {
@@ -83,6 +84,7 @@ void fplinux_session_settings_defaults(
 	settings->screen_off_seconds = 30;
 	settings->auto_lock_seconds = 5;
 	settings->theme = FPLINUX_UI_SESSION_THEME_LIGHT;
+	strcpy(settings->midi_soundfont, FPLINUX_SESSION_SOUNDFONT_DEFAULT);
 	fplinux_language_english(&english);
 	if (!select_language(settings, languages, "en") &&
 	    !select_language(settings, languages, "ru")) {
@@ -116,6 +118,67 @@ static bool parse_decimal(const char *value, unsigned int *number)
 			return false;
 	*number = (unsigned int)strtoul(value, NULL, 10);
 	return true;
+}
+
+static bool soundfont_id_valid(const char *id)
+{
+	size_t length = strnlen(id, FPLINUX_UI_SESSION_TEXT_BYTES);
+	bool word_start = true;
+
+	if (!length || length >= FPLINUX_UI_SESSION_TEXT_BYTES)
+		return false;
+	for (size_t i = 0; i < length; ++i) {
+		char byte = id[i];
+
+		if ((byte >= 'a' && byte <= 'z') ||
+		    (byte >= '0' && byte <= '9'))
+			word_start = false;
+		else if (byte == '-' && !word_start)
+			word_start = true;
+		else
+			return false;
+	}
+	return !word_start;
+}
+
+static bool select_soundfont(struct fplinux_session_settings *settings,
+			     const char *id)
+{
+	if (!soundfont_id_valid(id))
+		return false;
+	strcpy(settings->midi_soundfont, id);
+	return true;
+}
+
+bool fplinux_session_soundfont_path(const char *directory, const char *id,
+				    char *path, size_t capacity)
+{
+	char header[12];
+	struct stat status;
+	ssize_t bytes;
+	int length;
+	int fd;
+
+	if (!directory || directory[0] != '/')
+		return false;
+	length = snprintf(path, capacity, "%s/%s.sf2", directory, id);
+	if (length < 0 || (size_t)length >= capacity)
+		return false;
+	fd = open(path, O_RDONLY | O_CLOEXEC | O_NONBLOCK);
+	if (fd < 0)
+		return false;
+	if (fstat(fd, &status) < 0 || !S_ISREG(status.st_mode) ||
+	    status.st_size < (off_t)sizeof(header) ||
+	    status.st_size > INT_MAX) {
+		close(fd);
+		return false;
+	}
+	do {
+		bytes = read(fd, header, sizeof(header));
+	} while (bytes < 0 && errno == EINTR);
+	close(fd);
+	return bytes == (ssize_t)sizeof(header) && !memcmp(header, "RIFF", 4) &&
+	       !memcmp(header + 8, "sfbk", 4);
 }
 
 bool fplinux_session_settings_parse(struct fplinux_session_settings *settings,
@@ -189,6 +252,8 @@ bool fplinux_session_settings_parse(struct fplinux_session_settings *settings,
 				return true;
 			}
 		return false;
+	case FPLINUX_SESSION_SETTING_MIDI_SOUNDFONT:
+		return select_soundfont(settings, value);
 	default:
 		return false;
 	}
@@ -225,6 +290,8 @@ bool fplinux_session_settings_apply(struct fplinux_session_settings *settings,
 	case FPLINUX_UI_SETTING_THEME:
 		settings->theme = value->theme;
 		return true;
+	case FPLINUX_UI_SETTING_MIDI_SOUNDFONT:
+		return select_soundfont(settings, value->soundfont);
 	default:
 		return false;
 	}
@@ -251,6 +318,9 @@ fplinux_session_settings_value(const struct fplinux_session_settings *settings,
 		break;
 	case FPLINUX_UI_SETTING_THEME:
 		value.theme = settings->theme;
+		break;
+	case FPLINUX_UI_SETTING_MIDI_SOUNDFONT:
+		strcpy(value.soundfont, settings->midi_soundfont);
 		break;
 	default:
 		break;
@@ -301,6 +371,10 @@ bool fplinux_session_settings_format(
 	case FPLINUX_SESSION_SETTING_THEME:
 		length = snprintf(value, capacity, "%s",
 				  theme_names[settings->theme]);
+		break;
+	case FPLINUX_SESSION_SETTING_MIDI_SOUNDFONT:
+		length = snprintf(value, capacity, "%s",
+				  settings->midi_soundfont);
 		break;
 	default:
 		return false;
@@ -407,7 +481,7 @@ fplinux_session_settings_save(const struct fplinux_session_settings *settings,
 		.state = FPLINUX_STORAGE_UNPUBLISHED,
 	};
 	char temporary[PATH_MAX];
-	char text[256];
+	char text[256 + sizeof(settings->midi_soundfont)];
 	char screen_off[16];
 	char auto_lock[16];
 	char theme[16];
@@ -449,6 +523,12 @@ fplinux_session_settings_save(const struct fplinux_session_settings *settings,
 	    (size_t)length < sizeof(text))
 		length += snprintf(text + length, sizeof(text) - length,
 				   "alarm_volume=%u\n", settings->alarm_volume);
+	if (strcmp(settings->midi_soundfont,
+		   FPLINUX_SESSION_SOUNDFONT_DEFAULT) &&
+	    length >= 0 && (size_t)length < sizeof(text))
+		length += snprintf(text + length, sizeof(text) - length,
+				   "midi_soundfont=%s\n",
+				   settings->midi_soundfont);
 	if (length < 0 || (size_t)length >= sizeof(text) ||
 	    snprintf(temporary, sizeof(temporary), "%s.XXXXXX", path) >=
 		    (int)sizeof(temporary)) {

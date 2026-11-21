@@ -21,8 +21,11 @@ enum fplinux_session_setting {
 	FPLINUX_SESSION_SETTING_INPUT_LOCALE,
 	FPLINUX_SESSION_SETTING_TIME,
 	FPLINUX_SESSION_SETTING_THEME,
+	FPLINUX_SESSION_SETTING_MIDI_SOUNDFONT,
 	FPLINUX_SESSION_SETTING_UNKNOWN,
 };
+
+#define FPLINUX_SESSION_SOUNDFONT_DEFAULT "default"
 
 /*
  * Persistent session settings. has_brightness is false until the user chose
@@ -45,6 +48,7 @@ struct fplinux_session_settings {
 	char input_locale[FPLINUX_UI_SESSION_LOCALE_BYTES];
 	char lang[FPLINUX_LANGUAGE_TEXT_BYTES];
 	enum fplinux_ui_session_theme theme;
+	char midi_soundfont[FPLINUX_UI_SESSION_TEXT_BYTES];
 };
 
 /*
@@ -74,6 +78,9 @@ fplinux_session_settings_value(const struct fplinux_session_settings *settings,
 bool fplinux_session_settings_format(
 	const struct fplinux_session_settings *settings,
 	enum fplinux_session_setting setting, char *value, size_t capacity);
+/* Finds a readable installed SF2 candidate for a validated soundfont ID. */
+bool fplinux_session_soundfont_path(const char *directory, const char *id,
+				    char *path, size_t capacity);
 /*
  * Loads key=value lines over the defaults. A missing file leaves the defaults;
  * an unknown key or invalid value is ignored. Returns false only when an

@@ -222,6 +222,7 @@ static const char *const setting_names[] = {
 	[FPLINUX_UI_SETTING_TIME] = "time",
 	[FPLINUX_UI_SETTING_THEME] = "theme",
 	[FPLINUX_UI_SETTING_WIFI] = "wifi",
+	[FPLINUX_UI_SETTING_MIDI_SOUNDFONT] = "midi_soundfont",
 	[FPLINUX_UI_SETTING_UNKNOWN] = "unknown",
 };
 
@@ -1316,6 +1317,7 @@ enum setting_payload {
 	SETTING_TIME,
 	SETTING_THEME,
 	SETTING_ENABLED,
+	SETTING_SOUNDFONT,
 };
 
 static enum setting_payload
@@ -1350,6 +1352,8 @@ setting_payload(const struct fplinux_ui_setting *setting)
 		return SETTING_THEME;
 	case FPLINUX_UI_SETTING_WIFI:
 		return SETTING_ENABLED;
+	case FPLINUX_UI_SETTING_MIDI_SOUNDFONT:
+		return SETTING_SOUNDFONT;
 	default:
 		return SETTING_LEVEL;
 	}
@@ -1432,6 +1436,9 @@ static bool setting_value_valid(const struct fplinux_ui_setting *setting)
 	case SETTING_LOCALE:
 		return value->locale[0] &&
 		       memchr(value->locale, '\0', sizeof(value->locale));
+	case SETTING_SOUNDFONT:
+		return value->soundfont[0] &&
+		       memchr(value->soundfont, '\0', sizeof(value->soundfont));
 	case SETTING_TIME:
 		return setting_time_shape(&value->time);
 	case SETTING_THEME:
@@ -1530,6 +1537,11 @@ static bool setting_from_text(struct fplinux_ui_setting *setting,
 		if (!text[0] || strlen(text) >= sizeof(value->locale))
 			return false;
 		strcpy(value->locale, text);
+		return true;
+	case SETTING_SOUNDFONT:
+		if (!text[0] || strlen(text) >= sizeof(value->soundfont))
+			return false;
+		strcpy(value->soundfont, text);
 		return true;
 	case SETTING_TIME:
 		return setting_time_parse(text, &value->time);
@@ -1634,6 +1646,9 @@ static void setting_to_text(const struct fplinux_ui_setting *setting,
 	case SETTING_LOCALE:
 		snprintf(text, size, "%s", value->locale);
 		break;
+	case SETTING_SOUNDFONT:
+		snprintf(text, size, "%s", value->soundfont);
+		break;
 	case SETTING_TIME:
 		offset = snprintf(text, size, "%04d-%02d-%02d %02d:%02d",
 				  time->year, time->month, time->day,
@@ -1694,6 +1709,9 @@ static void add_setting(struct json_object *object,
 		break;
 	case SETTING_LOCALE:
 		add_string(entry, "locale", value->locale);
+		break;
+	case SETTING_SOUNDFONT:
+		add_string(entry, "soundfont", value->soundfont);
 		break;
 	case SETTING_TIME:
 		field = json_object_new_object();
@@ -1785,6 +1803,9 @@ static bool get_setting_payload(struct json_object *entry,
 	case SETTING_LOCALE:
 		return get_string(entry, "locale", value->locale,
 				  sizeof(value->locale));
+	case SETTING_SOUNDFONT:
+		return get_string(entry, "soundfont", value->soundfont,
+				  sizeof(value->soundfont));
 	case SETTING_TIME:
 		return json_object_object_get_ex(entry, "time", &field) &&
 		       json_object_is_type(field, json_type_object) &&

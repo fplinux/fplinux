@@ -47,6 +47,8 @@ struct fplinux_session_options {
 	int height;
 	const char *settings_path;
 	const char *languages_dir;
+	/* Absolute directory of the installed MIDI soundfonts. */
+	const char *soundfonts_dir;
 	const char *brightness_socket;
 	const char *leds_dir;
 	const char *power_supply_dir;

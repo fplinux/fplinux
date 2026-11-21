@@ -10,6 +10,7 @@ struct fplinux_session_options;
 _Noreturn __attribute__((visibility("hidden"))) void
 fplinux_session_child_start(const struct fplinux_session_options *options,
 			    const struct fplinux_desktop_entry *entry,
-			    const char *lang, pid_t manager);
+			    const char *lang, const char *soundfont,
+			    pid_t manager);
 
 #endif

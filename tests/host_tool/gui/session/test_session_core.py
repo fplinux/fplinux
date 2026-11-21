@@ -194,6 +194,7 @@ def session_core_harness(tmp_path_factory: pytest.TempPathFactory) -> Path:
         "task-close-new-activation",
         "settings-retry-latest",
         "settings-retry-unchanged",
+        "midi-soundfont-changes",
         "settings-applied-error-view",
         "settings-preview-cancel-retry",
         "settings-preview-cancel-published-retry",

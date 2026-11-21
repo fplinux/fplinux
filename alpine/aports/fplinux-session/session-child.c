@@ -52,7 +52,8 @@ static void reset_oom_score(void)
 _Noreturn void
 fplinux_session_child_start(const struct fplinux_session_options *options,
 			    const struct fplinux_desktop_entry *entry,
-			    const char *lang, pid_t manager)
+			    const char *lang, const char *soundfont,
+			    pid_t manager)
 {
 	const char *home = options->home;
 	sigset_t signals;
@@ -70,6 +71,12 @@ fplinux_session_child_start(const struct fplinux_session_options *options,
 	if (getenv("FPLINUX_APP_RUNTIME_DIR"))
 		setenv("XDG_RUNTIME_DIR", getenv("FPLINUX_APP_RUNTIME_DIR"), 1);
 	setenv("LANG", lang, 1);
+	if (soundfont) {
+		if (setenv("FPLINUX_MIDI_SOUNDFONT_PATH", soundfont, 1) < 0)
+			_exit(126);
+	} else {
+		unsetenv("FPLINUX_MIDI_SOUNDFONT_PATH");
+	}
 	setenv("FPLINUX_UI_SESSION_SOCKET", options->socket_path, 1);
 	setenv("FPLINUX_APP_ID", entry->app_id, 1);
 	chdir(home);

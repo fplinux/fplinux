@@ -404,7 +404,8 @@ static void test_settings_file(void)
 	check(fplinux_session_settings_load(&settings, languages, path) &&
 		      settings.screen_off_seconds == 30 &&
 		      !strcmp(settings.locale, "en") &&
-		      !strcmp(settings.input_locale, "en"),
+		      !strcmp(settings.input_locale, "en") &&
+		      !strcmp(settings.midi_soundfont, "default"),
 	      "a missing file selects the defaults");
 	write_file(path, "locale=ru\ninput_locale=ru\n");
 	check(fplinux_session_settings_load(&settings, languages, path) &&
@@ -439,6 +440,10 @@ static void test_settings_file(void)
 	check(fplinux_session_settings_load(&settings, languages, path) &&
 		      settings.theme == FPLINUX_UI_SESSION_THEME_LIGHT,
 	      "an invalid saved theme is the default light theme");
+	write_file(path, "midi_soundfont=../outside\n");
+	check(fplinux_session_settings_load(&settings, languages, path) &&
+		      !strcmp(settings.midi_soundfont, "default"),
+	      "a saved soundfont path keeps the default");
 	memset(long_line, 'x', sizeof(long_line) - 2);
 	long_line[sizeof(long_line) - 2] = '\n';
 	long_line[sizeof(long_line) - 1] = '\0';
@@ -473,6 +478,7 @@ static void test_settings_file(void)
 	strcpy(settings.locale, "en");
 	strcpy(settings.input_locale, "kk");
 	settings.theme = FPLINUX_UI_SESSION_THEME_DARK;
+	strcpy(settings.midi_soundfont, "fm1gm");
 	umask(0077);
 	check(fplinux_session_settings_save(&settings, path).state ==
 		      FPLINUX_STORAGE_DURABLE,
@@ -482,7 +488,8 @@ static void test_settings_file(void)
 			    "locale=en\n"
 			    "input_locale=kk\n"
 			    "theme=dark\n"
-			    "brightness=4\n"),
+			    "brightness=4\n"
+			    "midi_soundfont=fm1gm\n"),
 	      "the file holds key=value lines");
 	check(stat(path, &status) == 0 && (status.st_mode & 0777) == 0644,
 	      "the file is readable 0644 regardless of umask");
@@ -494,7 +501,8 @@ static void test_settings_file(void)
 		      !strcmp(loaded.locale, "en") &&
 		      !strcmp(loaded.input_locale, "kk") &&
 		      !strcmp(loaded.lang, "en_US.UTF-8") &&
-		      loaded.theme == FPLINUX_UI_SESSION_THEME_DARK,
+		      loaded.theme == FPLINUX_UI_SESSION_THEME_DARK &&
+		      !strcmp(loaded.midi_soundfont, "fm1gm"),
 	      "saved settings load unchanged");
 	listing = opendir(directory);
 	while (listing && (entry = readdir(listing)))

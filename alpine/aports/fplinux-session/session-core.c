@@ -651,10 +651,38 @@ static void initialize_process(struct process *process)
 static void send_config(struct fplinux_session *session,
 			struct process *process);
 
+static bool uses_midi_soundfont(const char *app_id)
+{
+	return !strcmp(app_id, "org.fplinux.phoneme") ||
+	       !strcmp(app_id, "org.fplinux.mre") ||
+	       !strcmp(app_id, "org.fplinux.music");
+}
+
+static const char *app_soundfont(const struct fplinux_session *session,
+				 const char *app_id, char path[PATH_MAX])
+{
+	const char *directory = session->options.soundfonts_dir;
+	const char *id = session->settings.midi_soundfont;
+
+	if (!uses_midi_soundfont(app_id))
+		return NULL;
+	if (fplinux_session_soundfont_path(directory, id, path, PATH_MAX))
+		return path;
+	if (strcmp(id, FPLINUX_SESSION_SOUNDFONT_DEFAULT) &&
+	    fplinux_session_soundfont_path(directory,
+					   FPLINUX_SESSION_SOUNDFONT_DEFAULT,
+					   path, PATH_MAX))
+		return path;
+	return NULL;
+}
+
 static bool start_process(struct fplinux_session *session,
 			  struct process *process,
 			  const struct fplinux_desktop_entry *entry)
 {
+	char soundfont_path[PATH_MAX];
+	const char *soundfont =
+		app_soundfont(session, entry->app_id, soundfont_path);
 	pid_t manager = getpid();
 	pid_t pid;
 
@@ -664,7 +692,8 @@ static bool start_process(struct fplinux_session *session,
 		return false;
 	if (!pid)
 		fplinux_session_child_start(&session->options, entry,
-					    session->settings.lang, manager);
+					    session->settings.lang, soundfont,
+					    manager);
 	initialize_process(process);
 	process->uid = session->options.app_uid;
 	process->policy.pid = pid;
@@ -2957,6 +2986,53 @@ static void finish_output_request(struct fplinux_session *session)
 			request->serial, true);
 }
 
+static void close_midi_consumers(struct fplinux_session *session)
+{
+	for (unsigned int i = 0; i < FPLINUX_UI_SESSION_TASK_MAX; ++i) {
+		struct process *process = &session->tasks[i];
+
+		if (uses_midi_soundfont(process->policy.app_id))
+			request_close(session, process);
+	}
+}
+
+static void
+midi_soundfont_setting(struct fplinux_session *session, struct process *process,
+		       const struct fplinux_ui_session_message *message)
+{
+	const struct fplinux_ui_setting *setting = &message->setting;
+	bool set = setting->operation == FPLINUX_UI_SETTING_SET;
+
+	if (set) {
+		struct fplinux_session_settings next = session->settings;
+		char path[PATH_MAX];
+
+		if (!fplinux_session_settings_apply(
+			    &next, session->options.languages_dir, setting) ||
+		    (strcmp(next.midi_soundfont,
+			    FPLINUX_SESSION_SOUNDFONT_DEFAULT) &&
+		     !fplinux_session_soundfont_path(
+			     session->options.soundfonts_dir,
+			     next.midi_soundfont, path, sizeof(path)))) {
+			fplinux_session_setting_error(process, message,
+						      "invalid-value");
+			return;
+		}
+		if (strcmp(next.midi_soundfont,
+			   session->settings.midi_soundfont)) {
+			session->settings = next;
+			close_midi_consumers(session);
+		}
+		session->settings_retry_delay_ms = 0;
+		fplinux_session_save_settings(session);
+	}
+	fplinux_session_setting_reply(
+		session, process, setting->kind,
+		fplinux_session_settings_value(&session->settings,
+					       setting->kind),
+		0, set);
+}
+
 static void handle_setting(struct fplinux_session *session,
 			   struct process *process,
 			   const struct fplinux_ui_session_message *message)
@@ -2989,6 +3065,9 @@ static void handle_setting(struct fplinux_session *session,
 		return;
 	case FPLINUX_UI_SETTING_WIFI:
 		wireless_setting(session, process, message);
+		return;
+	case FPLINUX_UI_SETTING_MIDI_SOUNDFONT:
+		midi_soundfont_setting(session, process, message);
 		return;
 	case FPLINUX_UI_SETTING_TIME:
 		time_setting(session, process, message);

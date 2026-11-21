@@ -242,6 +242,7 @@ enum fplinux_ui_setting_kind {
 	FPLINUX_UI_SETTING_TIME,
 	FPLINUX_UI_SETTING_THEME,
 	FPLINUX_UI_SETTING_WIFI,
+	FPLINUX_UI_SETTING_MIDI_SOUNDFONT,
 	FPLINUX_UI_SETTING_UNKNOWN,
 };
 
@@ -279,6 +280,7 @@ union fplinux_ui_setting_value {
 	enum fplinux_ui_session_theme theme;
 	bool enabled;
 	char locale[FPLINUX_UI_SESSION_LOCALE_BYTES];
+	char soundfont[FPLINUX_UI_SESSION_TEXT_BYTES];
 	struct fplinux_ui_setting_time time;
 };
 
