@@ -22,10 +22,16 @@ backlight = "bq-2830l-backlight"
 levels = [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50]
 
 [rootfs]
-packages = ["fplinux-font-terminus-8x16", "fplinux-wifi"]
+packages = [
+  "fplinux-font-terminus-8x16",
+  "fplinux-hostapd",
+  "fplinux-libnl",
+  "fplinux-wifi",
+  "fplinux-wpa-supplicant",
+]
 
 [bundle]
-packages = []
+packages = ["libnl3"]
 
 [linux]
 memory = { base = 0x80200000, size = 0x03c00000 }

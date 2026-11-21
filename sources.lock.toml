@@ -623,6 +623,13 @@ url = "https://download.gnome.org/sources/glib/2.90/glib-2.90.1.tar.xz"
 algorithm = "sha512"
 checksum = "d2d76deaad64e307034b09635c64a60537b0d625d1695b314bc33e9e3c9b20284270d2105333474eb1fbe5afcaa814d4c52ded3a1c2a46b4b2652f7b66a211c3"
 
+[aport_hostapd_2_11_tar_gz]
+version = "2.11"
+name = "hostapd-2.11.tar.gz"
+url = "https://w1.fi/releases/hostapd-2.11.tar.gz"
+algorithm = "sha512"
+checksum = "1382af2a243e3a555507b55942f41d1233cc942826d26bc4f4dbe5e75560b3fe22e426948762fe162453e934685a69ef0c05723b7fecef71811fc1987e32b048"
+
 [aport_hwdrivers_initd]
 version = "dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763"
 name = "hwdrivers.initd"
@@ -671,6 +678,38 @@ name = "libjpeg-turbo-3.2.1.tar.gz"
 url = "https://github.com/libjpeg-turbo/libjpeg-turbo/releases/download/3.2.1/libjpeg-turbo-3.2.1.tar.gz"
 algorithm = "sha512"
 checksum = "8a0be9e42f4dd0634d61ec76b959f8942c70237848bb2854baad8abd352483784b7c4f099823368fb3e40be5d9200fb4b2574aecdcebf225d74b09dc217948eb"
+
+[aport_libnl3_alpine_apkbuild]
+version = "4084996615c2a6601e26eedde99e3ae66e7d6ab7"
+name = "libnl3-alpine-APKBUILD"
+url = "https://raw.githubusercontent.com/alpinelinux/aports/4084996615c2a6601e26eedde99e3ae66e7d6ab7/main/libnl3/APKBUILD"
+algorithm = "sha256"
+checksum = "f338b3f50bb61b72da8aafcfcaff3b1e32e71ac54c5b45b726ccfc0f0ce55f50"
+bytes = 1680
+
+[aport_libnl3_armv7_apk]
+version = "3.11.0-r0"
+name = "libnl3-3.11.0-r0.apk"
+url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/armv7/libnl3-3.11.0-r0.apk"
+algorithm = "sha256"
+checksum = "7dd3b312eff41e92b2a69ac43d0aa9ac2bf449b349a51743dd046ea3550ba60d"
+bytes = 291460
+
+[aport_libnl3_musl_patch]
+version = "4084996615c2a6601e26eedde99e3ae66e7d6ab7"
+name = "libnl3-musl.patch"
+url = "https://raw.githubusercontent.com/alpinelinux/aports/4084996615c2a6601e26eedde99e3ae66e7d6ab7/main/libnl3/libnl3-musl.patch"
+algorithm = "sha512"
+checksum = "d5fc23646225a63da557edb672c33a4fce88d71f0d18d0c5aedba95dbe26ca3d3be58b7626543307a6c5419b8439f49687e3dd92acc0c6cf3b34bf13a81b1df5"
+bytes = 1795
+
+[aport_libnl_3_11_0_tar_gz]
+version = "3.11.0"
+name = "libnl-3.11.0.tar.gz"
+url = "https://github.com/thom311/libnl/releases/download/libnl3_11_0/libnl-3.11.0.tar.gz"
+algorithm = "sha512"
+checksum = "69ecec6e792fc7b9c443fff8742cf45782af5c5c4664687440942eaeb616ba7b4ed2b606e33c5d86e44e6b49a9c79a1fed4b7c77781a059e13cf6a844d94530e"
+bytes = 1124072
 
 [aport_libpng_1_6_58_apng_patch_gz]
 version = "1.6.58"
@@ -1070,6 +1109,41 @@ name = "wayland-protocols-1.50.tar.xz"
 url = "https://gitlab.freedesktop.org/wayland/wayland-protocols/-/releases/1.50/downloads/wayland-protocols-1.50.tar.xz"
 algorithm = "sha512"
 checksum = "12cdc1c1d45e547f4216445f8f21a58cf3979bcf291ebc0270eda716af2fa39e482eb37c88edce9768a299b8da832421ef3cac64eb3abd5b2230a5d5f488f171"
+
+[aport_wpa_supplicant_2_11_tar_gz]
+version = "2.11"
+name = "wpa_supplicant-2.11.tar.gz"
+url = "https://w1.fi/releases/wpa_supplicant-2.11.tar.gz"
+algorithm = "sha512"
+checksum = "9a0a3a9d6fa2235903c40aa57b5955f0c9dd1dccfd0e3825a3b6f92b3e32db8d464b3ea0aef3285ba3ee109e7b190560cedd744902e954f0003cdba543e277b2"
+
+[aport_wpa_supplicant_ap_ft_sae_patch]
+version = "2.11-r4"
+name = "0002-AP-guard-FT-SAE-code-with-CONFIG_IEEE80211R_AP.patch"
+url = "https://raw.githubusercontent.com/alpinelinux/aports/a5e7e28d156656420281cc42d2671d795239e6a7/main/wpa_supplicant/0002-AP-guard-FT-SAE-code-with-CONFIG_IEEE80211R_AP.patch"
+algorithm = "sha512"
+checksum = "d70b2d98b1ffefb1c9023e693d02e1adf21ba21535f7fb76f69f30cb95fb9ab393561d59f27517874108088f0e9061ab88333f65e25d70fab760d4c0d8366dc4"
+
+[aport_wpa_supplicant_authorization_patch]
+version = "2.11-r4"
+name = "wpa_supplicant-2.11-Revert-Mark-authorization-completed-on-driver-indica.patch"
+url = "https://raw.githubusercontent.com/alpinelinux/aports/a5e7e28d156656420281cc42d2671d795239e6a7/main/wpa_supplicant/wpa_supplicant-2.11-Revert-Mark-authorization-completed-on-driver-indica.patch"
+algorithm = "sha512"
+checksum = "5d54d6e5a06bb8d0612b2178a3c6ddf27b9bca142e3c512f67df0ace9e650ae343170ea05f47156717c717484c85e5b890706a92ad353046a8a61e8aae8dc1c2"
+
+[aport_wpa_supplicant_cli_sh]
+version = "2.11-r4"
+name = "wpa_cli.sh"
+url = "https://raw.githubusercontent.com/alpinelinux/aports/a5e7e28d156656420281cc42d2671d795239e6a7/main/wpa_supplicant/wpa_cli.sh"
+algorithm = "sha512"
+checksum = "212c4265afce2e72b95a32cd785612d6c3e821b47101ead154136d184ac4add01434ada6c87edbb9a98496552e76e1a4d79c6b5840e3a5cfe5e6d602fceae576"
+
+[aport_wpa_supplicant_nl80211_scan_patch]
+version = "2.11-r4"
+name = "0001-nl80211-add-extra-ies-only-if-allowed-by-driver.patch"
+url = "https://raw.githubusercontent.com/alpinelinux/aports/a5e7e28d156656420281cc42d2671d795239e6a7/main/wpa_supplicant/0001-nl80211-add-extra-ies-only-if-allowed-by-driver.patch"
+algorithm = "sha512"
+checksum = "fb328872087268056b035802f71df2f7af8d11699822fe68611201a07dc693c4fdb8c50dd4fd509ed6db4cca89f6003ce3303770951686a35633977f466f4fb5"
 
 [aport_xkeyboard_config_2_49_tar_bz2]
 version = "2.49"

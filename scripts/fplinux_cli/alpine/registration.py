@@ -523,6 +523,7 @@ SUBPACKAGE_APORTS = {
     "fplinux-wayland-dev": "fplinux-wayland",
     "fplinux-font-terminus-6x12": "fplinux-font-terminus",
     "fplinux-font-terminus-8x16": "fplinux-font-terminus",
+    "libnl3": "fplinux-libnl",
 }
 
 SHARED_APORT_SOURCE_PATHS = frozenset(

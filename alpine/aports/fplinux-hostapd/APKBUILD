@@ -1,0 +1,56 @@
+# Maintainer: FPLinux contributors <fplinux@example.invalid>
+pkgname=fplinux-hostapd
+pkgver=@version:aport_hostapd_2_11_tar_gz@
+pkgrel=0
+pkgdesc="WPA wireless access point runtime"
+url="https://w1.fi/hostapd/"
+arch="armv7"
+license="BSD-3-Clause"
+_alpine_version="$pkgver-r4"
+provides="hostapd=$_alpine_version"
+provider_priority=10
+replaces="hostapd"
+makedepends_build="clang23 lld23 pkgconf"
+makedepends_host="libnl3-dev linux-headers musl-dev"
+options="!check"
+source="
+	@source:aport_hostapd_2_11_tar_gz@
+"
+builddir="$srcdir/hostapd-$pkgver"
+
+prepare() {
+	default_prepare
+	sed -i 's:/etc/hostapd:/etc/hostapd/hostapd:g' hostapd/hostapd.conf
+	# The internal backend keeps MD4 in a separate object used by nt_password_hash.
+	sed -i '/^NOBJS += .*crypto_\$(CONFIG_CRYPTO)\.o$/a NOBJS += ../src/crypto/md4-internal.o' hostapd/Makefile
+	cat > hostapd/.config <<-EOF
+		CONFIG_DRIVER_NL80211=y
+		CONFIG_LIBNL32=y
+		CONFIG_DRIVER_NONE=y
+		CONFIG_WPA_CLI_EDIT=y
+		CONFIG_IEEE80211N=y
+		CONFIG_IPV6=y
+		CONFIG_TLS=internal
+		CONFIG_INTERNAL_LIBTOMMATH=y
+	EOF
+}
+
+build() {
+	export CFLAGS="$CFLAGS -flto=thin"
+	export LDFLAGS="$LDFLAGS -flto=thin"
+	export PKG_CONFIG_SYSROOT_DIR="$CBUILDROOT"
+	export PKG_CONFIG_LIBDIR="$CBUILDROOT/usr/lib/pkgconfig:$CBUILDROOT/usr/share/pkgconfig"
+	make -C hostapd CC="$CC" hostapd hostapd_cli nt_password_hash
+}
+
+package() {
+	install -Dm755 -t "$pkgdir/etc/hostapd" hostapd/hostapd.conf hostapd/hostapd.accept \
+		hostapd/hostapd.deny hostapd/hostapd.eap_user hostapd/hostapd.radius_clients \
+		hostapd/hostapd.sim_db hostapd/hostapd.wpa_psk
+	install -Dm755 hostapd/hostapd "$pkgdir/usr/sbin/hostapd"
+	install -Dm755 -t "$pkgdir/usr/bin" hostapd/hostapd_cli hostapd/nt_password_hash
+	install -Dm644 -t "$pkgdir/usr/share/licenses/$pkgname" COPYING README
+}
+
+sha512sums="
+"

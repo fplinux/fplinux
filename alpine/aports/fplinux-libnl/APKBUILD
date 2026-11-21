@@ -1,0 +1,43 @@
+# Maintainer: FPLinux contributors <fplinux@example.invalid>
+pkgname=fplinux-libnl
+pkgver=@version:aport_libnl_3_11_0_tar_gz@
+pkgrel=0
+pkgdesc="Core and generic netlink runtime libraries"
+url="https://www.infradead.org/~tgr/libnl/"
+arch="armv7"
+license="LGPL-2.1-or-later"
+_alpine_version="@version:aport_libnl3_armv7_apk@"
+_sover=200.26.0
+depends="so:libc.musl-armv7.so.1"
+provides="so:libnl-3.so.200=$_sover so:libnl-genl-3.so.200=$_sover"
+options="!check !strip !tracedeps"
+subpackages="libnl3:full"
+source="
+	@source:aport_libnl3_armv7_apk@
+	@source:aport_libnl_3_11_0_tar_gz@
+	@source:aport_libnl3_alpine_apkbuild@
+	@source:aport_libnl3_musl_patch@
+"
+builddir="$srcdir/libnl-$pkgver"
+
+package() {
+	mkdir -p "$pkgdir"
+	tar --ignore-zeros --warning=no-unknown-keyword --preserve-permissions \
+		-xzf "$startdir/libnl3-$_alpine_version.apk" -C "$pkgdir" etc/libnl usr/lib
+	install -Dm644 COPYING "$pkgdir/usr/share/licenses/$pkgname/COPYING"
+}
+
+full() {
+	pkgdesc="Additional netlink runtime libraries and configuration"
+	depends="$pkgname=$pkgver-r$pkgrel so:libc.musl-armv7.so.1"
+	provides="so:libnl-idiag-3.so.200=$_sover so:libnl-nf-3.so.200=$_sover
+		so:libnl-route-3.so.200=$_sover so:libnl-xfrm-3.so.200=$_sover"
+	amove etc/libnl \
+		usr/lib/libnl-idiag-3.so.* \
+		usr/lib/libnl-nf-3.so.* \
+		usr/lib/libnl-route-3.so.* \
+		usr/lib/libnl-xfrm-3.so.*
+}
+
+sha512sums="
+"
