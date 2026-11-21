@@ -16,7 +16,6 @@ source="
 	@source:aport_mesa_26_3_1_tar_xz@
 	neon-clang.patch
 	afbc-policy.patch
-	NOTICE
 "
 builddir="$srcdir/mesa-$pkgver"
 
@@ -70,9 +69,9 @@ build() {
 
 package() {
 	DESTDIR="$pkgdir" meson install --no-rebuild -C output
-	mkdir -p "$pkgdir/usr/share/licenses/$pkgname"
-	cp -r licenses/. "$pkgdir/usr/share/licenses/$pkgname/"
-	install -Dm644 "$srcdir/NOTICE" "$pkgdir/usr/share/licenses/$pkgname/NOTICE"
+	# The exact-version GBM dependency carries the full Mesa notices.
+	mkdir -p "$pkgdir/usr/share/licenses"
+	ln -sT fplinux-mesa-gbm "$pkgdir/usr/share/licenses/$pkgname"
 	install -Dm644 "$CBUILDROOT/usr/share/licenses/fplinux-expat-dev/COPYING" \
 		"$pkgdir/usr/share/licenses/libexpat/COPYING"
 }
@@ -89,5 +88,4 @@ dev() {
 sha512sums="
 1c83949f8904fa0d4cb189fc9bc5dd8910e6fd17009b95d46927713f228f4f81bf4dc74cc326bfd6752d969416e259d542e95e7e61b1aa11ca88acf5e8fd6988  neon-clang.patch
 8b8d9de7cbd4ace3626abb17ab1ec9498f02233e7a5d3e4aa931be8f326e2dd2c35d6c6c89e7cb6592d2b7a0e79e0f3c79b6fce20f386520dbb1250366d11f0c  afbc-policy.patch
-1e6759fb5bd7a2cd646d43490dd5a1811f5c27063695cc4d223b411fbf23d8550b0a4b003edc54b27428c81f15f9ce001ebda1f703bcdc55820fdcfb9b3e9bdf  NOTICE
 "
