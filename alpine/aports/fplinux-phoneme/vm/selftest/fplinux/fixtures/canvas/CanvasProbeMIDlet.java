@@ -19,6 +19,7 @@ import javax.microedition.lcdui.Font;
 import javax.microedition.lcdui.Graphics;
 import javax.microedition.lcdui.FPLinuxNokiaImage;
 import javax.microedition.lcdui.Image;
+import javax.microedition.lcdui.game.Sprite;
 import javax.microedition.midlet.MIDlet;
 
 /**
@@ -99,6 +100,7 @@ public class CanvasProbeMIDlet extends MIDlet implements Runnable {
         showFull();
         nokiaCanvas();
         nokiaImages();
+        regionTransforms();
         nokiaPixels();
         nokiaDecodedImage();
         nokiaShapes();
@@ -215,6 +217,90 @@ public class CanvasProbeMIDlet extends MIDlet implements Runnable {
         boolean replaced = (pixels[0] & 0xff808080) == 0xff008000;
         say("nokia image transform=" + transform + " blit=" + blit
             + " partial=" + partial + " replaced=" + replaced);
+    }
+
+    // Pixels of the source A B C / D E F after each Sprite transform, row by
+    // row, and the width of that layout.
+    private static final int REGION_A = 0xffff0000;
+    private static final int REGION_B = 0xff00ff00;
+    private static final int REGION_C = 0xff0000ff;
+    private static final int REGION_D = 0xffffff00;
+    private static final int REGION_E = 0xff00ffff;
+    private static final int REGION_F = 0xffff00ff;
+    private static final int REGION_BACKDROP = 0xff000000;
+
+    private static int[] regionLayout(int transform) {
+        int a = REGION_A, b = REGION_B, c = REGION_C;
+        int d = REGION_D, e = REGION_E, f = REGION_F;
+        switch (transform) {
+        case Sprite.TRANS_NONE: return new int[] { a, b, c, d, e, f };
+        case Sprite.TRANS_MIRROR_ROT180: return new int[] { d, e, f, a, b, c };
+        case Sprite.TRANS_MIRROR: return new int[] { c, b, a, f, e, d };
+        case Sprite.TRANS_ROT180: return new int[] { f, e, d, c, b, a };
+        case Sprite.TRANS_MIRROR_ROT270: return new int[] { a, d, b, e, c, f };
+        case Sprite.TRANS_ROT90: return new int[] { d, a, e, b, f, c };
+        case Sprite.TRANS_ROT270: return new int[] { c, f, b, e, a, d };
+        default: return new int[] { f, c, e, b, d, a }; // TRANS_MIRROR_ROT90
+        }
+    }
+
+    private static int[] drawRegion(Image source, int sourceX, int transform, int clipY) {
+        Image target = Image.createImage(5, 5);
+        Graphics graphics = target.getGraphics();
+        graphics.setColor(REGION_BACKDROP);
+        graphics.fillRect(0, 0, 5, 5);
+        graphics.setClip(0, clipY, 5, 5 - clipY);
+        graphics.drawRegion(source, sourceX, 0, 3, 2, transform, 1, 1,
+            Graphics.TOP | Graphics.LEFT);
+        int[] pixels = new int[25];
+        target.getRGB(pixels, 0, 5, 0, 0, 5, 5);
+        return pixels;
+    }
+
+    // Compares the RGB565 bits of the 5x5 target with the layout drawn at
+    // (1, 1); the clipped rows and the transparent pixel keep the backdrop.
+    private static boolean regionMatches(int[] pixels, int transform, int transparent,
+                                         int clipY) {
+        int[] layout = regionLayout(transform);
+        int width = (transform & 4) != 0 ? 2 : 3;
+        int height = 6 / width;
+        for (int y = 0; y < 5; y++) {
+            for (int x = 0; x < 5; x++) {
+                int expected = REGION_BACKDROP;
+                if (y >= clipY && x >= 1 && x <= width && y >= 1 && y <= height) {
+                    int value = layout[(y - 1) * width + x - 1];
+                    expected = value == transparent ? REGION_BACKDROP : value;
+                }
+                if (((pixels[y * 5 + x] ^ expected) & 0xf8fcf8) != 0) {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    private void regionTransforms() {
+        Image opaque = Image.createRGBImage(new int[] {
+            REGION_A, REGION_B, REGION_C, REGION_D, REGION_E, REGION_F,
+        }, 3, 2, false);
+        Image keyed = Image.createRGBImage(new int[] {
+            REGION_A, REGION_B, REGION_C, REGION_D, 0, REGION_F,
+        }, 3, 2, true);
+        Image wide = Image.createRGBImage(new int[] {
+            0, REGION_A, REGION_B, REGION_C, 0, REGION_D, REGION_E, REGION_F,
+        }, 4, 2, false);
+        boolean transforms = true;
+        boolean keyedTransforms = true;
+        for (int transform = 0; transform < 8; transform++) {
+            transforms &= regionMatches(drawRegion(opaque, 0, transform, 0),
+                transform, -1, 0);
+            keyedTransforms &= regionMatches(drawRegion(keyed, 0, transform, 0),
+                transform, REGION_E, 0);
+        }
+        boolean clipped = regionMatches(drawRegion(wide, 1, Sprite.TRANS_ROT90, 2),
+            Sprite.TRANS_ROT90, -1, 2);
+        say("region transforms=" + transforms + " keyed=" + keyedTransforms
+            + " clipped=" + clipped);
     }
 
     private void nokiaPixels() {

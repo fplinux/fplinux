@@ -1,0 +1,107 @@
+Copy a transformed image region row by row through local pointers.
+
+The per-pixel loop tested the transform and reloaded the buffer descriptors
+for every pixel, because the pixel stores may alias them without strict
+aliasing. Compute the destination steps once; the copied pixels are the same.
+
+--- a/midp/src/lowlevelui/graphics/gx_putpixel/native/gxj_image.c
++++ b/midp/src/lowlevelui/graphics/gx_putpixel/native/gxj_image.c
+@@ -235,16 +235,21 @@
+ void
+ create_transformed_imageregion(gxj_screen_buffer* src, gxj_screen_buffer* dest, jint src_x, jint src_y,
+                              jint width, jint height, jint transform) {
+-  int srcX;
+-  int srcY;
+   int xStart;
+   int yStart;
+   int xIncr;
+   int yIncr;
+-  int destX;
+-  int destY;
+   int yCounter;
+   int xCounter;
++  const gxj_pixel_type *srcPixels;
++  const gxj_alpha_type *srcAlpha;
++  gxj_pixel_type *destPixels;
++  gxj_alpha_type *destAlpha;
++  int srcWidth;
++  int destWidth;
++  int start;
++  int stepX;
++  int stepY;
+
+   /* set dimensions of image being created,
+      depending on transform */
+@@ -272,35 +277,44 @@
+     xIncr = +1;
+   }
+
+-  for (srcY = src_y, destY = yStart, yCounter = 0;
+-       yCounter < height;
+-       srcY++, destY+=yIncr, yCounter++) {
+-
+-    int srcYwidth = srcY * src->width;
+-    int destYwidth = destY * dest->width;
+-
+-    for (srcX = src_x, destX = xStart, xCounter = 0;
+-         xCounter < width;
+-         srcX++, destX+=xIncr, xCounter++) {
+-
+-      if ( transform & TRANSFORM_INVERTED_AXES ) {
+-          dest->pixelData[destX * dest->width + destY] =
+-            src->pixelData[srcYwidth /*srcY*src->width*/ + srcX];
+-        if (src->alphaData != NULL) {
+-            dest->alphaData[destX * dest->width + destY] =
+-                src->alphaData[srcYwidth /*srcY*src->width*/ + srcX];
+-        }
+-
+-      } else {
+-        dest->pixelData[destYwidth /*destY * dest->width*/ + destX] =
+-                   src->pixelData[srcYwidth /*srcY*src->width*/ + srcX];
+-        if (src->alphaData != NULL) {
+-            dest->alphaData[destYwidth /*destY * dest->width*/ + destX] =
+-                src->alphaData[srcYwidth /*srcY*src->width*/ + srcX];
+-        }
++  /*
++   * Copy through local pointers: with -fno-strict-aliasing a store to the
++   * pixel data could alias the buffer descriptors, which would then be
++   * reloaded for every pixel.
++   */
++  srcPixels = src->pixelData;
++  srcAlpha = src->alphaData;
++  destPixels = dest->pixelData;
++  destAlpha = dest->alphaData;
++  srcWidth = src->width;
++  destWidth = dest->width;
++
++  /* Destination offset of the first pixel and of each source x and y step. */
++  if (transform & TRANSFORM_INVERTED_AXES) {
++    start = xStart * destWidth + yStart;
++    stepX = xIncr * destWidth;
++    stepY = yIncr;
++  } else {
++    start = yStart * destWidth + xStart;
++    stepX = xIncr;
++    stepY = yIncr * destWidth;
++  }
++
++  for (yCounter = 0; yCounter < height; yCounter++) {
++    const int srcRow = (src_y + yCounter) * srcWidth + src_x;
++    const int destRow = start + yCounter * stepY;
++    int destIndex = destRow;
++
++    for (xCounter = 0; xCounter < width; xCounter++, destIndex += stepX) {
++      destPixels[destIndex] = srcPixels[srcRow + xCounter];
++    }
++    if (srcAlpha != NULL) {
++      destIndex = destRow;
++      for (xCounter = 0; xCounter < width; xCounter++, destIndex += stepX) {
++        destAlpha[destIndex] = srcAlpha[srcRow + xCounter];
+       }
+-    } /*for x*/
+-  } /* for y */
++    }
++  }
+ }
+
+ /**

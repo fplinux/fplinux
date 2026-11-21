@@ -574,35 +574,45 @@ static size_t clip_plane(const struct vertex *input, size_t count,
 static void draw_triangle(struct target *target, const struct surface *surface,
 			  const jfloat *vertices, int a, int b, int c)
 {
-	struct vertex work[2][CLIPPED_VERTEX_COUNT];
+	/* Each vertex is VERTEX_COMPONENTS consecutive floats of the array. */
+	const struct vertex *corners[3] = {
+		(const struct vertex *)(vertices + a * VERTEX_COMPONENTS),
+		(const struct vertex *)(vertices + b * VERTEX_COMPONENTS),
+		(const struct vertex *)(vertices + c * VERTEX_COMPONENTS),
+	};
 	unsigned int outside = 0;
-	size_t count = 3;
-	struct vertex *input = work[0];
 
-	memcpy(input[0].values, vertices + a * VERTEX_COMPONENTS,
-	       sizeof(input[0].values));
-	memcpy(input[1].values, vertices + b * VERTEX_COMPONENTS,
-	       sizeof(input[1].values));
-	memcpy(input[2].values, vertices + c * VERTEX_COMPONENTS,
-	       sizeof(input[2].values));
 	for (size_t vertex = 0; vertex < 3; ++vertex) {
 		for (size_t component = 0; component <= W; ++component)
-			if (!isfinite(input[vertex].values[component]))
+			if (!isfinite(corners[vertex]->values[component]))
 				return;
 	}
 	for (unsigned int plane = 0; plane < 6; ++plane) {
-		int n = (distance(&input[0], plane) < 0) +
-			(distance(&input[1], plane) < 0) +
-			(distance(&input[2], plane) < 0);
+		int n = (distance(corners[0], plane) < 0) +
+			(distance(corners[1], plane) < 0) +
+			(distance(corners[2], plane) < 0);
 
 		if (n == 3)
 			return;
 		if (n)
 			outside |= 1U << plane;
 	}
+	if (!outside) {
+		/* Only clipping needs copies of the corners. */
+		rasterize(target, surface, corners[0], corners[1], corners[2],
+			  corners[2]);
+		return;
+	}
+
+	struct vertex work[2][CLIPPED_VERTEX_COUNT];
+	size_t count = 3;
+	struct vertex *input = work[0];
+
+	for (size_t vertex = 0; vertex < 3; ++vertex)
+		input[vertex] = *corners[vertex];
 	const struct vertex flat = input[2];
 	struct vertex *output = work[1];
-	for (unsigned int plane = 0; outside && plane < 6; ++plane) {
+	for (unsigned int plane = 0; plane < 6; ++plane) {
 		if (!(outside & (1U << plane)))
 			continue;
 		count = clip_plane(input, count, output, plane);
@@ -705,28 +715,28 @@ KNIEXPORT KNI_RETURNTYPE_VOID KNIDECL(javax_microedition_m3g_Rasterizer_clear0)
 		}
 
 		for (int y = clip->top; y < clip->bottom; ++y) {
+			jint *pixel_row = target.pixels + y * target.stride;
+			jfloat *depth_row = target.depths + y * target.stride;
 			int sy = source ? background_index(
 						  y, layout[VIEW_Y],
 						  layout[VIEWPORT_HEIGHT],
 						  region[3], region[5],
 						  region[1], region[7]) :
 					  -1;
-			for (int x = clip->left; x < clip->right; ++x) {
-				int offset = y * target.stride + x;
 
-				if (color_clear) {
-					int sx =
-						sy < 0 ?
-							-1 :
-							background_index(
-								x,
-								layout[VIEW_X],
-								layout[VIEWPORT_WIDTH],
-								region[2],
-								region[4],
-								region[0],
-								region[6]);
-					target.pixels[offset] =
+			/* Separate row loops let the compiler emit plain stores. */
+			if (color_clear && sy < 0) {
+				for (int x = clip->left; x < clip->right; ++x)
+					pixel_row[x] = color;
+			} else if (color_clear) {
+				for (int x = clip->left; x < clip->right; ++x) {
+					int sx = background_index(
+						x, layout[VIEW_X],
+						layout[VIEWPORT_WIDTH],
+						region[2], region[4], region[0],
+						region[6]);
+
+					pixel_row[x] =
 						sx < 0 ?
 							color :
 							(jint)((uint32_t)source
@@ -734,8 +744,10 @@ KNIEXPORT KNI_RETURNTYPE_VOID KNIDECL(javax_microedition_m3g_Rasterizer_clear0)
 									sx] |
 							       alpha);
 				}
-				if (depth_clear)
-					target.depths[offset] = 1;
+			}
+			if (depth_clear) {
+				for (int x = clip->left; x < clip->right; ++x)
+					depth_row[x] = 1;
 			}
 		}
 	}
@@ -787,7 +799,20 @@ static void prepare_vertices(jfloat *vertices, int count,
 {
 	/* Match the separate float operations in the Java transforms. */
 #pragma STDC FP_CONTRACT OFF
-	const jfloat *position = positions->scale_bias;
+	/*
+	 * Without strict aliasing the stores to vertices could change these
+	 * inputs; local copies keep them from being reloaded for every vertex.
+	 */
+	const struct coordinates position_input = *positions;
+	const struct coordinates tex_input = *tex_coords;
+	float position[4], matrix[16], tex_matrix[16], tex_bias[3];
+
+	memcpy(position, position_input.scale_bias, sizeof(position));
+	memcpy(matrix, projection, sizeof(matrix));
+	if (texture)
+		memcpy(tex_matrix, texture, sizeof(tex_matrix));
+	if (texture && tex_input.values)
+		memcpy(tex_bias, tex_input.scale_bias, sizeof(tex_bias));
 	float a = (color >> 24) * alpha;
 	float r = (color >> 16) & 255U;
 	float g = (color >> 8) & 255U;
@@ -795,32 +820,30 @@ static void prepare_vertices(jfloat *vertices, int count,
 
 	for (int i = 0; i < count; ++i, vertices += VERTEX_COMPONENTS) {
 		const jshort *point =
-			positions->values + i * positions->components;
+			position_input.values + i * position_input.components;
 		float x = point[0] * position[0] + position[1];
 		float y = point[1] * position[0] + position[2];
-		float z = (positions->components > 2 ? point[2] : 0) *
+		float z = (position_input.components > 2 ? point[2] : 0) *
 				  position[0] +
 			  position[3];
 
-		vertices[X] = transform_row(projection, x, y, z);
-		vertices[Y] = transform_row(projection + 4, x, y, z);
-		vertices[Z] = transform_row(projection + 8, x, y, z);
-		vertices[W] = transform_row(projection + 12, x, y, z);
+		vertices[X] = transform_row(matrix, x, y, z);
+		vertices[Y] = transform_row(matrix + 4, x, y, z);
+		vertices[Z] = transform_row(matrix + 8, x, y, z);
+		vertices[W] = transform_row(matrix + 12, x, y, z);
 		if (texture) {
 			float s = 0, t = 0;
 
-			if (tex_coords->values) {
-				const jshort *coords =
-					tex_coords->values +
-					i * tex_coords->components;
-				const jfloat *bias = tex_coords->scale_bias;
+			if (tex_input.values) {
+				const jshort *coords = tex_input.values +
+						       i * tex_input.components;
 
-				s = coords[0] * bias[0] + bias[1];
-				t = coords[1] * bias[0] + bias[2];
+				s = coords[0] * tex_bias[0] + tex_bias[1];
+				t = coords[1] * tex_bias[0] + tex_bias[2];
 			}
-			float u = transform_row(texture, s, t, 0);
-			float v = transform_row(texture + 4, s, t, 0);
-			float q = transform_row(texture + 12, s, t, 0);
+			float u = transform_row(tex_matrix, s, t, 0);
+			float v = transform_row(tex_matrix + 4, s, t, 0);
+			float q = transform_row(tex_matrix + 12, s, t, 0);
 
 			vertices[U] = u / q;
 			vertices[V] = v / q;
