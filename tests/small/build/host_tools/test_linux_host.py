@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 from unittest import mock
 
 import pytest
+from fplinux_cli.build.host_tools.linux_export import _python_files
 from fplinux_cli.build.host_tools.linux_host import _write_launchers, verify_linux_dependencies
 from fplinux_cli.runtime.ssh.commands import require_tool
 
@@ -63,6 +64,21 @@ def test_plain_standard_library_sources_need_no_elf_inspection(tmp_path: Path) -
         side_effect=AssertionError("readelf"),
     ):
         assert verify_linux_dependencies({"runtime/lib/python3.14/module.py": module}) == {}
+
+
+def test_standalone_runtime_omits_pip_bootstrap(tmp_path: Path) -> None:
+    standard_library = tmp_path / "lib/python3.15"
+    ensurepip = standard_library / "ensurepip"
+    (ensurepip / "_bundled").mkdir(parents=True)
+    (ensurepip / "__init__.py").write_text("", encoding="utf-8")
+    (ensurepip / "_bundled/pip.whl").write_bytes(b"fixture wheel")
+    launcher_dependency = standard_library / "argparse.py"
+    launcher_dependency.write_text("", encoding="utf-8")
+
+    exported = _python_files(tmp_path, "3.15")
+
+    assert exported["runtime/lib/python3.15/argparse.py"] == launcher_dependency
+    assert not any(name.startswith("runtime/lib/python3.15/ensurepip/") for name in exported)
 
 
 def test_ssh_preflight_finds_bundled_launcher_without_system_openssh(

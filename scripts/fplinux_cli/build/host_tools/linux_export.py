@@ -65,7 +65,7 @@ def _python_files(installation: Path, abi: str) -> dict[str, Path]:
     standard_library = installation / "lib" / interpreter
     for path in sorted(standard_library.rglob("*")):
         standard_relative = path.relative_to(standard_library)
-        if any(
+        if standard_relative.parts[0] == "ensurepip" or any(
             part in {"site-packages", "__pycache__"} or part.startswith("config-")
             for part in standard_relative.parts
         ):
