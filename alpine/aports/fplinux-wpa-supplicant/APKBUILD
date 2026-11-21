@@ -19,6 +19,7 @@ source="
 	@source:aport_wpa_supplicant_ap_ft_sae_patch@
 	@source:aport_wpa_supplicant_authorization_patch@
 	@source:aport_wpa_supplicant_cli_sh@
+	keep-p2p-disabled-setting.patch
 "
 builddir="$srcdir/wpa_supplicant-$pkgver"
 
@@ -67,4 +68,5 @@ package() {
 }
 
 sha512sums="
+51f7357b1900412331049293ffc44da8275a601b409953aca1dd40c0aa8c8683ff93ead884d466fe2fc4283a3c974c29e74e293d7ac69115e9a476f1a534bc86  keep-p2p-disabled-setting.patch
 "

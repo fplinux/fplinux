@@ -1,0 +1,44 @@
+SPDX-FileCopyrightText: 2026 FPLinux contributors
+SPDX-License-Identifier: BSD-3-Clause
+
+Preserve the station setting when reading and writing configurations
+with a build that omits P2P support.
+
+--- a/wpa_supplicant/config.c
++++ b/wpa_supplicant/config.c
+@@ -5473,7 +5473,6 @@
+ 	{ INT(p2p_go_vht), 0 },
+ 	{ INT(p2p_go_he), 0 },
+ 	{ INT(p2p_go_edmg), 0 },
+-	{ INT(p2p_disabled), 0 },
+ 	{ INT_RANGE(p2p_go_ctwindow, 0, 127), 0 },
+ 	{ INT(p2p_no_group_iface), 0 },
+ 	{ INT_RANGE(p2p_ignore_shared_freq, 0, 1), 0 },
+@@ -5487,6 +5486,7 @@
+ 	{ INT(p2p_interface_random_mac_addr), 0 },
+ 	{ INT(p2p_6ghz_disable), 0 },
+ #endif /* CONFIG_P2P */
++	{ INT(p2p_disabled), 0 },
+ 	{ FUNC(country), CFG_CHANGED_COUNTRY },
+ 	{ INT(bss_max_count), 0 },
+ 	{ INT(bss_expiration_age), 0 },
+--- a/wpa_supplicant/config_file.c
++++ b/wpa_supplicant/config_file.c
+@@ -1278,8 +1278,6 @@
+ 		fprintf(f, "p2p_go_edmg=%d\n", config->p2p_go_edmg);
+ 	if (config->p2p_go_ctwindow != DEFAULT_P2P_GO_CTWINDOW)
+ 		fprintf(f, "p2p_go_ctwindow=%d\n", config->p2p_go_ctwindow);
+-	if (config->p2p_disabled)
+-		fprintf(f, "p2p_disabled=%d\n", config->p2p_disabled);
+ 	if (config->p2p_no_group_iface)
+ 		fprintf(f, "p2p_no_group_iface=%d\n",
+ 			config->p2p_no_group_iface);
+@@ -1316,6 +1314,8 @@
+ 			config->ip_addr_end[0], config->ip_addr_end[1],
+ 			config->ip_addr_end[2], config->ip_addr_end[3]);
+ #endif /* CONFIG_P2P */
++	if (config->p2p_disabled)
++		fprintf(f, "p2p_disabled=%d\n", config->p2p_disabled);
+ 	if (config->country[0] && config->country[1]) {
+ 		fprintf(f, "country=%c%c\n",
+ 			config->country[0], config->country[1]);
