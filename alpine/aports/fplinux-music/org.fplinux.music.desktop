@@ -5,6 +5,6 @@ Name[ru]=Музыка
 Exec=/usr/bin/fplinux-music
 Icon=org.fplinux.music
 Categories=Audio;Music;
-X-FPLinux-FileExtensions=mp3;wav;
+X-FPLinux-FileExtensions=mp3;wav;mid;midi;
 X-FPLinux-Mode=integrated
 X-FPLinux-BackgroundAudio=true

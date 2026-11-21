@@ -60,6 +60,7 @@ struct music_app {
 	bool seek_pending;
 	uint64_t seek_ms;
 	bool loaded;
+	bool midi;
 	bool playing;
 	bool device_pause_seen;
 	bool waiting;
@@ -118,7 +119,7 @@ static const char *error_text(int error)
 	case ESTALE:
 		return _("File is unavailable. Open the file or folder again.");
 	case ENODATA:
-		return _("This folder contains no MP3 or WAV files.");
+		return _("This folder contains no supported music files.");
 	case ENOTSUP:
 		return _("This audio format is not supported.");
 	case EACCES:
@@ -169,7 +170,11 @@ static uint64_t played_ms(struct music_app *app)
 	uint64_t played = app->submitted_frames > (uint64_t)queued ?
 				  app->submitted_frames - (uint64_t)queued :
 				  0;
-	return (app->base_frames + played) * 1000U / app->info.rate;
+	uint64_t position_ms =
+		(app->base_frames + played) * 1000U / app->info.rate;
+	if (app->midi && position_ms > app->info.duration_ms)
+		return app->info.duration_ms;
+	return position_ms;
 }
 
 static bool is_finished(struct music_app *app)
@@ -408,14 +413,13 @@ static void picker_result(struct fplinux_ui_file_picker *picker,
 
 static void open_picker(struct music_app *app, bool folder)
 {
-	static const char *const extensions[] = { "mp3", "wav", NULL };
 	struct fplinux_ui_file_picker_options options = {
 		.mode = folder ? FPLINUX_UI_FILE_PICKER_FOLDER :
 				 FPLINUX_UI_FILE_PICKER_FILE,
 		.home = app->home,
 		.title = folder ? _("Open folder") : _("Open file"),
 		.folder_action = _("Play folder"),
-		.extensions = extensions,
+		.extensions = music_player_extensions,
 	};
 	app->folder_picker = folder;
 	app->picker = fplinux_ui_file_picker_open(app->ui, &options,
@@ -505,8 +509,12 @@ static void open_details(struct music_app *app)
 						app->info.album);
 	if (app->loaded) {
 		char format[80];
-		snprintf(format, sizeof(format), "%s · %u Hz · %s",
-			 app->info.codec == FPLINUX_MEDIA_WAV ? "WAV" : "MP3",
+		const char *codec =
+			app->info.codec == FPLINUX_MEDIA_WAV ? "WAV" : "MP3";
+
+		if (app->midi)
+			codec = "MIDI";
+		snprintf(format, sizeof(format), "%s · %u Hz · %s", codec,
 			 app->info.rate,
 			 app->info.channels == 1 ? _("Mono") : _("Stereo"));
 		fplinux_ui_form_append_property(form, _("Format"), format);
@@ -751,6 +759,7 @@ static void loaded_result(struct music_app *app,
 			  struct music_player_result *result)
 {
 	app->info = result->info;
+	app->midi = result->midi;
 	app->loaded = true;
 	app->playing = app->target_play;
 	app->base_frames = result->info.position_frames;
@@ -1096,7 +1105,7 @@ int main(int argc, char **argv)
 {
 	struct fplinux_cli cli = {
 		.program = "fplinux-music",
-		.description = "Play local MP3 and WAV files",
+		.description = "Play local MP3, WAV and MIDI files",
 	};
 	int result = fplinux_cli_parse(&cli, argc, argv);
 	if (result != FPLINUX_CLI_READY)

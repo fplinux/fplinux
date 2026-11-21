@@ -2,13 +2,13 @@
 pkgname=fplinux-music
 pkgver=1.0.0
 pkgrel=0
-pkgdesc="Local MP3 and WAV music player for FPLinux"
+pkgdesc="Local MP3, WAV and MIDI music player for FPLinux"
 url="https://github.com/fplinux/fplinux"
 arch="armv7"
 license="GPL-2.0-only"
-depends="fplinux-ui fplinux-media"
+depends="fplinux-ui fplinux-media fplinux-midi"
 makedepends_build="clang23 lld23 pkgconf gettext"
-makedepends_host="musl-dev musl-libintl linux-headers fplinux-ui-dev fplinux-media-dev"
+makedepends_host="musl-dev musl-libintl linux-headers fplinux-ui-dev fplinux-media-dev fplinux-midi-dev"
 options="!check"
 source="
 	fplinux-music.c
@@ -29,9 +29,9 @@ build() {
 	export PKG_CONFIG_SYSROOT_DIR="$CBUILDROOT"
 	export PKG_CONFIG_LIBDIR="$CBUILDROOT/usr/lib/pkgconfig:$CBUILDROOT/usr/share/pkgconfig"
 	"$CC" $CPPFLAGS $CFLAGS -Os -std=c11 -Wall -Wextra -Werror -pthread \
-		$(pkg-config --cflags fplinux-ui fplinux-media) \
+		$(pkg-config --cflags fplinux-ui fplinux-media fplinux-midi) \
 		fplinux-music.c music-player.c music-model.c music-view.c fplinux-cli.c \
-		$(pkg-config --libs fplinux-ui fplinux-media) $LDFLAGS \
+		$(pkg-config --libs fplinux-ui fplinux-media fplinux-midi) $LDFLAGS \
 		-Wl,--gc-sections -o fplinux-music
 	msgfmt --check --output-file=ru.mo ru.po
 }
@@ -44,15 +44,15 @@ package() {
 }
 
 sha512sums="
-895c9134b0d4746ac6b428140b4a4e02a3f29929cdc6ef853c56d54aba8fe8d5c4994bd50680bc083f4f96838278b05c127927607e7e32eaab775f4eb8296ce0  fplinux-music.c
-fe3e61e65bc39cd41e6627a67e815542111394d7a314f9bc2b7e66120b783dc678646b7acab00493a31569679d1762be00f020b93915f854efbb171c9efbf160  music-player.c
-faf6a36688875b9e1f470a54358c8a354ff86555097860670eeb46dd6f6d136f35bf995845ecc57cae0bba971197929c1cea912ac251020b0e53791f7807e065  music-player.h
+702c11a96869552083d233a8d96479ec187d256c1500af94edd8751cb7a2bd21124157640f6624a9a494f653d1d45bf8581e54e79d6a64ac43aab00cb34b3238  fplinux-music.c
+5bef18c3ab90c5f96910500e8bd6bea34e8b46e68d1173f3ef0d8bd2d350076c2fae5280aa536ae3ec4e79fd1bf78e6222b1d3d4b37881582ec78047d495732a  music-player.c
+a163aca226476552a620519f447f918b446cc67015ed2774ff4b1da127bd0d423dccad6973cf2d108d2ff2dfa337faedbcc2eab52ca0574f10306b88399242e4  music-player.h
 f372324cbd4732b74d95144697c1c79afce5f045bfc5a5d4bc9531f0cc0159d9e9f0d1d6839d2f8242e5f47ffc9d316b7848007443bb245a93e2d32d2c922503  music-model.c
 d883ab01564665a0aa44fdeb12be3ca3ea282eb42b475cedb397288305dbf04f1941e62e0359f42f2b9d83167295953dea7bf5ad6783c562b3d8f3800d47bce8  music-model.h
 56030d4a4ef54f245a3e4cd62dde70b85b3cba960e4951df28b9d59f4077965445ec2642fa0cc58eb2d058876d28cc4eccc7ed35b3859b5eb0b736925f845e69  music-view.c
 56391e1c6c8e9fc63060c39721cb226f0fa17ab597d53cdbecdeea0e1a7284f6aecf3d892d750ac03ca0b27ca72eeb63132006b31b7031fad32a55895b1f7d1b  music-view.h
 60be1ccccf0215ea13bc64fd442a0498e7db203234ce74f92cec502295e8ac703a089438848b9a1850102836855537f561e9bd8313751574a069eb0ec6dcf31a  fplinux-cli.c
 9677a324ea1cbcca154f472c83eb0660badfa11c2b444116f27080bd839dee2ab9ea6ef3b0c495f6074207559b813c843f284786f8b1e3c89023121b5aacb453  fplinux-cli.h
-55364dafa94f032b9d551a33b9ae5e176c9b7c45fd8a6e5e6d153f330d541e88c395cbb827bc18442d0423c3bf2ee1705c5a6bc60ea18847c0ff5e92623e64f9  org.fplinux.music.desktop
-f8e631a0ec8045993da42f4d30ffd818fba24f164086d17de22d41e49b786a00ae1f189e8f122be2d18bbdd142c8338e380b6e14be7fb90ea0e1b45718868b7e  ru.po
+6abf71840a676a9b53614cf39ee821dc89dd7114dcb3a8b6faa20daaeca9b4f126b84939125dde33ea41d7029e8904f324da37d1dd7246f70dc04b47be338f72  org.fplinux.music.desktop
+b826f082062f9ff04b51eb40becf3af5f17ee8cedb3bd8e83e7cc2b2e9425df5c02d7f4886f7f8808d844b9b756ae6ffe16821e9c05861778bb148230c76a387  ru.po
 "

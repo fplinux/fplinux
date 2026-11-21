@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 #define _GNU_SOURCE
 #include "music-player.h"
+#include "fplinux-midi.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -8,22 +9,96 @@
 #include <string.h>
 #include <strings.h>
 #include <sys/eventfd.h>
+#include <sys/stat.h>
 #include <unistd.h>
+
+const char *const music_player_extensions[] = { "mp3", "wav", "mid", "midi",
+						NULL };
+
+static const char *extension(const char *name)
+{
+	const char *suffix = strrchr(name, '.');
+
+	return suffix ? suffix + 1 : "";
+}
+
+static bool is_midi_name(const char *name)
+{
+	const char *suffix = extension(name);
+
+	return !strcasecmp(suffix, "mid") || !strcasecmp(suffix, "midi");
+}
 
 bool music_player_supported_name(const char *name)
 {
-	const char *suffix = strrchr(name, '.');
-	return suffix &&
-	       (!strcasecmp(suffix, ".wav") || !strcasecmp(suffix, ".mp3"));
+	const char *suffix = extension(name);
+
+	for (size_t i = 0; music_player_extensions[i]; i++)
+		if (!strcasecmp(suffix, music_player_extensions[i]))
+			return true;
+	return false;
 }
 
 static void close_media(struct music_player *player)
 {
 	fplinux_media_close(player->media);
 	player->media = NULL;
+	fplinux_midi_close(player->midi);
+	player->midi = NULL;
 	if (player->directory_fd >= 0)
 		close(player->directory_fd);
 	player->directory_fd = -1;
+}
+
+static int read_file(int fd, unsigned char *bytes, size_t count)
+{
+	size_t done = 0;
+
+	while (done < count) {
+		ssize_t received = read(fd, bytes + done, count - done);
+		if (received < 0 && errno == EINTR)
+			continue;
+		if (received <= 0) {
+			if (!received)
+				errno = EIO;
+			return -1;
+		}
+		done += (size_t)received;
+	}
+	return 0;
+}
+
+static struct fplinux_midi *open_midi(int fd)
+{
+	struct stat st;
+
+	if (fstat(fd, &st) < 0)
+		return NULL;
+	if (!S_ISREG(st.st_mode) || st.st_size <= 0) {
+		errno = EINVAL;
+		return NULL;
+	}
+	if ((uint64_t)st.st_size > FPLINUX_MIDI_RESOURCE_BYTES) {
+		errno = EFBIG;
+		return NULL;
+	}
+	size_t count = (size_t)st.st_size;
+	unsigned char *bytes = malloc(count);
+	if (!bytes)
+		return NULL;
+	struct fplinux_midi *midi = NULL;
+	if (read_file(fd, bytes, count) == 0)
+		midi = fplinux_midi_open_bytes(bytes, count);
+	int error = errno;
+	free(bytes);
+	if (midi && fplinux_midi_start(midi) < 0) {
+		error = errno;
+		fplinux_midi_close(midi);
+		midi = NULL;
+	}
+	if (!midi)
+		errno = error;
+	return midi;
 }
 
 static int open_file(struct music_player *player, const char *path)
@@ -40,15 +115,17 @@ static int open_file(struct music_player *player, const char *path)
 		errno = error;
 		return -1;
 	}
-	struct fplinux_media *media = fplinux_media_open_fd(fd);
+	if (is_midi_name(name))
+		player->midi = open_midi(fd);
+	else
+		player->media = fplinux_media_open_fd(fd);
 	int error = errno;
 	close(fd);
-	if (!media) {
+	if (!player->media && !player->midi) {
 		close(parent);
 		errno = error;
 		return -1;
 	}
-	player->media = media;
 	player->directory_fd = parent;
 	return 0;
 }
@@ -101,6 +178,39 @@ static int open_folder(struct music_player *player,
 	return open_file(player, path);
 }
 
+static int seek_media(struct music_player *player, uint64_t position_ms)
+{
+	if (player->midi) {
+		if (fplinux_midi_seek(player->midi, position_ms) < 0)
+			return -1;
+		return fplinux_midi_start(player->midi);
+	}
+	return fplinux_media_seek(player->media, position_ms);
+}
+
+static void media_info(struct music_player *player,
+		       struct music_player_result *result)
+{
+	if (player->midi) {
+		struct fplinux_midi_info info;
+
+		if (fplinux_midi_get_info(player->midi, &info) < 0)
+			return;
+		result->midi = true;
+		result->info = (struct fplinux_media_info){
+			.rate = info.rate,
+			.channels = info.channels,
+			.position_frames = info.position_frames,
+			.duration_ms = (info.duration_us + 999U) / 1000U,
+			.duration_known = true,
+			.seeking = info.seeking,
+			.eof = info.eof,
+		};
+	} else if (player->media) {
+		result->info = *fplinux_media_info(player->media);
+	}
+}
+
 static void execute(struct music_player *player,
 		    struct music_player_result *result)
 {
@@ -110,27 +220,29 @@ static void execute(struct music_player *player,
 		status = player->folder ? open_folder(player, result) :
 					  open_file(player, player->path);
 		if (!status && player->position_ms)
-			status = fplinux_media_seek(player->media,
-						    player->position_ms);
+			status = seek_media(player, player->position_ms);
 	} else if (result->action == MUSIC_PLAYER_CLOSE) {
 		close_media(player);
-	} else if (!player->media) {
+	} else if (!player->media && !player->midi) {
 		errno = ENOENT;
 		status = -1;
 	} else if (result->action == MUSIC_PLAYER_SEEK) {
-		status = fplinux_media_seek(player->media, player->position_ms);
+		status = seek_media(player, player->position_ms);
 	} else {
-		ssize_t frames = fplinux_media_read(player->media,
-						    result->samples,
-						    FPLINUX_MEDIA_BLOCK_FRAMES);
+		ssize_t frames =
+			player->midi ?
+				fplinux_midi_read(player->midi, result->samples,
+						  FPLINUX_MIDI_BLOCK_FRAMES) :
+				fplinux_media_read(player->media,
+						   result->samples,
+						   FPLINUX_MEDIA_BLOCK_FRAMES);
 		if (frames < 0)
 			status = -1;
 		else
 			result->frames = (size_t)frames;
 	}
 	result->error = status < 0 ? errno : 0;
-	if (player->media)
-		result->info = *fplinux_media_info(player->media);
+	media_info(player, result);
 }
 
 static void *run(void *context)

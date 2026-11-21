@@ -13,12 +13,6 @@ import pytest
 from tests import ROOT
 from tests.c_harness import c_build_directory
 from tests.host_tool.gui.support.rgb565_png import convert
-from tests.host_tool.media.decoder_fixtures import (
-    media_decoder_args as media_decoder_args,  # noqa: PLC0414 -- pytest fixture dependency.
-)
-from tests.host_tool.media.decoder_fixtures import (
-    native_mpg123 as native_mpg123,  # noqa: PLC0414 -- pytest fixture dependency.
-)
 from tests.process import run_process
 
 if TYPE_CHECKING:
@@ -41,18 +35,18 @@ def music_view(tmp_path_factory: pytest.TempPathFactory, ui_host_inputs: Path) -
 
 @pytest.fixture(scope="module")
 def music_app(
-    tmp_path_factory: pytest.TempPathFactory, ui_host_inputs: Path, media_decoder_args: list[str]
+    tmp_path_factory: pytest.TempPathFactory,
+    ui_host_inputs: Path,
+    music_app_decoder_args: list[str],
 ) -> Iterator[Path]:
     with c_build_directory(tmp_path_factory, "music-app") as directory:
-        # The shared UI build already links the production UTF-8 routines.
-        utf8 = str(ROOT / "lib/fplinux/fplinux-utf8.c")
         run_process(
             [
                 "sh",
                 str(SCREENS / "build-view.sh"),
                 str(directory),
                 str(ui_host_inputs),
-                *(argument for argument in media_decoder_args if argument != utf8),
+                *music_app_decoder_args,
             ],
             name="build Music and its native session peer",
             timeout=180,

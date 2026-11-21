@@ -20,6 +20,7 @@ struct music_player_result {
 	enum music_player_action action;
 	uint64_t generation;
 	int error;
+	bool midi;
 	struct fplinux_media_info info;
 	int16_t samples[FPLINUX_MEDIA_BLOCK_FRAMES * 2U];
 	size_t frames;
@@ -47,8 +48,11 @@ struct music_player {
 	struct music_player_result result;
 	/* Owned and accessed only by the worker. */
 	struct fplinux_media *media;
+	struct fplinux_midi *midi;
 	int directory_fd;
 };
+
+extern const char *const music_player_extensions[];
 
 int music_player_init(struct music_player *player);
 void music_player_cleanup(struct music_player *player);

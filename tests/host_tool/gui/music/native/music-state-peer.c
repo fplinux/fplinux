@@ -5,6 +5,7 @@
 #include "ui-frame-peer.h"
 
 #include <assert.h>
+#include <errno.h>
 #include <linux/input-event-codes.h>
 #include <stdio.h>
 #include <string.h>
@@ -50,9 +51,57 @@ static void wait_saved(struct fplinux_ui_frame_peer *compositor,
 	assert(false);
 }
 
+static void open_document(struct fplinux_ui_frame_peer *compositor, int session,
+			  const char *path, uint32_t serial, int error)
+{
+	struct fplinux_ui_session_message message = {
+		.type = FPLINUX_UI_SESSION_DOCUMENT,
+		.activation = FPLINUX_UI_SESSION_ACTIVATION_OPEN,
+		.serial = serial,
+	};
+	assert(strlen(path) < sizeof(message.path));
+	strcpy(message.path, path);
+	assert(fplinux_ui_session_send(session, &message));
+	bool waiting = false;
+	for (;;) {
+		message = fplinux_ui_frame_wait_message(compositor, session);
+		if (message.type != FPLINUX_UI_SESSION_DOCUMENT_RESULT)
+			continue;
+		assert(message.serial == serial);
+		if (message.document_status == FPLINUX_UI_DOCUMENT_WAIT) {
+			waiting = true;
+			continue;
+		}
+		assert(waiting);
+		assert(message.document_status ==
+		       (error ? FPLINUX_UI_DOCUMENT_ERROR :
+				FPLINUX_UI_DOCUMENT_ACCEPTED));
+		assert(message.document_error == error);
+		return;
+	}
+}
+
+static void exercise_restoration(struct fplinux_ui_frame_peer *compositor,
+				 int session, const char *replacement,
+				 const char *track)
+{
+	/* Music adds the default repeat option when it finishes restoration. */
+	wait_saved(compositor, "repeat", "0");
+	fplinux_ui_frame_focus_keyboard(&compositor->keyboards[1]);
+	press(compositor, KEY_RIGHT);
+	wait_right_label(compositor, session, "Close");
+	if (strcmp(replacement, "-")) {
+		assert(rename(replacement, track) == 0);
+		press(compositor, KEY_ESC);
+		wait_right_label(compositor, session, "Back");
+		press(compositor, KEY_RIGHT);
+		wait_saved(compositor, "track", "b.wav");
+	}
+}
+
 int main(int argc, char **argv)
 {
-	assert(argc == 6);
+	assert(argc == 6 || (argc == 7 && !strcmp(argv[6], "document")));
 	alarm(10);
 	const struct fplinux_ui_session_message config = {
 		.type = FPLINUX_UI_SESSION_CONFIG,
@@ -93,17 +142,11 @@ int main(int argc, char **argv)
 	do {
 		message = fplinux_ui_frame_wait_message(&compositor, session);
 	} while (message.type != FPLINUX_UI_SESSION_READY);
-	/* Music adds the default repeat option when it finishes restoration. */
-	wait_saved(&compositor, "repeat", "0");
-	fplinux_ui_frame_focus_keyboard(&compositor.keyboards[1]);
-	press(&compositor, KEY_RIGHT);
-	wait_right_label(&compositor, session, "Close");
-	if (strcmp(argv[4], "-")) {
-		assert(rename(argv[4], argv[5]) == 0);
-		press(&compositor, KEY_ESC);
-		wait_right_label(&compositor, session, "Back");
-		press(&compositor, KEY_RIGHT);
-		wait_saved(&compositor, "track", "b.wav");
+	if (argc == 7) {
+		open_document(&compositor, session, argv[4], 1, 0);
+		open_document(&compositor, session, argv[5], 2, EINVAL);
+	} else {
+		exercise_restoration(&compositor, session, argv[4], argv[5]);
 	}
 
 	message = (struct fplinux_ui_session_message){

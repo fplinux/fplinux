@@ -1,14 +1,15 @@
 ---
 title: Music
-description: Play local MP3 and WAV files, choose a folder and keep music playing in the background.
+description: Play local MP3, WAV and MIDI files, choose a folder and keep music playing in the background.
 source:
   - alpine/aports/fplinux-music
   - alpine/aports/fplinux-media
+  - alpine/aports/fplinux-midi
 ---
 
-Music is included in the system. Open **Music** from the application menu or select an MP3 or WAV file in [Files](/fplinux/use/files/). It plays MP3 and WAV files containing PCM or 4-bit IMA ADPCM audio. A memory card is optional: files in **My files** work too.
+Music is included in the system. Open **Music** from the application menu or select an MP3, WAV or MIDI file in [Files](/fplinux/use/files/). Music plays MP3, WAV with PCM or 4-bit IMA ADPCM audio, and Standard MIDI Files (`.mid` and `.midi`) of types 0 and 1 with PPQN timing. Files in **My files** work without a memory card.
 
-Choose **Open** to play one file. It is on the centre key when no track is selected and under **Options** once a track is selected. Choose **Options → Open folder** to use the supported files in that folder as a queue. Music does not scan other folders. You can also select a supported file in [Files](/fplinux/use/files/). Opening another file replaces the current track in the same Music application.
+Choose **Open** to play one file. It is on the centre key when no track is selected and under **Options** once a track is selected. Choose **Options → Open folder** to queue supported files from that folder. Music skips subfolders. Opening another file replaces the current track in the same Music application.
 
 ## Playback controls
 

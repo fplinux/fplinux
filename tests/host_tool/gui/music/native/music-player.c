@@ -42,6 +42,53 @@ static struct music_player_result collect(struct music_player *player)
 	return result;
 }
 
+static void play_midi(struct music_player *player, const char *folder)
+{
+	assert(music_player_request(player, MUSIC_PLAYER_OPEN, 13, folder, true,
+				    "zz.MIDI", 250));
+	struct music_player_result result = collect(player);
+	assert(!result.error && result.midi && result.info.seeking);
+	assert(result.selected == 2);
+	fplinux_files_directory_free(&result.directory);
+	assert(result.info.rate == 22050 && result.info.channels == 2 &&
+	       result.info.duration_known && result.info.duration_ms == 500);
+	unsigned int steps = 0;
+	while (result.info.seeking) {
+		assert(music_player_request(player, MUSIC_PLAYER_READ, 13, NULL,
+					    false, NULL, 0));
+		result = collect(player);
+		assert(result.error == EAGAIN && !result.frames);
+		assert(++steps < 100);
+	}
+	assert(result.info.position_frames == 5512);
+	size_t frames = 0;
+	bool nonzero = false;
+	while (!result.info.eof) {
+		assert(music_player_request(player, MUSIC_PLAYER_READ, 13, NULL,
+					    false, NULL, 0));
+		result = collect(player);
+		assert(!result.error && (result.frames || result.info.eof));
+		frames += result.frames;
+		assert(frames <= 5513 + 5 * 22050);
+		for (size_t i = 0; i < result.frames * 2U; i++)
+			nonzero |= result.samples[i] != 0;
+	}
+	assert(frames >= 5513 && nonzero);
+	assert(result.info.position_frames == 11025);
+
+	char path[FPLINUX_FILES_PATH_MAX];
+	assert(fplinux_files_child_path(folder, "zzz.mid", path,
+					sizeof(path)) == 0);
+	assert(music_player_request(player, MUSIC_PLAYER_OPEN, 14, path, false,
+				    NULL, 0));
+	result = collect(player);
+	assert(result.error == EINVAL);
+	assert(music_player_request(player, MUSIC_PLAYER_READ, 14, NULL, false,
+				    NULL, 0));
+	result = collect(player);
+	assert(result.error == ENOENT);
+}
+
 int main(int argc, char **argv)
 {
 	assert(argc == 2);
@@ -62,10 +109,12 @@ int main(int argc, char **argv)
 	struct music_player_result result = collect(&player);
 	assert(atomic_load(&delayed_reads) == 1);
 	assert(!result.error && result.generation == 7 && result.selected == 1);
-	assert(result.directory.count == 2);
+	assert(result.directory.count == 4);
 	assert(!strcmp(result.directory.entries[0].name, "a.wav"));
 	assert(!strcmp(result.directory.entries[1].name, "z.mp3"));
-	assert(result.info.codec == FPLINUX_MEDIA_MP3 &&
+	assert(!strcmp(result.directory.entries[2].name, "zz.MIDI"));
+	assert(!strcmp(result.directory.entries[3].name, "zzz.mid"));
+	assert(!result.midi && result.info.codec == FPLINUX_MEDIA_MP3 &&
 	       result.info.duration_ms == 2000);
 	fplinux_files_directory_free(&result.directory);
 	assert(music_player_request(&player, MUSIC_PLAYER_SEEK, 9, NULL, false,
@@ -111,7 +160,7 @@ int main(int argc, char **argv)
 				    true, NULL, 0));
 	result = collect(&player);
 	assert(!result.error && result.selected == 0 &&
-	       result.directory.count == 2);
+	       result.directory.count == 4);
 	assert(result.info.codec == FPLINUX_MEDIA_WAV &&
 	       result.info.position_frames == 0);
 	fplinux_files_directory_free(&result.directory);
@@ -120,13 +169,15 @@ int main(int argc, char **argv)
 	assert(music_player_request(&player, MUSIC_PLAYER_OPEN, 11, path, false,
 				    NULL, 0));
 	result = collect(&player);
-	assert(!result.error && result.info.codec == FPLINUX_MEDIA_WAV);
+	assert(!result.error && !result.midi &&
+	       result.info.codec == FPLINUX_MEDIA_WAV);
 	assert(music_player_request(&player, MUSIC_PLAYER_READ, 11, NULL, false,
 				    NULL, 0));
 	result = collect(&player);
 	assert(!result.error && result.frames == 8 && result.info.eof);
 	assert(result.samples[0] == -32768 && result.samples[4] == 32767 &&
 	       result.samples[7] == 8192);
+	play_midi(&player, argv[1]);
 	music_player_cleanup(&player);
 	close(gate[0]);
 	close(gate[1]);

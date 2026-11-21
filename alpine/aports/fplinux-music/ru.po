@@ -48,8 +48,8 @@ msgstr "Карта памяти извлечена. Подключите её и
 msgid "File is unavailable. Open the file or folder again."
 msgstr "Файл недоступен. Откройте файл или папку снова."
 
-msgid "This folder contains no MP3 or WAV files."
-msgstr "В этой папке нет файлов MP3 или WAV."
+msgid "This folder contains no supported music files."
+msgstr "В этой папке нет музыкальных файлов поддерживаемых форматов."
 
 msgid "This audio format is not supported."
 msgstr "Этот звуковой формат не поддерживается."
