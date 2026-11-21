@@ -1,0 +1,25 @@
+Do not record a folded bytecode result as a CSE expression.
+
+The ARM code generator folds imul and iadd into mla and skips the iadd.
+CSE recorded that result for the bytes up to imul, which push two values.
+A later match pushed one value, so the following iadd consumed the last
+local and shifted the stack for later invocations.
+
+--- a/cldc/src/vm/share/compiler/BytecodeCompileClosure.cpp
++++ b/cldc/src/vm/share/compiler/BytecodeCompileClosure.cpp
+@@ -2344,7 +2344,14 @@
+               "Invalid expression start bci");
+     GUARANTEE(!raw_location->is_two_word(), "2-word expressions not supported");
+     if (raw_location->in_register()) {
+-      const int next_bci = method()->next_bci(current_bci);
++      const int bytecode_end = method()->next_bci(current_bci);
++      if (bytecode_end != next_bci) {
++        // The code generator folded the following bytecodes into this one,
++        // such as imul and iadd into mla. The bytes of this expression no
++        // longer push the register value, so CSE must not reuse it.
++        vsf->clear_expression(raw_location->get_register());
++        return;
++      }
+
+       ExpressionAttributeClosure cl;
+       cl.initialize(method());

@@ -39,6 +39,14 @@ public final class JitMIDlet extends MIDlet {
         return errors;
     }
 
+    // The return expression repeats the multiply-add stored in last. The
+    // method has no branch, so the compiler always enters it at bci 0, and it
+    // is too large to be inlined into the caller.
+    private static int regionWidth(int offset, int rows, int scan, int width) {
+        int last = offset + (rows - 1) * scan + width;
+        return last - (offset + (rows - 1) * scan);
+    }
+
     protected void startApp() {
         int value = 0x13579bdf;
         for (int i = 0; i < 1024; i++) {
@@ -58,6 +66,17 @@ public final class JitMIDlet extends MIDlet {
             wrongRemainders += countWrongRemainders(i);
         }
         System.out.println("PM-JIT wrong-remainders=" + wrongRemainders);
+
+        int regionWidths = 0;
+        for (int round = 0; round < 1024; round++) {
+            for (int offset = -8; offset <= 8; offset++) {
+                for (int rows = 1; rows <= 3; rows++) {
+                    regionWidths += regionWidth(offset, rows, 5, 3);
+                    regionWidths += regionWidth(offset, rows, -5, 3);
+                }
+            }
+        }
+        System.out.println("PM-JIT region-widths=" + regionWidths);
         notifyDestroyed();
     }
 

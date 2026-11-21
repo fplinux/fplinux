@@ -66,6 +66,11 @@ for output in "${work}/jit-interpreted.txt" "${work}/jit-compiled.txt"; do
 		cat "${output}" >&2
 		fail "JIT fixture produced an incorrect floating-point remainder"
 	}
+	# 104448 calls, each returning the width 3.
+	grep -qx 'PM-JIT region-widths=313344' "${output}" || {
+		cat "${output}" >&2
+		fail "JIT fixture reused a folded multiply-add expression"
+	}
 	grep '^PM-JIT ' "${output}"
 done
 if grep -q 'Compiling ' "${work}/jit-interpreted.txt"; then
@@ -74,17 +79,20 @@ fi
 # Compiler trace can interrupt MIDlet output, so inspect it separately.
 run_jit_fixture 1 1 "${work}/jit-trace.txt"
 awk '
-    /Compiling / { method = /JitMIDlet\.(hotLoop|countWrongRemainders)/ ? $0 : "" }
+    /Compiling / {
+        method = /JitMIDlet\.(hotLoop|countWrongRemainders|regionWidth)/ ? $0 : ""
+    }
     method && /<done [1-9][0-9]*>/ {
         print method; print
         if (method ~ /\.hotLoop/) integer = 1
         if (method ~ /\.countWrongRemainders/) remainder = 1
+        if (method ~ /\.regionWidth/) region = 1
         method = ""
     }
-    END { exit !(integer && remainder) }
+    END { exit !(integer && remainder && region) }
 ' "${work}/jit-trace.txt" || {
 	cat "${work}/jit-trace.txt" >&2
-	fail "JIT did not compile both arithmetic methods"
+	fail "JIT did not compile all arithmetic methods"
 }
 
 build_jar hello "${here}/hello.mf"
