@@ -6,10 +6,11 @@ _jpegver=@version:aport_libjpeg_turbo_3_2_1_tar_gz@
 pkgdesc="MRE runtime for native ARM VXP applications"
 url="https://github.com/fplinux/fplinux"
 arch="armv7"
-license="GPL-2.0-only AND 0BSD AND MIT AND Zlib AND libpng-2.0 AND IJG AND BSD-3-Clause"
-depends="fplinux-ui fplinux-runtime-media fplinux-font-terminus-8x16 libcurl"
+license="GPL-2.0-only AND 0BSD AND MIT AND Zlib AND libpng-2.0 AND IJG AND BSD-3-Clause AND curl"
+depends="fplinux-ui fplinux-runtime-media fplinux-font-terminus-8x16 c-ares fplinux-libidn2"
 makedepends_build="clang23 lld23 pkgconf cmake samurai gettext"
-makedepends_host="musl-dev musl-libintl linux-headers gcc zlib-dev zlib-static libpng-dev libpng-static curl-dev fplinux-mbedtls-static-dev fplinux-ui-dev fplinux-runtime-media-dev"
+makedepends_host="musl-dev musl-libintl linux-headers gcc zlib-dev zlib-static libpng-dev libpng-static
+	c-ares-dev libidn2-dev fplinux-mre-curl-dev fplinux-mbedtls-static-dev fplinux-ui-dev fplinux-runtime-media-dev"
 options="!check"
 source="
 	@source:mre_gif@
@@ -57,13 +58,14 @@ build() {
 	export PKG_CONFIG_SYSROOT_DIR="$CBUILDROOT"
 	export PKG_CONFIG_LIBDIR="$CBUILDROOT/usr/lib/pkgconfig:$CBUILDROOT/usr/share/pkgconfig"
 	"$CC" $CPPFLAGS $CFLAGS -Os -std=c11 -Wall -Wextra -Werror \
-		-I"$srcdir/include" -I"$startdir" \
-		$(pkg-config --cflags fplinux-ui fplinux-runtime-media libcurl fplinux-mbedcrypto) \
+		-I"$srcdir/include" -I"$startdir" -I"$CBUILDROOT/usr/include/fplinux-mre-curl" \
+		$(pkg-config --cflags fplinux-ui fplinux-runtime-media fplinux-mbedcrypto) \
 		fplinux-mre.c mre-selector-files.c runtime-paths.c text-codec.c \
 		"$startdir/ipc/mre-control.c" \
 		"$startdir/brokers/vfs-broker.c" "$startdir/brokers/vfs-path.c" \
 		"$startdir/brokers/http-broker.c" "$startdir/brokers/audio-broker.c" fplinux-cli.c \
-		$(pkg-config --libs fplinux-ui fplinux-runtime-media libcurl) \
+		"$CBUILDROOT/usr/lib/fplinux-mre-curl/libcurl.a" -lcares -lidn2 \
+		$(pkg-config --libs fplinux-ui fplinux-runtime-media) \
 		"$CBUILDROOT/usr/lib/fplinux-mbedtls-static/libmbedcrypto.a" $LDFLAGS \
 		-o fplinux-mre
 	msgfmt --check --output-file=ru.mo ru.po
@@ -153,6 +155,8 @@ package() {
 		"$pkgdir/usr/share/licenses/$pkgname/README.ijg"
 	install -Dm644 "$CBUILDROOT/usr/share/licenses/fplinux-mbedtls-static-dev/LICENSE" \
 		"$pkgdir/usr/share/licenses/$pkgname/Mbed-TLS.txt"
+	install -Dm644 "$CBUILDROOT/usr/share/licenses/fplinux-mre-curl-dev/COPYING" \
+		"$pkgdir/usr/share/licenses/$pkgname/curl.txt"
 }
 
 sha512sums="

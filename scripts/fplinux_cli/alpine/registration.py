@@ -454,6 +454,7 @@ LOCAL_BUILD_DEPENDENCIES = {
         "fplinux-ui",
         "fplinux-font-terminus",
         "fplinux-mbedtls-static-dev",
+        "fplinux-mre-curl-dev",
         "fplinux-runtime-media",
     ),
     "fplinux-music": ("fplinux-ui", "fplinux-media", "fplinux-midi"),

@@ -1,0 +1,63 @@
+# Maintainer: FPLinux contributors <fplinux@example.invalid>
+pkgname=fplinux-mre-curl-dev
+pkgver=@version:aport_curl_8_23_0_tar_xz@
+pkgrel=0
+pkgdesc="Private HTTP/1.1 libcurl for the MRE broker"
+url="https://curl.se/"
+arch="armv7"
+license="curl"
+makedepends_build="clang23 lld23 llvm23 cmake pkgconf samurai"
+makedepends_host="c-ares-dev libidn2-dev musl-dev"
+options="!check"
+source="
+	@source:aport_curl_8_23_0_tar_xz@
+"
+builddir="$srcdir/curl-$pkgver"
+
+build() {
+	: "${CC:?missing target CC}" \
+		"${CHOST:?missing target CHOST}" "${CBUILDROOT:?missing target sysroot}"
+	export PKG_CONFIG_SYSROOT_DIR="$CBUILDROOT"
+	export PKG_CONFIG_LIBDIR="$CBUILDROOT/usr/lib/pkgconfig:$CBUILDROOT/usr/share/pkgconfig"
+	# Percent-encoded host names can use IDN. Keep the proxy option available
+	# so the broker can explicitly ignore the ambient proxy configuration.
+	cmake -B output -G Ninja \
+		-DCMAKE_BUILD_TYPE=MinSizeRel \
+		-DCMAKE_SYSTEM_NAME=Linux -DCMAKE_SYSTEM_PROCESSOR=armv7 \
+		-DCMAKE_C_COMPILER="$CC" -DCMAKE_C_COMPILER_TARGET="$CHOST" \
+		-DCMAKE_SYSROOT="$CBUILDROOT" \
+		-DCMAKE_C_FLAGS="$CPPFLAGS $CFLAGS -ffile-prefix-map=$srcdir=." \
+		-DCMAKE_C_FLAGS_MINSIZEREL= -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+		-DCMAKE_AR=/usr/lib/llvm23/bin/llvm-ar \
+		-DCMAKE_RANLIB=/usr/lib/llvm23/bin/llvm-ranlib \
+		-DCMAKE_FIND_ROOT_PATH="$CBUILDROOT" \
+		-DCMAKE_FIND_ROOT_PATH_MODE_PROGRAM=NEVER \
+		-DCMAKE_FIND_ROOT_PATH_MODE_LIBRARY=ONLY \
+		-DCMAKE_FIND_ROOT_PATH_MODE_INCLUDE=ONLY \
+		-DCMAKE_FIND_ROOT_PATH_MODE_PACKAGE=ONLY \
+		-DBUILD_SHARED_LIBS=OFF -DBUILD_STATIC_LIBS=ON -DBUILD_CURL_EXE=OFF \
+		-DBUILD_TESTING=OFF -DBUILD_EXAMPLES=OFF \
+		-DBUILD_LIBCURL_DOCS=OFF -DBUILD_MISC_DOCS=OFF \
+		-DCURL_DISABLE_INSTALL=ON \
+		-DENABLE_ARES=ON -DENABLE_THREADED_RESOLVER=OFF \
+		-DUSE_LIBIDN2=ON -DCMAKE_REQUIRE_FIND_PACKAGE_Libidn2=ON \
+		-DCURL_ENABLE_SSL=OFF -DUSE_NGHTTP2=OFF \
+		-DCURL_USE_LIBPSL=OFF -DCURL_USE_LIBSSH2=OFF \
+		-DCURL_ZLIB=OFF -DCURL_BROTLI=OFF -DCURL_ZSTD=OFF \
+		-DCURL_DISABLE_COOKIES=ON -DCURL_DISABLE_MIME=ON -DCURL_DISABLE_NETRC=ON \
+		-DCURL_DISABLE_DICT=ON -DCURL_DISABLE_FILE=ON -DCURL_DISABLE_FTP=ON \
+		-DCURL_DISABLE_GOPHER=ON -DCURL_DISABLE_IMAP=ON -DCURL_DISABLE_IPFS=ON \
+		-DCURL_DISABLE_LDAP=ON -DCURL_DISABLE_MQTT=ON -DCURL_DISABLE_POP3=ON \
+		-DCURL_DISABLE_RTSP=ON -DCURL_DISABLE_SMTP=ON -DCURL_DISABLE_TELNET=ON \
+		-DCURL_DISABLE_TFTP=ON -DCURL_DISABLE_WEBSOCKETS=ON
+	cmake --build output --parallel "${JOBS:-1}"
+}
+
+package() {
+	install -Dm644 output/lib/libcurl.a "$pkgdir/usr/lib/fplinux-mre-curl/libcurl.a"
+	install -Dm644 -t "$pkgdir/usr/include/fplinux-mre-curl/curl" include/curl/*.h
+	install -Dm644 COPYING "$pkgdir/usr/share/licenses/$pkgname/COPYING"
+}
+
+sha512sums="
+"

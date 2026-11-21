@@ -1,0 +1,59 @@
+# Maintainer: FPLinux contributors <fplinux@example.invalid>
+pkgname=fplinux-libidn2
+pkgver=@version:aport_libidn2_2_3_8_tar_gz@
+pkgrel=0
+pkgdesc="Internationalized domain names library for the MRE runtime"
+url="https://www.gnu.org/software/libidn#libidn2"
+arch="armv7"
+license="GPL-2.0-or-later OR LGPL-3.0-or-later"
+_idn_version="@version:aport_libidn2_static_armv7_apk@"
+_unistring_version="@version:aport_libunistring_static_armv7_apk@"
+_unistring_source_version="@version:aport_libunistring_1_4_2_tar_xz@"
+provides="libidn2=$_idn_version"
+provider_priority=10
+replaces="libidn2"
+makedepends_build="clang23 lld23 tar"
+makedepends_host="gcc libgcc-static musl-dev"
+options="!check"
+source="
+	@source:aport_libidn2_2_3_8_tar_gz@
+	@source:aport_libidn2_static_armv7_apk@
+	@source:aport_libunistring_1_4_2_tar_xz@
+	@source:aport_libunistring_static_armv7_apk@
+"
+builddir="$srcdir/libidn2-$pkgver"
+
+build() {
+	: "${CC:?missing target CC}" \
+		"${CHOST:?missing target CHOST}" "${CBUILDROOT:?missing target sysroot}"
+	local libgcc
+	libgcc=$("$CC" --target="$CHOST" --sysroot="$CBUILDROOT" \
+		--gcc-toolchain="$CBUILDROOT/usr" --rtlib=libgcc -print-libgcc-file-name)
+	tar --ignore-zeros --warning=no-unknown-keyword \
+		-xOzf "$startdir/libidn2-static-$_idn_version.apk" usr/lib/libidn2.a \
+		> "$srcdir/libidn2.a"
+	tar --ignore-zeros --warning=no-unknown-keyword \
+		-xOzf "$startdir/libunistring-static-$_unistring_version.apk" usr/lib/libunistring.a \
+		> "$srcdir/libunistring.a"
+
+	# Keep every public IDN2 entry point. The version script hides the
+	# Unicode helpers, which use the same tables as the build sysroot.
+	"$CHOST-ld" -m armelf_linux_eabi -shared -z defs -z text -z relro -z now \
+		--as-needed --gc-sections --build-id=none --hash-style=gnu \
+		--soname=libidn2.so.0 --version-script=lib/idn2.map --no-undefined-version \
+		--whole-archive "$srcdir/libidn2.a" --no-whole-archive \
+		"$srcdir/libunistring.a" "$CBUILDROOT/usr/lib/libc.so" "$libgcc" \
+		-o libidn2.so.0
+}
+
+package() {
+	local licenses="$pkgdir/usr/share/licenses/$pkgname"
+	local unistring="$srcdir/libunistring-$_unistring_source_version"
+	install -Dm755 libidn2.so.0 "$pkgdir/usr/lib/libidn2.so.0.4.0"
+	ln -s libidn2.so.0.4.0 "$pkgdir/usr/lib/libidn2.so.0"
+	install -Dm644 -t "$licenses/libidn2" COPYING COPYINGv2 COPYING.LESSERv3 COPYING.unicode
+	install -Dm644 -t "$licenses/libunistring" "$unistring/COPYING" "$unistring/COPYING.LIB"
+}
+
+sha512sums="
+"

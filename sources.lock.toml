@@ -525,6 +525,13 @@ url = "https://raw.githubusercontent.com/alpinelinux/aports/dff61c85c6c68e2c5fb8
 algorithm = "sha512"
 checksum = "201ef1876655101cedabc83a0ce46f75079b08f565ca8de4cf96fd69e41332a2d0597b77fe360dc58b10772586fa39bd52ac9ee670a912fef84840278356065a"
 
+[aport_curl_8_23_0_tar_xz]
+version = "8.23.0"
+name = "curl-8.23.0.tar.xz"
+url = "https://curl.se/download/curl-8.23.0.tar.xz"
+algorithm = "sha512"
+checksum = "69cf0feafdc79fbad007cf2fc977b777ce6ccb05d01afd17b5a42f8bedbfcc342fc3a48193faa7f3eafe6800cd7d07948916e8733db1b9de60287ed06219b840"
+
 [aport_dad_if_up]
 version = "dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763"
 name = "dad.if-up"
@@ -644,6 +651,20 @@ url = "https://raw.githubusercontent.com/libffi/libffi/v3.5.2/LICENSE"
 algorithm = "sha512"
 checksum = "7a1f749140afdc9550ec12b69df3b8c2bd6567bd38b0345fe728a32dd8552f4d2eb12a973c75d8aafe5a7d637a4d2332d7eee657c7b17d521cc8f90780d807c4"
 
+[aport_libidn2_2_3_8_tar_gz]
+version = "2.3.8"
+name = "libidn2-2.3.8.tar.gz"
+url = "https://ftp.gnu.org/gnu/libidn/libidn2-2.3.8.tar.gz"
+algorithm = "sha512"
+checksum = "4d8427c0f115268132f7544e80a808c883ab1406338f6c529b1a586b016d57aedb0857f66166eb8d9f37d70efc9dccf907b673b43b17bcf258c8797db1e829ce"
+
+[aport_libidn2_static_armv7_apk]
+version = "2.3.8-r0"
+name = "libidn2-static-2.3.8-r0.apk"
+url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/armv7/libidn2-static-2.3.8-r0.apk"
+algorithm = "sha256"
+checksum = "44530bb88be3332064274c421b4e37c0c23f84a14bc0338a8bfb43e3e1f63ced"
+
 [aport_libjpeg_turbo_3_2_1_tar_gz]
 version = "3.2.1"
 name = "libjpeg-turbo-3.2.1.tar.gz"
@@ -657,6 +678,20 @@ name = "libudev-zero-1.0.5.tar.gz"
 url = "https://github.com/illiliti/libudev-zero/archive/1.0.5.tar.gz"
 algorithm = "sha512"
 checksum = "f20a923cb04351ef9e02313ea3b94e261e01d3607bc1c4c626cb40593b2d60b0e59e017f394786bf9b068c8c4870ee26b50eb56aed60aa828f7629078e9d4fa2"
+
+[aport_libunistring_1_4_2_tar_xz]
+version = "1.4.2"
+name = "libunistring-1.4.2.tar.xz"
+url = "https://ftp.gnu.org/gnu/libunistring/libunistring-1.4.2.tar.xz"
+algorithm = "sha512"
+checksum = "0215f7f40f426227eca5174140654a3fa43ac1520eeb212c2ba08043470f905687b2703afdda12e9635359a6187643900136b6bb11b422bd7567d17ca71b555f"
+
+[aport_libunistring_static_armv7_apk]
+version = "1.4.2-r0"
+name = "libunistring-static-1.4.2-r0.apk"
+url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/armv7/libunistring-static-1.4.2-r0.apk"
+algorithm = "sha256"
+checksum = "4712635eda8d71b3132d91da66980e37b16dcb9a533fbf69cc298d34ec1bb2eb"
 
 [aport_libxkbcommon_1_13_2_tar_gz]
 version = "1.13.2"
