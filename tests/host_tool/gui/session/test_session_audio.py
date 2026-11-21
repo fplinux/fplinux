@@ -26,6 +26,7 @@ def test_session_audio_resyncs_app_and_clock_owners(tmp_path: Path) -> None:
             f"-I{ROOT / 'alpine/aports/fplinux-session'}",
             str(ROOT / "tests/host_tool/gui/session/session-audio-test.c"),
             str(ROOT / "alpine/aports/fplinux-session/session-audio.c"),
+            str(ROOT / "lib/fplinux-shared/fplinux-audio-control.c"),
         ],
         name="compile manager audio policy client",
     )

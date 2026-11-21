@@ -23,6 +23,8 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "fplinux-audio-control.h"
+#include "fplinux-audio-status.h"
 #include "fplinux-brightness-client.h"
 #include "fplinux-desktop-entry.h"
 #include "fplinux-keypad-light.h"
@@ -861,6 +863,7 @@ static void send_active(struct fplinux_session *session)
 	struct clock_ring ring;
 	struct process *app = session->app;
 	bool named = app_announced(session);
+	uint64_t event_id = 0;
 
 	if (session->launcher.control_fd < 0)
 		return;
@@ -877,8 +880,9 @@ static void send_active(struct fplinux_session *session)
 	message.background_playing = background_playing(session);
 	message.theme = session->settings.theme;
 	clock_wire_ring_from_model(&session->clock.model, &ring);
-	clock_wire_ring_encode(&ring, ring.event.id, message.clock_data,
-			       sizeof(message.clock_data));
+	if (clock_wire_ring_encode(&ring, message.clock_data,
+				   sizeof(message.clock_data)) == CLOCK_OK)
+		event_id = ring.event.id;
 	fplinux_session_clock_presentation(&session->clock,
 					   &message.clock_presentation);
 	fplinux_session_copy_value(
@@ -919,11 +923,12 @@ static void send_active(struct fplinux_session *session)
 					   session->launch_title);
 	}
 	/* A new launcher opens the view that the previous one showed. */
-	fplinux_session_copy_value(message.value, sizeof(message.value),
-				   session->launcher_home_view ? "home" :
-								 "catalogue");
-	fplinux_session_copy_value(message.name, sizeof(message.name),
-				   session->launcher_list ? "list" : "grid");
+	message.launcher_view = session->launcher_home_view ?
+					FPLINUX_UI_LAUNCHER_VIEW_HOME :
+					FPLINUX_UI_LAUNCHER_VIEW_CATALOGUE;
+	message.launcher_catalogue =
+		session->launcher_list ? FPLINUX_UI_LAUNCHER_CATALOGUE_LIST :
+					 FPLINUX_UI_LAUNCHER_CATALOGUE_GRID;
 	message.tasks_view = !named && session->launcher_tasks_view;
 	/*
 	 * While locked, reason is the current unlock hint. Otherwise it reports
@@ -953,6 +958,7 @@ static void send_active(struct fplinux_session *session)
 	if (message.tasks_view)
 		session->launcher_restore_tasks = false;
 	session->last_active = message;
+	session->last_active_clock_event = event_id;
 	session->last_active_sent = true;
 	session->active_known = true;
 	session->active_display = session->power.display;
@@ -1586,7 +1592,7 @@ static void close_reply(struct fplinux_session *session,
 	if (!process->close_serial ||
 	    process->close_serial != message->serial || process->policy.closing)
 		return;
-	if (!strcmp(message->value, "ready")) {
+	if (message->close_response == FPLINUX_UI_SESSION_CLOSE_READY) {
 		if (session->document.restarting &&
 		    session->document.handler_token == process->policy.token) {
 			release_scene(session, HELD_SCENE_CLOSE);
@@ -1594,7 +1600,7 @@ static void close_reply(struct fplinux_session *session,
 		} else {
 			finish_user_close(session, process);
 		}
-	} else if (!strcmp(message->value, "cancel")) {
+	} else if (message->close_response == FPLINUX_UI_SESSION_CLOSE_CANCEL) {
 		if (session->document.restarting &&
 		    session->document.handler_token == process->policy.token)
 			document_result(session, FPLINUX_UI_DOCUMENT_CANCELLED,
@@ -1607,7 +1613,7 @@ static void close_reply(struct fplinux_session *session,
 		    session->close_pid == process->policy.pid &&
 		    session->close_token == process->policy.token)
 			release_scene(session, HELD_SCENE_CLOSE);
-	} else if (!strcmp(message->value, "wait")) {
+	} else if (message->close_response == FPLINUX_UI_SESSION_CLOSE_WAIT) {
 		process->close_waiting = true;
 		process->close_activate &= process != session->app;
 	}
@@ -2181,15 +2187,12 @@ static bool keeps_screen_on(const struct fplinux_session *session)
 	return false;
 }
 
-void fplinux_session_reply_with_serial(struct process *process,
-				       enum fplinux_ui_session_message_type type,
-				       const char *name, const char *value,
-				       const char *reason, uint32_t serial)
+static void reply(struct process *process,
+		  enum fplinux_ui_session_message_type type, const char *name,
+		  const char *value, const char *reason)
 {
 	struct fplinux_ui_session_message message = {
 		.type = type,
-		.serial = serial,
-		.applied = type == FPLINUX_UI_SESSION_SETTING,
 	};
 
 	fplinux_session_copy_value(message.name, sizeof(message.name), name);
@@ -2199,23 +2202,37 @@ void fplinux_session_reply_with_serial(struct process *process,
 	fplinux_ui_session_send(process->control_fd, &message);
 }
 
-static void reply(struct process *process,
-		  enum fplinux_ui_session_message_type type, const char *name,
-		  const char *value, const char *reason)
+void fplinux_session_setting_error(
+	struct process *process,
+	const struct fplinux_ui_session_message *request, const char *reason)
 {
-	fplinux_session_reply_with_serial(process, type, name, value, reason,
-					  0);
+	struct fplinux_ui_session_message message = {
+		.type = FPLINUX_UI_SESSION_ERROR,
+		.serial = request->serial,
+		.setting = request->setting,
+	};
+
+	if (request->setting.kind == FPLINUX_UI_SETTING_UNKNOWN)
+		fplinux_session_copy_value(message.name, sizeof(message.name),
+					   request->name);
+	fplinux_session_copy_value(message.reason, sizeof(message.reason),
+				   reason);
+	fplinux_ui_session_send(process->control_fd, &message);
 }
 
-static void setting_error(struct process *process,
-			  const struct fplinux_ui_session_message *message,
-			  const char *reason)
+static void setting_result(struct process *process,
+			   enum fplinux_ui_setting_kind kind,
+			   union fplinux_ui_setting_value value)
 {
-	bool volume = fplinux_session_volume_has_setting(message->name);
+	const struct fplinux_ui_session_message message = {
+		.type = FPLINUX_UI_SESSION_SETTING,
+		.applied = true,
+		.setting = { .kind = kind,
+			     .operation = FPLINUX_UI_SETTING_RESULT,
+			     .value = value },
+	};
 
-	fplinux_session_reply_with_serial(process, FPLINUX_UI_SESSION_ERROR,
-					  message->name, message->value, reason,
-					  volume ? message->serial : 0);
+	fplinux_ui_session_send(process->control_fd, &message);
 }
 
 void fplinux_session_save_settings(struct fplinux_session *session)
@@ -2255,9 +2272,10 @@ void fplinux_session_save_settings(struct fplinux_session *session)
 }
 
 void fplinux_session_setting_reply(struct fplinux_session *session,
-				   struct process *process, const char *name,
-				   const char *value, uint32_t serial,
-				   bool mutation)
+				   struct process *process,
+				   enum fplinux_ui_setting_kind kind,
+				   union fplinux_ui_setting_value value,
+				   uint32_t serial, bool mutation)
 {
 	struct fplinux_ui_session_message message = {
 		.type = mutation && session->settings_storage.error ?
@@ -2267,10 +2285,11 @@ void fplinux_session_setting_reply(struct fplinux_session *session,
 		.applied = true,
 		.storage_state = session->settings_storage.state,
 		.storage_error = session->settings_storage.error,
+		.setting = { .kind = kind,
+			     .operation = FPLINUX_UI_SETTING_RESULT,
+			     .value = value },
 	};
 
-	fplinux_session_copy_value(message.name, sizeof(message.name), name);
-	fplinux_session_copy_value(message.value, sizeof(message.value), value);
 	if (message.storage_error)
 		fplinux_session_copy_value(
 			message.reason, sizeof(message.reason), "save-failed");
@@ -2303,84 +2322,89 @@ static void set_rtc(const char *path, time_t seconds)
 }
 
 static void time_setting(struct fplinux_session *session,
-			 struct process *process, const char *value)
+			 struct process *process,
+			 const struct fplinux_ui_session_message *message)
 {
 	struct timespec clock_time = { 0 };
-	char current[32];
+	struct tm current;
+	time_t now;
 
-	if (value[0]) {
-		if (!fplinux_session_time_parse(value, &clock_time.tv_sec)) {
-			reply(process, FPLINUX_UI_SESSION_ERROR, "time", value,
-			      "invalid-value");
+	if (message->setting.operation == FPLINUX_UI_SETTING_SET) {
+		if (!fplinux_session_time_setpoint(&message->setting.value.time,
+						   &clock_time.tv_sec)) {
+			fplinux_session_setting_error(process, message,
+						      "invalid-value");
 			return;
 		}
 		if (clock_settime(CLOCK_REALTIME, &clock_time) < 0) {
 			fprintf(stderr,
 				"fplinux-session: cannot set the clock: %s\n",
 				strerror(errno));
-			reply(process, FPLINUX_UI_SESSION_ERROR, "time", value,
-			      "failed");
+			fplinux_session_setting_error(process, message,
+						      "failed");
 			return;
 		}
 		set_rtc(session->options.rtc_path, clock_time.tv_sec);
 		send_active(session);
 	}
-	if (!fplinux_session_time_format(time(NULL), current,
-					 sizeof(current))) {
-		reply(process, FPLINUX_UI_SESSION_ERROR, "time", value,
-		      "failed");
+	now = time(NULL);
+	if (!localtime_r(&now, &current)) {
+		fplinux_session_setting_error(process, message, "failed");
 		return;
 	}
-	reply(process, FPLINUX_UI_SESSION_SETTING, "time", current, "");
+	setting_result(process, FPLINUX_UI_SETTING_TIME,
+		       (union fplinux_ui_setting_value){
+			       .time = {
+				       .year = current.tm_year + 1900,
+				       .month = current.tm_mon + 1,
+				       .day = current.tm_mday,
+				       .hour = current.tm_hour,
+				       .minute = current.tm_min,
+			       } });
 }
 
 static void brightness_setting(struct fplinux_session *session,
-			       struct process *process, const char *value)
+			       struct process *process,
+			       const struct fplinux_ui_session_message *message)
 {
-	struct fplinux_session_settings next = session->settings;
-	unsigned int level = 0;
-	char current[16];
+	bool set = message->setting.operation == FPLINUX_UI_SETTING_SET;
+	unsigned int level = message->setting.value.level;
 	int result;
 
-	if (value[0] && !fplinux_session_settings_parse(
-				&next, session->options.languages_dir,
-				FPLINUX_SESSION_SETTING_BRIGHTNESS, value)) {
-		reply(process, FPLINUX_UI_SESSION_ERROR, "brightness", value,
-		      "invalid-value");
+	if (set && (level < FPLINUX_SETTINGS_BRIGHTNESS_MIN ||
+		    level > FPLINUX_SETTINGS_BRIGHTNESS_MAX)) {
+		fplinux_session_setting_error(process, message,
+					      "invalid-value");
 		return;
 	}
 	if (!brightness_connect(session)) {
-		reply(process, FPLINUX_UI_SESSION_ERROR, "brightness", value,
-		      "unavailable");
+		fplinux_session_setting_error(process, message, "unavailable");
 		return;
 	}
 	/* While dimmed or off, the service applies a new level on release. */
-	if (value[0])
-		result = fplinux_brightness_set(&session->brightness,
-						next.brightness);
+	if (set)
+		result = fplinux_brightness_set(&session->brightness, level);
 	else
 		result = fplinux_brightness_get(&session->brightness, &level);
 	if (result < 0) {
-		brightness_lost(session, value[0] ? "set" : "get");
-		reply(process, FPLINUX_UI_SESSION_ERROR, "brightness", value,
-		      "unavailable");
+		brightness_lost(session, set ? "set" : "get");
+		fplinux_session_setting_error(process, message, "unavailable");
 		return;
 	}
-	if (value[0]) {
-		session->settings = next;
-		session->user_level = next.brightness;
+	if (set) {
+		session->settings.brightness = level;
+		session->settings.has_brightness = true;
 		/* The saved level replaces the one a preview would restore. */
 		session->preview_active = false;
 		session->settings_retry_delay_ms = 0;
 		fplinux_session_save_settings(session);
-	} else {
-		session->user_level = level;
 	}
+	session->user_level = level;
 	session->brightness_applied = session->user_level;
 	session->brightness_known = true;
-	snprintf(current, sizeof(current), "%u", session->user_level);
-	fplinux_session_setting_reply(session, process, "brightness", current,
-				      0, value[0]);
+	fplinux_session_setting_reply(
+		session, process, FPLINUX_UI_SETTING_BRIGHTNESS,
+		(union fplinux_ui_setting_value){ .level = level }, 0, set);
 }
 
 /*
@@ -2418,50 +2442,52 @@ static bool end_brightness_preview(struct fplinux_session *session)
  * restores.
  */
 static void brightness_preview(struct fplinux_session *session,
-			       struct process *process, const char *value)
+			       struct process *process,
+			       const struct fplinux_ui_session_message *message)
 {
-	struct fplinux_session_settings next = session->settings;
-	char current[16];
+	unsigned int level = message->setting.value.level;
 
-	if (!value[0]) {
+	if (message->setting.operation == FPLINUX_UI_SETTING_CANCEL) {
 		if (!end_brightness_preview(session)) {
-			reply(process, FPLINUX_UI_SESSION_ERROR, "brightness",
-			      value, "unavailable");
+			struct fplinux_ui_session_message request = {
+				.setting.kind = FPLINUX_UI_SETTING_BRIGHTNESS,
+			};
+
+			fplinux_session_setting_error(process, &request,
+						      "unavailable");
 			return;
 		}
-		snprintf(current, sizeof(current), "%u", session->user_level);
-		fplinux_session_setting_reply(session, process, "brightness",
-					      current, 0, false);
+		fplinux_session_setting_reply(
+			session, process, FPLINUX_UI_SETTING_BRIGHTNESS,
+			(union fplinux_ui_setting_value){
+				.level = session->user_level },
+			0, false);
 		return;
 	}
-	if (!fplinux_session_settings_parse(
-		    &next, session->options.languages_dir,
-		    FPLINUX_SESSION_SETTING_BRIGHTNESS, value)) {
-		reply(process, FPLINUX_UI_SESSION_ERROR, "brightness_preview",
-		      value, "invalid-value");
+	if (level < FPLINUX_SETTINGS_BRIGHTNESS_MIN ||
+	    level > FPLINUX_SETTINGS_BRIGHTNESS_MAX) {
+		fplinux_session_setting_error(process, message,
+					      "invalid-value");
 		return;
 	}
 	if (!brightness_connect(session)) {
-		reply(process, FPLINUX_UI_SESSION_ERROR, "brightness_preview",
-		      value, "unavailable");
+		fplinux_session_setting_error(process, message, "unavailable");
 		return;
 	}
 	if (!session->preview_active)
 		session->preview_restore_level = session->user_level;
-	if (fplinux_brightness_set(&session->brightness, next.brightness) < 0) {
+	if (fplinux_brightness_set(&session->brightness, level) < 0) {
 		brightness_lost(session, "set");
-		reply(process, FPLINUX_UI_SESSION_ERROR, "brightness_preview",
-		      value, "unavailable");
+		fplinux_session_setting_error(process, message, "unavailable");
 		return;
 	}
 	session->preview_active = true;
 	session->preview_launcher = process == &session->launcher;
-	session->user_level = next.brightness;
-	session->brightness_applied = next.brightness;
+	session->user_level = level;
+	session->brightness_applied = level;
 	session->brightness_known = true;
-	snprintf(current, sizeof(current), "%u", next.brightness);
-	reply(process, FPLINUX_UI_SESSION_SETTING, "brightness_preview",
-	      current, "");
+	setting_result(process, FPLINUX_UI_SETTING_BRIGHTNESS_PREVIEW,
+		       (union fplinux_ui_setting_value){ .level = level });
 }
 
 struct process *
@@ -2489,12 +2515,14 @@ void fplinux_session_remember_setting_request(
 	request->pid = process->policy.pid;
 	request->token = process->policy.token;
 	request->serial = message->serial;
+	request->kind = message->setting.kind;
 	request->pending = true;
 }
 
 static void wireless_reply(struct process *process,
 			   struct fplinux_session_wireless_state state,
-			   bool initialized, int error, const char *value)
+			   bool initialized, int error,
+			   const struct fplinux_ui_session_message *message)
 {
 	if (!initialized || error || state.error || !state.known) {
 		const char *reason = initialized && !state.error &&
@@ -2502,11 +2530,12 @@ static void wireless_reply(struct process *process,
 					     "unsupported" :
 					     "unavailable";
 
-		reply(process, FPLINUX_UI_SESSION_ERROR, "wifi", value, reason);
+		fplinux_session_setting_error(process, message, reason);
 		return;
 	}
-	reply(process, FPLINUX_UI_SESSION_SETTING, "wifi",
-	      state.enabled ? "1" : "0", "");
+	setting_result(
+		process, FPLINUX_UI_SETTING_WIFI,
+		(union fplinux_ui_setting_value){ .enabled = state.enabled });
 }
 
 static void wireless_setting(struct fplinux_session *session,
@@ -2517,31 +2546,27 @@ static void wireless_setting(struct fplinux_session *session,
 		fplinux_session_wireless_state(session->wireless);
 	int error;
 
-	if (!message->value[0]) {
+	if (message->setting.operation == FPLINUX_UI_SETTING_GET) {
 		wireless_reply(process, state, session->wireless_initialized, 0,
-			       "");
-		return;
-	}
-	if (strcmp(message->value, "0") && strcmp(message->value, "1")) {
-		reply(process, FPLINUX_UI_SESSION_ERROR, "wifi", message->value,
-		      "invalid-value");
+			       message);
 		return;
 	}
 	if (!session->wireless_initialized || state.error || !state.known) {
 		wireless_reply(process, state, session->wireless_initialized, 0,
-			       message->value);
+			       message);
 		return;
 	}
-	error = fplinux_session_wireless_request(session->wireless,
-						 !strcmp(message->value, "1"));
+	error = fplinux_session_wireless_request(
+		session->wireless, message->setting.value.enabled);
 	if (error) {
-		reply(process, FPLINUX_UI_SESSION_ERROR, "wifi", message->value,
-		      error == EBUSY ? "busy" : "unavailable");
+		fplinux_session_setting_error(process, message,
+					      error == EBUSY ? "busy" :
+							       "unavailable");
 		return;
 	}
 	fplinux_session_remember_setting_request(&session->wireless_request,
 						 process, message);
-	session->wireless_request.level = !strcmp(message->value, "1");
+	session->wireless_request.level = message->setting.value.enabled;
 }
 
 static void wifi_state(struct fplinux_session *session, struct process *process)
@@ -2615,6 +2640,9 @@ clear:
 
 static void dispatch_wireless(struct fplinux_session *session)
 {
+	struct fplinux_ui_session_message message = {
+		.setting.kind = FPLINUX_UI_SETTING_WIFI,
+	};
 	struct fplinux_session_wireless_state state;
 	struct process *process;
 	enum fplinux_ui_wifi_result result;
@@ -2645,13 +2673,15 @@ static void dispatch_wireless(struct fplinux_session *session)
 					  session, &session->wireless_request) :
 				  NULL;
 		session->wireless_request.pending = false;
-		if (process)
-			wireless_reply(process, state, true, error,
-				       session->wireless_request.level ? "1" :
-									 "0");
+		if (process) {
+			message.setting.operation = FPLINUX_UI_SETTING_SET;
+			message.setting.value.enabled =
+				session->wireless_request.level;
+			wireless_reply(process, state, true, error, &message);
+		}
 	} else if (!session->wireless_request.pending &&
 		   fplinux_session_quick_settings_shown(session)) {
-		wireless_reply(&session->launcher, state, true, 0, "");
+		wireless_reply(&session->launcher, state, true, 0, &message);
 	}
 }
 
@@ -2715,13 +2745,12 @@ static void send_input_locale(struct fplinux_session *session,
 	struct fplinux_ui_session_message message = {
 		.type = FPLINUX_UI_SESSION_SETTING,
 		.applied = true,
+		.setting = { .kind = FPLINUX_UI_SETTING_INPUT_LOCALE,
+			     .operation = FPLINUX_UI_SETTING_RESULT },
 	};
 	unsigned int i;
 
-	fplinux_session_copy_value(message.name, sizeof(message.name),
-				   "input_locale");
-	fplinux_session_copy_value(message.value, sizeof(message.value),
-				   session->settings.input_locale);
+	strcpy(message.setting.value.locale, session->settings.input_locale);
 	for (i = 0; i < FPLINUX_UI_SESSION_TASK_MAX; ++i) {
 		struct process *process = &session->tasks[i];
 
@@ -2751,15 +2780,17 @@ static void refresh_default_titles(struct fplinux_session *session)
 static void outputs_reply(struct fplinux_session *session,
 			  struct process *process, uint32_t serial)
 {
-	const char *outputs =
-		session->audio_speaker ?
-			(session->audio_headphones ? "AUTO,SPEAKER,HEADPHONES" :
-						     "AUTO,SPEAKER") :
-			(session->audio_headphones ? "AUTO,HEADPHONES" :
-						     "AUTO");
+	unsigned int routes = FPLINUX_UI_AUDIO_OUTPUT(FPLINUX_AUDIO_ROUTE_AUTO);
 
-	fplinux_session_setting_reply(session, process, "audio_outputs",
-				      outputs, serial, false);
+	if (session->audio_speaker)
+		routes |= FPLINUX_UI_AUDIO_OUTPUT(FPLINUX_AUDIO_ROUTE_SPEAKER);
+	if (session->audio_headphones)
+		routes |=
+			FPLINUX_UI_AUDIO_OUTPUT(FPLINUX_AUDIO_ROUTE_HEADPHONES);
+	fplinux_session_setting_reply(
+		session, process, FPLINUX_UI_SETTING_AUDIO_OUTPUTS,
+		(union fplinux_ui_setting_value){ .routes = routes }, serial,
+		false);
 }
 
 static void query_outputs(struct fplinux_session *session,
@@ -2770,18 +2801,14 @@ static void query_outputs(struct fplinux_session *session,
 	char *slash;
 	int fd;
 
-	if (message->value[0]) {
-		setting_error(process, message, "invalid-value");
-		return;
-	}
-	if (!strcmp(message->name, "audio_outputs") &&
+	if (message->setting.kind == FPLINUX_UI_SETTING_AUDIO_OUTPUTS &&
 	    session->audio_capabilities_known) {
 		outputs_reply(session, process, message->serial);
 		return;
 	}
 	if (!session->has_audio || session->audio_status_fd >= 0 ||
 	    strlen(session->audio.socket_path) >= sizeof(address.sun_path)) {
-		setting_error(process, message, "unavailable");
+		fplinux_session_setting_error(process, message, "unavailable");
 		return;
 	}
 	strcpy(address.sun_path, session->audio.socket_path);
@@ -2789,7 +2816,7 @@ static void query_outputs(struct fplinux_session *session,
 	if (!slash ||
 	    (size_t)(slash - address.sun_path) + sizeof("/status.sock") >
 		    sizeof(address.sun_path)) {
-		setting_error(process, message, "unavailable");
+		fplinux_session_setting_error(process, message, "unavailable");
 		return;
 	}
 	strcpy(slash, "/status.sock");
@@ -2799,7 +2826,7 @@ static void query_outputs(struct fplinux_session *session,
 	    !add_fd(session, fd)) {
 		if (fd >= 0)
 			close(fd);
-		setting_error(process, message, "unavailable");
+		fplinux_session_setting_error(process, message, "unavailable");
 		return;
 	}
 	session->audio_status_fd = fd;
@@ -2808,23 +2835,6 @@ static void query_outputs(struct fplinux_session *session,
 		FPLINUX_SESSION_AUDIO_VOLUME_TIMEOUT_MS;
 	fplinux_session_remember_setting_request(&session->capabilities_request,
 						 process, message);
-	fplinux_session_copy_value(session->capabilities_request.name,
-				   sizeof(session->capabilities_request.name),
-				   message->name);
-}
-
-static bool status_boolean(const char *packet, const char *field, bool *value)
-{
-	const char *start = strstr(packet, field);
-
-	if (!start || (start != packet && start[-1] != ' '))
-		return false;
-	start += strlen(field);
-	if ((start[0] != '0' && start[0] != '1') ||
-	    (start[1] && start[1] != ' '))
-		return false;
-	*value = start[0] == '1';
-	return true;
 }
 
 static void finish_outputs_query(struct fplinux_session *session, uint64_t time,
@@ -2832,39 +2842,23 @@ static void finish_outputs_query(struct fplinux_session *session, uint64_t time,
 {
 	struct setting_request *request = &session->capabilities_request;
 	struct process *process;
-	char packet[512];
-	ssize_t bytes;
-	bool valid = false;
+	struct fplinux_audio_status snapshot;
+	bool valid;
 
 	if (session->audio_status_fd < 0)
 		return;
-	bytes = recv(session->audio_status_fd, packet, sizeof(packet),
-		     MSG_DONTWAIT | MSG_TRUNC);
-	if (bytes < 0 &&
+	valid = fplinux_audio_status_receive(session->audio_status_fd,
+					     &snapshot) == 0;
+	if (!valid &&
 	    (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR) &&
 	    time < session->audio_status_deadline_ms) {
 		if (!*earliest || session->audio_status_deadline_ms < *earliest)
 			*earliest = session->audio_status_deadline_ms;
 		return;
 	}
-	if (bytes > 0 && bytes < (ssize_t)sizeof(packet) &&
-	    !memchr(packet, '\0', (size_t)bytes)) {
-		packet[bytes] = '\0';
-		valid = !strncmp(packet, "STATE ", 6) &&
-			status_boolean(packet,
-				       "speaker=", &session->audio_speaker) &&
-			status_boolean(packet, "headphones=",
-				       &session->audio_headphones);
-		if (valid && !strcmp(request->name, "audio_output_active")) {
-			const char *applied = strstr(packet, " applied=");
-
-			valid = applied && applied[9] >= '0' &&
-				applied[9] <= '2' &&
-				(!applied[10] || applied[10] == ' ');
-			if (valid)
-				session->audio_active_output =
-					(unsigned int)(applied[9] - '0');
-		}
+	if (valid) {
+		session->audio_speaker = snapshot.speaker;
+		session->audio_headphones = snapshot.headphones;
 	}
 	remove_fd(session, session->audio_status_fd);
 	session->audio_status_fd = -1;
@@ -2873,20 +2867,22 @@ static void finish_outputs_query(struct fplinux_session *session, uint64_t time,
 	session->audio_capabilities_known = valid;
 	if (!process)
 		return;
-	if (valid && !strcmp(request->name, "audio_output_active")) {
-		static const char *const outputs[] = { "AUTO", "SPEAKER",
-						       "HEADPHONES" };
-
+	if (valid && request->kind == FPLINUX_UI_SETTING_AUDIO_OUTPUT_ACTIVE) {
 		fplinux_session_setting_reply(
-			session, process, request->name,
-			outputs[session->audio_active_output], request->serial,
-			false);
+			session, process, request->kind,
+			(union fplinux_ui_setting_value){
+				.route = snapshot.applied_route },
+			request->serial, false);
 	} else if (valid)
 		outputs_reply(session, process, request->serial);
-	else
-		fplinux_session_reply_with_serial(
-			process, FPLINUX_UI_SESSION_ERROR, request->name, "",
-			"unavailable", request->serial);
+	else {
+		struct fplinux_ui_session_message query = {
+			.serial = request->serial,
+			.setting.kind = request->kind,
+		};
+
+		fplinux_session_setting_error(process, &query, "unavailable");
+	}
 }
 
 static void output_setting(struct fplinux_session *session,
@@ -2894,34 +2890,27 @@ static void output_setting(struct fplinux_session *session,
 			   const struct fplinux_ui_session_message *message)
 {
 	struct setting_request *request = &session->output_request;
-	struct fplinux_session_settings next = session->settings;
-
 	if (!session->audio.output_known) {
-		setting_error(process, message, "unavailable");
+		fplinux_session_setting_error(process, message, "unavailable");
 		return;
 	}
-	if (!message->value[0]) {
-		fplinux_session_setting_reply(session, process, message->name,
-					      session->audio.applied_output,
-					      message->serial, false);
-		return;
-	}
-	if (!fplinux_session_settings_parse(
-		    &next, session->options.languages_dir,
-		    FPLINUX_SESSION_SETTING_AUDIO_OUTPUT, message->value)) {
-		setting_error(process, message, "invalid-value");
+	if (message->setting.operation == FPLINUX_UI_SETTING_GET) {
+		fplinux_session_setting_reply(
+			session, process, message->setting.kind,
+			(union fplinux_ui_setting_value){
+				.route = session->audio.applied_output },
+			message->serial, false);
 		return;
 	}
 	if (request->pending) {
-		setting_error(process, message, "busy");
+		fplinux_session_setting_error(process, message, "busy");
 		return;
 	}
-	strcpy(session->output_restore, session->audio.applied_output);
-	fplinux_session_copy_value(request->name, sizeof(request->name),
-				   message->value);
+	session->output_restore = session->audio.applied_output;
+	request->route = message->setting.value.route;
 	request->audio_fd = session->audio.fd;
 	fplinux_session_remember_setting_request(request, process, message);
-	fplinux_session_audio_set_output(&session->audio, message->value,
+	fplinux_session_audio_set_output(&session->audio, request->route,
 					 fplinux_session_now_ms(session));
 }
 
@@ -2941,76 +2930,82 @@ static void finish_output_request(struct fplinux_session *session)
 	request->pending = false;
 	process = fplinux_session_setting_requester(session, request);
 	if (failed) {
+		struct fplinux_ui_session_message attempted = {
+			.serial = request->serial,
+			.setting = { .kind = request->kind,
+				     .operation = FPLINUX_UI_SETTING_SET,
+				     .value.route = request->route },
+		};
+
 		fplinux_session_audio_set_output(
 			&session->audio, session->output_restore,
 			fplinux_session_now_ms(session));
 		if (process)
-			fplinux_session_reply_with_serial(
-				process, FPLINUX_UI_SESSION_ERROR,
-				"audio_output", request->name, "unavailable",
-				request->serial);
+			fplinux_session_setting_error(process, &attempted,
+						      "unavailable");
 		return;
 	}
-	strcpy(session->settings.audio_output, session->audio.applied_output);
+	strcpy(session->settings.audio_output,
+	       fplinux_audio_route_name(session->audio.applied_output));
 	session->settings_retry_delay_ms = 0;
 	fplinux_session_save_settings(session);
 	if (process)
-		fplinux_session_setting_reply(session, process, "audio_output",
-					      session->settings.audio_output,
-					      request->serial, true);
+		fplinux_session_setting_reply(
+			session, process, request->kind,
+			(union fplinux_ui_setting_value){
+				.route = session->audio.applied_output },
+			request->serial, true);
 }
 
 static void handle_setting(struct fplinux_session *session,
 			   struct process *process,
 			   const struct fplinux_ui_session_message *message)
 {
-	enum fplinux_session_setting setting =
-		fplinux_session_setting_find(message->name);
+	const struct fplinux_ui_setting *setting = &message->setting;
 	struct fplinux_session_settings next = session->settings;
-	char current[FPLINUX_UI_SESSION_TEXT_BYTES];
+	bool set = setting->operation == FPLINUX_UI_SETTING_SET;
 	bool input_changed = false;
 	bool locale_changed = false;
 	uint32_t visual_serial = 0;
 
-	if (!strcmp(message->name, "audio_outputs") ||
-	    !strcmp(message->name, "audio_output_active")) {
+	if (setting->operation == FPLINUX_UI_SETTING_INVALID) {
+		fplinux_session_setting_error(
+			process, message,
+			setting->kind == FPLINUX_UI_SETTING_UNKNOWN ?
+				"unknown-setting" :
+				"invalid-value");
+		return;
+	}
+	switch (setting->kind) {
+	case FPLINUX_UI_SETTING_AUDIO_OUTPUTS:
+	case FPLINUX_UI_SETTING_AUDIO_OUTPUT_ACTIVE:
 		query_outputs(session, process, message);
 		return;
-	}
-	if (setting == FPLINUX_SESSION_SETTING_AUDIO_OUTPUT) {
+	case FPLINUX_UI_SETTING_AUDIO_OUTPUT:
 		output_setting(session, process, message);
 		return;
-	}
-
-	if (!strcmp(message->name, "brightness_preview")) {
-		brightness_preview(session, process, message->value);
+	case FPLINUX_UI_SETTING_BRIGHTNESS_PREVIEW:
+		brightness_preview(session, process, message);
 		return;
+	case FPLINUX_UI_SETTING_WIFI:
+		wireless_setting(session, process, message);
+		return;
+	case FPLINUX_UI_SETTING_TIME:
+		time_setting(session, process, message);
+		return;
+	case FPLINUX_UI_SETTING_BRIGHTNESS:
+		brightness_setting(session, process, message);
+		return;
+	default:
+		break;
 	}
 	if (fplinux_session_volume_setting(session, process, message))
 		return;
-	if (!strcmp(message->name, "wifi")) {
-		wireless_setting(session, process, message);
-		return;
-	}
-	if (setting == FPLINUX_SESSION_SETTING_UNKNOWN) {
-		reply(process, FPLINUX_UI_SESSION_ERROR, message->name,
-		      message->value, "unknown-setting");
-		return;
-	}
-	if (setting == FPLINUX_SESSION_SETTING_TIME) {
-		time_setting(session, process, message->value);
-		return;
-	}
-	if (setting == FPLINUX_SESSION_SETTING_BRIGHTNESS) {
-		brightness_setting(session, process, message->value);
-		return;
-	}
-	if (message->value[0]) {
-		if (!fplinux_session_settings_parse(
-			    &next, session->options.languages_dir, setting,
-			    message->value)) {
-			reply(process, FPLINUX_UI_SESSION_ERROR, message->name,
-			      message->value, "invalid-value");
+	if (set) {
+		if (!fplinux_session_settings_apply(
+			    &next, session->options.languages_dir, setting)) {
+			fplinux_session_setting_error(process, message,
+						      "invalid-value");
 			return;
 		}
 		if (strcmp(next.locale, session->settings.locale) ||
@@ -3033,7 +3028,9 @@ static void handle_setting(struct fplinux_session *session,
 		}
 		if (next.theme != session->settings.theme) {
 			fprintf(stderr, "fplinux-session: theme %s\n",
-				message->value);
+				next.theme == FPLINUX_UI_SESSION_THEME_LIGHT ?
+					"light" :
+					"dark");
 		}
 		input_changed = strcmp(next.input_locale,
 				       session->settings.input_locale) != 0;
@@ -3049,24 +3046,58 @@ static void handle_setting(struct fplinux_session *session,
 		session->settings_retry_delay_ms = 0;
 		fplinux_session_save_settings(session);
 	}
-	fplinux_session_settings_format(&session->settings, setting, current,
-					sizeof(current));
-	fplinux_session_setting_reply(session, process, message->name, current,
-				      visual_serial, message->value[0]);
+	fplinux_session_setting_reply(
+		session, process, setting->kind,
+		fplinux_session_settings_value(&session->settings,
+					       setting->kind),
+		visual_serial, set);
+}
+
+static bool public_setting(const struct fplinux_ui_setting *setting)
+{
+	switch (setting->kind) {
+	case FPLINUX_UI_SETTING_MEDIA_VOLUME_STEP:
+		return true;
+	case FPLINUX_UI_SETTING_VOLUME:
+	case FPLINUX_UI_SETTING_ALARM_VOLUME:
+	case FPLINUX_UI_SETTING_AUDIO_OUTPUT:
+	case FPLINUX_UI_SETTING_AUDIO_OUTPUTS:
+	case FPLINUX_UI_SETTING_AUDIO_OUTPUT_ACTIVE:
+		return setting->operation == FPLINUX_UI_SETTING_GET;
+	default:
+		return false;
+	}
+}
+
+static bool quick_setting(enum fplinux_ui_setting_kind kind)
+{
+	switch (kind) {
+	case FPLINUX_UI_SETTING_BRIGHTNESS:
+	case FPLINUX_UI_SETTING_BRIGHTNESS_PREVIEW:
+	case FPLINUX_UI_SETTING_VOLUME:
+	case FPLINUX_UI_SETTING_VOLUME_PREVIEW:
+	case FPLINUX_UI_SETTING_VOLUME_STEP:
+	case FPLINUX_UI_SETTING_VOLUME_COMMIT:
+	case FPLINUX_UI_SETTING_WIFI:
+		return true;
+	default:
+		return false;
+	}
 }
 
 static void clock_reply(struct fplinux_session *session,
-			struct process *process,
-			const struct fplinux_ui_session_message *request,
+			struct process *process, uint32_t serial,
+			const char *operation,
 			const struct clock_result *result)
 {
 	struct fplinux_ui_session_message response = {
 		.type = FPLINUX_UI_SESSION_CLOCK,
-		.serial = request->serial,
+		.serial = serial,
 	};
 
-	fplinux_session_copy_value(response.name, sizeof(response.name),
-				   request->name);
+	if (operation)
+		fplinux_session_copy_value(response.name, sizeof(response.name),
+					   operation);
 	if (!session->clock_ready) {
 		fplinux_session_copy_value(response.reason,
 					   sizeof(response.reason),
@@ -3082,27 +3113,14 @@ static void clock_reply(struct fplinux_session *session,
 		struct clock_ring ring;
 
 		clock_wire_ring_from_model(&session->clock.model, &ring);
-		clock_wire_ring_encode(&ring, ring.event.id,
-				       response.clock_data,
+		clock_wire_ring_encode(&ring, response.clock_data,
 				       sizeof(response.clock_data));
 	} else {
 		clock_wire_snapshot_encode(&session->clock.model, result,
-					   request->serial, response.clock_data,
+					   response.clock_data,
 					   sizeof(response.clock_data));
 	}
 	fplinux_ui_session_send(process->control_fd, &response);
-}
-
-static bool same_clock_request(const struct clock_request *left,
-			       const struct clock_request *right)
-{
-	char left_json[1024], right_json[1024];
-
-	return clock_wire_request_encode(left, left_json, sizeof(left_json)) ==
-		       CLOCK_OK &&
-	       clock_wire_request_encode(right, right_json,
-					 sizeof(right_json)) == CLOCK_OK &&
-	       !strcmp(left_json, right_json);
 }
 
 static bool handle_clock(struct fplinux_session *session,
@@ -3113,6 +3131,7 @@ static bool handle_clock(struct fplinux_session *session,
 	struct clock_result result = {
 		.storage = session->clock.storage,
 	};
+	const char *operation = NULL;
 
 	if (process != &session->launcher) {
 		if (strcmp(process->policy.app_id, FPLINUX_SESSION_CLOCK))
@@ -3125,10 +3144,9 @@ static bool handle_clock(struct fplinux_session *session,
 		return true;
 	result.status = clock_wire_request_decode(
 		message->clock_data, strlen(message->clock_data), &request);
-	if (result.status == CLOCK_OK &&
-	    strcmp(message->name, clock_wire_request_name(request.op)))
-		result.status = CLOCK_INVALID;
-	if (!message->serial)
+	if (result.status == CLOCK_OK)
+		operation = clock_wire_request_name(request.op);
+	if (message->name[0] || !message->serial)
 		result.status = CLOCK_INVALID;
 	if (result.status == CLOCK_OK && process == &session->launcher &&
 	    request.op != CLOCK_REQUEST_DISMISS &&
@@ -3137,8 +3155,8 @@ static bool handle_clock(struct fplinux_session *session,
 	if (result.status == CLOCK_OK && session->clock_ready) {
 		if (request.op != CLOCK_REQUEST_SNAPSHOT &&
 		    process->clock_serial == message->serial) {
-			if (same_clock_request(&process->clock_request,
-					       &request))
+			if (clock_wire_request_equal(&process->clock_request,
+						     &request))
 				result = fplinux_session_clock_retry(
 					&session->clock,
 					fplinux_session_now_ms(session));
@@ -3155,7 +3173,7 @@ static bool handle_clock(struct fplinux_session *session,
 			}
 		}
 	}
-	clock_reply(session, process, message, &result);
+	clock_reply(session, process, message->serial, operation, &result);
 	clock_power(session, fplinux_session_now_ms(session));
 	send_active(session);
 	changed(session);
@@ -3241,11 +3259,12 @@ static bool receive_message(struct fplinux_session *session, struct peer *peer,
 	case FPLINUX_UI_SESSION_SELECT:
 		if (process != &session->launcher)
 			return false;
-		if (!strcmp(message->value, "tasks")) {
+		if (message->launcher_view == FPLINUX_UI_LAUNCHER_VIEW_TASKS) {
 			session->launcher_tasks_view = message->enabled;
 			break;
 		}
-		if (!strcmp(message->value, "quick-settings")) {
+		if (message->launcher_view ==
+		    FPLINUX_UI_LAUNCHER_VIEW_QUICK_SETTINGS) {
 			session->launcher_quick_settings_view =
 				message->enabled;
 			if (fplinux_session_quick_settings_shown(session))
@@ -3255,18 +3274,17 @@ static bool receive_message(struct fplinux_session *session, struct peer *peer,
 		if (message->selected_id[0] &&
 		    !fplinux_desktop_entry_valid_id(message->selected_id))
 			return false;
-		if (!strcmp(message->value, "home"))
+		if (message->launcher_view == FPLINUX_UI_LAUNCHER_VIEW_HOME)
 			session->launcher_home_view = true;
-		else if (!strcmp(message->value, "catalogue"))
+		else if (message->launcher_view ==
+			 FPLINUX_UI_LAUNCHER_VIEW_CATALOGUE)
 			session->launcher_home_view = false;
-		else if (message->value[0])
-			return false;
-		if (!strcmp(message->name, "grid"))
+		if (message->launcher_catalogue ==
+		    FPLINUX_UI_LAUNCHER_CATALOGUE_GRID)
 			session->launcher_list = false;
-		else if (!strcmp(message->name, "list"))
+		else if (message->launcher_catalogue ==
+			 FPLINUX_UI_LAUNCHER_CATALOGUE_LIST)
 			session->launcher_list = true;
-		else if (message->name[0])
-			return false;
 		fplinux_session_copy_value(session->selected_id,
 					   sizeof(session->selected_id),
 					   message->selected_id);
@@ -3277,15 +3295,9 @@ static bool receive_message(struct fplinux_session *session, struct peer *peer,
 		/* The runtime has received a sync reply after this ACTIVE's commit. */
 		if (message->serial &&
 		    message->serial == session->last_active.serial) {
-			struct clock_ring ring;
-			uint64_t serial;
-
 			session->launcher_ack_serial = message->serial;
-			if (clock_wire_ring_decode(
-				    session->last_active.clock_data,
-				    strlen(session->last_active.clock_data),
-				    &ring, &serial) == CLOCK_OK)
-				session->clock_drawn_event = ring.event.id;
+			session->clock_drawn_event =
+				session->last_active_clock_event;
 			if (session->battery_notice !=
 				    FPLINUX_SESSION_BATTERY_ALERT_NONE &&
 			    !strcmp(session->last_active.notice,
@@ -3416,55 +3428,26 @@ static bool receive_message(struct fplinux_session *session, struct peer *peer,
 		handle_light_effect(session, process, message);
 		break;
 	case FPLINUX_UI_SESSION_SETTING:
-		if (!message->value[0] && process != &session->launcher &&
-		    (!strcmp(message->name, "volume") ||
-		     !strcmp(message->name, "alarm_volume") ||
-		     !strcmp(message->name, "audio_output") ||
-		     !strcmp(message->name, "audio_outputs") ||
-		     !strcmp(message->name, "audio_output_active"))) {
-			if (process != session->app ||
-			    !app_in_foreground(session) ||
-			    launcher_on_top(session))
-				setting_error(process, message,
-					      "not-foreground");
-			else
-				handle_setting(session, process, message);
-			break;
-		}
-		if (!strcmp(message->name, "media_volume_step") &&
-		    process != &session->launcher) {
-			if (process != session->app ||
-			    !app_in_foreground(session) ||
-			    launcher_on_top(session))
-				setting_error(process, message,
-					      "not-foreground");
-			else
-				handle_setting(session, process, message);
-			break;
-		}
+		if (message->setting.operation == FPLINUX_UI_SETTING_RESULT)
+			return false;
 		if (process == &session->launcher) {
-			/* Quick settings owns only these controls. */
-			if (strcmp(message->name, "brightness") &&
-			    strcmp(message->name, "brightness_preview") &&
-			    strcmp(message->name, "volume") &&
-			    strcmp(message->name, "volume_preview") &&
-			    strcmp(message->name, "volume_step") &&
-			    strcmp(message->name, "volume_commit") &&
-			    strcmp(message->name, "wifi"))
+			if (!quick_setting(message->setting.kind))
 				return false;
 			if (fplinux_session_quick_settings_shown(session))
 				handle_setting(session, process, message);
 			else
-				setting_error(process, message,
-					      "not-foreground");
+				fplinux_session_setting_error(process, message,
+							      "not-foreground");
 			break;
 		}
-		if (strcmp(process->policy.app_id, FPLINUX_SESSION_SETTINGS))
+		if (!public_setting(&message->setting) &&
+		    strcmp(process->policy.app_id, FPLINUX_SESSION_SETTINGS))
 			return false;
 		/* Settings parked on Home has no active settings authority. */
 		if (process != session->app || !app_in_foreground(session) ||
 		    launcher_on_top(session)) {
-			setting_error(process, message, "not-foreground");
+			fplinux_session_setting_error(process, message,
+						      "not-foreground");
 			break;
 		}
 		handle_setting(session, process, message);
@@ -4416,8 +4399,10 @@ fplinux_session_create(const struct fplinux_session_options *options)
 							NULL,
 				   session->epoll_fd);
 	fplinux_session_volume_load(session);
-	fplinux_session_audio_set_output(&session->audio,
-					 session->settings.audio_output,
+	enum fplinux_audio_route route = FPLINUX_AUDIO_ROUTE_AUTO;
+
+	fplinux_audio_route_parse(session->settings.audio_output, &route);
+	fplinux_session_audio_set_output(&session->audio, route,
 					 fplinux_session_now_ms(session));
 	session->wireless = fplinux_session_wireless_create();
 	if (session->wireless &&

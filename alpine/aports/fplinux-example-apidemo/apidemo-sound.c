@@ -96,36 +96,43 @@ static void query_system_sound(struct apidemo *app)
 {
 	struct fplinux_ui_session_message query = {
 		.type = FPLINUX_UI_SESSION_SETTING,
-		.name = "volume",
+		.setting = { .kind = FPLINUX_UI_SETTING_VOLUME,
+			     .operation = FPLINUX_UI_SETTING_GET },
 	};
 
 	if (!fplinux_ui_audio_supported(app->ui))
 		return;
 	(void)fplinux_ui_send(app->ui, &query);
-	strcpy(query.name, "audio_output_active");
+	query.setting.kind = FPLINUX_UI_SETTING_AUDIO_OUTPUT_ACTIVE;
 	(void)fplinux_ui_send(app->ui, &query);
 }
 
 void apidemo_sound_setting(struct apidemo *app,
 			   const struct fplinux_ui_session_message *message)
 {
-	bool media = !strcmp(message->name, "volume");
-	bool output = !strcmp(message->name, "audio_output_active");
-	const char *text;
+	const struct fplinux_ui_setting *setting = &message->setting;
+	bool media = setting->kind == FPLINUX_UI_SETTING_VOLUME;
+	bool output = setting->kind == FPLINUX_UI_SETTING_AUDIO_OUTPUT_ACTIVE;
+	const char *text = _("Unavailable");
+	char level[TEXT_BYTES];
 
 	if (sound.app != app || !sound.form || (!media && !output) ||
 	    (message->type != FPLINUX_UI_SESSION_SETTING &&
 	     message->type != FPLINUX_UI_SESSION_ERROR))
 		return;
-	text = message->type == FPLINUX_UI_SESSION_ERROR ? _("Unavailable") :
-							   message->value;
-	if (output && message->type == FPLINUX_UI_SESSION_SETTING) {
-		if (!strcmp(text, "SPEAKER"))
+	if (message->type == FPLINUX_UI_SESSION_SETTING &&
+	    setting->operation == FPLINUX_UI_SETTING_RESULT) {
+		if (media) {
+			snprintf(level, sizeof(level), "%d",
+				 setting->value.level);
+			text = level;
+		} else if (setting->value.route ==
+			   FPLINUX_AUDIO_ROUTE_SPEAKER) {
 			text = _("Speaker");
-		else if (!strcmp(text, "HEADPHONES"))
+		} else if (setting->value.route ==
+			   FPLINUX_AUDIO_ROUTE_HEADPHONES) {
 			text = _("Headphones");
-		else
-			text = _("Unavailable");
+		}
 	}
 	set_line(media ? sound.media_volume : sound.output, text);
 }

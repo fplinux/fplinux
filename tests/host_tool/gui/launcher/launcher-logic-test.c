@@ -79,18 +79,24 @@ static void test_text(void)
 	now = (struct timespec){ .tv_sec = 315532800, .tv_nsec = 0 };
 	check(fplinux_launcher_clock_delay(&now) == 60000,
 	      "a valid exact minute does not retain one-second polling");
-	check(fplinux_launcher_view_from_names("catalogue", "grid", &view,
-					       &presentation) &&
+	check(fplinux_launcher_view_from_session(
+		      FPLINUX_UI_LAUNCHER_VIEW_CATALOGUE,
+		      FPLINUX_UI_LAUNCHER_CATALOGUE_GRID, &view,
+		      &presentation) &&
 		      view == FPLINUX_LAUNCHER_VIEW_GRID &&
 		      presentation == FPLINUX_LAUNCHER_VIEW_GRID,
 	      "restarted launcher restores the catalogue presentation");
-	check(fplinux_launcher_view_from_names("home", "list", &view,
-					       &presentation) &&
+	check(fplinux_launcher_view_from_session(
+		      FPLINUX_UI_LAUNCHER_VIEW_HOME,
+		      FPLINUX_UI_LAUNCHER_CATALOGUE_LIST, &view,
+		      &presentation) &&
 		      view == FPLINUX_LAUNCHER_VIEW_HOME &&
 		      presentation == FPLINUX_LAUNCHER_VIEW_LIST,
 	      "Home remembers the list presentation");
-	check(!fplinux_launcher_view_from_names("unknown", "grid", &view,
-						&presentation) &&
+	check(!fplinux_launcher_view_from_session(
+		      FPLINUX_UI_LAUNCHER_VIEW_NONE,
+		      FPLINUX_UI_LAUNCHER_CATALOGUE_GRID, &view,
+		      &presentation) &&
 		      view == FPLINUX_LAUNCHER_VIEW_HOME &&
 		      presentation == FPLINUX_LAUNCHER_VIEW_LIST,
 	      "invalid manager view leaves both choices unchanged");

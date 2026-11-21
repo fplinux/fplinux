@@ -428,6 +428,7 @@ static void redraw_form(struct form_capture *capture)
 {
 	struct fplinux_ui_session_message redraw = {
 		.type = FPLINUX_UI_SESSION_SETTING,
+		.applied = true,
 		.serial = ++capture->serial,
 	};
 

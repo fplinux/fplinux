@@ -12,6 +12,7 @@
 #include <linux/input-event-codes.h>
 #include <pwd.h>
 #include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -29,8 +30,9 @@ struct fixture {
 	int audio_listener;
 	int audio_control;
 	bool hold_audio_ack;
-	char held_audio_ack[32];
-	char audio_packets[16][32];
+	bool audio_ack_held;
+	uint8_t held_audio_level;
+	uint8_t audio_levels[16];
 	unsigned int audio_count;
 	char settings[PATH_MAX];
 	char audio_socket[PATH_MAX];
@@ -59,7 +61,14 @@ static void write_file(const char *path, const char *contents)
 	assert(chmod(path, 0600) == 0);
 }
 
-/* This peer applies VOLUME packets and can withhold only their replies. */
+static void acknowledge_volume(int fd, uint8_t class, uint8_t level)
+{
+	const uint8_t reply[] = { 8, class, level };
+
+	assert(send(fd, reply, sizeof(reply), MSG_NOSIGNAL) == sizeof(reply));
+}
+
+/* The peer can hold the media acknowledgement while the Launcher preview changes. */
 static void observe_audio(struct fixture *fixture)
 {
 	if (fixture->audio_control < 0) {
@@ -72,30 +81,40 @@ static void observe_audio(struct fixture *fixture)
 		}
 	}
 	for (;;) {
-		char packet[256];
+		uint8_t packet[10];
 		ssize_t bytes = recv(fixture->audio_control, packet,
-				     sizeof(packet) - 1, MSG_DONTWAIT);
+				     sizeof(packet), MSG_DONTWAIT | MSG_TRUNC);
 
 		if (bytes < 0 && errno == EAGAIN)
 			return;
 		assert(bytes > 0);
-		packet[bytes] = '\0';
-		if (!strncmp(packet, "VOLUME ALARM ", 13) ||
-		    !strncmp(packet, "OUTPUT ", 7)) {
-			assert(send(fixture->audio_control, packet,
-				    (size_t)bytes, MSG_NOSIGNAL) == bytes);
+		if (packet[0] == 2) {
+			assert(bytes == 2 && packet[1] <= 2);
+			const uint8_t reply[] = { 9, packet[1] };
+
+			assert(send(fixture->audio_control, reply,
+				    sizeof(reply),
+				    MSG_NOSIGNAL) == sizeof(reply));
 			continue;
 		}
-		if (strncmp(packet, "VOLUME ", 7))
+		if (packet[0] != 1)
 			continue;
-		assert(fixture->audio_count < 16 && bytes < 32);
-		strcpy(fixture->audio_packets[fixture->audio_count++], packet);
+		assert(bytes == 3 && (packet[1] == 1 || packet[1] == 2) &&
+		       packet[2] <= 10);
+		if (packet[1] == 2) {
+			acknowledge_volume(fixture->audio_control, 2,
+					   packet[2]);
+			continue;
+		}
+		assert(fixture->audio_count < sizeof(fixture->audio_levels));
+		fixture->audio_levels[fixture->audio_count++] = packet[2];
 		if (fixture->hold_audio_ack) {
-			assert(!fixture->held_audio_ack[0]);
-			strcpy(fixture->held_audio_ack, packet);
+			assert(!fixture->audio_ack_held);
+			fixture->held_audio_level = packet[2];
+			fixture->audio_ack_held = true;
 		} else {
-			assert(send(fixture->audio_control, packet,
-				    (size_t)bytes, MSG_NOSIGNAL) == bytes);
+			acknowledge_volume(fixture->audio_control, 1,
+					   packet[2]);
 		}
 	}
 }
@@ -268,8 +287,8 @@ static void start(struct fixture *fixture, char **arguments)
 	wait_label(fixture, "← 7 →", true);
 	while (fixture->audio_count < 2)
 		pump(fixture);
-	assert(!strcmp(fixture->audio_packets[0], "VOLUME MEDIA 8"));
-	assert(!strcmp(fixture->audio_packets[1], "VOLUME MEDIA 7"));
+	assert(fixture->audio_levels[0] == 8);
+	assert(fixture->audio_levels[1] == 7);
 	uint64_t preview_deadline = fplinux_ui_frame_now_ms() + 3000;
 
 	while ((!fixture->frame.volume_preview_serial ||
@@ -296,34 +315,30 @@ int main(int argc, char **argv)
 	assert(!fplinux_session_key(fixture.session, KEY_VOLUMEDOWN, false,
 				    fplinux_ui_frame_now_ms()));
 	deadline = fplinux_ui_frame_now_ms() + 1000;
-	while (!fixture.held_audio_ack[0] &&
-	       fplinux_ui_frame_now_ms() < deadline)
+	while (!fixture.audio_ack_held && fplinux_ui_frame_now_ms() < deadline)
 		pump(&fixture);
-	assert(!strcmp(fixture.held_audio_ack, "VOLUME MEDIA 6"));
+	assert(fixture.audio_ack_held && fixture.held_audio_level == 6);
 	press(&fixture, save ? KEY_F13 : KEY_RIGHT);
 	wait_label(&fixture, save ? "Save" : "← 8 →", !save);
 	pump(&fixture);
-	assert(send(fixture.audio_control, fixture.held_audio_ack,
-		    strlen(fixture.held_audio_ack),
-		    MSG_NOSIGNAL) == (ssize_t)strlen(fixture.held_audio_ack));
-	fixture.held_audio_ack[0] = '\0';
+	acknowledge_volume(fixture.audio_control, 1, fixture.held_audio_level);
+	fixture.audio_ack_held = false;
 	fixture.hold_audio_ack = false;
 	if (save) {
 		wait_label(&fixture, "Back", true);
 		assert(fixture.audio_count == 3);
-		assert(!strcmp(fixture.audio_packets[2], "VOLUME MEDIA 6"));
+		assert(fixture.audio_levels[2] == 6);
 		expect_settings(&fixture, "6");
 	} else {
 		wait_label(&fixture, "← 7 →", true);
 		assert(fixture.audio_count == 4);
-		assert(!strcmp(fixture.audio_packets[3], "VOLUME MEDIA 7"));
+		assert(fixture.audio_levels[3] == 7);
 		wait_label(&fixture, "Cancel", true);
 		expect_settings(&fixture, "8");
 		press(&fixture, KEY_F14);
 		wait_label(&fixture, "Back", true);
 		wait_label(&fixture, "← 8 →", true);
-		assert(!strcmp(fixture.audio_packets[fixture.audio_count - 1],
-			       "VOLUME MEDIA 8"));
+		assert(fixture.audio_levels[fixture.audio_count - 1] == 8);
 		expect_settings(&fixture, "8");
 	}
 	fplinux_session_destroy(fixture.session);

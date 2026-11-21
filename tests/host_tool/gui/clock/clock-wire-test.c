@@ -386,7 +386,6 @@ static void snapshot_retains_user_values_and_checks_encoder_independently(
 			.error = EIO,
 		},
 	};
-	uint64_t serial = 4;
 	char json[CLOCK_WIRE_CAPACITY];
 	struct json_object *object, *model, *value, *alarms, *alarm, *spec,
 		*stopwatch;
@@ -406,8 +405,7 @@ static void snapshot_retains_user_values_and_checks_encoder_independently(
 	assert(fplinux_session_clock_tick(&clock, 1704067260, 2500).status ==
 	       CLOCK_OK);
 	apply(&clock, "{\"op\":\"stopwatch-lap\"}", 1704067260, 2500);
-	assert(clock_wire_snapshot_encode(&clock.model, &failed,
-					  UINT64_C(18446744073709551615), json,
+	assert(clock_wire_snapshot_encode(&clock.model, &failed, json,
 					  sizeof(json)) == CLOCK_OK);
 	object = json_tokener_parse(json);
 	assert(object);
@@ -419,8 +417,7 @@ static void snapshot_retains_user_values_and_checks_encoder_independently(
 	assert(!strcmp(json_object_get_string(value), "published-unsynced"));
 	assert(json_object_object_get_ex(object, "error", &value));
 	assert(json_object_get_int(value) == EIO);
-	assert(json_object_object_get_ex(object, "serial", &value));
-	assert(json_object_get_uint64(value) == UINT64_C(18446744073709551615));
+	assert(!json_object_object_get_ex(object, "serial", &value));
 	assert(json_object_object_get_ex(object, "model", &model));
 	assert(json_object_object_get_ex(model, "view", &value));
 	assert(json_object_get_int(value) == 1);
@@ -449,12 +446,11 @@ static void snapshot_retains_user_values_and_checks_encoder_independently(
 	assert(json_object_object_get_ex(spec, "once_utc", &value));
 	assert(json_object_get_int64(value) == 1704067260);
 	json_object_put(object);
-	assert(clock_wire_snapshot_decode(json, strlen(json), &decoded, &result,
-					  &serial) == CLOCK_OK);
+	assert(clock_wire_snapshot_decode(json, strlen(json), &decoded,
+					  &result) == CLOCK_OK);
 	assert(result.status == CLOCK_STORAGE_ERROR && result.applied &&
 	       result.storage.state == FPLINUX_STORAGE_PUBLISHED_UNSYNCED &&
-	       result.storage.error == EIO &&
-	       serial == UINT64_C(18446744073709551615));
+	       result.storage.error == EIO);
 	assert(decoded.view == CLOCK_VIEW_ANALOG);
 	assert(decoded.world_count == 1 &&
 	       decoded.world[0].offset_minutes == 345);
@@ -469,13 +465,12 @@ static void snapshot_retains_user_values_and_checks_encoder_independently(
 	clock_wire_ring_from_model(&decoded, &ring);
 	assert(ring.event.id == 1 && !strcmp(ring.event.label, "Чай"));
 	before = decoded;
-	assert(clock_wire_snapshot_decode("{}", 2, &decoded, &result,
-					  &serial) == CLOCK_INVALID);
+	assert(clock_wire_snapshot_decode("{}", 2, &decoded, &result) ==
+	       CLOCK_INVALID);
 	assert(!memcmp(&before, &decoded, sizeof(decoded)));
 	assert(result.status == CLOCK_STORAGE_ERROR && result.applied &&
 	       result.storage.state == FPLINUX_STORAGE_PUBLISHED_UNSYNCED &&
-	       result.storage.error == EIO &&
-	       serial == UINT64_C(18446744073709551615));
+	       result.storage.error == EIO);
 	fplinux_session_clock_cleanup(&clock);
 }
 
@@ -488,31 +483,26 @@ literal_ring_preserves_large_identity_and_rejects_partial_output(void)
 		"\"generation\":2,\"label\":\"Чай\",\"due_wall_utc\":1704067260,"
 		"\"due_monotonic_ms\":2000,\"ring_started_ms\":2000,"
 		"\"snoozed\":true,\"missed_reason\":0},"
-		"\"snooze_minutes\":7,\"serial\":18446744073709551615}";
+		"\"snooze_minutes\":7}";
 	struct clock_ring ring, before;
-	uint64_t serial;
 	char json[CLOCK_WIRE_CAPACITY];
 
-	assert(clock_wire_ring_decode(message, sizeof(message) - 1, &ring,
-				      &serial) == CLOCK_OK);
+	assert(clock_wire_ring_decode(message, sizeof(message) - 1, &ring) ==
+	       CLOCK_OK);
 	assert(ring.event.id == UINT64_C(9223372036854775817));
 	assert(ring.event.source_id == 37 && ring.event.generation == 2);
 	assert(!strcmp(ring.event.label, "Чай") && ring.event.snoozed);
 	assert(ring.snooze_minutes == 7 && ring.missed_total == 9);
-	assert(serial == UINT64_C(18446744073709551615));
-	assert(clock_wire_ring_encode(&ring, serial, json, sizeof(json)) ==
-	       CLOCK_OK);
-	assert(clock_wire_ring_decode(json, strlen(json), &ring, &serial) ==
-	       CLOCK_OK);
+	assert(clock_wire_ring_encode(&ring, json, sizeof(json)) == CLOCK_OK);
+	assert(clock_wire_ring_decode(json, strlen(json), &ring) == CLOCK_OK);
 	assert_json_fields(json, message);
 	strcpy(json, "unchanged");
-	assert(clock_wire_ring_encode(&ring, serial, json, 5) == CLOCK_FULL);
+	assert(clock_wire_ring_encode(&ring, json, 5) == CLOCK_FULL);
 	assert(!strcmp(json, "unchanged"));
 	before = ring;
-	assert(clock_wire_ring_decode(message, sizeof(message) - 2, &ring,
-				      &serial) == CLOCK_INVALID);
+	assert(clock_wire_ring_decode(message, sizeof(message) - 2, &ring) ==
+	       CLOCK_INVALID);
 	assert(!memcmp(&before, &ring, sizeof(ring)));
-	assert(serial == UINT64_C(18446744073709551615));
 }
 
 static struct json_object *world_fixture(const char *directory,
@@ -554,7 +544,6 @@ signed_world_values_match_literal_snapshot_and_preferences(const char *fixtures)
 		.applied = true,
 		.storage.state = FPLINUX_STORAGE_DURABLE,
 	};
-	uint64_t serial = 0;
 
 	assert(clock_model_init(&model, 1704067200, 1000) == CLOCK_OK);
 	assert(clock_wire_request_apply(&model, &request) == CLOCK_OK);
@@ -588,17 +577,17 @@ signed_world_values_match_literal_snapshot_and_preferences(const char *fixtures)
 	assert(!memcmp(&model, &before, sizeof(model)));
 
 	expected = world_fixture(fixtures, "snapshot.json");
-	assert(clock_wire_snapshot_encode(&model, &result, 9, encoded,
+	assert(clock_wire_snapshot_encode(&model, &result, encoded,
 					  sizeof(encoded)) == CLOCK_OK);
 	actual = json_tokener_parse(encoded);
 	assert(actual && json_object_equal(actual, expected));
 	json_object_put(actual);
 	json = json_object_to_json_string_ext(expected, JSON_C_TO_STRING_PLAIN);
-	assert(clock_wire_snapshot_decode(json, strlen(json), &decoded, &result,
-					  &serial) == CLOCK_OK);
+	assert(clock_wire_snapshot_decode(json, strlen(json), &decoded,
+					  &result) == CLOCK_OK);
 	assert(result.status == CLOCK_OK && result.applied &&
 	       result.storage.state == FPLINUX_STORAGE_DURABLE &&
-	       result.storage.error == 0 && serial == 9);
+	       result.storage.error == 0);
 	assert_world_entries(&decoded);
 	json_object_put(expected);
 
@@ -625,19 +614,18 @@ static void assert_malformed_world_documents(struct json_object *snapshot,
 		.status = CLOCK_FULL,
 		.storage.state = FPLINUX_STORAGE_DURABLE,
 	};
-	uint64_t serial = 19;
 	const char *json;
 
 	assert(clock_model_init(&model, 1704153600, 2000) == CLOCK_OK);
 	assert(clock_model_world_add(&model, 330, NULL) == CLOCK_OK);
 	before = model;
 	json = json_object_to_json_string_ext(snapshot, JSON_C_TO_STRING_PLAIN);
-	assert(clock_wire_snapshot_decode(json, strlen(json), &model, &result,
-					  &serial) == CLOCK_INVALID);
+	assert(clock_wire_snapshot_decode(json, strlen(json), &model,
+					  &result) == CLOCK_INVALID);
 	assert(!memcmp(&model, &before, sizeof(model)));
 	assert(result.status == CLOCK_FULL && !result.applied &&
 	       result.storage.state == FPLINUX_STORAGE_DURABLE &&
-	       result.storage.error == 0 && serial == 19);
+	       result.storage.error == 0);
 	json = json_object_to_json_string_ext(preferences,
 					      JSON_C_TO_STRING_PLAIN);
 	assert(clock_wire_preferences_decode(json, strlen(json), &model) ==

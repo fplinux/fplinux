@@ -1,7 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 #include "session-core-internal.h"
 
-#include <stdio.h>
 #include <string.h>
 
 #include "fplinux-audio-protocol.h"
@@ -9,58 +8,6 @@
 #define FPLINUX_SESSION_VOLUME_REPEAT_DELAY_MS 500U
 #define FPLINUX_SESSION_VOLUME_REPEAT_MS 200U
 #define FPLINUX_SESSION_INDICATOR_MS 1500U
-
-enum volume_setting_operation {
-	VOLUME_SETTING_SET,
-	VOLUME_SETTING_PREVIEW,
-	VOLUME_SETTING_STEP,
-	VOLUME_SETTING_COMMIT,
-	VOLUME_SETTING_PERSISTENT_STEP,
-};
-
-struct volume_setting {
-	const char *name;
-	enum fplinux_session_audio_class class;
-	enum volume_setting_operation operation;
-};
-
-static const struct volume_setting volume_settings[] = {
-	{ "volume", FPLINUX_SESSION_AUDIO_MEDIA, VOLUME_SETTING_SET },
-	{ "volume_preview", FPLINUX_SESSION_AUDIO_MEDIA,
-	  VOLUME_SETTING_PREVIEW },
-	{ "volume_step", FPLINUX_SESSION_AUDIO_MEDIA, VOLUME_SETTING_STEP },
-	{ "volume_commit", FPLINUX_SESSION_AUDIO_MEDIA, VOLUME_SETTING_COMMIT },
-	{ "media_volume_step", FPLINUX_SESSION_AUDIO_MEDIA,
-	  VOLUME_SETTING_PERSISTENT_STEP },
-	{ "alarm_volume", FPLINUX_SESSION_AUDIO_ALARM, VOLUME_SETTING_SET },
-	{ "alarm_volume_preview", FPLINUX_SESSION_AUDIO_ALARM,
-	  VOLUME_SETTING_PREVIEW },
-	{ "alarm_volume_commit", FPLINUX_SESSION_AUDIO_ALARM,
-	  VOLUME_SETTING_COMMIT },
-};
-
-static const struct volume_setting *find_setting(const char *name)
-{
-	for (size_t i = 0;
-	     i < sizeof(volume_settings) / sizeof(volume_settings[0]); ++i)
-		if (!strcmp(name, volume_settings[i].name))
-			return &volume_settings[i];
-	return NULL;
-}
-
-bool fplinux_session_volume_has_setting(const char *name)
-{
-	return find_setting(name) != NULL;
-}
-
-static void volume_error(struct process *process,
-			 const struct fplinux_ui_session_message *message,
-			 const char *reason)
-{
-	fplinux_session_reply_with_serial(process, FPLINUX_UI_SESSION_ERROR,
-					  message->name, message->value, reason,
-					  message->serial);
-}
 
 static enum fplinux_system_level_kind
 volume_level_kind(enum fplinux_session_audio_class class)
@@ -216,12 +163,42 @@ static void end_volume_preview(struct fplinux_session *session,
 					 fplinux_session_now_ms(session));
 }
 
-static const char *volume_name(enum fplinux_session_audio_class class,
-			       bool preview)
+static enum fplinux_ui_setting_kind
+volume_kind(enum fplinux_session_audio_class class, bool preview)
 {
 	if (class == FPLINUX_SESSION_AUDIO_ALARM)
-		return preview ? "alarm_volume_preview" : "alarm_volume";
-	return preview ? "volume_preview" : "volume";
+		return preview ? FPLINUX_UI_SETTING_ALARM_VOLUME_PREVIEW :
+				 FPLINUX_UI_SETTING_ALARM_VOLUME;
+	return preview ? FPLINUX_UI_SETTING_VOLUME_PREVIEW :
+			 FPLINUX_UI_SETTING_VOLUME;
+}
+
+static void volume_reply(struct fplinux_session *session,
+			 struct process *process,
+			 enum fplinux_ui_setting_kind kind, unsigned int level,
+			 uint32_t serial, bool save)
+{
+	fplinux_session_setting_reply(
+		session, process, kind,
+		(union fplinux_ui_setting_value){ .level = level }, serial,
+		save);
+}
+
+static void pending_volume_error(struct process *process,
+				 const struct setting_request *request,
+				 const char *reason, bool has_level)
+{
+	const struct fplinux_ui_session_message result = {
+		.serial = request->serial,
+		.setting = {
+			.kind = request->kind,
+			.operation = has_level ? FPLINUX_UI_SETTING_RESULT :
+						 FPLINUX_UI_SETTING_INVALID,
+			.value.level = request->level,
+		},
+	};
+
+	fplinux_session_setting_error(process, &result, reason);
 }
 
 static void set_key_volume(struct fplinux_session *session,
@@ -256,9 +233,7 @@ static void set_key_volume(struct fplinux_session *session,
 	request->audio_fd = session->audio.fd;
 	request->pending = true;
 	if (!request->step)
-		fplinux_session_copy_value(request->name, sizeof(request->name),
-					   volume_name(class,
-						       request->preview));
+		request->kind = volume_kind(class, request->preview);
 	fplinux_session_audio_set_volume(&session->audio, class, level,
 					 fplinux_session_now_ms(session));
 }
@@ -284,10 +259,8 @@ dispatch_volume_step(struct fplinux_session *session,
 				     control->key_level :
 				     session->audio.volume[class].desired;
 	unsigned int next = stepped_volume(level, step);
-	char current[16];
-
 	if (process && control->preview_active) {
-		volume_error(process, message, "busy");
+		fplinux_session_setting_error(process, message, "busy");
 		return false;
 	}
 	start_indicator(session, class,
@@ -296,7 +269,8 @@ dispatch_volume_step(struct fplinux_session *session,
 						  &applied)) {
 		session->volume.indicator.warning = true;
 		if (process)
-			volume_error(process, message, "unavailable");
+			fplinux_session_setting_error(process, message,
+						      "unavailable");
 		return false;
 	}
 	if (process) {
@@ -307,23 +281,15 @@ dispatch_volume_step(struct fplinux_session *session,
 				fplinux_session_setting_requester(session,
 								  recipient);
 
-			if (previous) {
-				snprintf(current, sizeof(current), "%u",
-					 recipient->level);
-				fplinux_session_reply_with_serial(
-					previous, FPLINUX_UI_SESSION_ERROR,
-					recipient->name, current, "superseded",
-					recipient->serial);
-			}
+			if (previous)
+				pending_volume_error(previous, recipient,
+						     "superseded", true);
 		}
 	}
 	if (next == level && !request->pending && !control->key_pending) {
-		if (process) {
-			snprintf(current, sizeof(current), "%u", applied);
-			fplinux_session_setting_reply(session, process,
-						      message->name, current,
-						      message->serial, false);
-		}
+		if (process)
+			volume_reply(session, process, message->setting.kind,
+				     applied, message->serial, false);
 		return false;
 	}
 	if (next != level)
@@ -338,9 +304,6 @@ dispatch_volume_step(struct fplinux_session *session,
 		recipient->level = next;
 		recipient->step = true;
 		recipient->feedback = true;
-		fplinux_session_copy_value(recipient->name,
-					   sizeof(recipient->name),
-					   message->name);
 	}
 	return next != level;
 }
@@ -354,76 +317,54 @@ static bool volume_key_step(struct fplinux_session *session, unsigned int code)
 static void volume_setting(struct fplinux_session *session,
 			   struct process *process,
 			   const struct fplinux_ui_session_message *message,
-			   enum fplinux_session_audio_class class,
-			   enum volume_setting_operation operation)
+			   enum fplinux_session_audio_class class)
 {
-	struct fplinux_session_settings next = session->settings;
 	struct volume_control *control = &session->volume.controls[class];
 	struct setting_request *request = &control->request;
+	enum fplinux_ui_setting_operation operation =
+		message->setting.operation;
 	unsigned int applied;
-	unsigned int level;
-	char current[16];
-	bool persistent_step = operation == VOLUME_SETTING_PERSISTENT_STEP;
-	bool step = operation == VOLUME_SETTING_STEP || persistent_step;
-	bool commit = operation == VOLUME_SETTING_COMMIT;
-	bool preview = operation == VOLUME_SETTING_PREVIEW ||
-		       operation == VOLUME_SETTING_STEP;
-	bool rollback = operation == VOLUME_SETTING_PREVIEW &&
-			!message->value[0] && control->preview_active;
+	unsigned int level = message->setting.value.level;
+	bool step = operation == FPLINUX_UI_SETTING_STEP;
+	bool commit = operation == FPLINUX_UI_SETTING_COMMIT;
+	bool cancel = operation == FPLINUX_UI_SETTING_CANCEL;
+	bool set = operation == FPLINUX_UI_SETTING_SET;
+	bool preview = operation == FPLINUX_UI_SETTING_PREVIEW || step;
+	bool rollback = cancel && control->preview_active;
 
-	if ((step && strcmp(message->value, "-1") &&
-	     strcmp(message->value, "1")) ||
-	    (commit && message->value[0])) {
-		volume_error(process, message, "invalid-value");
-		return;
-	}
-	if (persistent_step) {
+	if (message->setting.kind == FPLINUX_UI_SETTING_MEDIA_VOLUME_STEP) {
 		dispatch_volume_step(session, class,
-				     !strcmp(message->value, "1") ? 1 : -1,
-				     process, message);
+				     message->setting.value.step, process,
+				     message);
 		return;
 	}
-	if (!step && !commit && message->value[0] &&
-	    !fplinux_session_settings_parse(
-		    &next, session->options.languages_dir,
-		    class == FPLINUX_SESSION_AUDIO_MEDIA ?
-			    FPLINUX_SESSION_SETTING_VOLUME :
-			    FPLINUX_SESSION_SETTING_ALARM_VOLUME,
-		    message->value)) {
-		volume_error(process, message, "invalid-value");
+	if (!step && (set || preview) && level > FPLINUX_AUDIO_VOLUME_MAX) {
+		fplinux_session_setting_error(process, message,
+					      "invalid-value");
 		return;
 	}
-	if (request->pending && request->save &&
-	    (message->value[0] || commit)) {
-		volume_error(process, message, "busy");
+	if (request->pending && request->save && (set || preview || commit)) {
+		fplinux_session_setting_error(process, message, "busy");
 		return;
 	}
-	if (operation == VOLUME_SETTING_PREVIEW && !message->value[0]) {
+	if (cancel)
 		end_volume_preview(session, class);
-		preview = false;
-	}
 	if (!fplinux_session_audio_volume_applied(&session->audio, class,
 						  &applied)) {
-		volume_error(process, message, "unavailable");
+		fplinux_session_setting_error(process, message, "unavailable");
 		return;
 	}
-	if (!message->value[0] && !rollback && !commit) {
-		snprintf(current, sizeof(current), "%u", applied);
-		fplinux_session_setting_reply(session, process,
-					      volume_name(class, false),
-					      current, message->serial, false);
+	if (operation == FPLINUX_UI_SETTING_GET || (cancel && !rollback)) {
+		volume_reply(session, process, volume_kind(class, false),
+			     applied, message->serial, false);
 		return;
 	}
 	if (step)
 		level = stepped_volume(session->audio.volume[class].desired,
-				       !strcmp(message->value, "1") ? 1 : -1);
-	else
-		level = commit || !message->value[0] ?
-				session->audio.volume[class].desired :
-			class == FPLINUX_SESSION_AUDIO_MEDIA ?
-				next.volume :
-				next.alarm_volume;
-	if (message->value[0] && preview && !control->preview_active) {
+				       message->setting.value.step);
+	else if (commit || cancel)
+		level = session->audio.volume[class].desired;
+	if (preview && !control->preview_active) {
 		control->preview_active = true;
 		control->preview_launcher = process == &session->launcher;
 		/* A previous preview may still be restoring asynchronously. */
@@ -434,14 +375,13 @@ static void volume_setting(struct fplinux_session *session,
 	request->level = level;
 	if (rollback)
 		request->restore_level = request->level;
-	request->save = commit || (message->value[0] && !preview);
+	request->save = commit || set;
 	request->preview = preview;
 	request->feedback = false;
 	request->step = false;
 	request->audio_fd = session->audio.fd;
 	fplinux_session_remember_setting_request(request, process, message);
-	fplinux_session_copy_value(request->name, sizeof(request->name),
-				   volume_name(class, preview));
+	request->kind = volume_kind(class, preview);
 	if (request->save)
 		control->preview_active = false;
 	fplinux_session_audio_set_volume(&session->audio, class, request->level,
@@ -455,8 +395,6 @@ static void finish_volume_request(struct fplinux_session *session,
 	struct setting_request *request = &control->request;
 	struct process *process;
 	unsigned int applied;
-	char current[16];
-	const char *name;
 
 	if (!request->pending)
 		return;
@@ -465,7 +403,6 @@ static void finish_volume_request(struct fplinux_session *session,
 	    fplinux_session_quick_settings_shown(session) &&
 	    session->launcher.control_fd >= 0)
 		process = &session->launcher;
-	name = request->name;
 	if (session->audio.fd != request->audio_fd || session->audio.fd < 0) {
 		struct process *step_process =
 			fplinux_session_setting_requester(
@@ -474,10 +411,9 @@ static void finish_volume_request(struct fplinux_session *session,
 		request->pending = false;
 		control->key_pending = false;
 		if (control->step_request.pending && step_process)
-			fplinux_session_reply_with_serial(
-				step_process, FPLINUX_UI_SESSION_ERROR,
-				control->step_request.name, "", "unavailable",
-				control->step_request.serial);
+			pending_volume_error(step_process,
+					     &control->step_request,
+					     "unavailable", false);
 		control->step_request.pending = false;
 		if (request->feedback && session->volume.indicator_active &&
 		    session->volume.indicator.kind == volume_level_kind(class))
@@ -487,13 +423,9 @@ static void finish_volume_request(struct fplinux_session *session,
 		fplinux_session_audio_set_volume(
 			&session->audio, class, request->restore_level,
 			fplinux_session_now_ms(session));
-		if (process) {
-			snprintf(current, sizeof(current), "%u",
-				 request->level);
-			fplinux_session_reply_with_serial(
-				process, FPLINUX_UI_SESSION_ERROR, name,
-				current, "unavailable", request->serial);
-		}
+		if (process)
+			pending_volume_error(process, request, "unavailable",
+					     true);
 		return;
 	}
 	if (fplinux_session_audio_volume_pending(&session->audio, class) ||
@@ -516,11 +448,9 @@ static void finish_volume_request(struct fplinux_session *session,
 		    session->volume.indicator.kind == volume_level_kind(class))
 			session->volume.indicator.warning = true;
 	}
-	if (process) {
-		snprintf(current, sizeof(current), "%u", applied);
-		fplinux_session_setting_reply(session, process, name, current,
-					      request->serial, request->save);
-	}
+	if (process)
+		volume_reply(session, process, request->kind, applied,
+			     request->serial, request->save);
 	if (control->key_pending) {
 		struct setting_request queued = control->step_request;
 		struct process *step_process =
@@ -535,15 +465,11 @@ static void finish_volume_request(struct fplinux_session *session,
 				request->token = queued.token;
 				request->serial = queued.serial;
 				request->step = true;
-				fplinux_session_copy_value(
-					request->name, sizeof(request->name),
-					queued.name);
+				request->kind = queued.kind;
 			}
 		} else if (queued.pending && step_process) {
-			snprintf(current, sizeof(current), "%u", applied);
-			fplinux_session_setting_reply(session, step_process,
-						      queued.name, current,
-						      queued.serial, false);
+			volume_reply(session, step_process, queued.kind,
+				     applied, queued.serial, false);
 		}
 	}
 }
@@ -622,13 +548,24 @@ bool fplinux_session_volume_setting(
 	struct fplinux_session *session, struct process *process,
 	const struct fplinux_ui_session_message *message)
 {
-	const struct volume_setting *setting = find_setting(message->name);
-
-	if (!setting)
+	switch (message->setting.kind) {
+	case FPLINUX_UI_SETTING_VOLUME:
+	case FPLINUX_UI_SETTING_VOLUME_PREVIEW:
+	case FPLINUX_UI_SETTING_VOLUME_STEP:
+	case FPLINUX_UI_SETTING_VOLUME_COMMIT:
+	case FPLINUX_UI_SETTING_MEDIA_VOLUME_STEP:
+		volume_setting(session, process, message,
+			       FPLINUX_SESSION_AUDIO_MEDIA);
+		return true;
+	case FPLINUX_UI_SETTING_ALARM_VOLUME:
+	case FPLINUX_UI_SETTING_ALARM_VOLUME_PREVIEW:
+	case FPLINUX_UI_SETTING_ALARM_VOLUME_COMMIT:
+		volume_setting(session, process, message,
+			       FPLINUX_SESSION_AUDIO_ALARM);
+		return true;
+	default:
 		return false;
-	volume_setting(session, process, message, setting->class,
-		       setting->operation);
-	return true;
+	}
 }
 
 void fplinux_session_volume_load(struct fplinux_session *session)

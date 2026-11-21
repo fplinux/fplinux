@@ -83,8 +83,8 @@ class BrightnessProcesses:
                 except FileNotFoundError, ConnectionRefusedError:
                     pass
                 else:
-                    probe.sendall(b"GET")
-                    if probe.recv(32).startswith(b"LEVEL "):
+                    probe.sendall(b"\x01")
+                    if probe.recv(32).startswith(b"\x06"):
                         return
             time.sleep(0.01)
         pytest.fail("brightness daemon did not listen")
@@ -154,10 +154,10 @@ class BrightnessProcesses:
         return client
 
     @staticmethod
-    def exchange(client: socket.socket, request: str) -> str:
+    def exchange(client: socket.socket, request: bytes) -> bytes:
         """Exchange one request and response packet."""
-        client.sendall(request.encode("ascii"))
-        return client.recv(32).decode("ascii")
+        client.sendall(request)
+        return client.recv(32)
 
 
 @pytest.fixture(scope="class")
@@ -170,12 +170,20 @@ def brightness_binaries() -> Iterator[BrightnessBinaries]:
         daemon = directory / "fplinux-brightnessd"
         cli = directory / "fplinux-brightness"
         for output, sources in (
-            (daemon, (APORT / "fplinux-brightnessd.c", LIB / "fplinux-cli.c")),
+            (
+                daemon,
+                (
+                    APORT / "fplinux-brightnessd.c",
+                    LIB / "fplinux-brightness-wire.c",
+                    LIB / "fplinux-cli.c",
+                ),
+            ),
             (
                 cli,
                 (
                     APORT / "fplinux-brightness.c",
                     LIB / "fplinux-brightness-client.c",
+                    LIB / "fplinux-brightness-wire.c",
                     LIB / "fplinux-cli.c",
                 ),
             ),

@@ -290,8 +290,7 @@ static void ring_data(char *data, size_t capacity, uint64_t event_id,
 
 	if (!event_id)
 		memset(&ring.event, 0, sizeof(ring.event));
-	assert(clock_wire_ring_encode(&ring, event_id, data, capacity) ==
-	       CLOCK_OK);
+	assert(clock_wire_ring_encode(&ring, data, capacity) == CLOCK_OK);
 }
 
 static void update_ring(struct fplinux_launcher_clock *clock, uint64_t event_id,
@@ -354,6 +353,7 @@ assert_ring_request(const struct fplinux_ui_session_message *message,
 					 strlen(message->clock_data),
 					 &request) == CLOCK_OK);
 	assert(request.op == op);
+	assert(!message->name[0]);
 	assert(request.event_id == event_id);
 	assert(request.minutes == minutes);
 }
@@ -378,7 +378,6 @@ static void test_alarm(struct fplinux_ui *ui,
 	alert_response(ui, FPLINUX_UI_COMMAND_SCREEN);
 	assert(ui->sent_count == 1 && ui->sent[0].serial != 0);
 	assert(ui->sent[0].type == FPLINUX_UI_SESSION_CLOCK);
-	assert(!strcmp(ui->sent[0].name, "snooze"));
 	assert_ring_request(&ui->sent[0], CLOCK_REQUEST_SNOOZE,
 			    UINT64_C(9007199254740993), 0);
 	assert_ring_waits(ui, clock, alert);
@@ -405,7 +404,7 @@ static void test_timer(struct fplinux_ui *ui,
 	assert(alert->command_count == 1);
 	assert(!find_command(alert, FPLINUX_UI_COMMAND_SCREEN));
 	alert_response(ui, FPLINUX_UI_COMMAND_STOP);
-	assert(ui->sent_count == 1 && !strcmp(ui->sent[0].name, "dismiss"));
+	assert(ui->sent_count == 1);
 	assert_ring_request(&ui->sent[0], CLOCK_REQUEST_DISMISS, 7, 0);
 	assert_ring_waits(ui, clock, alert);
 	assert(!ui->busy_alerts);

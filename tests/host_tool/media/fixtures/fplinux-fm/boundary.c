@@ -44,32 +44,49 @@ int connect(int fd, const struct sockaddr *address, socklen_t length)
 
 ssize_t send(int fd, const void *data, size_t bytes, int flags)
 {
+	const unsigned char *packet = data;
+
 	(void)flags;
-	if (fd != 18 || (bytes != 4 && bytes != 8)) {
+	if (fd != 18 || (bytes != 1 && bytes != 3)) {
 		errno = EINVAL;
 		return -1;
 	}
 	if (getenv("FM_TEST_EXPECT_983") &&
-	    (bytes != 8 || memcmp(data, "PLAY 983", 8))) {
+	    (bytes != 3 || memcmp(data, "\x02\xd7\x03", 3))) {
 		errno = EINVAL;
 		return -1;
 	}
-	fprintf(stderr, "REQUEST %.*s\n", (int)bytes, (const char *)data);
+	if (bytes == 1 && packet[0] == 1)
+		fputs("REQUEST SCAN\n", stderr);
+	else if (bytes == 3 && packet[0] == 2)
+		fprintf(stderr, "REQUEST PLAY %u\n",
+			packet[1] | (unsigned int)packet[2] << 8);
+	else {
+		errno = EINVAL;
+		return -1;
+	}
 	return (ssize_t)bytes;
 }
 
 ssize_t recv(int fd, void *data, size_t bytes, int flags)
 {
 	const char *reply = getenv("FM_TEST_SERVICE_REPLY");
+	unsigned char *packet = data;
 	size_t length;
 
 	(void)fd;
 	if (!reply)
-		reply = "READY";
-	length = strlen(reply);
+		reply = "03";
+	length = strlen(reply) / 2;
 	if (bytes > length)
 		bytes = length;
-	memcpy(data, reply, bytes);
+	for (size_t i = 0; i < bytes; ++i) {
+		unsigned int byte;
+
+		if (sscanf(reply + 2 * i, "%2x", &byte) != 1)
+			abort();
+		packet[i] = byte;
+	}
 	handshake = true;
 	return (ssize_t)(flags & MSG_TRUNC ? length : bytes);
 }

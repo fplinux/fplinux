@@ -4,7 +4,6 @@
   "applied": true,
   "storage": "durable",
   "error": 0,
-  "serial": 9,
   "model": {
     "wall_utc": 1704067200,
     "monotonic_ms": 1000,

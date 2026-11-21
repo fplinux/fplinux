@@ -7,7 +7,6 @@
 #include <libintl.h>
 #include <linux/input-event-codes.h>
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
 
 #define _(text) gettext(text)
@@ -23,25 +22,29 @@ enum quick_command {
 struct row_descriptor {
 	const char *title;
 	const char *glyph;
-	const char *setting;
-	const char *preview;
+	enum fplinux_ui_setting_kind setting;
+	enum fplinux_ui_setting_kind preview;
 	int minimum;
 	int maximum;
 };
 
 static const struct row_descriptor descriptors[] = {
 	[FPLINUX_LAUNCHER_QUICK_SETTING_BRIGHTNESS] = {
-		"Brightness", "brightness", "brightness", "brightness_preview",
+		"Brightness", "brightness", FPLINUX_UI_SETTING_BRIGHTNESS,
+		FPLINUX_UI_SETTING_BRIGHTNESS_PREVIEW,
 		FPLINUX_SETTINGS_BRIGHTNESS_MIN, FPLINUX_SETTINGS_BRIGHTNESS_MAX,
 	},
 	[FPLINUX_LAUNCHER_QUICK_SETTING_VOLUME] = {
-		"Volume", "volume", "volume", "volume_preview", 0, 10,
+		"Volume", "volume", FPLINUX_UI_SETTING_VOLUME,
+		FPLINUX_UI_SETTING_VOLUME_PREVIEW, 0, 10,
 	},
 	[FPLINUX_LAUNCHER_QUICK_SETTING_WIFI] = {
-		"Wi-Fi", "wifi", "wifi", NULL, 0, 0,
+		"Wi-Fi", "wifi", FPLINUX_UI_SETTING_WIFI,
+		FPLINUX_UI_SETTING_NONE, 0, 0,
 	},
 	[FPLINUX_LAUNCHER_QUICK_SETTING_BLUETOOTH] = {
-		"Bluetooth", "bluetooth", NULL, NULL, 0, 0,
+		"Bluetooth", "bluetooth", FPLINUX_UI_SETTING_NONE,
+		FPLINUX_UI_SETTING_NONE, 0, 0,
 	},
 };
 
@@ -51,20 +54,21 @@ static void view_changed(struct fplinux_launcher_quick_settings *quick)
 		quick->listener.view_changed(quick->listener.context);
 }
 
-/* NULL is a query or rollback; zero is a valid value. */
 static bool send_setting(struct fplinux_launcher_quick_settings *quick,
-			 const char *name, const int *value)
+			 enum fplinux_ui_setting_kind kind,
+			 enum fplinux_ui_setting_operation operation,
+			 union fplinux_ui_setting_value value)
 {
 	struct fplinux_ui_session_message message = {
 		.type = FPLINUX_UI_SESSION_SETTING,
+		.setting = { .kind = kind,
+			     .operation = operation,
+			     .value = value },
 	};
 
 	if (!++quick->setting_serial)
 		++quick->setting_serial;
 	message.serial = quick->setting_serial;
-	snprintf(message.name, sizeof(message.name), "%s", name);
-	if (value)
-		snprintf(message.value, sizeof(message.value), "%d", *value);
 	return fplinux_ui_send(quick->ui, &message);
 }
 
@@ -262,7 +266,8 @@ static void end_edit(struct fplinux_launcher_quick_settings *quick,
 		return;
 	if (rollback)
 		send_setting(quick, descriptors[quick->editing_row].preview,
-			     NULL);
+			     FPLINUX_UI_SETTING_CANCEL,
+			     (union fplinux_ui_setting_value){ 0 });
 	quick->editing = false;
 	quick->preview_pending = false;
 	quick->save_requested = false;
@@ -286,9 +291,14 @@ static void send_draft(struct fplinux_launcher_quick_settings *quick)
 			quick->preview_pending = false;
 			quick->preview_serial = 0;
 		}
-		quick->save_pending = send_setting(
-			quick, volume ? "volume_commit" : descriptor->setting,
-			volume ? NULL : &quick->draft);
+		quick->save_pending =
+			send_setting(quick,
+				     volume ? FPLINUX_UI_SETTING_VOLUME_COMMIT :
+					      descriptor->setting,
+				     volume ? FPLINUX_UI_SETTING_COMMIT :
+					      FPLINUX_UI_SETTING_SET,
+				     (union fplinux_ui_setting_value){
+					     .level = quick->draft });
 		quick->save_serial = quick->setting_serial;
 		if (!quick->save_pending) {
 			quick->save_requested = false;
@@ -299,8 +309,10 @@ static void send_draft(struct fplinux_launcher_quick_settings *quick)
 		}
 	} else {
 		quick->preview_sent = quick->draft;
-		quick->preview_pending =
-			send_setting(quick, descriptor->preview, &quick->draft);
+		quick->preview_pending = send_setting(
+			quick, descriptor->preview, FPLINUX_UI_SETTING_PREVIEW,
+			(union fplinux_ui_setting_value){
+				.level = quick->draft });
 		quick->preview_serial = quick->setting_serial;
 		if (!quick->preview_pending) {
 			end_edit(quick, true);
@@ -319,29 +331,15 @@ static void send_volume_step(struct fplinux_launcher_quick_settings *quick,
 		quick->draft = 0;
 	if (quick->draft > 10)
 		quick->draft = 10;
-	quick->preview_pending = send_setting(quick, "volume_step", &step);
+	quick->preview_pending = send_setting(
+		quick, FPLINUX_UI_SETTING_VOLUME_STEP, FPLINUX_UI_SETTING_STEP,
+		(union fplinux_ui_setting_value){ .step = step });
 	quick->preview_serial = quick->setting_serial;
 	if (!quick->preview_pending) {
 		end_edit(quick, true);
 		show_alert(quick, _("Volume"),
 			   _("The setting was not changed. Try again."));
 	}
-}
-
-static bool parse_level(const char *value,
-			const struct row_descriptor *descriptor, int *level)
-{
-	char *end;
-	long number;
-
-	if (!value[0])
-		return false;
-	number = strtol(value, &end, 10);
-	if (*end || number < descriptor->minimum ||
-	    number > descriptor->maximum)
-		return false;
-	*level = (int)number;
-	return true;
 }
 
 static void setting_error(struct fplinux_launcher_quick_settings *quick,
@@ -380,30 +378,31 @@ bool fplinux_launcher_quick_settings_receive(
 	const struct row_descriptor *descriptor;
 	bool preview;
 	bool valid;
+	const struct fplinux_ui_setting *setting = &message->setting;
 	int value;
-	const char *name = message->name;
+	enum fplinux_ui_setting_kind kind = setting->kind;
 
 	if (message->type != FPLINUX_UI_SESSION_SETTING &&
 	    message->type != FPLINUX_UI_SESSION_ERROR)
 		return false;
-	if (!strcmp(name, "volume_step"))
-		name = "volume_preview";
-	else if (!strcmp(name, "volume_commit"))
-		name = "volume";
+	if (kind == FPLINUX_UI_SETTING_NONE)
+		return false;
+	if (kind == FPLINUX_UI_SETTING_VOLUME_STEP)
+		kind = FPLINUX_UI_SETTING_VOLUME_PREVIEW;
+	else if (kind == FPLINUX_UI_SETTING_VOLUME_COMMIT)
+		kind = FPLINUX_UI_SETTING_VOLUME;
 	for (row = 0; row <= FPLINUX_LAUNCHER_QUICK_SETTING_WIFI; ++row) {
 		descriptor = &descriptors[row];
-		if (!strcmp(name, descriptor->setting) ||
-		    (descriptor->preview && !strcmp(name, descriptor->preview)))
+		if (kind == descriptor->setting || kind == descriptor->preview)
 			break;
 	}
 	if (row > FPLINUX_LAUNCHER_QUICK_SETTING_WIFI)
 		return false;
 	if (row == FPLINUX_LAUNCHER_QUICK_SETTING_WIFI) {
 		if (message->type == FPLINUX_UI_SESSION_SETTING &&
-		    (!strcmp(message->value, "0") ||
-		     !strcmp(message->value, "1"))) {
+		    setting->operation == FPLINUX_UI_SETTING_RESULT) {
 			quick->wifi_known = true;
-			quick->wifi_on = !strcmp(message->value, "1");
+			quick->wifi_on = setting->value.enabled;
 			quick->wifi_pending = false;
 		} else if (message->type == FPLINUX_UI_SESSION_ERROR) {
 			if (!strcmp(message->reason, "unsupported"))
@@ -416,8 +415,12 @@ bool fplinux_launcher_quick_settings_receive(
 		show_rows(quick);
 		return true;
 	}
-	preview = !strcmp(name, descriptor->preview);
-	valid = parse_level(message->value, descriptor, &value);
+	preview = kind == descriptor->preview;
+	value = setting->value.level;
+	valid = (setting->operation == FPLINUX_UI_SETTING_RESULT ||
+		 setting->operation == FPLINUX_UI_SETTING_PREVIEW ||
+		 setting->operation == FPLINUX_UI_SETTING_SET) &&
+		value >= descriptor->minimum && value <= descriptor->maximum;
 	if (quick->editing && row == quick->editing_row) {
 		bool volume = row == FPLINUX_LAUNCHER_QUICK_SETTING_VOLUME;
 		bool current_preview =
@@ -515,10 +518,12 @@ static void toggle(struct fplinux_launcher_quick_settings *quick,
 {
 	if (row == FPLINUX_LAUNCHER_QUICK_SETTING_WIFI && quick->wifi_known &&
 	    !quick->wifi_pending) {
-		int value = !quick->wifi_on;
+		bool value = !quick->wifi_on;
 
 		quick->wifi_turning_on = value;
-		quick->wifi_pending = send_setting(quick, "wifi", &value);
+		quick->wifi_pending = send_setting(
+			quick, FPLINUX_UI_SETTING_WIFI, FPLINUX_UI_SETTING_SET,
+			(union fplinux_ui_setting_value){ .enabled = value });
 		if (!quick->wifi_pending)
 			show_alert(
 				quick, _("Wi-Fi"),
@@ -656,7 +661,8 @@ void fplinux_launcher_quick_settings_open(
 	show_rows(quick);
 	fplinux_ui_push(quick->ui, quick->list);
 	view_changed(quick);
-	send_setting(quick, "wifi", NULL);
+	send_setting(quick, FPLINUX_UI_SETTING_WIFI, FPLINUX_UI_SETTING_GET,
+		     (union fplinux_ui_setting_value){ 0 });
 	if (quick->bluetooth)
 		fplinux_bluez_adapter_connect(quick->bluetooth);
 }

@@ -33,6 +33,11 @@ if TYPE_CHECKING:
         BrightnessProcesses,
     )
 
+GET = b"\x01"
+CLAIM = b"\x03"
+RELEASE = b"\x05"
+OK = b"\x07"
+
 
 @pytest.fixture(scope="class")
 def signal_daemon(brightness_binaries: BrightnessBinaries) -> Path:
@@ -48,6 +53,7 @@ def signal_daemon(brightness_binaries: BrightnessBinaries) -> Path:
             "-I",
             str(INCLUDE),
             str(APORT / "fplinux-brightnessd.c"),
+            str(LIB / "fplinux-brightness-wire.c"),
             str(LIB / "fplinux-cli.c"),
             str(
                 ROOT
@@ -93,16 +99,37 @@ class FPLinuxBrightnessServiceTests:
         brightness.start_daemon()
         lease = brightness.client()
         other = brightness.client()
-        assert (brightness.exchange(lease, "CLAIM")) == ("OK")
-        assert (brightness.exchange(other, "CLAIM")) == ("ERR 16")
-        assert (brightness.exchange(other, "SHOW 2")) == ("ERR 1")
-        assert (brightness.exchange(lease, "SHOW 2")) == ("OK")
+        assert brightness.exchange(lease, CLAIM) == OK
+        assert brightness.exchange(other, CLAIM) == b"\x08\x10\x00\x00\x00"
+        assert brightness.exchange(other, b"\x04\x02") == b"\x08\x01\x00\x00\x00"
+        assert brightness.exchange(lease, b"\x04\x02") == OK
         assert (brightness.raw()) == ("2\n")
         assert (brightness.run_cli("set", "9").returncode) == (0)
-        assert (brightness.exchange(other, "GET")) == ("LEVEL 9")
+        assert brightness.exchange(other, GET) == b"\x06\x09"
         assert (brightness.raw()) == ("2\n")
-        assert (brightness.exchange(lease, "RELEASE")) == ("OK")
+        assert brightness.exchange(lease, RELEASE) == OK
         assert (brightness.raw()) == ("44\n")
+
+    @pytest.mark.parametrize(
+        "packet",
+        [
+            b"\x02",
+            b"\x02\x04\x00",
+            b"\x02\x04" + bytes(32),
+            b"\x02\x0b",
+            b"\x06\x04",
+        ],
+        ids=["short", "trailing", "truncated", "out-of-range", "wrong-direction"],
+    )
+    def test_invalid_packets_do_not_apply_or_persist_brightness(
+        self, brightness: BrightnessProcesses, packet: bytes
+    ) -> None:
+        brightness.start_daemon()
+        client = brightness.client()
+        assert brightness.exchange(client, packet) == b"\x08\x16\x00\x00\x00"
+        assert brightness.exchange(client, GET) == b"\x06\x07"
+        assert brightness.raw() == "23\n"
+        assert brightness.state.read_text(encoding="ascii") == "7\n"
 
     def test_preview_disconnect_restores_latest_baseline(
         self, brightness: BrightnessProcesses
@@ -110,8 +137,8 @@ class FPLinuxBrightnessServiceTests:
         """Closing a lease holder applies the latest desired level."""
         brightness.start_daemon()
         lease = brightness.client()
-        assert (brightness.exchange(lease, "CLAIM")) == ("OK")
-        assert (brightness.exchange(lease, "SHOW 0")) == ("OK")
+        assert brightness.exchange(lease, CLAIM) == OK
+        assert brightness.exchange(lease, b"\x04\x00") == OK
         assert (brightness.run_cli("set", "8").returncode) == (0)
         assert brightness.raw() == "0\n"
         lease.close()
@@ -120,7 +147,7 @@ class FPLinuxBrightnessServiceTests:
         while time.monotonic() < deadline and brightness.raw() != "32\n":
             time.sleep(0.01)
         assert (brightness.raw()) == ("32\n")
-        assert (brightness.exchange(other, "CLAIM")) == ("OK")
+        assert brightness.exchange(other, CLAIM) == OK
 
     def test_killed_daemon_recovers_published_baseline_and_stale_socket(
         self, brightness: BrightnessProcesses
@@ -129,8 +156,8 @@ class FPLinuxBrightnessServiceTests:
         brightness.start_daemon()
         assert (brightness.run_cli("set", "10").returncode) == (0)
         lease = brightness.client()
-        assert (brightness.exchange(lease, "CLAIM")) == ("OK")
-        assert (brightness.exchange(lease, "SHOW 0")) == ("OK")
+        assert brightness.exchange(lease, CLAIM) == OK
+        assert brightness.exchange(lease, b"\x04\x00") == OK
         assert (brightness.raw()) == ("0\n")
         process = brightness.process
         if process is None:
@@ -186,11 +213,11 @@ class FPLinuxBrightnessServiceTests:
         assert (brightness.run_cli("set", "4").returncode) == (0)
         client = brightness.client()
         if preview:
-            assert (brightness.exchange(client, "CLAIM")) == ("OK")
-            assert (brightness.exchange(client, "SHOW 0")) == ("OK")
+            assert brightness.exchange(client, CLAIM) == OK
+            assert brightness.exchange(client, b"\x04\x00") == OK
             assert (brightness.raw()) == ("0\n")
         request.write_text(f"{signum}\n", encoding="ascii")
-        assert (brightness.exchange(client, "GET")) == ("LEVEL 4")
+        assert brightness.exchange(client, GET) == b"\x06\x04"
         result = brightness.wait_for_daemon_exit()
         assert (result.returncode) == (0), result.stderr
         assert (notice.read_text(encoding="ascii")) == (f"{signum}\n")
@@ -258,8 +285,8 @@ class FPLinuxBrightnessServiceTests:
         brightness.start_daemon()
         assert (brightness.run_cli("set", "3").returncode) == (0)
         lease = brightness.client()
-        assert (brightness.exchange(lease, "CLAIM")) == ("OK")
-        assert (brightness.exchange(lease, "SHOW 0")) == ("OK")
+        assert brightness.exchange(lease, CLAIM) == OK
+        assert brightness.exchange(lease, b"\x04\x00") == OK
         assert (brightness.raw()) == ("0\n")
         assert (brightness.run_once().returncode) != (0)
         assert (brightness.raw()) == ("0\n")

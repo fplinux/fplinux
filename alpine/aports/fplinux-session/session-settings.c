@@ -157,8 +157,8 @@ bool fplinux_session_settings_parse(struct fplinux_session_settings *settings,
 		if (!parse_decimal(value, &number))
 			return false;
 		for (i = 0; i < FPLINUX_SETTINGS_SCREEN_OFF_COUNT; ++i)
-			if (!strcmp(value,
-				    fplinux_settings_screen_off_values[i])) {
+			if ((int)number ==
+			    fplinux_settings_screen_off_values[i]) {
 				settings->screen_off_seconds = number;
 				return true;
 			}
@@ -172,8 +172,8 @@ bool fplinux_session_settings_parse(struct fplinux_session_settings *settings,
 		if (!parse_decimal(value, &number))
 			return false;
 		for (i = 1; i < FPLINUX_SETTINGS_AUTO_LOCK_COUNT; ++i)
-			if (!strcmp(value,
-				    fplinux_settings_auto_lock_values[i])) {
+			if ((int)number ==
+			    fplinux_settings_auto_lock_values[i]) {
 				settings->auto_lock_seconds = (int)number;
 				return true;
 			}
@@ -192,6 +192,70 @@ bool fplinux_session_settings_parse(struct fplinux_session_settings *settings,
 	default:
 		return false;
 	}
+}
+
+bool fplinux_session_settings_apply(struct fplinux_session_settings *settings,
+				    const char *languages,
+				    const struct fplinux_ui_setting *request)
+{
+	const union fplinux_ui_setting_value *value = &request->value;
+
+	switch (request->kind) {
+	case FPLINUX_UI_SETTING_SCREEN_OFF:
+		for (size_t i = 0; i < FPLINUX_SETTINGS_SCREEN_OFF_COUNT; ++i)
+			if (value->seconds ==
+			    fplinux_settings_screen_off_values[i]) {
+				settings->screen_off_seconds = value->seconds;
+				return true;
+			}
+		return false;
+	case FPLINUX_UI_SETTING_AUTO_LOCK:
+		for (size_t i = 0; i < FPLINUX_SETTINGS_AUTO_LOCK_COUNT; ++i)
+			if (value->seconds ==
+			    fplinux_settings_auto_lock_values[i]) {
+				settings->auto_lock_seconds = value->seconds;
+				return true;
+			}
+		return false;
+	case FPLINUX_UI_SETTING_LOCALE:
+		return select_language(settings, languages, value->locale);
+	case FPLINUX_UI_SETTING_INPUT_LOCALE:
+		return select_input_language(settings, languages,
+					     value->locale);
+	case FPLINUX_UI_SETTING_THEME:
+		settings->theme = value->theme;
+		return true;
+	default:
+		return false;
+	}
+}
+
+union fplinux_ui_setting_value
+fplinux_session_settings_value(const struct fplinux_session_settings *settings,
+			       enum fplinux_ui_setting_kind kind)
+{
+	union fplinux_ui_setting_value value = { 0 };
+
+	switch (kind) {
+	case FPLINUX_UI_SETTING_SCREEN_OFF:
+		value.seconds = settings->screen_off_seconds;
+		break;
+	case FPLINUX_UI_SETTING_AUTO_LOCK:
+		value.seconds = settings->auto_lock_seconds;
+		break;
+	case FPLINUX_UI_SETTING_LOCALE:
+		strcpy(value.locale, settings->locale);
+		break;
+	case FPLINUX_UI_SETTING_INPUT_LOCALE:
+		strcpy(value.locale, settings->input_locale);
+		break;
+	case FPLINUX_UI_SETTING_THEME:
+		value.theme = settings->theme;
+		break;
+	default:
+		break;
+	}
+	return value;
 }
 
 bool fplinux_session_settings_format(
@@ -420,60 +484,31 @@ failed:
 	return result;
 }
 
-static bool has_digits(const char *value, size_t first, size_t count)
-{
-	size_t i;
-
-	for (i = first; i < first + count; ++i)
-		if (value[i] < '0' || value[i] > '9')
-			return false;
-	return true;
-}
-
-bool fplinux_session_time_parse(const char *value, time_t *seconds)
+bool fplinux_session_time_setpoint(const struct fplinux_ui_setting_time *value,
+				   time_t *seconds)
 {
 	struct tm time = { .tm_isdst = -1 };
-	size_t length = strlen(value);
-	int year, month, day, hour, minute;
-	int second = 0;
 	time_t result;
 
-	/* Seconds are optional; a date-only edit keeps the running seconds. */
-	if ((length != 16 && length != 19) || !has_digits(value, 0, 4) ||
-	    value[4] != '-' || !has_digits(value, 5, 2) || value[7] != '-' ||
-	    !has_digits(value, 8, 2) || value[10] != ' ' ||
-	    !has_digits(value, 11, 2) || value[13] != ':' ||
-	    !has_digits(value, 14, 2) ||
-	    (length == 19 && (value[16] != ':' || !has_digits(value, 17, 2))) ||
-	    sscanf(value, "%4d-%2d-%2d %2d:%2d", &year, &month, &day, &hour,
-		   &minute) != 5 ||
-	    (length == 19 && sscanf(value + 17, "%2d", &second) != 1))
+	if (value->year < FPLINUX_SETTINGS_YEAR_MIN ||
+	    value->year > FPLINUX_SETTINGS_YEAR_MAX || value->month < 1 ||
+	    value->month > 12 || value->day < 1 || value->day > 31 ||
+	    value->hour < 0 || value->hour > 23 || value->minute < 0 ||
+	    value->minute > 59 || value->second < 0 || value->second > 59)
 		return false;
-	if (year < FPLINUX_SETTINGS_YEAR_MIN ||
-	    year > FPLINUX_SETTINGS_YEAR_MAX || month < 1 || month > 12 ||
-	    day < 1 || day > 31 || hour > 23 || minute > 59 || second > 59)
-		return false;
-	time.tm_year = year - 1900;
-	time.tm_mon = month - 1;
-	time.tm_mday = day;
-	time.tm_hour = hour;
-	time.tm_min = minute;
-	time.tm_sec = second;
+	time.tm_year = value->year - 1900;
+	time.tm_mon = value->month - 1;
+	time.tm_mday = value->day;
+	time.tm_hour = value->hour;
+	time.tm_min = value->minute;
+	time.tm_sec = value->second;
 	result = mktime(&time);
 	/* mktime normalizes 31 April to 1 May; such a date is invalid. */
-	if (result == (time_t)-1 || time.tm_year != year - 1900 ||
-	    time.tm_mon != month - 1 || time.tm_mday != day ||
-	    time.tm_hour != hour || time.tm_min != minute ||
-	    time.tm_sec != second)
+	if (result == (time_t)-1 || time.tm_year != value->year - 1900 ||
+	    time.tm_mon != value->month - 1 || time.tm_mday != value->day ||
+	    time.tm_hour != value->hour || time.tm_min != value->minute ||
+	    time.tm_sec != value->second)
 		return false;
 	*seconds = result;
 	return true;
-}
-
-bool fplinux_session_time_format(time_t seconds, char *value, size_t capacity)
-{
-	struct tm time;
-
-	return localtime_r(&seconds, &time) &&
-	       strftime(value, capacity, "%Y-%m-%d %H:%M", &time) == 16;
 }

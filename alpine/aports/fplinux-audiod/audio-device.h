@@ -2,6 +2,8 @@
 #ifndef FPLINUX_AUDIO_DEVICE_H
 #define FPLINUX_AUDIO_DEVICE_H
 
+#include "fplinux-audio-protocol.h"
+
 #include <poll.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -10,12 +12,6 @@
 
 struct _snd_pcm;
 struct _snd_ctl;
-
-enum fplinux_audio_route {
-	FPLINUX_AUDIO_ROUTE_AUTO,
-	FPLINUX_AUDIO_ROUTE_SPEAKER,
-	FPLINUX_AUDIO_ROUTE_HEADPHONES,
-};
 
 enum fplinux_audio_device_event {
 	FPLINUX_AUDIO_DEVICE_JACK_CHANGED = 1,

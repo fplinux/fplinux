@@ -2,6 +2,7 @@
 #define _POSIX_C_SOURCE 200809L
 
 #include "audio-device.h"
+#include "fplinux-audio-radio.h"
 #include "audio-mixer.h"
 
 #include <fplinux-audio-protocol.h>
@@ -369,7 +370,8 @@ int fplinux_audio_device_tune(struct fplinux_audio_device *device,
 	unsigned int capabilities;
 	int result;
 
-	if (!device->fm_id || frequency < 875 || frequency > 1080)
+	if (!device->fm_id || frequency < FPLINUX_AUDIO_FM_LOW_100KHZ ||
+	    frequency > FPLINUX_AUDIO_FM_HIGH_100KHZ)
 		return -ENOTSUP;
 	device->radio_fd = open("/dev/radio0", O_RDWR | O_CLOEXEC);
 	if (device->radio_fd < 0)

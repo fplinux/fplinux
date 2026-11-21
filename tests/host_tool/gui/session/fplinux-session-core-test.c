@@ -23,6 +23,9 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "fplinux-audio-control.h"
+#include "fplinux-audio-status.h"
+#include "fplinux-brightness-wire.h"
 #include "fplinux-keypad.h"
 #include "fplinux-clock-wire.h"
 
@@ -82,13 +85,13 @@ struct fixture {
 	int audio_status_listener;
 	int audio_control;
 	char audio_socket[PATH_MAX];
-	char audio_messages[128][256];
+	struct fplinux_audio_control audio_messages[128];
 	size_t audio_message_count;
 	unsigned int audio_volume;
 	unsigned int audio_alarm_volume;
 	bool hold_audio_ack;
-	char held_audio_ack[256];
-	const char *audio_outputs;
+	struct fplinux_audio_control held_audio_ack;
+	struct fplinux_audio_status audio_status;
 	bool fail_audio_output;
 	unsigned int teardown_callbacks;
 	bool frame_held;
@@ -627,47 +630,50 @@ static void run_brightness_service(int listener, const char *level_path,
 
 	CHECK(client >= 0);
 	for (;;) {
-		char request[32], response[32];
-		unsigned int next;
-		ssize_t bytes = recv(client, request, sizeof(request) - 1, 0);
+		struct fplinux_brightness_message request;
+		struct fplinux_brightness_message reply = {
+			.type = FPLINUX_BRIGHTNESS_OK,
+		};
+		int received = fplinux_brightness_wire_receive(
+			client, FPLINUX_BRIGHTNESS_REQUEST, &request);
+		char stored[16];
 
-		if (bytes <= 0)
+		if (!received)
 			_exit(0);
-		request[bytes] = '\0';
-		if (!strcmp(request, "GET")) {
-			snprintf(response, sizeof(response), "LEVEL %u", level);
-		} else {
-			if (sscanf(request, "SET %u", &next) == 1) {
-				char stored[16];
-
-				CHECK(next >= 1 && next <= 10);
-				level = next;
-				if (!leased)
-					effective = level;
-				snprintf(stored, sizeof(stored), "%u\n", level);
-				write_file(level_path, stored);
-			} else {
-				if (!strcmp(request, "CLAIM")) {
-					leased = true;
-				} else if (!strcmp(request, "RELEASE")) {
-					CHECK(leased);
-					leased = false;
-					effective = level;
-				} else {
-					CHECK(sscanf(request, "SHOW %u",
-						     &next) == 1);
-					CHECK(leased && next <= 10);
-					effective = next;
-				}
-			}
-			char stored[16];
-
+		CHECK(received == 1);
+		switch (request.type) {
+		case FPLINUX_BRIGHTNESS_GET:
+			reply.type = FPLINUX_BRIGHTNESS_LEVEL;
+			reply.level = level;
+			break;
+		case FPLINUX_BRIGHTNESS_SET:
+			CHECK(request.level >= 1 && request.level <= 10);
+			level = request.level;
+			if (!leased)
+				effective = level;
+			snprintf(stored, sizeof(stored), "%u\n", level);
+			write_file(level_path, stored);
+			break;
+		case FPLINUX_BRIGHTNESS_CLAIM:
+			leased = true;
+			break;
+		case FPLINUX_BRIGHTNESS_RELEASE:
+			CHECK(leased);
+			leased = false;
+			effective = level;
+			break;
+		case FPLINUX_BRIGHTNESS_SHOW:
+			CHECK(leased && request.level <= 10);
+			effective = request.level;
+			break;
+		default:
+			CHECK(false);
+		}
+		if (reply.type == FPLINUX_BRIGHTNESS_OK) {
 			snprintf(stored, sizeof(stored), "%u\n", effective);
 			write_file(effective_path, stored);
-			strcpy(response, "OK");
 		}
-		CHECK(send(client, response, strlen(response), MSG_NOSIGNAL) ==
-		      (ssize_t)strlen(response));
+		CHECK(fplinux_brightness_wire_send(client, &reply) == 0);
 	}
 }
 
@@ -741,10 +747,8 @@ static void observe_audio(struct fixture *fixture)
 				     SOCK_CLOEXEC | SOCK_NONBLOCK);
 
 		if (status >= 0) {
-			const char *state = fixture->audio_outputs;
-
-			CHECK(send(status, state, strlen(state),
-				   MSG_NOSIGNAL) == (ssize_t)strlen(state));
+			CHECK(fplinux_audio_status_send(
+				      status, &fixture->audio_status) == 0);
 			close(status);
 		}
 	}
@@ -758,44 +762,44 @@ static void observe_audio(struct fixture *fixture)
 			return;
 	}
 	for (;;) {
-		char packet[256];
-		ssize_t bytes = recv(fixture->audio_control, packet,
-				     sizeof(packet) - 1, MSG_DONTWAIT);
+		struct fplinux_audio_control message;
+		int received = fplinux_audio_control_receive(
+			fixture->audio_control, FPLINUX_AUDIO_TO_SERVICE,
+			&message);
 
-		if (bytes < 0 && (errno == EAGAIN || errno == EINTR))
+		if (received < 0 && (errno == EAGAIN || errno == EINTR))
 			return;
-		if (!bytes) {
+		if (!received) {
 			close(fixture->audio_control);
 			fixture->audio_control = -1;
 			return;
 		}
-		CHECK(bytes > 0 && fixture->audio_message_count < 128);
-		packet[bytes] = '\0';
-		strcpy(fixture->audio_messages[fixture->audio_message_count++],
-		       packet);
-		if (!strncmp(packet, "VOLUME ", 7)) {
-			if (!strncmp(packet, "VOLUME MEDIA ", 13))
-				CHECK(sscanf(packet, "VOLUME MEDIA %u",
-					     &fixture->audio_volume) == 1);
+		CHECK(received == 1 && fixture->audio_message_count < 128);
+		fixture->audio_messages[fixture->audio_message_count++] =
+			message;
+		if (message.type == FPLINUX_AUDIO_SET_VOLUME) {
+			if (message.volume.class == FPLINUX_AUDIO_MEDIA)
+				fixture->audio_volume = message.volume.level;
 			else
-				CHECK(sscanf(packet, "VOLUME ALARM %u",
-					     &fixture->audio_alarm_volume) ==
-				      1);
+				fixture->audio_alarm_volume =
+					message.volume.level;
+			message.type = FPLINUX_AUDIO_VOLUME_APPLIED;
 			if (fixture->hold_audio_ack)
-				strcpy(fixture->held_audio_ack, packet);
+				fixture->held_audio_ack = message;
 			else
-				CHECK(send(fixture->audio_control, packet,
-					   strlen(packet), MSG_NOSIGNAL) ==
-				      (ssize_t)strlen(packet));
-		} else if (!strncmp(packet, "OUTPUT ", 7)) {
-			const char *answer = fixture->fail_audio_output ?
-						     "OUTPUT ERROR 19" :
-						     packet;
-
+				CHECK(fplinux_audio_control_send(
+					      fixture->audio_control,
+					      &message) == 0);
+		} else if (message.type == FPLINUX_AUDIO_SET_OUTPUT) {
+			if (fixture->fail_audio_output) {
+				message.type = FPLINUX_AUDIO_OUTPUT_ERROR;
+				message.error = ENODEV;
+			} else {
+				message.type = FPLINUX_AUDIO_OUTPUT_APPLIED;
+			}
 			fixture->fail_audio_output = false;
-			CHECK(send(fixture->audio_control, answer,
-				   strlen(answer),
-				   MSG_NOSIGNAL) == (ssize_t)strlen(answer));
+			CHECK(fplinux_audio_control_send(fixture->audio_control,
+							 &message) == 0);
 		}
 	}
 }
@@ -829,8 +833,13 @@ static struct fixture *create_fixture(const char *root, int width, int height,
 	fixture->listener = -1;
 	fixture->audio_listener = -1;
 	fixture->audio_status_listener = -1;
-	fixture->audio_outputs =
-		"STATE media=10 alarm=10 output=0 applied=1 speaker=1 headphones=0";
+	fixture->audio_status = (struct fplinux_audio_status){
+		.media_volume = 10,
+		.alarm_volume = 10,
+		.rate = 48000,
+		.applied_route = FPLINUX_AUDIO_ROUTE_SPEAKER,
+		.speaker = true,
+	};
 	fixture->audio_control = -1;
 	fixture->media = media;
 	fixture->now_ms = 1000;
@@ -2412,10 +2421,8 @@ static void set_tasks_view(struct fixture *fixture, struct peer *launcher,
 {
 	struct fplinux_ui_session_message select = {
 		.type = FPLINUX_UI_SESSION_SELECT,
-		.value = "tasks",
+		.launcher_view = FPLINUX_UI_LAUNCHER_VIEW_TASKS,
 		.enabled = opened,
-		.selected_id = TEST_APP,
-		.name = "transient-only",
 	};
 
 	issue(fixture, launcher, &select);
@@ -3107,10 +3114,8 @@ static void set_quick_settings_view(struct fixture *fixture,
 {
 	struct fplinux_ui_session_message select = {
 		.type = FPLINUX_UI_SESSION_SELECT,
-		.value = "quick-settings",
+		.launcher_view = FPLINUX_UI_LAUNCHER_VIEW_QUICK_SETTINGS,
 		.enabled = opened,
-		.selected_id = TEST_APP,
-		.name = "transient-only",
 	};
 
 	issue(fixture, launcher, &select);
@@ -3256,13 +3261,20 @@ static void test_quick_settings_authority(struct fixture *fixture)
 
 static void acknowledge_audio_with_next(struct fixture *fixture, bool hold_next)
 {
-	size_t length = strlen(fixture->held_audio_ack);
-
-	CHECK(length && fixture->audio_control >= 0);
-	CHECK(send(fixture->audio_control, fixture->held_audio_ack, length,
-		   MSG_NOSIGNAL) == (ssize_t)length);
-	fixture->held_audio_ack[0] = '\0';
+	CHECK(fixture->held_audio_ack.type == FPLINUX_AUDIO_VOLUME_APPLIED &&
+	      fixture->audio_control >= 0);
+	CHECK(fplinux_audio_control_send(fixture->audio_control,
+					 &fixture->held_audio_ack) == 0);
+	fixture->held_audio_ack.type = 0;
 	fixture->hold_audio_ack = hold_next;
+}
+
+static bool audio_ack_is(const struct fixture *fixture,
+			 enum fplinux_audio_class class, unsigned int level)
+{
+	return fixture->held_audio_ack.type == FPLINUX_AUDIO_VOLUME_APPLIED &&
+	       fixture->held_audio_ack.volume.class == class &&
+	       fixture->held_audio_ack.volume.level == level;
 }
 
 static void acknowledge_audio(struct fixture *fixture)
@@ -3388,10 +3400,10 @@ static void test_levels_coalesced_steps_follow_ack(struct fixture *fixture)
 	CHECK(response.serial == 501 && !response.applied &&
 	      !strcmp(response.reason, "superseded"));
 	volume_gesture(fixture, false, KEY_VOLUMEDOWN);
-	CHECK(!strcmp(fixture->held_audio_ack, "VOLUME MEDIA 9"));
+	CHECK(audio_ack_is(fixture, FPLINUX_AUDIO_MEDIA, 9));
 	acknowledge_audio_with_next(fixture, true);
 	pump(fixture, 10);
-	CHECK(!strcmp(fixture->held_audio_ack, "VOLUME MEDIA 7"));
+	CHECK(audio_ack_is(fixture, FPLINUX_AUDIO_MEDIA, 7));
 	expect_media_level(latest_levels(fixture, app), 9, true);
 	CHECK(indicator(fixture).level.value == 9 &&
 	      indicator(fixture).level.pending);
@@ -3480,13 +3492,13 @@ static void test_levels_steps_preserve_editor_save(struct fixture *fixture)
 				"media_volume_step");
 	CHECK(response.serial == 522 && !strcmp(response.reason, "superseded"));
 	volume_gesture(fixture, false, KEY_VOLUMEDOWN);
-	CHECK(!strcmp(fixture->held_audio_ack, "VOLUME MEDIA 7"));
+	CHECK(audio_ack_is(fixture, FPLINUX_AUDIO_MEDIA, 7));
 	acknowledge_audio_with_next(fixture, true);
 	response = wait_message(fixture, settings, FPLINUX_UI_SESSION_SETTING,
 				"volume");
 	CHECK(response.serial == 521 && response.applied &&
 	      !strcmp(response.value, "7"));
-	CHECK(!strcmp(fixture->held_audio_ack, "VOLUME MEDIA 4"));
+	CHECK(audio_ack_is(fixture, FPLINUX_AUDIO_MEDIA, 4));
 	acknowledge_audio(fixture);
 	response = wait_message(fixture, settings, FPLINUX_UI_SESSION_SETTING,
 				"media_volume_step");
@@ -3557,7 +3569,7 @@ static size_t audio_volume_writes(const struct fixture *fixture)
 	size_t count = 0;
 
 	for (size_t i = 0; i < fixture->audio_message_count; ++i)
-		if (!strncmp(fixture->audio_messages[i], "VOLUME ", 7))
+		if (fixture->audio_messages[i].type == FPLINUX_AUDIO_SET_VOLUME)
 			++count;
 	return count;
 }
@@ -3721,9 +3733,9 @@ static void test_volume_keys_pending(struct fixture *fixture)
 	set_quick_settings_view(fixture, launcher, true);
 	fixture->hold_audio_ack = true;
 	volume_gesture(fixture, false, KEY_VOLUMEDOWN);
-	CHECK(!strcmp(fixture->held_audio_ack, "VOLUME MEDIA 9"));
+	CHECK(audio_ack_is(fixture, FPLINUX_AUDIO_MEDIA, 9));
 	volume_gesture(fixture, true, KEY_VOLUMEDOWN);
-	CHECK(!strcmp(fixture->held_audio_ack, "VOLUME MEDIA 9"));
+	CHECK(audio_ack_is(fixture, FPLINUX_AUDIO_MEDIA, 9));
 	expect_file(fixture->settings,
 		    "screen_off_seconds=30\nauto_lock_seconds=0\n"
 		    "locale=en\ninput_locale=en\ntheme=light\nbrightness=7\n");
@@ -3735,8 +3747,11 @@ static void test_volume_keys_pending(struct fixture *fixture)
 	CHECK(!strcmp(response.value, "8") && response.applied &&
 	      response.storage_state == FPLINUX_STORAGE_DURABLE);
 	CHECK(fixture->audio_volume == 8);
-	CHECK(!strcmp(fixture->audio_messages[fixture->audio_message_count - 1],
-		      "VOLUME MEDIA 8"));
+	const struct fplinux_audio_control *last =
+		&fixture->audio_messages[fixture->audio_message_count - 1];
+	CHECK(last->type == FPLINUX_AUDIO_SET_VOLUME &&
+	      last->volume.class == FPLINUX_AUDIO_MEDIA &&
+	      last->volume.level == 8);
 	expect_saved_volume(fixture, "8");
 }
 
@@ -3755,7 +3770,7 @@ static void test_volume_keys_preview(struct fixture *fixture)
 	fixture->hold_audio_ack = true;
 	issue(fixture, launcher, &preview);
 	volume_gesture(fixture, false, KEY_VOLUMEDOWN);
-	CHECK(!strcmp(fixture->held_audio_ack, "VOLUME MEDIA 7"));
+	CHECK(audio_ack_is(fixture, FPLINUX_AUDIO_MEDIA, 7));
 	acknowledge_audio(fixture);
 	response = wait_message(fixture, launcher, FPLINUX_UI_SESSION_SETTING,
 				"volume_preview");
@@ -3794,7 +3809,7 @@ static void test_volume_keys_during_save(struct fixture *fixture)
 	issue(fixture, launcher, &save);
 	volume_gesture(fixture, false, KEY_VOLUMEDOWN);
 	volume_gesture(fixture, true, KEY_VOLUMEDOWN);
-	CHECK(!strcmp(fixture->held_audio_ack, "VOLUME MEDIA 7"));
+	CHECK(audio_ack_is(fixture, FPLINUX_AUDIO_MEDIA, 7));
 	acknowledge_audio(fixture);
 	response = wait_message(fixture, launcher, FPLINUX_UI_SESSION_SETTING,
 				"volume");
@@ -3821,7 +3836,7 @@ static void test_volume_save_after_home(struct fixture *fixture)
 
 	fixture->hold_audio_ack = true;
 	issue(fixture, settings, &request);
-	CHECK(!strcmp(fixture->held_audio_ack, "VOLUME MEDIA 7"));
+	CHECK(audio_ack_is(fixture, FPLINUX_AUDIO_MEDIA, 7));
 	return_home(fixture, launcher);
 	CHECK(fplinux_session_focused_pid(fixture->session) == launcher->pid);
 	process = fplinux_session_find_process(fixture->session, settings->pid);
@@ -3924,7 +3939,7 @@ static void test_volume_keys_timeout(struct fixture *fixture)
 	set_quick_settings_view(fixture, launcher, true);
 	fixture->hold_audio_ack = true;
 	volume_gesture(fixture, false, KEY_VOLUMEDOWN);
-	CHECK(!strcmp(fixture->held_audio_ack, "VOLUME MEDIA 9"));
+	CHECK(audio_ack_is(fixture, FPLINUX_AUDIO_MEDIA, 9));
 	CHECK(indicator(fixture).visible &&
 	      indicator(fixture).level.value == 10);
 	fixture->now_ms += 1001;
@@ -4049,7 +4064,7 @@ static void test_volume_relative_steps(struct fixture *fixture)
 	request.serial = 92;
 	issue(fixture, launcher, &request);
 	volume_gesture(fixture, false, KEY_VOLUMEDOWN);
-	CHECK(!strcmp(fixture->held_audio_ack, "VOLUME MEDIA 9"));
+	CHECK(audio_ack_is(fixture, FPLINUX_AUDIO_MEDIA, 9));
 	acknowledge_audio(fixture);
 	response = wait_message(fixture, launcher, FPLINUX_UI_SESSION_SETTING,
 				"volume_preview");
@@ -4083,7 +4098,7 @@ static void test_volume_controls(struct fixture *fixture, const char *scenario)
 	CHECK(!strcmp(response.value, "10"));
 	fixture->hold_audio_ack = true;
 	setting(fixture, launcher, "volume_preview", "0");
-	CHECK(!strcmp(fixture->held_audio_ack, "VOLUME MEDIA 0"));
+	CHECK(audio_ack_is(fixture, FPLINUX_AUDIO_MEDIA, 0));
 	CHECK(!take_message(launcher, FPLINUX_UI_SESSION_SETTING,
 			    "volume_preview", &response));
 	if (!strcmp(scenario, "volume-cancel-pending")) {
@@ -4123,9 +4138,9 @@ static void test_volume_controls(struct fixture *fixture, const char *scenario)
 	if (!strcmp(scenario, "volume-cancel-repreview")) {
 		fixture->hold_audio_ack = true;
 		setting(fixture, launcher, "volume_preview", "");
-		CHECK(!strcmp(fixture->held_audio_ack, "VOLUME MEDIA 10"));
+		CHECK(audio_ack_is(fixture, FPLINUX_AUDIO_MEDIA, 10));
 		setting(fixture, launcher, "volume_preview", "5");
-		CHECK(!strcmp(fixture->held_audio_ack, "VOLUME MEDIA 10"));
+		CHECK(audio_ack_is(fixture, FPLINUX_AUDIO_MEDIA, 10));
 		acknowledge_audio(fixture);
 		response = wait_message(fixture, launcher,
 					FPLINUX_UI_SESSION_SETTING,
@@ -5420,9 +5435,7 @@ clock_request(struct fixture *fixture, struct peer *peer, const char *name,
 		.serial = serial,
 	};
 
-	CHECK(strlen(name) < sizeof(message.name));
 	CHECK(strlen(json) < sizeof(message.clock_data));
-	strcpy(message.name, name);
 	strcpy(message.clock_data, json);
 	issue(fixture, peer, &message);
 	message = wait_message(fixture, peer, FPLINUX_UI_SESSION_CLOCK, name);
@@ -5437,13 +5450,11 @@ static struct clock_model clock_snapshot(struct fixture *fixture,
 		fixture, peer, "snapshot", "{\"op\":\"snapshot\"}", serial);
 	struct clock_model model;
 	struct clock_result result;
-	uint64_t response_serial;
-
 	CHECK(!reply.reason[0]);
-	CHECK(clock_wire_snapshot_decode(
-		      reply.clock_data, strlen(reply.clock_data), &model,
-		      &result, &response_serial) == CLOCK_OK);
-	CHECK(result.status == CLOCK_OK && response_serial == serial);
+	CHECK(clock_wire_snapshot_decode(reply.clock_data,
+					 strlen(reply.clock_data), &model,
+					 &result) == CLOCK_OK);
+	CHECK(result.status == CLOCK_OK && reply.serial == serial);
 	return model;
 }
 
@@ -5452,16 +5463,13 @@ clock_active(struct fixture *fixture, struct peer *launcher,
 	     enum clock_event_kind kind, struct clock_ring *ring)
 {
 	struct fplinux_ui_session_message message;
-	uint64_t serial;
-
 	do {
 		message = wait_message(fixture, launcher,
 				       FPLINUX_UI_SESSION_ACTIVE, NULL);
 		CHECK(clock_wire_ring_decode(message.clock_data,
-					     strlen(message.clock_data), ring,
-					     &serial) == CLOCK_OK);
+					     strlen(message.clock_data),
+					     ring) == CLOCK_OK);
 	} while (ring->event.kind != kind);
-	CHECK(serial == ring->event.id);
 	return message;
 }
 
@@ -5668,7 +5676,6 @@ static void test_clock_survives_home_close(struct fixture *fixture)
 	struct fplinux_ui_session_message background = {
 		.type = FPLINUX_UI_SESSION_CLOCK,
 		.serial = 5,
-		.name = "timer-stop",
 		.clock_data = "{\"op\":\"timer-stop\"}",
 	};
 
@@ -5735,7 +5742,6 @@ static void test_clock_authority(struct fixture *fixture, bool launcher_only)
 	struct fplinux_ui_session_message request = {
 		.type = FPLINUX_UI_SESSION_CLOCK,
 		.serial = 17,
-		.name = "timer-set",
 		.app_id = TEST_CLOCK,
 		.clock_data = "{\"op\":\"timer-set\",\"seconds\":1}",
 	};
@@ -5784,15 +5790,13 @@ static void test_clock_save_retry_preserves_identity(struct fixture *fixture,
 	struct fplinux_ui_session_message reply;
 	struct clock_model model;
 	struct clock_result result;
-	uint64_t serial;
-
 	sync_fails = !published;
 	directory_sync_fails = published;
 	reply = clock_request(fixture, clocks, "alarm-add", add, 11);
 	CHECK(!strcmp(reply.reason, "storage-error"));
 	CHECK(clock_wire_snapshot_decode(reply.clock_data,
 					 strlen(reply.clock_data), &model,
-					 &result, &serial) == CLOCK_OK);
+					 &result) == CLOCK_OK);
 	CHECK(result.applied == published && result.storage.error == EIO);
 	CHECK(result.storage.state ==
 	      (published ? FPLINUX_STORAGE_PUBLISHED_UNSYNCED :
@@ -5812,6 +5816,12 @@ static void test_clock_save_retry_preserves_identity(struct fixture *fixture,
 	model = clock_snapshot(fixture, clocks, 13);
 	CHECK(model.alarm_count == 1 && model.alarms[0].id == 1);
 	CHECK(model.next_alarm_id == 2);
+	reply = clock_request(
+		fixture, clocks, "alarm-add",
+		"{\"op\":\"alarm-add\",\"alarm\":{\"label\":\"Other\",\"schedule\":0,"
+		"\"once_utc\":1735689660,\"hour\":0,\"minute\":0,\"repeat_days\":0,\"enabled\":true}}",
+		11);
+	CHECK(!strcmp(reply.reason, "invalid"));
 	reply = clock_request(fixture, clocks, "timer-set",
 			      "{\"op\":\"timer-set\",\"seconds\":90}", 11);
 	CHECK(!strcmp(reply.reason, "invalid"));
@@ -5826,8 +5836,6 @@ test_clock_save_checkpoints_current_model_without_edit(struct fixture *fixture)
 	struct peer *clocks = show_app(fixture, launcher, TEST_CLOCK);
 	struct clock_model model;
 	struct clock_result result;
-	uint64_t serial;
-
 	directory_sync_fails = true;
 	struct fplinux_ui_session_message reply = clock_request(
 		fixture, clocks, "alarm-add",
@@ -5847,8 +5855,9 @@ test_clock_save_checkpoints_current_model_without_edit(struct fixture *fixture)
 	CHECK(!reply.reason[0]);
 	CHECK(clock_wire_snapshot_decode(reply.clock_data,
 					 strlen(reply.clock_data), &model,
-					 &result, &serial) == CLOCK_OK);
-	CHECK(result.applied && result.status == CLOCK_OK && serial == 13);
+					 &result) == CLOCK_OK);
+	CHECK(result.applied && result.status == CLOCK_OK &&
+	      reply.serial == 13);
 	CHECK(result.storage.state == FPLINUX_STORAGE_DURABLE &&
 	      !result.storage.error);
 	CHECK(model.alarm_count == 1 && model.alarms[0].id == 1);
@@ -5887,6 +5896,8 @@ static void test_clock_locked_ring_keys(struct fixture *fixture)
 	CHECK(ring.event.id == 1 && !strcmp(ring.event.label, "Wake"));
 	CHECK(active.locked && active.display == FPLINUX_UI_SESSION_DISPLAY_ON);
 	CHECK(fplinux_session_wake_pending(fixture->session));
+	struct fplinux_ui_session_message first_active = active;
+
 	acknowledge(fixture, launcher, &active);
 	fplinux_session_set_launcher_shown(fixture->session, true);
 	CHECK(fplinux_session_keyboard_key(fixture->session, KEY_COMPOSE,
@@ -5909,6 +5920,12 @@ static void test_clock_locked_ring_keys(struct fixture *fixture)
 	pump(fixture, 4);
 	active = clock_active(fixture, launcher, CLOCK_EVENT_ALARM, &ring);
 	CHECK(ring.event.id == 2 && ring.event.snoozed);
+	CHECK(active.serial != first_active.serial);
+	acknowledge(fixture, launcher, &first_active);
+	CHECK(!fplinux_session_key(fixture->session, FPLINUX_KEY_SOFT_RIGHT,
+				   true, fixture->now_ms));
+	CHECK(!fplinux_session_key(fixture->session, FPLINUX_KEY_SOFT_RIGHT,
+				   false, fixture->now_ms));
 	acknowledge(fixture, launcher, &active);
 	CHECK(!fplinux_session_key(fixture->session, FPLINUX_KEY_SOFT_RIGHT,
 				   false, fixture->now_ms));
@@ -5991,21 +6008,31 @@ static void test_clock_restart_needs_new_ring_frame(struct fixture *fixture)
 	CHECK(fplinux_session_focused_pid(fixture->session) == launcher->pid);
 }
 
-static unsigned int audio_count(struct fixture *fixture, const char *kind,
-				pid_t pid)
+static unsigned int audio_count(struct fixture *fixture,
+				enum fplinux_audio_control_type kind, pid_t pid)
 {
-	char prefix[64];
 	unsigned int count = 0;
-	size_t length;
 
-	CHECK(snprintf(prefix, sizeof(prefix), "%s %ld", kind, (long)pid) <
-	      (int)sizeof(prefix));
-	length = strlen(prefix);
-	for (size_t i = 0; i < fixture->audio_message_count; ++i)
-		if (!strncmp(fixture->audio_messages[i], prefix, length) &&
-		    (fixture->audio_messages[i][length] == '\0' ||
-		     fixture->audio_messages[i][length] == ' '))
-			++count;
+	for (size_t i = 0; i < fixture->audio_message_count; ++i) {
+		const struct fplinux_audio_control *message =
+			&fixture->audio_messages[i];
+
+		if (message->type != kind)
+			continue;
+		switch (kind) {
+		case FPLINUX_AUDIO_CONTROL_APP:
+			count += message->app.pid == pid;
+			break;
+		case FPLINUX_AUDIO_CONTROL_CLOCK:
+			count += message->clock.pid == pid;
+			break;
+		case FPLINUX_AUDIO_CONTROL_GONE:
+			count += message->gone == pid;
+			break;
+		default:
+			CHECK(false);
+		}
+	}
 	return count;
 }
 
@@ -6014,13 +6041,12 @@ static int audio_audible(struct fixture *fixture, pid_t pid)
 	int value = -1;
 
 	for (size_t i = 0; i < fixture->audio_message_count; ++i) {
-		long owner;
-		int audible;
+		const struct fplinux_audio_control *message =
+			&fixture->audio_messages[i];
 
-		if (sscanf(fixture->audio_messages[i], "ELIGIBLE %ld %d",
-			   &owner, &audible) == 2 &&
-		    owner == (long)pid)
-			value = audible;
+		if (message->type == FPLINUX_AUDIO_CONTROL_ELIGIBLE &&
+		    message->eligible.pid == pid)
+			value = message->eligible.enabled;
 	}
 	return value;
 }
@@ -6048,7 +6074,7 @@ static void test_volume_classes(struct fixture *fixture)
 
 	fixture->hold_audio_ack = true;
 	setting(fixture, settings, "volume", "0");
-	CHECK(!strcmp(fixture->held_audio_ack, "VOLUME MEDIA 0"));
+	CHECK(audio_ack_is(fixture, FPLINUX_AUDIO_MEDIA, 0));
 	setting(fixture, settings, "alarm_volume", "");
 	response = wait_message(fixture, settings, FPLINUX_UI_SESSION_SETTING,
 				"alarm_volume");
@@ -6062,7 +6088,7 @@ static void test_volume_classes(struct fixture *fixture)
 	expect_saved_volume(fixture, "0");
 	fixture->hold_audio_ack = true;
 	setting(fixture, settings, "alarm_volume_preview", "3");
-	CHECK(!strcmp(fixture->held_audio_ack, "VOLUME ALARM 3"));
+	CHECK(audio_ack_is(fixture, FPLINUX_AUDIO_ALARM, 3));
 	setting(fixture, settings, "alarm_volume_preview", "");
 	acknowledge_audio(fixture);
 	response = wait_message(fixture, settings, FPLINUX_UI_SESSION_SETTING,
@@ -6200,9 +6226,12 @@ static void test_output_controls(struct fixture *fixture, bool headphones,
 	struct peer *settings = show_app(fixture, launcher, TEST_SETTINGS);
 	struct fplinux_ui_session_message response;
 
-	if (headphones)
-		fixture->audio_outputs =
-			"STATE media=10 alarm=10 output=0 applied=2 speaker=0 headphones=1";
+	if (headphones) {
+		fixture->audio_status.applied_route =
+			FPLINUX_AUDIO_ROUTE_HEADPHONES;
+		fixture->audio_status.speaker = false;
+		fixture->audio_status.headphones = true;
+	}
 	setting(fixture, settings, "audio_outputs", "");
 	response = wait_message(fixture, settings, FPLINUX_UI_SESSION_SETTING,
 				"audio_outputs");
@@ -6281,20 +6310,22 @@ static void test_media_background_grant(struct fixture *fixture)
 	second = show_app(fixture, launcher, second_id);
 	config = wait_message(fixture, first, FPLINUX_UI_SESSION_CONFIG, NULL);
 	CHECK(config.audio && !config.background_audio && config.vibration);
-	CHECK(audio_count(fixture, "APP", first->pid) == 1);
-	CHECK(audio_count(fixture, "APP", second->pid) == 1);
+	CHECK(audio_count(fixture, FPLINUX_AUDIO_CONTROL_APP, first->pid) == 1);
+	CHECK(audio_count(fixture, FPLINUX_AUDIO_CONTROL_APP, second->pid) ==
+	      1);
 }
 
 static void audio_activity(struct fixture *fixture, pid_t pid, uid_t uid,
-			   const char *state)
+			   enum fplinux_audio_activity state)
 {
-	char packet[256];
+	const struct fplinux_audio_control message = {
+		.type = FPLINUX_AUDIO_CONTROL_ACTIVITY,
+		.activity = { .pid = pid, .uid = uid, .state = state },
+	};
 
-	snprintf(packet, sizeof(packet), "ACTIVITY %ld %lu %s", (long)pid,
-		 (unsigned long)uid, state);
 	CHECK(fixture->audio_control >= 0);
-	CHECK(send(fixture->audio_control, packet, strlen(packet),
-		   MSG_NOSIGNAL) == (ssize_t)strlen(packet));
+	CHECK(fplinux_audio_control_send(fixture->audio_control, &message) ==
+	      0);
 	pump(fixture, 4);
 }
 
@@ -6305,13 +6336,17 @@ static void test_media_activity(struct fixture *fixture)
 	struct peer *app;
 	uint32_t token;
 	static const struct {
-		const char *packet;
+		enum fplinux_audio_activity state;
 		enum fplinux_ui_session_playback playback;
 	} held[] = {
-		{ "paused", FPLINUX_UI_SESSION_PLAYBACK_PAUSED },
-		{ "held", FPLINUX_UI_SESSION_PLAYBACK_HELD },
-		{ "unavailable", FPLINUX_UI_SESSION_PLAYBACK_UNAVAILABLE },
-		{ "none", FPLINUX_UI_SESSION_PLAYBACK_NONE },
+		{ FPLINUX_AUDIO_ACTIVITY_PAUSED,
+		  FPLINUX_UI_SESSION_PLAYBACK_PAUSED },
+		{ FPLINUX_AUDIO_ACTIVITY_HELD,
+		  FPLINUX_UI_SESSION_PLAYBACK_HELD },
+		{ FPLINUX_AUDIO_ACTIVITY_UNAVAILABLE,
+		  FPLINUX_UI_SESSION_PLAYBACK_UNAVAILABLE },
+		{ FPLINUX_AUDIO_ACTIVITY_NONE,
+		  FPLINUX_UI_SESSION_PLAYBACK_NONE },
 	};
 
 	add_background_entry(fixture, TEST_APP);
@@ -6320,11 +6355,13 @@ static void test_media_activity(struct fixture *fixture)
 	CHECK(task_record(&snapshot, TEST_APP)->playback ==
 	      FPLINUX_UI_SESSION_PLAYBACK_NONE);
 	token = task_record(&snapshot, TEST_APP)->token;
-	audio_activity(fixture, app->pid, getuid() + 1, "playing");
+	audio_activity(fixture, app->pid, getuid() + 1,
+		       FPLINUX_AUDIO_ACTIVITY_PLAYING);
 	snapshot = query_tasks(fixture, launcher);
 	CHECK(task_record(&snapshot, TEST_APP)->playback ==
 	      FPLINUX_UI_SESSION_PLAYBACK_NONE);
-	audio_activity(fixture, app->pid, getuid(), "playing");
+	audio_activity(fixture, app->pid, getuid(),
+		       FPLINUX_AUDIO_ACTIVITY_PLAYING);
 	snapshot = latest_tasks(fixture, launcher);
 	CHECK(task_record(&snapshot, TEST_APP)->playback ==
 	      FPLINUX_UI_SESSION_PLAYBACK_PLAYING);
@@ -6334,7 +6371,7 @@ static void test_media_activity(struct fixture *fixture)
 	CHECK(active.background_playing);
 	acknowledge(fixture, launcher, &active);
 	for (size_t i = 0; i < sizeof(held) / sizeof(held[0]); ++i) {
-		audio_activity(fixture, app->pid, getuid(), held[i].packet);
+		audio_activity(fixture, app->pid, getuid(), held[i].state);
 		snapshot = latest_tasks(fixture, launcher);
 		CHECK(task_record(&snapshot, TEST_APP)->playback ==
 		      held[i].playback);
@@ -6346,7 +6383,8 @@ static void test_media_activity(struct fixture *fixture)
 			acknowledge(fixture, launcher, &active);
 		}
 	}
-	audio_activity(fixture, app->pid, getuid(), "playing");
+	audio_activity(fixture, app->pid, getuid(),
+		       FPLINUX_AUDIO_ACTIVITY_PLAYING);
 	active = active_for(fixture, launcher, "");
 	CHECK(active.background_playing);
 	acknowledge(fixture, launcher, &active);
@@ -6354,7 +6392,8 @@ static void test_media_activity(struct fixture *fixture)
 		    token);
 	wait_message(fixture, app, FPLINUX_UI_SESSION_CLOSE, NULL);
 	wait_reaped(fixture, app->pid);
-	audio_activity(fixture, app->pid, getuid(), "playing");
+	audio_activity(fixture, app->pid, getuid(),
+		       FPLINUX_AUDIO_ACTIVITY_PLAYING);
 	snapshot = query_tasks(fixture, launcher);
 	CHECK(!snapshot.task_count);
 }
@@ -6367,7 +6406,7 @@ static void test_media_home_resume_close(struct fixture *fixture)
 	struct fplinux_ui_session_message active;
 
 	pump(fixture, 4);
-	CHECK(audio_count(fixture, "APP", pid) == 1 &&
+	CHECK(audio_count(fixture, FPLINUX_AUDIO_CONTROL_APP, pid) == 1 &&
 	      audio_audible(fixture, pid) == 1);
 	start_vibration(fixture, app);
 	clear_messages(fixture, launcher);
@@ -6376,13 +6415,13 @@ static void test_media_home_resume_close(struct fixture *fixture)
 	acknowledge(fixture, launcher, &active);
 	pump(fixture, 4);
 	CHECK(!fixture->vibrator_on && audio_audible(fixture, pid) == 0);
-	CHECK(audio_count(fixture, "GONE", pid) == 0);
+	CHECK(audio_count(fixture, FPLINUX_AUDIO_CONTROL_GONE, pid) == 0);
 	CHECK(launch_app(fixture, launcher, TEST_APP)->pid == pid);
 	active = active_for(fixture, launcher, TEST_APP);
 	acknowledge(fixture, launcher, &active);
 	pump(fixture, 4);
 	CHECK(audio_audible(fixture, pid) == 1 && !fixture->vibrator_on);
-	CHECK(audio_count(fixture, "APP", pid) == 1);
+	CHECK(audio_count(fixture, FPLINUX_AUDIO_CONTROL_APP, pid) == 1);
 	start_vibration(fixture, app);
 	clear_messages(fixture, launcher);
 	send_type(fixture, app, FPLINUX_UI_SESSION_EXIT);
@@ -6390,7 +6429,8 @@ static void test_media_home_resume_close(struct fixture *fixture)
 	acknowledge(fixture, launcher, &active);
 	wait_message(fixture, app, FPLINUX_UI_SESSION_CLOSE, NULL);
 	wait_reaped(fixture, pid);
-	CHECK(!fixture->vibrator_on && audio_count(fixture, "GONE", pid) == 1);
+	CHECK(!fixture->vibrator_on &&
+	      audio_count(fixture, FPLINUX_AUDIO_CONTROL_GONE, pid) == 1);
 }
 
 static void test_media_lock_crash(struct fixture *fixture)
@@ -6410,7 +6450,7 @@ static void test_media_lock_crash(struct fixture *fixture)
 	pump(fixture, 4);
 	CHECK(fplinux_session_is_locked(fixture->session));
 	CHECK(!fixture->vibrator_on && audio_audible(fixture, pid) == 0);
-	CHECK(audio_count(fixture, "GONE", pid) == 0);
+	CHECK(audio_count(fixture, FPLINUX_AUDIO_CONTROL_GONE, pid) == 0);
 	issue(fixture, app, &request);
 	struct fplinux_ui_session_message error = wait_message(
 		fixture, app, FPLINUX_UI_SESSION_ERROR, "vibration");
@@ -6418,7 +6458,8 @@ static void test_media_lock_crash(struct fixture *fixture)
 	CHECK(!strcmp(error.reason, strerror(EAGAIN)) && !fixture->vibrator_on);
 	send_command(app->fd, &crash);
 	wait_reaped(fixture, pid);
-	CHECK(!fixture->vibrator_on && audio_count(fixture, "GONE", pid) == 1);
+	CHECK(!fixture->vibrator_on &&
+	      audio_count(fixture, FPLINUX_AUDIO_CONTROL_GONE, pid) == 1);
 }
 
 static void test_media_effect_error(struct fixture *fixture)
@@ -6517,9 +6558,11 @@ static void test_clock_signal_lifetime(struct fixture *fixture)
 
 	wait_clock_helper_reaped(fixture, failed_pid);
 	if (fixture->media) {
-		CHECK(audio_count(fixture, "CLOCK", failed_pid) == 1);
+		CHECK(audio_count(fixture, FPLINUX_AUDIO_CONTROL_CLOCK,
+				  failed_pid) == 1);
 		CHECK(audio_audible(fixture, failed_pid) == 1);
-		CHECK(audio_count(fixture, "GONE", failed_pid) == 1);
+		CHECK(audio_count(fixture, FPLINUX_AUDIO_CONTROL_GONE,
+				  failed_pid) == 1);
 	}
 	clock_request(fixture, launcher, "dismiss",
 		      "{\"op\":\"dismiss\",\"event_id\":1}", 3);
@@ -6531,16 +6574,19 @@ static void test_clock_signal_lifetime(struct fixture *fixture)
 
 	CHECK(second_pid != failed_pid);
 	if (fixture->media) {
-		CHECK(audio_count(fixture, "CLOCK", second_pid) == 1);
+		CHECK(audio_count(fixture, FPLINUX_AUDIO_CONTROL_CLOCK,
+				  second_pid) == 1);
 		CHECK(audio_audible(fixture, second_pid) == 1);
-		CHECK(audio_count(fixture, "GONE", second_pid) == 0);
+		CHECK(audio_count(fixture, FPLINUX_AUDIO_CONTROL_GONE,
+				  second_pid) == 0);
 	}
 	clock_request(fixture, launcher, "dismiss",
 		      "{\"op\":\"dismiss\",\"event_id\":2}", 5);
 	wait_clock_signal(fixture, 2, 1);
 	wait_clock_helper_reaped(fixture, second_pid);
 	if (fixture->media)
-		CHECK(audio_count(fixture, "GONE", second_pid) == 1);
+		CHECK(audio_count(fixture, FPLINUX_AUDIO_CONTROL_GONE,
+				  second_pid) == 1);
 	clock_request(fixture, clocks, "timer-restart",
 		      "{\"op\":\"timer-restart\"}", 6);
 	fixture->now_ms += 1000;
@@ -6550,9 +6596,12 @@ static void test_clock_signal_lifetime(struct fixture *fixture)
 	fixture->session = NULL;
 	if (fixture->media) {
 		observe_audio(fixture);
-		CHECK(audio_count(fixture, "CLOCK", final_pid) == 1);
-		CHECK(audio_count(fixture, "GONE", final_pid) == 1);
-		CHECK(audio_count(fixture, "GONE", clocks->pid) == 1);
+		CHECK(audio_count(fixture, FPLINUX_AUDIO_CONTROL_CLOCK,
+				  final_pid) == 1);
+		CHECK(audio_count(fixture, FPLINUX_AUDIO_CONTROL_GONE,
+				  final_pid) == 1);
+		CHECK(audio_count(fixture, FPLINUX_AUDIO_CONTROL_GONE,
+				  clocks->pid) == 1);
 	}
 	wait_clock_signal(fixture, 3, 2);
 	CHECK(kill(final_pid, 0) == -1 && errno == ESRCH);

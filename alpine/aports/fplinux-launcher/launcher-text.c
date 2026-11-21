@@ -60,32 +60,23 @@ static const struct {
 	},
 };
 
-const char *fplinux_launcher_view_value(enum fplinux_launcher_view view)
-{
-	return view == FPLINUX_LAUNCHER_VIEW_HOME ? "home" : "catalogue";
-}
-
-const char *
-fplinux_launcher_presentation_name(enum fplinux_launcher_view presentation)
-{
-	return presentation == FPLINUX_LAUNCHER_VIEW_LIST ? "list" : "grid";
-}
-
-bool fplinux_launcher_view_from_names(const char *value, const char *name,
-				      enum fplinux_launcher_view *view,
-				      enum fplinux_launcher_view *presentation)
+bool fplinux_launcher_view_from_session(
+	enum fplinux_ui_launcher_view screen,
+	enum fplinux_ui_launcher_catalogue layout,
+	enum fplinux_launcher_view *view,
+	enum fplinux_launcher_view *presentation)
 {
 	enum fplinux_launcher_view catalogue;
 
-	if (!strcmp(name, "grid"))
+	if (layout == FPLINUX_UI_LAUNCHER_CATALOGUE_GRID)
 		catalogue = FPLINUX_LAUNCHER_VIEW_GRID;
-	else if (!strcmp(name, "list"))
+	else if (layout == FPLINUX_UI_LAUNCHER_CATALOGUE_LIST)
 		catalogue = FPLINUX_LAUNCHER_VIEW_LIST;
 	else
 		return false;
-	if (!strcmp(value, "home"))
+	if (screen == FPLINUX_UI_LAUNCHER_VIEW_HOME)
 		*view = FPLINUX_LAUNCHER_VIEW_HOME;
-	else if (!strcmp(value, "catalogue"))
+	else if (screen == FPLINUX_UI_LAUNCHER_VIEW_CATALOGUE)
 		*view = catalogue;
 	else
 		return false;

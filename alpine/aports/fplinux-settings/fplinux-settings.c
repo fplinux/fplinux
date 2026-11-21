@@ -88,11 +88,10 @@ enum leave_destination {
 	LEAVE_CLOSE,
 };
 
-/* A choice list: its title, the SETTING name, values and their labels. */
 struct choice {
 	const char *title;
-	const char *setting;
-	const char *const *values;
+	enum fplinux_ui_setting_kind setting;
+	const int *values;
 	const char *const *labels;
 	size_t count;
 };
@@ -116,9 +115,9 @@ _Static_assert(ARRAY_SIZE(auto_lock_labels) == FPLINUX_SETTINGS_AUTO_LOCK_COUNT,
 	       "each auto-lock choice has a label");
 
 /* Indexed by enum fplinux_ui_theme_kind. */
-static const char *const theme_values[] = {
-	[FPLINUX_UI_THEME_LIGHT] = "light",
-	[FPLINUX_UI_THEME_DARK] = "dark",
+static const int theme_values[] = {
+	[FPLINUX_UI_THEME_LIGHT] = FPLINUX_UI_SESSION_THEME_LIGHT,
+	[FPLINUX_UI_THEME_DARK] = FPLINUX_UI_SESSION_THEME_DARK,
 };
 static const char *const theme_labels[] = {
 	[FPLINUX_UI_THEME_LIGHT] = NC_("theme", "Light"),
@@ -127,24 +126,21 @@ static const char *const theme_labels[] = {
 
 static const struct choice screen_off_choice = {
 	N_("Screen timeout"),
-	"screen_off_seconds",
+	FPLINUX_UI_SETTING_SCREEN_OFF,
 	fplinux_settings_screen_off_values,
 	screen_off_labels,
 	FPLINUX_SETTINGS_SCREEN_OFF_COUNT,
 };
 static const struct choice auto_lock_choice = {
 	N_("Auto-lock"),
-	"auto_lock_seconds",
+	FPLINUX_UI_SETTING_AUTO_LOCK,
 	fplinux_settings_auto_lock_values,
 	auto_lock_labels,
 	FPLINUX_SETTINGS_AUTO_LOCK_COUNT,
 };
 static const struct choice theme_choice = {
-	N_("Theme"),
-	"theme",
-	theme_values,
-	theme_labels,
-	ARRAY_SIZE(theme_values),
+	N_("Theme"),  FPLINUX_UI_SETTING_THEME, theme_values,
+	theme_labels, ARRAY_SIZE(theme_values),
 };
 
 enum notice {
@@ -191,7 +187,7 @@ struct settings_app {
 	bool notice_open;
 	enum notice notice;
 	struct fplinux_storage_result notice_storage;
-	char notice_setting[FPLINUX_UI_SESSION_NAME_BYTES];
+	enum fplinux_ui_setting_kind notice_setting;
 
 	/* Values reported by the manager; 0 or the list size when unknown. */
 	unsigned int brightness;
@@ -203,10 +199,11 @@ struct settings_app {
 	bool volume_previewing;
 	bool volume_pending;
 	struct choice output_choice;
-	const char *output_values[3];
+	int output_values[3];
 	const char *output_labels[3];
 	size_t output;
-	char output_value[16];
+	enum fplinux_audio_route output_route;
+	bool output_known;
 	size_t screen_off;
 	size_t auto_lock;
 
@@ -215,8 +212,7 @@ struct settings_app {
 	bool choice_pending;
 	bool choice_requery;
 	bool unsaved;
-	char requested_setting[FPLINUX_UI_SESSION_NAME_BYTES];
-	char requested_value[FPLINUX_UI_SESSION_TEXT_BYTES];
+	struct fplinux_ui_setting requested_setting;
 	bool input_language;
 	bool input_unavailable;
 	/* The theme the screens were built in; a new one rebuilds them. */
@@ -250,7 +246,7 @@ struct settings_app {
 	bool date_pending;
 	uint64_t date_revision;
 	uint64_t sent_date_revision;
-	char sent_time[FPLINUX_SETTINGS_TIME_BYTES];
+	struct fplinux_ui_setting_time sent_time;
 	/* Updates the form or the Date and time row at each new minute. */
 	lv_timer_t *clock_timer;
 };
@@ -259,24 +255,28 @@ static void show_notice(struct settings_app *app);
 static void return_root(struct settings_app *app);
 static void show_sound(struct settings_app *app);
 
-static const char *volume_setting_name(enum sound_class class, bool preview)
+static enum fplinux_ui_setting_kind volume_setting_kind(enum sound_class class,
+							bool preview)
 {
 	if (class == SOUND_CLASS_ALARM)
-		return preview ? "alarm_volume_preview" : "alarm_volume";
-	return preview ? "volume_preview" : "volume";
+		return preview ? FPLINUX_UI_SETTING_ALARM_VOLUME_PREVIEW :
+				 FPLINUX_UI_SETTING_ALARM_VOLUME;
+	return preview ? FPLINUX_UI_SETTING_VOLUME_PREVIEW :
+			 FPLINUX_UI_SETTING_VOLUME;
 }
+
+static bool send_setting(struct settings_app *app,
+			 enum fplinux_ui_setting_kind kind,
+			 enum fplinux_ui_setting_operation operation,
+			 union fplinux_ui_setting_value value);
 
 static void end_volume_preview(struct settings_app *app)
 {
 	if (!app->volume_previewing)
 		return;
-	struct fplinux_ui_session_message message = {
-		.type = FPLINUX_UI_SESSION_SETTING,
-	};
-
-	snprintf(message.name, sizeof(message.name), "%s",
-		 volume_setting_name(app->volume_class, true));
-	fplinux_ui_send(app->ui, &message);
+	send_setting(app, volume_setting_kind(app->volume_class, true),
+		     FPLINUX_UI_SETTING_CANCEL,
+		     (union fplinux_ui_setting_value){ 0 });
 	app->volume_previewing = false;
 }
 
@@ -292,15 +292,18 @@ static void add_back_command(struct settings_app *app,
 	fplinux_ui_screen_add_command(screen, &back);
 }
 
-static bool send_setting(struct settings_app *app, const char *name,
-			 const char *value)
+static bool send_setting(struct settings_app *app,
+			 enum fplinux_ui_setting_kind kind,
+			 enum fplinux_ui_setting_operation operation,
+			 union fplinux_ui_setting_value value)
 {
 	struct fplinux_ui_session_message message = {
 		.type = FPLINUX_UI_SESSION_SETTING,
+		.setting = { .kind = kind,
+			     .operation = operation,
+			     .value = value },
 	};
 
-	snprintf(message.name, sizeof(message.name), "%s", name);
-	snprintf(message.value, sizeof(message.value), "%s", value);
 	if (!fplinux_ui_send(app->ui, &message)) {
 		perror("fplinux-settings: send SETTING");
 		return false;
@@ -308,28 +311,28 @@ static bool send_setting(struct settings_app *app, const char *name,
 	return true;
 }
 
-/* An empty value asks the manager for the current one. */
-static void query_setting(struct settings_app *app, const char *name)
+static void query_setting(struct settings_app *app,
+			  enum fplinux_ui_setting_kind kind)
 {
-	send_setting(app, name, "");
+	send_setting(app, kind, FPLINUX_UI_SETTING_GET,
+		     (union fplinux_ui_setting_value){ 0 });
 }
 
-/* "brightness" stores the level; "brightness_preview" only shows it. */
-static void send_level(struct settings_app *app, const char *name,
-		       unsigned int level)
+static void send_level(struct settings_app *app,
+		       enum fplinux_ui_setting_kind kind,
+		       enum fplinux_ui_setting_operation operation, int level)
 {
-	char value[4];
-
-	snprintf(value, sizeof(value), "%u", level);
-	send_setting(app, name, value);
+	send_setting(app, kind, operation,
+		     (union fplinux_ui_setting_value){ .level = level });
 }
 
-/* An empty preview value restores the stored level. */
 static void end_preview(struct settings_app *app)
 {
 	if (!app->previewing)
 		return;
-	send_setting(app, "brightness_preview", "");
+	send_setting(app, FPLINUX_UI_SETTING_BRIGHTNESS_PREVIEW,
+		     FPLINUX_UI_SETTING_CANCEL,
+		     (union fplinux_ui_setting_value){ 0 });
 	app->previewing = false;
 }
 
@@ -366,6 +369,26 @@ static size_t choice_current(const struct settings_app *app,
 	if (choice == &app->output_choice)
 		return app->output;
 	return (size_t)theme_kind(app);
+}
+
+static union fplinux_ui_setting_value choice_value(const struct choice *choice,
+						   size_t index)
+{
+	int option = choice->values[index];
+
+	if (choice->setting == FPLINUX_UI_SETTING_AUDIO_OUTPUT)
+		return (union fplinux_ui_setting_value){ .route = option };
+	if (choice->setting == FPLINUX_UI_SETTING_THEME)
+		return (union fplinux_ui_setting_value){ .theme = option };
+	return (union fplinux_ui_setting_value){ .seconds = option };
+}
+
+static size_t option_index(const struct choice *choice, int value)
+{
+	for (size_t i = 0; i < choice->count; ++i)
+		if (choice->values[i] == value)
+			return i;
+	return choice->count;
 }
 
 /* A system glyph at the left of a row; rows go without when it is missing. */
@@ -481,8 +504,9 @@ static void change_command(struct fplinux_ui *ui,
 	app->change_alert = NULL;
 	if (command_id == COMMAND_CHANGE) {
 		app->choice_pending = true;
-		if (!send_setting(app, app->requested_setting,
-				  app->requested_value))
+		if (!send_setting(app, app->requested_setting.kind,
+				  FPLINUX_UI_SETTING_SET,
+				  app->requested_setting.value))
 			app->choice_pending = false;
 	}
 	show_choice_state(app);
@@ -497,8 +521,10 @@ static void change_command(struct fplinux_ui *ui,
 	}
 }
 
-static void confirm_change(struct settings_app *app, const char *name,
-			   const char *value, const char *title)
+static void confirm_change(struct settings_app *app,
+			   enum fplinux_ui_setting_kind kind,
+			   union fplinux_ui_setting_value value,
+			   const char *title)
 {
 	const struct fplinux_ui_command change = {
 		.id = COMMAND_CHANGE,
@@ -522,10 +548,8 @@ static void confirm_change(struct settings_app *app, const char *name,
 	if (!alert)
 		return;
 	app->change_alert = alert;
-	snprintf(app->requested_setting, sizeof(app->requested_setting), "%s",
-		 name);
-	snprintf(app->requested_value, sizeof(app->requested_value), "%s",
-		 value);
+	app->requested_setting =
+		(struct fplinux_ui_setting){ .kind = kind, .value = value };
 	fplinux_ui_screen_add_command(alert, &change);
 	fplinux_ui_screen_add_command(alert, &cancel);
 	fplinux_ui_screen_set_listener(alert, change_command, NULL, app);
@@ -549,16 +573,14 @@ static void choice_changed(struct fplinux_ui *ui,
 	 * A new theme keeps this screen until the reply rebuilds it, so the
 	 * parent is never shown briefly in the previous theme.
 	 */
-	if (index != current) {
-		if (choice == &theme_choice) {
-			confirm_change(app, choice->setting,
-				       choice->values[index], _("Theme"));
-			return;
-		}
-		send_setting(app, choice->setting, choice->values[index]);
-	} else if (app->unsaved) {
-		send_setting(app, choice->setting, choice->values[index]);
+	if (index != current && choice == &theme_choice) {
+		confirm_change(app, choice->setting,
+			       choice_value(choice, index), _("Theme"));
+		return;
 	}
+	if (index != current || app->unsaved)
+		send_setting(app, choice->setting, FPLINUX_UI_SETTING_SET,
+			     choice_value(choice, index));
 	close_screen(app, &app->choice_list);
 }
 
@@ -605,6 +627,10 @@ static void language_changed(struct fplinux_ui *ui,
 	const char *current = app->input_language ?
 				      fplinux_ui_input_locale(app->ui) :
 				      fplinux_ui_locale(app->ui);
+	enum fplinux_ui_setting_kind kind =
+		app->input_language ? FPLINUX_UI_SETTING_INPUT_LOCALE :
+				      FPLINUX_UI_SETTING_LOCALE;
+	union fplinux_ui_setting_value value = { 0 };
 
 	(void)ui;
 	(void)list;
@@ -612,18 +638,16 @@ static void language_changed(struct fplinux_ui *ui,
 	if (app->choice_pending)
 		return;
 	/* The reply switches the language; see apply_setting(). */
-	if (index < app->language_count &&
-	    strcmp(app->languages[index], current)) {
-		if (!app->input_language) {
-			confirm_change(app, "locale", app->languages[index],
-				       _("Language"));
+	if (index < app->language_count) {
+		bool changed = strcmp(app->languages[index], current) != 0;
+
+		strcpy(value.locale, app->languages[index]);
+		if (changed && !app->input_language) {
+			confirm_change(app, kind, value, _("Language"));
 			return;
 		}
-		send_setting(app, "input_locale", app->languages[index]);
-	} else if (index < app->language_count && app->unsaved) {
-		send_setting(app,
-			     app->input_language ? "input_locale" : "locale",
-			     app->languages[index]);
+		if (changed || app->unsaved)
+			send_setting(app, kind, FPLINUX_UI_SETTING_SET, value);
 	}
 	close_screen(app, &app->choice_list);
 }
@@ -692,7 +716,8 @@ static void brightness_changed(struct fplinux_ui *ui,
 
 	(void)ui;
 	if (index == app->gauge_item && level > 0) {
-		send_level(app, "brightness_preview", (unsigned int)level);
+		send_level(app, FPLINUX_UI_SETTING_BRIGHTNESS_PREVIEW,
+			   FPLINUX_UI_SETTING_PREVIEW, level);
 		app->previewing = true;
 	}
 }
@@ -708,7 +733,8 @@ static void brightness_command(struct fplinux_ui *ui,
 	if (command_id == COMMAND_SAVE) {
 		/* Storing the level also ends the preview. */
 		if (level > 0)
-			send_level(app, "brightness", (unsigned int)level);
+			send_level(app, FPLINUX_UI_SETTING_BRIGHTNESS,
+				   FPLINUX_UI_SETTING_SET, level);
 		app->previewing = false;
 	} else if (command_id == COMMAND_CANCEL) {
 		end_preview(app);
@@ -763,8 +789,8 @@ static void volume_changed(struct fplinux_ui *ui,
 	(void)ui;
 	if (index != app->volume_gauge || level < 0 || app->volume_pending)
 		return;
-	send_level(app, volume_setting_name(app->volume_class, true),
-		   (unsigned int)level);
+	send_level(app, volume_setting_kind(app->volume_class, true),
+		   FPLINUX_UI_SETTING_PREVIEW, level);
 	app->volume_previewing = true;
 }
 
@@ -779,12 +805,13 @@ static void volume_command(struct fplinux_ui *ui,
 		return;
 	if (command_id == COMMAND_SAVE) {
 		/* Commit the manager's latest level, including physical key steps. */
-		app->volume_pending =
-			send_setting(app,
-				     app->volume_class == SOUND_CLASS_MEDIA ?
-					     "volume_commit" :
-					     "alarm_volume_commit",
-				     "");
+		app->volume_pending = send_setting(
+			app,
+			app->volume_class == SOUND_CLASS_MEDIA ?
+				FPLINUX_UI_SETTING_VOLUME_COMMIT :
+				FPLINUX_UI_SETTING_ALARM_VOLUME_COMMIT,
+			FPLINUX_UI_SETTING_COMMIT,
+			(union fplinux_ui_setting_value){ 0 });
 		if (app->volume_pending)
 			fplinux_ui_screen_set_header_status(form, _("Saving…"),
 							    NULL);
@@ -956,18 +983,18 @@ static void save_date_time(struct settings_app *app)
 {
 	time_t date = fplinux_ui_form_get_date(app->date_form, app->date_item);
 	time_t clock = fplinux_ui_form_get_date(app->date_form, app->time_item);
-	char value[FPLINUX_SETTINGS_TIME_BYTES];
+	union fplinux_ui_setting_value setting = { 0 };
 	struct fplinux_ui_screen *alert;
 	time_t now = time(NULL);
 
-	if (app->sent_time[0] && app->sent_date_revision == app->date_revision)
-		snprintf(value, sizeof(value), "%s", app->sent_time);
-	else if (!fplinux_settings_save_time(now,
-					     app->date_edited ? &date : NULL,
-					     app->time_edited ? &clock : NULL,
-					     value, sizeof(value)))
+	if (app->sent_time.year &&
+	    app->sent_date_revision == app->date_revision)
+		setting.time = app->sent_time;
+	else if (!fplinux_settings_save_time(
+			 now, app->date_edited ? &date : NULL,
+			 app->time_edited ? &clock : NULL, &setting.time))
 		return;
-	if (!fplinux_settings_time_in_range(value)) {
+	if (!fplinux_settings_time_in_range(&setting.time)) {
 		alert = fplinux_ui_alert_new(
 			app->ui, FPLINUX_UI_ALERT_WARNING, _("Date and time"),
 			_("Year must be between 1980 and 2099."), 0);
@@ -979,11 +1006,12 @@ static void save_date_time(struct settings_app *app)
 		}
 		return;
 	}
-	if (!send_setting(app, "time", value))
+	if (!send_setting(app, FPLINUX_UI_SETTING_TIME, FPLINUX_UI_SETTING_SET,
+			  setting))
 		return;
 	app->date_pending = true;
 	app->sent_date_revision = app->date_revision;
-	snprintf(app->sent_time, sizeof(app->sent_time), "%s", value);
+	app->sent_time = setting.time;
 	if (!app->date_edited)
 		fplinux_ui_form_set_date(app->date_form, app->date_item, now);
 	if (!app->time_edited)
@@ -1142,7 +1170,7 @@ static void open_date_time(struct settings_app *app)
 	app->date_edited = false;
 	app->time_edited = false;
 	app->date_pending = false;
-	app->sent_time[0] = '\0';
+	app->sent_time.year = 0;
 	app->date_form = form;
 	date_commands(app);
 	fplinux_ui_push(app->ui, form);
@@ -1291,8 +1319,8 @@ static void open_sound(struct settings_app *app)
 	app->sound = list;
 	show_sound(app);
 	fplinux_ui_push(app->ui, list);
-	query_setting(app, "audio_output");
-	query_setting(app, "audio_outputs");
+	query_setting(app, FPLINUX_UI_SETTING_AUDIO_OUTPUT);
+	query_setting(app, FPLINUX_UI_SETTING_AUDIO_OUTPUTS);
 }
 
 static void show_time_language(struct settings_app *app)
@@ -1840,96 +1868,93 @@ static void receive_system_levels(struct settings_app *app)
 	show_root(app);
 }
 
-static void apply_setting(struct settings_app *app, const char *name,
-			  const char *value)
+static void apply_setting(struct settings_app *app,
+			  const struct fplinux_ui_setting *setting)
 {
-	if (!strcmp(name, "volume") || !strcmp(name, "alarm_volume") ||
-	    !strcmp(name, "volume_preview") ||
-	    !strcmp(name, "alarm_volume_preview")) {
-		enum sound_class class = !strncmp(name, "alarm_", 6) ?
-						 SOUND_CLASS_ALARM :
-						 SOUND_CLASS_MEDIA;
-		char *end;
-		unsigned long level = strtoul(value, &end, 10);
+	switch (setting->kind) {
+	case FPLINUX_UI_SETTING_VOLUME:
+	case FPLINUX_UI_SETTING_ALARM_VOLUME:
+	case FPLINUX_UI_SETTING_VOLUME_PREVIEW:
+	case FPLINUX_UI_SETTING_ALARM_VOLUME_PREVIEW: {
+		enum sound_class class =
+			setting->kind == FPLINUX_UI_SETTING_ALARM_VOLUME ||
+					setting->kind ==
+						FPLINUX_UI_SETTING_ALARM_VOLUME_PREVIEW ?
+				SOUND_CLASS_ALARM :
+				SOUND_CLASS_MEDIA;
 
-		if (!value[0] || *end || level > 10)
-			return;
 		if (app->volume_form && app->volume_class == class &&
 		    app->volume_previewing)
 			fplinux_ui_form_set_value(app->volume_form,
 						  app->volume_gauge,
-						  (int)level);
+						  setting->value.level);
 		return;
-	} else if (!strcmp(name, "audio_outputs")) {
-		static const char *const values[] = { "AUTO", "SPEAKER",
-						      "HEADPHONES" };
-		static const char *const labels[] = { N_("Automatic"),
-						      N_("Speaker"),
-						      N_("Headphones") };
-		const char *cursor = value;
+	}
+	case FPLINUX_UI_SETTING_AUDIO_OUTPUTS: {
+		static const struct {
+			enum fplinux_audio_route route;
+			const char *label;
+		} options[] = {
+			{ FPLINUX_AUDIO_ROUTE_AUTO, N_("Automatic") },
+			{ FPLINUX_AUDIO_ROUTE_SPEAKER, N_("Speaker") },
+			{ FPLINUX_AUDIO_ROUTE_HEADPHONES, N_("Headphones") },
+		};
 
 		app->output_choice = (struct choice){
 			.title = N_("Output"),
-			.setting = "audio_output",
+			.setting = FPLINUX_UI_SETTING_AUDIO_OUTPUT,
 			.values = app->output_values,
 			.labels = app->output_labels,
 		};
-		for (size_t i = 0; i < ARRAY_SIZE(values); ++i) {
-			size_t length = strlen(values[i]);
-
-			if (strncmp(cursor, values[i], length) ||
-			    (cursor[length] && cursor[length] != ','))
+		for (size_t i = 0; i < ARRAY_SIZE(options); ++i) {
+			if (!(setting->value.routes &
+			      FPLINUX_UI_AUDIO_OUTPUT(options[i].route)))
 				continue;
 			app->output_values[app->output_choice.count] =
-				values[i];
+				options[i].route;
 			app->output_labels[app->output_choice.count++] =
-				labels[i];
-			cursor += length;
-			if (*cursor == ',')
-				++cursor;
+				options[i].label;
 		}
-		if (*cursor)
-			app->output_choice.count = 0;
-		app->output = fplinux_settings_choice_find(
-			app->output_values, app->output_choice.count,
-			app->output_value);
+		app->output = app->output_known ?
+				      option_index(&app->output_choice,
+						   app->output_route) :
+				      app->output_choice.count;
 		show_sound(app);
 		return;
-	} else if (!strcmp(name, "audio_output")) {
-		snprintf(app->output_value, sizeof(app->output_value), "%s",
-			 value);
-		app->output = fplinux_settings_choice_find(
-			app->output_values, app->output_choice.count, value);
+	}
+	case FPLINUX_UI_SETTING_AUDIO_OUTPUT:
+		app->output_route = setting->value.route;
+		app->output_known = true;
+		app->output =
+			option_index(&app->output_choice, app->output_route);
 		show_sound(app);
 		return;
-	} else if (!strcmp(name, "brightness")) {
-		return;
-	} else if (!strcmp(name, "screen_off_seconds")) {
-		app->screen_off = fplinux_settings_choice_find(
-			fplinux_settings_screen_off_values,
-			FPLINUX_SETTINGS_SCREEN_OFF_COUNT, value);
-	} else if (!strcmp(name, "auto_lock_seconds")) {
-		app->auto_lock = fplinux_settings_choice_find(
-			fplinux_settings_auto_lock_values,
-			FPLINUX_SETTINGS_AUTO_LOCK_COUNT, value);
-	} else if (!strcmp(name, "locale")) {
+	case FPLINUX_UI_SETTING_SCREEN_OFF:
+		app->screen_off = option_index(&screen_off_choice,
+					       setting->value.seconds);
+		break;
+	case FPLINUX_UI_SETTING_AUTO_LOCK:
+		app->auto_lock =
+			option_index(&auto_lock_choice, setting->value.seconds);
+		break;
+	case FPLINUX_UI_SETTING_LOCALE:
 		/* The runtime has taken the new language from this reply. */
 		if (strcmp(app->locale, fplinux_ui_locale(app->ui)) ||
 		    (app->choice_pending && !app->choice &&
 		     !app->input_language))
 			rebuild(app);
 		return;
-	} else if (!strcmp(name, "input_locale")) {
+	case FPLINUX_UI_SETTING_INPUT_LOCALE:
 		app->input_unavailable = false;
 		show_input(app);
 		show_root(app);
 		return;
-	} else if (!strcmp(name, "time")) {
+	case FPLINUX_UI_SETTING_TIME:
 		/* The clock is set: show it and wait for its next minute. */
 		show_clock(app);
 		schedule_clock(app);
 		return;
-	} else if (!strcmp(name, "theme")) {
+	case FPLINUX_UI_SETTING_THEME:
 		/*
 		 * The runtime has taken the new theme from this reply; the
 		 * screens keep the colours they were made with until rebuilt.
@@ -1940,38 +1965,46 @@ static void apply_setting(struct settings_app *app, const char *name,
 			rebuild(app);
 			return;
 		}
-	} else {
+		break;
+	default:
 		return;
 	}
 	show_display(app);
 	show_root(app);
 }
 
-/* Known setting names are product labels, never protocol identifiers. */
-static const char *setting_title(const char *name)
+static const char *setting_title(enum fplinux_ui_setting_kind kind)
 {
-	if (!strcmp(name, "brightness") || !strcmp(name, "brightness_preview"))
+	switch (kind) {
+	case FPLINUX_UI_SETTING_BRIGHTNESS:
+	case FPLINUX_UI_SETTING_BRIGHTNESS_PREVIEW:
 		return _("Brightness");
-	if (!strcmp(name, "volume") || !strcmp(name, "volume_preview") ||
-	    !strcmp(name, "volume_commit"))
+	case FPLINUX_UI_SETTING_VOLUME:
+	case FPLINUX_UI_SETTING_VOLUME_PREVIEW:
+	case FPLINUX_UI_SETTING_VOLUME_COMMIT:
 		return _("Media volume");
-	if (!strncmp(name, "alarm_volume", 12))
+	case FPLINUX_UI_SETTING_ALARM_VOLUME:
+	case FPLINUX_UI_SETTING_ALARM_VOLUME_PREVIEW:
+	case FPLINUX_UI_SETTING_ALARM_VOLUME_COMMIT:
 		return _("Alarm volume");
-	if (!strcmp(name, "audio_output") || !strcmp(name, "audio_outputs"))
+	case FPLINUX_UI_SETTING_AUDIO_OUTPUT:
+	case FPLINUX_UI_SETTING_AUDIO_OUTPUTS:
 		return _("Output");
-	if (!strcmp(name, "screen_off_seconds"))
+	case FPLINUX_UI_SETTING_SCREEN_OFF:
 		return _("Screen timeout");
-	if (!strcmp(name, "auto_lock_seconds"))
+	case FPLINUX_UI_SETTING_AUTO_LOCK:
 		return _("Auto-lock");
-	if (!strcmp(name, "locale"))
+	case FPLINUX_UI_SETTING_LOCALE:
 		return _("Language");
-	if (!strcmp(name, "input_locale"))
+	case FPLINUX_UI_SETTING_INPUT_LOCALE:
 		return _("Input language");
-	if (!strcmp(name, "theme"))
+	case FPLINUX_UI_SETTING_THEME:
 		return _("Theme");
-	if (!strcmp(name, "time"))
+	case FPLINUX_UI_SETTING_TIME:
 		return _("Date and time");
-	return NULL;
+	default:
+		return NULL;
+	}
 }
 
 static void notice_closed(struct fplinux_ui *ui,
@@ -2028,28 +2061,33 @@ static void recover_choice(struct settings_app *app)
 	    !fplinux_ui_is_visible(app->ui))
 		return;
 	app->choice_requery = false;
-	query_setting(app, app->choice ? app->choice->setting : "locale");
+	query_setting(app, app->choice ? app->choice->setting :
+					 FPLINUX_UI_SETTING_LOCALE);
 }
 
 static void show_error(struct settings_app *app,
 		       const struct fplinux_ui_session_message *message)
 {
 	enum notice notice = NOTICE_FAILED;
+	enum fplinux_ui_setting_kind kind = message->setting.kind;
+	enum fplinux_ui_setting_operation operation =
+		message->setting.operation;
 
 	fprintf(stderr, "fplinux-settings: %s=\"%s\" failed: %s\n",
 		message->name, message->value, message->reason);
-	if (!strcmp(message->name, "volume_preview") ||
-	    !strcmp(message->name, "alarm_volume_preview")) {
-		if (!message->value[0] || !app->volume_previewing)
+	if (kind == FPLINUX_UI_SETTING_VOLUME_PREVIEW ||
+	    kind == FPLINUX_UI_SETTING_ALARM_VOLUME_PREVIEW) {
+		if (operation == FPLINUX_UI_SETTING_CANCEL ||
+		    !app->volume_previewing)
 			return;
 		end_volume_preview(app);
 		if (app->volume_form)
 			fplinux_ui_form_set_value(
 				app->volume_form, app->volume_gauge,
 				(int)app->volume[app->volume_class]);
-	} else if (!strcmp(message->name, "brightness_preview")) {
+	} else if (kind == FPLINUX_UI_SETTING_BRIGHTNESS_PREVIEW) {
 		/* One notice for the steps that were on their way. */
-		if (!message->value[0] || !app->previewing)
+		if (operation == FPLINUX_UI_SETTING_CANCEL || !app->previewing)
 			return;
 		/* The gauge returns to the stored level, shown again. */
 		end_preview(app);
@@ -2057,17 +2095,18 @@ static void show_error(struct settings_app *app,
 			fplinux_ui_form_set_value(app->brightness_form,
 						  app->gauge_item,
 						  (int)app->brightness);
-	} else if (!message->value[0]) {
+	} else if (operation == FPLINUX_UI_SETTING_GET ||
+		   operation == FPLINUX_UI_SETTING_COMMIT) {
 		if (app->choice_pending &&
 		    !strcmp(message->reason, "not-foreground"))
 			app->choice_requery = true;
 		/* A failed query leaves the value unknown. */
-		if (!strcmp(message->name, "input_locale")) {
+		if (kind == FPLINUX_UI_SETTING_INPUT_LOCALE) {
 			app->input_unavailable = true;
 			show_input(app);
 			show_root(app);
-		} else if (!strcmp(message->name, "audio_outputs") ||
-			   !strcmp(message->name, "audio_output")) {
+		} else if (kind == FPLINUX_UI_SETTING_AUDIO_OUTPUTS ||
+			   kind == FPLINUX_UI_SETTING_AUDIO_OUTPUT) {
 			app->output_choice.count = 0;
 			show_sound(app);
 		}
@@ -2077,11 +2116,11 @@ static void show_error(struct settings_app *app,
 		notice = NOTICE_UNAVAILABLE;
 	else if (!strcmp(message->reason, "save-failed"))
 		notice = NOTICE_NOT_SAVED;
-	else if (!strcmp(message->name, "time") &&
+	else if (kind == FPLINUX_UI_SETTING_TIME &&
 		 !strcmp(message->reason, "failed"))
 		/* The clock may be set before formatting the reply fails. */
 		notice = NOTICE_TIME_FAILED;
-	if (!strcmp(message->name, "time") && app->date_form) {
+	if (kind == FPLINUX_UI_SETTING_TIME && app->date_form) {
 		app->date_show_current = true;
 		show_clock(app);
 	}
@@ -2092,22 +2131,21 @@ static void show_error(struct settings_app *app,
 		.state = message->storage_state,
 		.error = message->storage_error,
 	};
-	snprintf(app->notice_setting, sizeof(app->notice_setting), "%s",
-		 message->name);
+	app->notice_setting = kind;
 	show_notice(app);
-	if (!message->applied && message->name[0] &&
-	    strcmp(message->name, "time") &&
-	    strcmp(message->name, "brightness_preview") &&
-	    strcmp(message->name, "brightness") &&
-	    strncmp(message->name, "volume", 6) &&
-	    strncmp(message->name, "alarm_volume", 12)) {
+	if (!message->applied && (kind == FPLINUX_UI_SETTING_SCREEN_OFF ||
+				  kind == FPLINUX_UI_SETTING_AUTO_LOCK ||
+				  kind == FPLINUX_UI_SETTING_LOCALE ||
+				  kind == FPLINUX_UI_SETTING_INPUT_LOCALE ||
+				  kind == FPLINUX_UI_SETTING_THEME ||
+				  kind == FPLINUX_UI_SETTING_AUDIO_OUTPUT)) {
 		if (app->choice_pending) {
 			app->choice_requery = true;
 			recover_choice(app);
 		} else if (fplinux_ui_lifecycle(app->ui) ==
 				   FPLINUX_UI_FOREGROUND &&
 			   fplinux_ui_is_visible(app->ui)) {
-			query_setting(app, message->name);
+			query_setting(app, kind);
 		}
 	}
 }
@@ -2117,6 +2155,8 @@ static void handle_event(struct fplinux_ui *ui,
 {
 	struct settings_app *app = context;
 	const struct fplinux_ui_session_message *message = event->session;
+	enum fplinux_ui_setting_kind kind = message ? message->setting.kind :
+						      FPLINUX_UI_SETTING_NONE;
 
 	switch (event->type) {
 	case FPLINUX_UI_EVENT_SYSTEM_LEVELS:
@@ -2128,13 +2168,13 @@ static void handle_event(struct fplinux_ui *ui,
 			receive_wifi(app, message);
 			break;
 		}
+		if (kind == FPLINUX_UI_SETTING_NONE)
+			break;
 		if (app->volume_pending &&
-		    (!strcmp(message->name,
-			     volume_setting_name(app->volume_class, false)) ||
-		     !strcmp(message->name,
-			     app->volume_class == SOUND_CLASS_MEDIA ?
-				     "volume_commit" :
-				     "alarm_volume_commit")) &&
+		    (kind == volume_setting_kind(app->volume_class, false) ||
+		     kind == (app->volume_class == SOUND_CLASS_MEDIA ?
+				      FPLINUX_UI_SETTING_VOLUME_COMMIT :
+				      FPLINUX_UI_SETTING_ALARM_VOLUME_COMMIT)) &&
 		    (message->type == FPLINUX_UI_SESSION_SETTING ||
 		     message->type == FPLINUX_UI_SESSION_ERROR)) {
 			app->volume_pending = false;
@@ -2146,10 +2186,11 @@ static void handle_event(struct fplinux_ui *ui,
 					app->volume_form, NULL, NULL);
 		}
 		if (message->type == FPLINUX_UI_SESSION_ERROR &&
-		    message->value[0])
+		    message->setting.operation != FPLINUX_UI_SETTING_GET &&
+		    message->setting.operation != FPLINUX_UI_SETTING_COMMIT)
 			app->root_requested = false;
 		/* Only one time mutation is outstanding; its reply reports current time. */
-		if (app->date_pending && !strcmp(message->name, "time") &&
+		if (app->date_pending && kind == FPLINUX_UI_SETTING_TIME &&
 		    (message->type == FPLINUX_UI_SESSION_SETTING ||
 		     message->type == FPLINUX_UI_SESSION_ERROR)) {
 			app->date_pending = false;
@@ -2167,17 +2208,16 @@ static void handle_event(struct fplinux_ui *ui,
 			show_clock(app);
 			schedule_clock(app);
 		}
-		if (message->applied && strcmp(message->name, "time") &&
-		    strcmp(message->name, "brightness_preview") &&
-		    strcmp(message->name, "volume_preview") &&
-		    strcmp(message->name, "alarm_volume_preview"))
+		if (message->applied && kind != FPLINUX_UI_SETTING_TIME &&
+		    kind != FPLINUX_UI_SETTING_BRIGHTNESS_PREVIEW &&
+		    kind != FPLINUX_UI_SETTING_VOLUME_PREVIEW &&
+		    kind != FPLINUX_UI_SETTING_ALARM_VOLUME_PREVIEW)
 			app->unsaved = message->storage_error != 0;
 		if (message->type == FPLINUX_UI_SESSION_SETTING)
-			apply_setting(app, message->name, message->value);
+			apply_setting(app, &message->setting);
 		else if (message->type == FPLINUX_UI_SESSION_ERROR) {
 			if (message->applied)
-				apply_setting(app, message->name,
-					      message->value);
+				apply_setting(app, &message->setting);
 			show_error(app, message);
 		}
 		if (app->root_requested &&
@@ -2319,9 +2359,9 @@ int main(int argc, char **argv)
 	app.root = root;
 	show_root(&app);
 	/* Levels arrive in SYSTEM_LEVELS; CONFIG supplied language and theme. */
-	query_setting(&app, "screen_off_seconds");
-	query_setting(&app, "auto_lock_seconds");
-	query_setting(&app, "input_locale");
+	query_setting(&app, FPLINUX_UI_SETTING_SCREEN_OFF);
+	query_setting(&app, FPLINUX_UI_SETTING_AUTO_LOCK);
+	query_setting(&app, FPLINUX_UI_SETTING_INPUT_LOCALE);
 	result = fplinux_ui_run(app.ui);
 	lv_timer_delete(app.clock_timer);
 	close_bluetooth(&app);

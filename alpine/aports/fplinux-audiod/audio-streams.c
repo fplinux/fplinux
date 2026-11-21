@@ -2,11 +2,9 @@
 #define _GNU_SOURCE
 
 #include "audio-streams.h"
-#include "fplinux-cli.h"
 
 #include <errno.h>
 #include <fcntl.h>
-#include <limits.h>
 #include <stdatomic.h>
 #include <stdio.h>
 #include <string.h>
@@ -502,82 +500,41 @@ static void forget(struct fplinux_audio_streams *streams, pid_t pid)
 	}
 }
 
-/* Splits at single spaces; returns the word count, capacity + 1 if more. */
-static unsigned int split(char *command, char **words, unsigned int capacity)
-{
-	unsigned int count = 0;
-
-	for (;;) {
-		if (count == capacity)
-			return capacity + 1;
-		words[count++] = command;
-		command = strchr(command, ' ');
-		if (!command)
-			return count;
-		*command++ = '\0';
-	}
-}
-
 void fplinux_audio_streams_command(struct fplinux_audio_streams *streams,
-				   char *command)
+				   const struct fplinux_audio_control *command)
 {
-	char *words[5];
-	unsigned int count = split(command, words, 5);
-	unsigned int pid, uid, eligible, background;
+	struct fplinux_audio_process *process;
 
-	if (!strcmp(words[0], FPLINUX_AUDIO_CONTROL_SYNC) && count == 1) {
+	switch (command->type) {
+	case FPLINUX_AUDIO_CONTROL_SYNC:
 		streams->manager_ready = true;
-		return;
+		break;
+	case FPLINUX_AUDIO_CONTROL_APP:
+		announce(streams, command->app.pid, command->app.uid, false,
+			 command->app.background);
+		break;
+	case FPLINUX_AUDIO_CONTROL_CLOCK:
+		announce(streams, command->clock.pid, command->clock.uid, true,
+			 false);
+		break;
+	case FPLINUX_AUDIO_CONTROL_GONE:
+		forget(streams, command->gone);
+		break;
+	case FPLINUX_AUDIO_CONTROL_ELIGIBLE:
+		process = find_process(streams, command->eligible.pid);
+		if (process)
+			process->eligible = command->eligible.enabled;
+		break;
+	default:
+		break;
 	}
-	if (!strcmp(words[0], FPLINUX_AUDIO_CONTROL_APP)) {
-		if (count == 5 &&
-		    fplinux_cli_unsigned(words[1], 1, INT_MAX, &pid) &&
-		    fplinux_cli_unsigned(words[2], 0, UINT_MAX - 1, &uid) &&
-		    *words[3] &&
-		    fplinux_cli_unsigned(words[4], 0, 1, &background) &&
-		    !words[4][1]) {
-			announce(streams, (pid_t)pid, (uid_t)uid, false,
-				 background != 0);
-			return;
-		}
-	} else if (!strcmp(words[0], FPLINUX_AUDIO_CONTROL_CLOCK)) {
-		if (count == 3 &&
-		    fplinux_cli_unsigned(words[1], 1, INT_MAX, &pid) &&
-		    fplinux_cli_unsigned(words[2], 0, UINT_MAX - 1, &uid)) {
-			announce(streams, (pid_t)pid, (uid_t)uid, true, false);
-			return;
-		}
-	} else if (!strcmp(words[0], FPLINUX_AUDIO_CONTROL_GONE)) {
-		if (count == 2 &&
-		    fplinux_cli_unsigned(words[1], 1, INT_MAX, &pid)) {
-			forget(streams, (pid_t)pid);
-			return;
-		}
-	} else if (!strcmp(words[0], FPLINUX_AUDIO_CONTROL_ELIGIBLE)) {
-		struct fplinux_audio_process *process;
-
-		if (count == 3 &&
-		    fplinux_cli_unsigned(words[1], 1, INT_MAX, &pid) &&
-		    fplinux_cli_unsigned(words[2], 0, 1, &eligible) &&
-		    !words[2][1]) {
-			process = find_process(streams, (pid_t)pid);
-			if (process)
-				process->eligible = eligible != 0;
-			return;
-		}
-	} else {
-		printf("fplinux-audiod: ignoring unknown control command %s\n",
-		       words[0]);
-		return;
-	}
-	fprintf(stderr,
-		"fplinux-audiod: ignoring malformed control command %s\n",
-		words[0]);
 }
 
 void fplinux_audio_streams_volume(struct fplinux_audio_streams *streams,
-				  bool alarm, unsigned int level)
+				  enum fplinux_audio_class class,
+				  unsigned int level)
 {
+	bool alarm = class == FPLINUX_AUDIO_ALARM;
 	unsigned int i;
 
 	if (alarm)

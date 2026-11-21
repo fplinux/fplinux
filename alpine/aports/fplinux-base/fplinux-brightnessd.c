@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 #define _GNU_SOURCE
 #include "fplinux-brightness-client.h"
+#include "fplinux-brightness-wire.h"
 #include "fplinux-cli.h"
 
 #include <errno.h>
@@ -319,27 +320,15 @@ static int make_listener(struct brightness_service *service)
 	return 0;
 }
 
-static int reply(int fd, int error, int level)
+static int reply(int fd, int error)
 {
-	char response[32];
-	int length;
+	const struct fplinux_brightness_message response = {
+		.type = error ? FPLINUX_BRIGHTNESS_ERROR :
+				FPLINUX_BRIGHTNESS_OK,
+		.error = error,
+	};
 
-	if (error)
-		length = snprintf(response, sizeof(response), "ERR %d", error);
-	else if (level >= 0)
-		length =
-			snprintf(response, sizeof(response), "LEVEL %d", level);
-	else
-		length = snprintf(response, sizeof(response), "OK");
-	return send(fd, response, length, MSG_NOSIGNAL) == length ? 0 : -1;
-}
-
-static bool parse_level(const char *request, const char *verb,
-			unsigned int *level)
-{
-	return !strncmp(request, verb, strlen(verb)) &&
-	       request[strlen(verb)] == ' ' &&
-	       decimal(request + strlen(verb) + 1, 10, level);
+	return fplinux_brightness_wire_send(fd, &response);
 }
 
 static void close_client(struct brightness_service *service, int index)
@@ -358,66 +347,64 @@ static void close_client(struct brightness_service *service, int index)
 
 static void handle_client(struct brightness_service *service, int index)
 {
-	char request[32];
-	unsigned int level;
+	struct fplinux_brightness_message request;
 	int fd = service->clients[index];
-	ssize_t length;
+	int result = fplinux_brightness_wire_receive(
+		fd, FPLINUX_BRIGHTNESS_REQUEST, &request);
 	int error = 0;
 
-	length = recv(fd, request, sizeof(request) - 1,
-		      MSG_DONTWAIT | MSG_TRUNC);
-	if (length < 0) {
-		if (errno != EINTR && errno != EAGAIN)
+	if (result <= 0) {
+		if (result < 0 && errno == EPROTO)
+			reply(fd, EINVAL);
+		else if (!result || (errno != EINTR && errno != EAGAIN))
 			close_client(service, index);
 		return;
 	}
-	if (!length) {
-		close_client(service, index);
+	switch (request.type) {
+	case FPLINUX_BRIGHTNESS_GET: {
+		const struct fplinux_brightness_message response = {
+			.type = FPLINUX_BRIGHTNESS_LEVEL,
+			.level = service->baseline,
+		};
+
+		fplinux_brightness_wire_send(fd, &response);
 		return;
 	}
-	if (length >= (ssize_t)sizeof(request)) {
-		reply(fd, EINVAL, -1);
-		return;
-	}
-	if (memchr(request, '\0', length)) {
-		reply(fd, EINVAL, -1);
-		return;
-	}
-	request[length] = '\0';
-	if (!strcmp(request, "GET")) {
-		reply(fd, 0, service->baseline);
-		return;
-	}
-	if (parse_level(request, "SET", &level)) {
-		if (publish_state(service->state_path, level) < 0)
+	case FPLINUX_BRIGHTNESS_SET:
+		if (publish_state(service->state_path, request.level) < 0)
 			error = errno;
 		else {
-			service->baseline = level;
+			service->baseline = request.level;
 			if (service->lease < 0 &&
-			    apply_level(service, level) < 0)
+			    apply_level(service, request.level) < 0)
 				error = errno;
 		}
-	} else if (!strcmp(request, "CLAIM")) {
+		break;
+	case FPLINUX_BRIGHTNESS_CLAIM:
 		if (service->lease >= 0)
 			error = EBUSY;
 		else
 			service->lease = fd;
-	} else if (parse_level(request, "SHOW", &level)) {
+		break;
+	case FPLINUX_BRIGHTNESS_SHOW:
 		if (service->lease != fd)
 			error = EPERM;
-		else if (apply_level(service, level) < 0)
+		else if (apply_level(service, request.level) < 0)
 			error = errno;
-	} else if (!strcmp(request, "RELEASE")) {
+		break;
+	case FPLINUX_BRIGHTNESS_RELEASE:
 		if (service->lease != fd)
 			error = EPERM;
 		else if (apply_level(service, service->baseline) < 0)
 			error = errno;
 		else
 			service->lease = -1;
-	} else {
+		break;
+	default:
 		error = EINVAL;
+		break;
 	}
-	if (reply(fd, error, -1) < 0)
+	if (reply(fd, error) < 0)
 		close_client(service, index);
 }
 

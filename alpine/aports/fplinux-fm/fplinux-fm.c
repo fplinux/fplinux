@@ -3,6 +3,7 @@
 
 #include "fplinux-cli.h"
 #include "fplinux-audio-protocol.h"
+#include "fplinux-audio-radio.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -21,11 +22,10 @@
 #include <unistd.h>
 
 #define RADIO_DEVICE "/dev/radio0"
-#define FM_LOW_100KHZ 875U
-#define FM_HIGH_100KHZ 1080U
 #define FM_V4L2_UNITS_PER_100KHZ 1600U
 #define FM_SEEK_SPACING_HZ 100000U
-#define FM_CHANNEL_COUNT (FM_HIGH_100KHZ - FM_LOW_100KHZ + 1U)
+#define FM_CHANNEL_COUNT \
+	(FPLINUX_AUDIO_FM_HIGH_100KHZ - FPLINUX_AUDIO_FM_LOW_100KHZ + 1U)
 
 enum command { COMMAND_SCAN, COMMAND_PLAY, COMMAND_NONE };
 
@@ -52,7 +52,7 @@ static bool parse_frequency(const char *text, unsigned int *frequency_100khz)
 		return false;
 	while (*cursor >= '0' && *cursor <= '9') {
 		mhz = mhz * 10U + (unsigned int)(*cursor - '0');
-		if (mhz > FM_HIGH_100KHZ / 10U)
+		if (mhz > FPLINUX_AUDIO_FM_HIGH_100KHZ / 10U)
 			return false;
 		++cursor;
 	}
@@ -64,8 +64,9 @@ static bool parse_frequency(const char *text, unsigned int *frequency_100khz)
 		while (*cursor == '0')
 			++cursor;
 	}
-	if (*cursor != '\0' || mhz * 10U + tenth < FM_LOW_100KHZ ||
-	    mhz * 10U + tenth > FM_HIGH_100KHZ)
+	if (*cursor != '\0' ||
+	    mhz * 10U + tenth < FPLINUX_AUDIO_FM_LOW_100KHZ ||
+	    mhz * 10U + tenth > FPLINUX_AUDIO_FM_HIGH_100KHZ)
 		return false;
 	*frequency_100khz = mhz * 10U + tenth;
 	return true;
@@ -234,11 +235,13 @@ static int scan(int fd)
 		.seek_upward = 1,
 		.wrap_around = 0,
 		.spacing = FM_SEEK_SPACING_HZ,
-		.rangelow = FM_LOW_100KHZ * FM_V4L2_UNITS_PER_100KHZ,
-		.rangehigh = FM_HIGH_100KHZ * FM_V4L2_UNITS_PER_100KHZ,
+		.rangelow =
+			FPLINUX_AUDIO_FM_LOW_100KHZ * FM_V4L2_UNITS_PER_100KHZ,
+		.rangehigh =
+			FPLINUX_AUDIO_FM_HIGH_100KHZ * FM_V4L2_UNITS_PER_100KHZ,
 	};
 
-	if (set_frequency(fd, FM_LOW_100KHZ) < 0)
+	if (set_frequency(fd, FPLINUX_AUDIO_FM_LOW_100KHZ) < 0)
 		return 1;
 	while (count < FM_CHANNEL_COUNT) {
 		struct v4l2_frequency frequency = {
@@ -296,10 +299,14 @@ static int claim_audio(const struct arguments *arguments)
 		.sun_family = AF_UNIX,
 		.sun_path = FPLINUX_AUDIO_RADIO_SOCKET,
 	};
-	char command[32], reply[32];
+	const struct fplinux_audio_radio command = {
+		.type = arguments->command == COMMAND_SCAN ?
+				FPLINUX_AUDIO_RADIO_SCAN :
+				FPLINUX_AUDIO_RADIO_PLAY,
+		.frequency = arguments->frequency_100khz,
+	};
+	struct fplinux_audio_radio reply;
 	struct pollfd ready;
-	ssize_t length;
-	unsigned int refusal;
 	int error;
 	int fd = socket(AF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC, 0);
 
@@ -307,31 +314,19 @@ static int claim_audio(const struct arguments *arguments)
 		return -1;
 	if (connect(fd, (struct sockaddr *)&address, sizeof(address)) < 0)
 		goto fail;
-	if (arguments->command == COMMAND_SCAN)
-		snprintf(command, sizeof(command), "SCAN");
-	else
-		snprintf(command, sizeof(command), "PLAY %u",
-			 arguments->frequency_100khz);
-	if (send(fd, command, strlen(command), MSG_NOSIGNAL) !=
-	    (ssize_t)strlen(command))
+	if (fplinux_audio_radio_send(fd, &command) < 0)
 		goto fail;
 	ready = (struct pollfd){ .fd = fd, .events = POLLIN };
 	if (poll(&ready, 1, 2000) <= 0) {
 		errno = ETIMEDOUT;
 		goto fail;
 	}
-	length = recv(fd, reply, sizeof(reply), MSG_TRUNC);
-	if (length == 5 && !memcmp(reply, "READY", 5))
-		return fd;
-	if (length > 6 && (size_t)length < sizeof(reply) &&
-	    !memcmp(reply, "ERROR ", 6) &&
-	    !memchr(reply, '\0', (size_t)length)) {
-		reply[length] = '\0';
-		if (reply[6] >= '1' && reply[6] <= '9' &&
-		    fplinux_cli_unsigned(reply + 6, 1, INT_MAX, &refusal)) {
-			errno = (int)refusal;
-			goto fail;
-		}
+	if (fplinux_audio_radio_receive(fd, FPLINUX_AUDIO_RADIO_REPLY, &reply) >
+	    0) {
+		if (reply.type == FPLINUX_AUDIO_RADIO_READY)
+			return fd;
+		errno = reply.error;
+		goto fail;
 	}
 	errno = EBUSY;
 fail:

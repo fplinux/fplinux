@@ -2,6 +2,8 @@
 #ifndef FPLINUX_AUDIO_PROTOCOL_H
 #define FPLINUX_AUDIO_PROTOCOL_H
 
+#include "fplinux-audio-route.h"
+
 /*
  * The private protocol of the system audio service, fplinux-audiod. It is
  * compiled into the service, audio client and session manager. It is
@@ -13,20 +15,17 @@
  * fplinux:
  *
  * - FPLINUX_AUDIO_CONTROL_SOCKET, mode 0600: the session manager's policy,
- *   in short text commands (below). audiod accepts one connection at a time
+ *   in fplinux-audio-control.h. audiod accepts one connection at a time
  *   and only from a peer with its own uid, root on the phone.
  * - FPLINUX_AUDIO_STREAM_SOCKET, mode 0660: the applications' streams, in
  *   fixed-size binary messages (struct fplinux_audio_message). The frames of
  *   each stream go through a shared ring (struct fplinux_audio_ring) whose
  *   memfd audiod creates and sends with OPENED; it never accepts a
  *   descriptor from an application.
- * - FPLINUX_AUDIO_STATUS_SOCKET, mode 0660: one read-only STATE packet at
- *   connection, then EOF. This endpoint never accepts policy commands.
- * - FPLINUX_AUDIO_RADIO_SOCKET, mode 0600: one root FM frontend lease. PLAY
- *   <frequency in 100 kHz> tunes and requests playback; SCAN reserves the
- *   tuner for a silent scan. READY confirms the lease, ERROR <errno>
- *   refuses it. Disconnect releases FM. CLOCK may interrupt an active PLAY
- *   without ending the lease, and the same station resumes afterwards.
+ * - FPLINUX_AUDIO_STATUS_SOCKET, mode 0660: one read-only snapshot at
+ *   connection, then EOF. See fplinux-audio-status.h.
+ * - FPLINUX_AUDIO_RADIO_SOCKET, mode 0600: one root FM frontend lease.
+ *   See fplinux-audio-radio.h.
  *
  * In every poll round audiod serves the control socket before the stream
  * socket, so a process the manager announced before it could connect is
@@ -60,58 +59,6 @@
 #define FPLINUX_AUDIO_CLOCK_STREAM_INDEX FPLINUX_AUDIO_APP_STREAMS
 #define FPLINUX_AUDIO_STREAMS (FPLINUX_AUDIO_APP_STREAMS + 1U)
 
-/*
- * Control commands, manager to audiod: one command per packet, ASCII words
- * separated by one space, no newline, shorter than
- * FPLINUX_AUDIO_CONTROL_BYTES. Numbers are decimal.
- *
- * "APP <pid> <uid> <app_id> <background:0|1>": announce an application.
- *   A new background grant revokes the previous application's grant.
- * "CLOCK <pid> <uid>": the manager started its trusted clock signal
- *   helper. This process alone may open one stream in the reserved slot;
- *   it cannot take an application slot. It starts paused and plays only
- *   after ELIGIBLE <pid> 1. There is at most one clock helper at a time.
- *   An APP or CLOCK for a known pid replaces its policy entry.
- * "GONE <pid>": the process is leaving, closing or was reaped. audiod ends
- *   its streams and closes all of its connections at once, and forgets it,
- *   remembering only that it left until APP or CLOCK announces it again.
- * "ELIGIBLE <pid> 0|1": foreground eligibility. For APP, the
- *   manager sends 1 while the application is running, connected to the
- *   session, not leaving and visible, and 0 when that ends. For CLOCK, it
- *   follows the active clock signal's lifetime independently of application
- *   visibility. audiod alone chooses focus: queued CLOCK frames interrupt
- *   media, queued foreground frames interrupt the permitted background app.
- *   An empty foreground stream does not interrupt background playback.
- * "VOLUME MEDIA|ALARM <0..10>": set that class's gain, 10 at unity.
- *   audiod replies with the same command after applying the target gain.
- * "OUTPUT AUTO|SPEAKER|HEADPHONES": select a supported output. The reply is
- *   the same command after application, or "OUTPUT ERROR <errno>".
- * "SYNC": complete the trusted state replay. No source plays before this
- *   command on a new manager connection; later commands apply immediately.
- * After SYNC, audiod sends "ACTIVITY <pid> <uid> <state>" for each APP and
- * on changes. States are none, paused (user), held (policy/focus), unavailable
- * (output) and playing. An empty open stream is none; playing includes queued
- * and not yet heard frames on an open output. CLOCK has no APP activity.
- *
- * The manager's socket is nonblocking. It never drops a command: when a send
- * fails or would block, it closes the connection, reconnects with a backoff
- * and sends its whole state again: both VOLUME settings and OUTPUT first,
- * then APP or CLOCK and ELIGIBLE per process, and finally SYNC.
- * When the connection drops, audiod forgets every process and pauses every
- * stream; a stream whose process is not announced again, with the same
- * uid and role, within FPLINUX_AUDIO_RESYNC_MS of the next connection ends.
- *
- * audiod ignores unknown commands.
- */
-#define FPLINUX_AUDIO_CONTROL_BYTES 256
-#define FPLINUX_AUDIO_CONTROL_APP "APP"
-#define FPLINUX_AUDIO_CONTROL_CLOCK "CLOCK"
-#define FPLINUX_AUDIO_CONTROL_GONE "GONE"
-#define FPLINUX_AUDIO_CONTROL_ELIGIBLE "ELIGIBLE"
-#define FPLINUX_AUDIO_CONTROL_VOLUME "VOLUME"
-#define FPLINUX_AUDIO_CONTROL_OUTPUT "OUTPUT"
-#define FPLINUX_AUDIO_CONTROL_SYNC "SYNC"
-#define FPLINUX_AUDIO_CONTROL_ACTIVITY "ACTIVITY"
 #define FPLINUX_AUDIO_VOLUME_MAX 10U
 #define FPLINUX_AUDIO_RESYNC_MS 1000
 

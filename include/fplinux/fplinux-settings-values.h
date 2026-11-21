@@ -10,12 +10,12 @@
 
 #define FPLINUX_SETTINGS_SCREEN_OFF_COUNT 5U
 #define FPLINUX_SETTINGS_AUTO_LOCK_COUNT 6U
+#define FPLINUX_SETTINGS_AUTO_LOCK_OFF -1
 
-/* Canonical SETTING values, in the order offered by Settings. */
-extern const char *const
+/* Seconds, in the order offered by Settings. */
+extern const int
 	fplinux_settings_screen_off_values[FPLINUX_SETTINGS_SCREEN_OFF_COUNT];
-/* The first auto-lock choice is "off"; the remaining choices are seconds. */
-extern const char *const
+extern const int
 	fplinux_settings_auto_lock_values[FPLINUX_SETTINGS_AUTO_LOCK_COUNT];
 
 #endif

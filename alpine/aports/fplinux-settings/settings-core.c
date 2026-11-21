@@ -8,17 +8,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-size_t fplinux_settings_choice_find(const char *const *values, size_t count,
-				    const char *value)
-{
-	size_t index;
-
-	for (index = 0; index < count; index++)
-		if (!strcmp(values[index], value))
-			break;
-	return index;
-}
-
 bool fplinux_settings_parse_brightness(const char *value, unsigned int *level)
 {
 	unsigned long number;
@@ -36,26 +25,30 @@ bool fplinux_settings_parse_brightness(const char *value, unsigned int *level)
 }
 
 bool fplinux_settings_time_value(const struct tm *date, const struct tm *clock,
-				 char *value, size_t size)
+				 struct fplinux_ui_setting_time *value)
 {
 	int year = date->tm_year + 1900;
 	/* A leap second keeps the minute. */
 	int second = clock->tm_sec == 60 ? 59 : clock->tm_sec;
-	int length;
-
 	if (year < 1000 || year > 9999 || date->tm_mon < 0 ||
 	    date->tm_mon > 11 || date->tm_mday < 1 || date->tm_mday > 31 ||
 	    clock->tm_hour < 0 || clock->tm_hour > 23 || clock->tm_min < 0 ||
 	    clock->tm_min > 59 || second < 0 || second > 59)
 		return false;
-	length = snprintf(value, size, "%04d-%02d-%02d %02d:%02d:%02d", year,
-			  date->tm_mon + 1, date->tm_mday, clock->tm_hour,
-			  clock->tm_min, second);
-	return length >= 0 && (size_t)length < size;
+	*value = (struct fplinux_ui_setting_time){
+		.year = year,
+		.month = date->tm_mon + 1,
+		.day = date->tm_mday,
+		.hour = clock->tm_hour,
+		.minute = clock->tm_min,
+		.second = second,
+	};
+	return true;
 }
 
 bool fplinux_settings_save_time(time_t now, const time_t *date,
-				const time_t *clock, char *value, size_t size)
+				const time_t *clock,
+				struct fplinux_ui_setting_time *value)
 {
 	struct tm date_parts;
 	struct tm clock_parts;
@@ -65,21 +58,13 @@ bool fplinux_settings_save_time(time_t now, const time_t *date,
 		return false;
 	if (clock)
 		clock_parts.tm_sec = 0;
-	return fplinux_settings_time_value(&date_parts, &clock_parts, value,
-					   size);
+	return fplinux_settings_time_value(&date_parts, &clock_parts, value);
 }
 
-bool fplinux_settings_time_in_range(const char *value)
+bool fplinux_settings_time_in_range(const struct fplinux_ui_setting_time *value)
 {
-	int year = 0;
-
-	for (int i = 0; i < 4; i++) {
-		if (value[i] < '0' || value[i] > '9')
-			return false;
-		year = year * 10 + (value[i] - '0');
-	}
-	return value[4] == '-' && year >= FPLINUX_SETTINGS_YEAR_MIN &&
-	       year <= FPLINUX_SETTINGS_YEAR_MAX;
+	return value->year >= FPLINUX_SETTINGS_YEAR_MIN &&
+	       value->year <= FPLINUX_SETTINGS_YEAR_MAX;
 }
 
 bool fplinux_settings_date_time_detail(const char *date, const char *clock,

@@ -165,6 +165,8 @@ static void answer_setting(struct capture *capture,
 	if (!strcmp(request->name, "wifi")) {
 		if (!capture->wifi_supported) {
 			reply.type = FPLINUX_UI_SESSION_ERROR;
+			reply.applied = false;
+			reply.storage_state = FPLINUX_STORAGE_UNPUBLISHED;
 			strcpy(reply.reason, "unsupported");
 		} else {
 			if (request->value[0])
@@ -491,6 +493,7 @@ static void redraw(struct capture *capture)
 {
 	struct fplinux_ui_session_message message = {
 		.type = FPLINUX_UI_SESSION_SETTING,
+		.applied = true,
 		.serial = ++capture->serial,
 	};
 	uint64_t deadline = fplinux_ui_frame_now_ms() + 3000;
@@ -1134,8 +1137,7 @@ static void ring_data(char *data, size_t capacity, uint64_t event_id)
 		snprintf(ring.event.label, sizeof(ring.event.label), "Ring %u",
 			 (unsigned int)event_id);
 	}
-	assert(clock_wire_ring_encode(&ring, event_id, data, capacity) ==
-	       CLOCK_OK);
+	assert(clock_wire_ring_encode(&ring, data, capacity) == CLOCK_OK);
 }
 
 /* The manager names the ringing event in ACTIVE; its ACK means drawn. */
@@ -1177,7 +1179,7 @@ static uint32_t stop_ring(struct capture *capture, uint64_t event_id)
 		pump(capture);
 	assert(capture->has_clock_request);
 	capture->has_clock_request = false;
-	assert(!strcmp(capture->clock_request.name, "dismiss"));
+	assert(!capture->clock_request.name[0]);
 	assert(clock_wire_request_decode(json, strlen(json), &request) ==
 	       CLOCK_OK);
 	assert(request.op == CLOCK_REQUEST_DISMISS);

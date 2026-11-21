@@ -9,22 +9,13 @@
 #include <time.h>
 
 #include "fplinux-settings-values.h"
+#include "fplinux-ui-session.h"
 
-/* The SETTING time value "YYYY-MM-DD HH:MM:SS" and its terminator. */
-#define FPLINUX_SETTINGS_TIME_BYTES 20U
-
-/* Index of value in values, or count when it is not one of them. */
-size_t fplinux_settings_choice_find(const char *const *values, size_t count,
-				    const char *value);
 bool fplinux_settings_parse_brightness(const char *value, unsigned int *level);
 
-/*
- * Writes the SETTING time value "YYYY-MM-DD HH:MM:SS" from the day of date
- * and the time of day of clock; false when a field is out of range or size
- * is below FPLINUX_SETTINGS_TIME_BYTES.
- */
+/* Combines the selected calendar day and clock time for Session. */
 bool fplinux_settings_time_value(const struct tm *date, const struct tm *clock,
-				 char *value, size_t size);
+				 struct fplinux_ui_setting_time *value);
 /*
  * The time value that Save sends at now. The day is the edited date's, or
  * today's when date is NULL; the time is the edited clock's hour and minute
@@ -33,9 +24,10 @@ bool fplinux_settings_time_value(const struct tm *date, const struct tm *clock,
  * the form opened.
  */
 bool fplinux_settings_save_time(time_t now, const time_t *date,
-				const time_t *clock, char *value, size_t size);
+				const time_t *clock,
+				struct fplinux_ui_setting_time *value);
 /* Whether the year of a time value is one the manager accepts. */
-bool fplinux_settings_time_in_range(const char *value);
+bool fplinux_settings_time_in_range(const struct fplinux_ui_setting_time *value);
 /*
  * The Date and time row's detail from the short date and the clock that the
  * runtime formats: "30.09.2026 23:58", or the one that is not empty; false

@@ -3,7 +3,7 @@
 #define FPLINUX_AUDIO_STREAMS_H
 
 #include "audio-mixer.h"
-#include "fplinux-audio-protocol.h"
+#include "fplinux-audio-control.h"
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -30,7 +30,7 @@ struct fplinux_audio_process {
 	bool clock;
 	/* Activity last sent on the current manager connection. */
 	bool activity_known;
-	unsigned int activity;
+	enum fplinux_audio_activity activity;
 };
 
 enum fplinux_audio_connection_state {
@@ -101,14 +101,15 @@ void fplinux_audio_streams_init(struct fplinux_audio_streams *streams);
 
 /* Apply one class level before acknowledging it to the manager. */
 void fplinux_audio_streams_volume(struct fplinux_audio_streams *streams,
-				  bool alarm, unsigned int level);
+				  enum fplinux_audio_class class,
+				  unsigned int level);
 /* Hold existing media before a private output is disconnected. */
 void fplinux_audio_streams_private_output_lost(
 	struct fplinux_audio_streams *streams);
 
-/* Applies one control command, a string without a newline. */
+/* Applies an already decoded process policy command. */
 void fplinux_audio_streams_command(struct fplinux_audio_streams *streams,
-				   char *command);
+				   const struct fplinux_audio_control *command);
 
 /*
  * The manager's connection dropped, which forgets every process, or a new

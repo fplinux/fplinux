@@ -311,7 +311,8 @@ static void resize(struct fplinux_ui *ui, int width, int height,
 		   bool fullscreen);
 static void show_legend_bar(struct fplinux_ui *ui);
 static bool local_softkeys_visible(const struct fplinux_ui *ui);
-static void set_theme_kind(struct fplinux_ui *ui, const char *value);
+static void set_theme_kind(struct fplinux_ui *ui,
+			   enum fplinux_ui_theme_kind kind);
 static void release_keys(struct input_seat *seat);
 
 static void stop_repeat(struct input_seat *seat)
@@ -573,17 +574,20 @@ static void request_close(struct fplinux_ui *ui)
 	dispatch_event(ui, &event);
 }
 
-static const char *const close_response_names[] = { "ready", "cancel", "wait" };
-
 static bool send_close_reply(struct fplinux_ui *ui,
 			     enum fplinux_ui_close_response response)
 {
+	static const enum fplinux_ui_session_close_response wire_response[] = {
+		[FPLINUX_UI_CLOSE_READY] = FPLINUX_UI_SESSION_CLOSE_READY,
+		[FPLINUX_UI_CLOSE_CANCEL] = FPLINUX_UI_SESSION_CLOSE_CANCEL,
+		[FPLINUX_UI_CLOSE_WAIT] = FPLINUX_UI_SESSION_CLOSE_WAIT,
+	};
 	struct fplinux_ui_session_message reply = {
 		.type = FPLINUX_UI_SESSION_CLOSE_REPLY,
 		.serial = ui->close_serial,
+		.close_response = wire_response[response],
 	};
 
-	strcpy(reply.value, close_response_names[response]);
 	if (!fplinux_ui_session_send(ui->session_fd, &reply))
 		return false;
 	ui->close_response = response;
@@ -843,14 +847,16 @@ static bool receive_session(struct fplinux_ui *ui)
 
 	while (!ui->quit && (received = fplinux_ui_session_receive(
 				     ui->session_fd, &message)) > 0) {
-		bool setting_reply =
-			message.type == FPLINUX_UI_SESSION_SETTING ||
-			(message.type == FPLINUX_UI_SESSION_ERROR &&
-			 message.applied);
+		const struct fplinux_ui_setting *setting = &message.setting;
+		bool setting_reply = setting->operation ==
+					     FPLINUX_UI_SETTING_RESULT &&
+				     message.applied;
 
 		/* These requests travel only from client to manager. */
 		if (message.type == FPLINUX_UI_SESSION_LAUNCH ||
 		    message.type == FPLINUX_UI_SESSION_WIFI_REQUEST ||
+		    (message.type == FPLINUX_UI_SESSION_SETTING &&
+		     !setting_reply) ||
 		    message.type == FPLINUX_UI_SESSION_OPEN_FILE ||
 		    message.type == FPLINUX_UI_SESSION_DOCUMENT_CHOICE ||
 		    message.type == FPLINUX_UI_SESSION_STORAGE_REQUEST ||
@@ -1000,20 +1006,27 @@ static bool receive_session(struct fplinux_ui *ui)
 		 * the launcher from ACTIVE; the application then redraws
 		 * with gettext in the new language.
 		 */
-		if (setting_reply && !strcmp(message.name, "locale") &&
-		    is_language_code(message.value) &&
-		    strcmp(message.value, ui->locale))
-			set_language(ui, message.value);
-		if (setting_reply && !strcmp(message.name, "input_locale") &&
-		    is_language_code(message.value))
-			strcpy(ui->input_locale, message.value);
+		if (setting_reply &&
+		    setting->kind == FPLINUX_UI_SETTING_LOCALE &&
+		    is_language_code(setting->value.locale) &&
+		    strcmp(setting->value.locale, ui->locale))
+			set_language(ui, setting->value.locale);
+		if (setting_reply &&
+		    setting->kind == FPLINUX_UI_SETTING_INPUT_LOCALE &&
+		    is_language_code(setting->value.locale))
+			strcpy(ui->input_locale, setting->value.locale);
 		/*
 		 * The settings app also re-themes itself: the reply updates
 		 * the theme in place and the application rebuilds its
 		 * screens, whose styles keep the colours they were made with.
 		 */
-		if (setting_reply && !strcmp(message.name, "theme"))
-			set_theme_kind(ui, message.value);
+		if (setting_reply && setting->kind == FPLINUX_UI_SETTING_THEME)
+			set_theme_kind(
+				ui,
+				setting->value.theme ==
+						FPLINUX_UI_SESSION_THEME_DARK ?
+					FPLINUX_UI_THEME_DARK :
+					FPLINUX_UI_THEME_LIGHT);
 		if (message.type == FPLINUX_UI_SESSION_ACTIVE &&
 		    is_language_code(message.locale) &&
 		    strcmp(message.locale, ui->locale))
@@ -2055,20 +2068,14 @@ static void set_theme(struct fplinux_ui *ui)
 }
 
 /*
- * A SETTING reply with the new theme: "light" or "dark". The screen's own
- * colours follow at once; everything else is rebuilt by the application.
+ * The screen's own colours follow at once; everything else is rebuilt by
+ * the application.
  */
-static void set_theme_kind(struct fplinux_ui *ui, const char *value)
+static void set_theme_kind(struct fplinux_ui *ui,
+			   enum fplinux_ui_theme_kind kind)
 {
-	enum fplinux_ui_theme_kind kind;
 	lv_obj_t *screen;
 
-	if (!strcmp(value, "light"))
-		kind = FPLINUX_UI_THEME_LIGHT;
-	else if (!strcmp(value, "dark"))
-		kind = FPLINUX_UI_THEME_DARK;
-	else
-		return;
 	if (kind == ui->theme.kind)
 		return;
 	ui->theme.kind = kind;
@@ -3075,7 +3082,11 @@ bool fplinux_ui_audio_volume_step(struct fplinux_ui *ui, int step)
 {
 	struct fplinux_ui_session_message message = {
 		.type = FPLINUX_UI_SESSION_SETTING,
-		.name = "media_volume_step",
+		.setting = {
+			.kind = FPLINUX_UI_SETTING_MEDIA_VOLUME_STEP,
+			.operation = FPLINUX_UI_SETTING_STEP,
+			.value.step = step,
+		},
 	};
 
 	if (!ui || (step != -1 && step != 1)) {
@@ -3089,7 +3100,6 @@ bool fplinux_ui_audio_volume_step(struct fplinux_ui *ui, int step)
 	if (!++ui->volume_step_serial)
 		++ui->volume_step_serial;
 	message.serial = ui->volume_step_serial;
-	strcpy(message.value, step < 0 ? "-1" : "1");
 	return fplinux_ui_send(ui, &message);
 }
 

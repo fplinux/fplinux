@@ -54,10 +54,9 @@ bool fplinux_launcher_clock_update(struct fplinux_launcher_clock *clock,
 				   const char *data)
 {
 	struct clock_ring ring = { 0 };
-	uint64_t serial;
 
-	if (data[0] && clock_wire_ring_decode(data, strlen(data), &ring,
-					      &serial) != CLOCK_OK)
+	if (data[0] &&
+	    clock_wire_ring_decode(data, strlen(data), &ring) != CLOCK_OK)
 		return false;
 	if (ring.event.id != clock->ring.event.id)
 		clock->action_failed = false;
@@ -194,8 +193,6 @@ static void clock_command(struct fplinux_ui *ui,
 	if (!++clock->serial)
 		++clock->serial;
 	message.serial = clock->serial;
-	snprintf(message.name, sizeof(message.name), "%s",
-		 clock_wire_request_name(request.op));
 	clock->pending = message.serial;
 	clock->pending_event_id = request.event_id;
 	clock->action_failed = false;

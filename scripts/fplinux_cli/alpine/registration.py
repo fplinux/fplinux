@@ -62,10 +62,26 @@ CLI_SOURCES = (
     "lib/fplinux-shared/fplinux-cli.c",
     "include/fplinux/fplinux-cli.h",
 )
+AUDIO_PROTOCOL_SOURCES = (
+    "include/fplinux/fplinux-audio-protocol.h",
+    "include/fplinux/fplinux-audio-route.h",
+)
 AUDIO_CLIENT_SOURCES = (
     "lib/fplinux/fplinux-audio-client.c",
     "include/fplinux/fplinux-audio-client-internal.h",
-    "include/fplinux/fplinux-audio-protocol.h",
+    *AUDIO_PROTOCOL_SOURCES,
+)
+AUDIO_CONTROL_SOURCES = (
+    "lib/fplinux-shared/fplinux-audio-control.c",
+    "include/fplinux/fplinux-audio-control.h",
+)
+AUDIO_STATUS_SOURCES = (
+    "lib/fplinux-shared/fplinux-audio-status.c",
+    "include/fplinux/fplinux-audio-status.h",
+)
+AUDIO_RADIO_SOURCES = (
+    "lib/fplinux-shared/fplinux-audio-radio.c",
+    "include/fplinux/fplinux-audio-radio.h",
 )
 FONT_SOURCES = (
     "lib/fplinux-shared/fplinux-font.c",
@@ -89,6 +105,8 @@ STATUS_SCREEN_SOURCES = (
 BRIGHTNESS_CLIENT_SOURCES = (
     "lib/fplinux-shared/fplinux-brightness-client.c",
     "include/fplinux/fplinux-brightness-client.h",
+    "lib/fplinux-shared/fplinux-brightness-wire.c",
+    "include/fplinux/fplinux-brightness-wire.h",
 )
 BLUEZ_ADAPTER_SOURCES = (
     "lib/fplinux-shared/fplinux-bluez-adapter.c",
@@ -124,7 +142,10 @@ INPUT_SESSION_SOURCES = (
 SHARED_APORT_SOURCES = {
     "fplinux-audiod": (
         *CLI_SOURCES,
-        "include/fplinux/fplinux-audio-protocol.h",
+        *AUDIO_CONTROL_SOURCES,
+        *AUDIO_STATUS_SOURCES,
+        *AUDIO_RADIO_SOURCES,
+        *AUDIO_PROTOCOL_SOURCES,
     ),
     "fplinux-base": (
         *CLI_SOURCES,
@@ -143,7 +164,11 @@ SHARED_APORT_SOURCES = {
     "fplinux-debug-tools": (*DRM_SESSION_SOURCES, *CLI_SOURCES, *GPU_OUTPUT_SOURCES),
     "fplinux-example-apidemo": CLI_SOURCES,
     "fplinux-files": (*CLI_SOURCES, "include/fplinux/fplinux-storage.h"),
-    "fplinux-fm": (*CLI_SOURCES, "include/fplinux/fplinux-audio-protocol.h"),
+    "fplinux-fm": (
+        *CLI_SOURCES,
+        *AUDIO_RADIO_SOURCES,
+        *AUDIO_PROTOCOL_SOURCES,
+    ),
     "fplinux-gpu-probe": (*CLI_SOURCES, *GPU_SOURCES),
     "fplinux-icons": (
         "lib/fplinux/fplinux-ui-profile.json",
@@ -234,6 +259,8 @@ SHARED_APORT_SOURCES = {
         *UTF8_SOURCES,
         *CLOCK_SOURCES,
         *AUDIO_CLIENT_SOURCES,
+        *AUDIO_CONTROL_SOURCES,
+        *AUDIO_STATUS_SOURCES,
         *DRM_SESSION_SOURCES,
         *STATUS_SCREEN_SOURCES,
         *CLI_SOURCES,
@@ -281,6 +308,7 @@ SHARED_APORT_SOURCES = {
         *TEXT_INPUT_SOURCES,
         *UI_PROFILE_SOURCES,
         "include/fplinux/fplinux-ui-session.h",
+        "include/fplinux/fplinux-audio-route.h",
         "include/fplinux/fplinux-system-levels.h",
         "include/fplinux/fplinux-ui-vibration.h",
         "include/fplinux/fplinux-ui-lights.h",

@@ -3293,6 +3293,7 @@ check_raw_text_cancellation(struct fplinux_ui_frame_peer *compositor,
 	{
 		struct fplinux_ui_session_message redraw = {
 			.type = FPLINUX_UI_SESSION_SETTING,
+			.applied = true,
 			.serial = 100,
 		};
 		int left = 240, top = 320, right = -1, bottom = -1;
@@ -3810,9 +3811,11 @@ static void check_ack(struct fplinux_ui_frame_peer *compositor, int session,
 
 		snprintf(
 			packet, sizeof(packet),
-			"{\"type\":\"ERROR\",\"name\":\"%s\",\"value\":\"%s\","
+			"{\"type\":\"ERROR\",\"setting\":{\"kind\":\"%s\",\"op\":\"%s\",\"%s\":\"%s\"},"
 			"\"reason\":\"%s\",\"serial\":73,\"applied\":%s,"
 			"\"storage_state\":\"unpublished\",\"storage_error\":28}",
+			locale ? "locale" : "theme",
+			!strcmp(scenario, "unapplied-theme") ? "set" : "result",
 			locale ? "locale" : "theme", locale ? "ru" : "dark",
 			scenario,
 			!strcmp(scenario, "unapplied-theme") ? "false" :
@@ -3823,6 +3826,7 @@ static void check_ack(struct fplinux_ui_frame_peer *compositor, int session,
 	} else {
 		assert(!strcmp(scenario, "setting") ||
 		       !strcmp(scenario, "locale"));
+		update.applied = true;
 		strcpy(update.name,
 		       !strcmp(scenario, "locale") ? "locale" : "theme");
 		strcpy(update.value,
@@ -4650,6 +4654,7 @@ check_close_acknowledgments(struct fplinux_ui_frame_peer *compositor,
 	};
 	struct fplinux_ui_session_message appearance = {
 		.type = FPLINUX_UI_SESSION_SETTING,
+		.applied = true,
 		.name = "theme",
 		.value = "dark",
 		.serial = 73,

@@ -47,6 +47,12 @@ def settings_app(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
             name="compile whole Settings application",
         )
         executable = directory / "settings-app"
+        json_flags = run_process(
+            ["pkg-config", "--cflags", "--libs", "json-c"],
+            name="resolve session protocol dependency",
+            timeout=10,
+            check=True,
+        )
         compile_c(
             executable,
             [
@@ -56,11 +62,13 @@ def settings_app(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
                 str(ROOT / "lib/fplinux-shared/fplinux-settings-values.c"),
                 str(ROOT / "lib/fplinux-shared/fplinux-system-info.c"),
                 str(ROOT / "lib/fplinux/fplinux-multitap.c"),
+                str(ROOT / "lib/fplinux/fplinux-ui-session.c"),
                 str(ROOT / "lib/fplinux/fplinux-utf8.c"),
                 str(ROOT / "lib/fplinux-shared/fplinux-cli.c"),
                 str(ROOT / "lib/fplinux/fplinux-ui-profile.c"),
                 str(app_object),
                 "-Wl,--wrap=fopen",
+                *json_flags.stdout.split(),
                 *gettext_link_flags(),
             ],
             name="link Settings application harness",

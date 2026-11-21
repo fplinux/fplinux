@@ -19,6 +19,7 @@ source="fstab inittab interfaces hostname issue os-release fplinux-zram.initd
 	fplinux-kmsg.c fplinux-cli.c fplinux-cli.h
 	fplinux-brightness.c fplinux-brightnessd.c
 	fplinux-brightness-client.c fplinux-brightness-client.h
+	fplinux-brightness-wire.c fplinux-brightness-wire.h
 	fplinux-vt-guardian.c"
 builddir="$srcdir"
 
@@ -29,9 +30,11 @@ build() {
 	"$CC" $CPPFLAGS $CFLAGS -Os -std=c11 -Wall -Wextra -Werror \
 		-I"$srcdir" "$srcdir/fplinux-brightness.c" \
 		"$srcdir/fplinux-brightness-client.c" "$srcdir/fplinux-cli.c" \
+		"$srcdir/fplinux-brightness-wire.c" \
 		$LDFLAGS -o fplinux-brightness
 	"$CC" $CPPFLAGS $CFLAGS -Os -std=c11 -Wall -Wextra -Werror \
 		-I"$srcdir" "$srcdir/fplinux-brightnessd.c" \
+		"$srcdir/fplinux-brightness-wire.c" \
 		"$srcdir/fplinux-cli.c" $LDFLAGS -o fplinux-brightnessd
 	"$CC" $CPPFLAGS $CFLAGS -Os -std=c11 -Wall -Wextra -Werror \
 		"$srcdir/fplinux-vt-guardian.c" $LDFLAGS \
@@ -97,8 +100,10 @@ f57b07700c891e7e6ba31beabcdb0e158714f5aa57840a250e00286efbb41c2bf9e6fd4145fd5c2c
 60be1ccccf0215ea13bc64fd442a0498e7db203234ce74f92cec502295e8ac703a089438848b9a1850102836855537f561e9bd8313751574a069eb0ec6dcf31a  fplinux-cli.c
 9677a324ea1cbcca154f472c83eb0660badfa11c2b444116f27080bd839dee2ab9ea6ef3b0c495f6074207559b813c843f284786f8b1e3c89023121b5aacb453  fplinux-cli.h
 cba8e45db60923c30ed93cd2fca674447d256c00ac6068c5182cf0b4134a264e9c81ad42c092471ad6f72c24a9ea43188f157f562f33a5ff2335c565f570a0dc  fplinux-brightness.c
-1ec12c5b05b0961b3899cd164cde2b5bc5beb05845015f2f965395ea1c9d23c19f9ced79308e07839abfaffec2adfa50ee8b26c5d85fbaa73a0e7eebad6f61e4  fplinux-brightnessd.c
-a16c1b2b84831be3da5bbf1d198c827a4bfde8bb435e4ac6d52777ca8472cedc700be5007a4320e6ffcafcf3ff3183a0de4e7068a94576e0016ca9b09c650bcf  fplinux-brightness-client.c
+818743e15d0024433ea6867fa6707eb35a775ddd7a94cf63d4e1ee4088bb422764c77473a4670b07d800775c9df52a0522cb0e2d15b06f95e4aba815427d89fa  fplinux-brightnessd.c
+b24bf4a754f4afb0314899c0ab3e444015e476298cdb7c2231541a9d065081e4ce3af8ff9149422c99be2618251a9e2fa0a282e56d7584811eadfd1e781a9836  fplinux-brightness-client.c
 031e8a9a9fed64c19b947d6d1b7510f2bf0dd76ae7712cd23f8fbf838a28e29eefec2adaa772070f75c930a42bf0e77290825ea88fd545800dbca30bdd61f0ee  fplinux-brightness-client.h
+0baf730d5808e7a468e9badab3abafaaacd0385e89f0a59f0c5cba5523ad86cccc795d44ac7af8ef337d1ad5fa146cc64662415da50bc1357cba771e17876cd1  fplinux-brightness-wire.c
+a201d36dadfba0139ad8b07c432475c8457f66f94e91bf71d6e5918b9d10b6239dd0ade9e6b90b7c4eb0355143c4b996a010f2fcfd4f54544c52dda311b6f0c3  fplinux-brightness-wire.h
 724c6b464ca56d711b60530e85277e3f006c8042e48b1220b2e4dcc9a0f1e6892f362a8847420d5edaafce9f4b31d4831c5982bfde7f30514e4a533a30943fef  fplinux-vt-guardian.c
 "

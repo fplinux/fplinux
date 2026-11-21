@@ -1,22 +1,18 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 #include "clock-client.h"
 
-#include <stdio.h>
 #include <string.h>
 
 static bool send_request(struct fplinux_ui *ui,
 			 const struct clock_request *request, uint32_t serial)
 {
 	struct fplinux_ui_session_message message = { 0 };
-	const char *name = clock_wire_request_name(request->op);
 
-	if (!name ||
-	    clock_wire_request_encode(request, message.clock_data,
+	if (clock_wire_request_encode(request, message.clock_data,
 				      sizeof(message.clock_data)) != CLOCK_OK)
 		return false;
 	message.type = FPLINUX_UI_SESSION_CLOCK;
 	message.serial = serial;
-	snprintf(message.name, sizeof(message.name), "%s", name);
 	if (!fplinux_ui_send(ui, &message))
 		return false;
 	return true;
@@ -57,7 +53,6 @@ clock_client_receive(struct clock_client *client,
 {
 	struct clock_model snapshot;
 	struct clock_result decoded_result;
-	uint64_t serial;
 	const char *name;
 	size_t length;
 
@@ -78,8 +73,7 @@ clock_client_receive(struct clock_client *client,
 			break;
 	if (length == sizeof(message->clock_data) ||
 	    clock_wire_snapshot_decode(message->clock_data, length, &snapshot,
-				       &decoded_result, &serial) != CLOCK_OK ||
-	    serial != message->serial) {
+				       &decoded_result) != CLOCK_OK) {
 		client->pending = client->request.op != CLOCK_REQUEST_SNAPSHOT;
 		client->deadline_ms = 0;
 		return CLOCK_CLIENT_ERROR;

@@ -130,7 +130,8 @@ struct setting_request {
 	bool preview;
 	bool feedback;
 	bool step;
-	char name[FPLINUX_UI_SESSION_NAME_BYTES];
+	enum fplinux_ui_setting_kind kind;
+	enum fplinux_audio_route route;
 };
 
 struct volume_control {
@@ -268,6 +269,7 @@ struct fplinux_session {
 	bool launcher_draws_app;
 	/* The last ACTIVE sent to the running launcher. */
 	struct fplinux_ui_session_message last_active;
+	uint64_t last_active_clock_event;
 	bool last_active_sent;
 	/* The display as last applied; a wake from OFF lights after a frame. */
 	enum fplinux_ui_session_display lit_display;
@@ -337,14 +339,13 @@ struct fplinux_session {
 	struct fplinux_session_volume volume;
 	struct fplinux_system_levels system_levels;
 	struct setting_request output_request;
-	char output_restore[16];
+	enum fplinux_audio_route output_restore;
 	struct setting_request capabilities_request;
 	int audio_status_fd;
 	uint64_t audio_status_deadline_ms;
 	bool audio_speaker;
 	bool audio_headphones;
 	bool audio_capabilities_known;
-	unsigned int audio_active_output;
 	struct fplinux_session_wireless *wireless;
 	bool wireless_initialized;
 	struct setting_request wireless_request;
@@ -374,16 +375,15 @@ fplinux_session_setting_requester(struct fplinux_session *session,
 void fplinux_session_remember_setting_request(
 	struct setting_request *request, const struct process *process,
 	const struct fplinux_ui_session_message *message);
-void fplinux_session_reply_with_serial(struct process *process,
-				       enum fplinux_ui_session_message_type type,
-				       const char *name, const char *value,
-				       const char *reason, uint32_t serial);
+void fplinux_session_setting_error(
+	struct process *process,
+	const struct fplinux_ui_session_message *request, const char *reason);
 void fplinux_session_setting_reply(struct fplinux_session *session,
-				   struct process *process, const char *name,
-				   const char *value, uint32_t serial,
-				   bool mutation);
+				   struct process *process,
+				   enum fplinux_ui_setting_kind kind,
+				   union fplinux_ui_setting_value value,
+				   uint32_t serial, bool mutation);
 
-bool fplinux_session_volume_has_setting(const char *name);
 bool fplinux_session_volume_setting(
 	struct fplinux_session *session, struct process *process,
 	const struct fplinux_ui_session_message *message);

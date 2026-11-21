@@ -59,6 +59,7 @@ ui_host_compile -pthread -I"$common" -I"$screens_dir" -I"$session" \
 	"$screens_dir/launcher-session-volume.c" "$common/ui-frame-peer.c" \
 	"$session/session-core.c" "$session/session-child.c" \
 	"$session/session-storage.c" "$session/session-audio.c" "$session/session-volume.c" \
+	"$ui_host_shared/fplinux-audio-control.c" "$ui_host_shared/fplinux-audio-status.c" \
 	"$session/session-vibration.c" "$session/session-vibrator.c" \
 	"$session/session-power.c" "$session/session-settings.c" \
 	"$session/session-battery.c" "$session/session-clock.c" \
@@ -66,7 +67,8 @@ ui_host_compile -pthread -I"$common" -I"$screens_dir" -I"$session" \
 	"$session/session-wifi-station.c" "$session/session-wifi-dhcp.c" \
 	"$ui_host_shared/fplinux-settings-values.c" \
 	"$ui_host_shared/fplinux-clock-model.c" "$ui_host_shared/fplinux-clock-wire.c" \
-	"$ui_host_shared/fplinux-brightness-client.c" "$ui_host_shared/fplinux-keypad-light.c" \
+	"$ui_host_shared/fplinux-brightness-client.c" "$ui_host_shared/fplinux-brightness-wire.c" \
+	"$ui_host_shared/fplinux-keypad-light.c" \
 	"$ui_host_shared/fplinux-desktop-entry.c" "$ui_host_ui/fplinux-ui-prefs.c" \
 	"$ui_host_ui/fplinux-ui-profile.c" "$ui_host_ui/fplinux-ui-session.c" \
 	"$ui_host_ui/fplinux-language.c" "$ui_host_ui/fplinux-utf8.c" \

@@ -177,6 +177,7 @@ static void redraw(struct capture *capture)
 {
 	struct fplinux_ui_session_message setting = {
 		.type = FPLINUX_UI_SESSION_SETTING,
+		.applied = true,
 		.serial = ++capture->serial,
 	};
 

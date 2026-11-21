@@ -71,6 +71,9 @@ struct clock_ring {
 	uint64_t missed_total;
 };
 
+bool clock_wire_request_equal(const struct clock_request *left,
+			      const struct clock_request *right);
+
 enum clock_status clock_wire_request_encode(const struct clock_request *request,
 					    char *json, size_t capacity);
 enum clock_status clock_wire_request_decode(const char *json, size_t length,
@@ -89,18 +92,14 @@ const char *clock_wire_request_name(enum clock_request_op op);
  */
 enum clock_status clock_wire_snapshot_encode(const struct clock_model *model,
 					     const struct clock_result *result,
-					     uint64_t serial, char *json,
-					     size_t capacity);
+					     char *json, size_t capacity);
 enum clock_status clock_wire_snapshot_decode(const char *json, size_t length,
 					     struct clock_model *model,
-					     struct clock_result *result,
-					     uint64_t *serial);
+					     struct clock_result *result);
 enum clock_status clock_wire_ring_encode(const struct clock_ring *ring,
-					 uint64_t serial, char *json,
-					 size_t capacity);
+					 char *json, size_t capacity);
 enum clock_status clock_wire_ring_decode(const char *json, size_t length,
-					 struct clock_ring *ring,
-					 uint64_t *serial);
+					 struct clock_ring *ring);
 void clock_wire_ring_from_model(const struct clock_model *model,
 				struct clock_ring *ring);
 

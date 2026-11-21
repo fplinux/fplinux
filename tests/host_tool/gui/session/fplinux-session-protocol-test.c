@@ -296,9 +296,13 @@ static void check_input_locales(int sender, int receiver)
 	check(fplinux_ui_session_send(sender, &message) &&
 		      fplinux_ui_session_receive(receiver, &received) == 1 &&
 		      received.type == FPLINUX_UI_SESSION_SETTING &&
+		      received.setting.kind ==
+			      FPLINUX_UI_SETTING_INPUT_LOCALE &&
+		      received.setting.operation == FPLINUX_UI_SETTING_SET &&
+		      !strcmp(received.setting.value.locale, "ru") &&
 		      !strcmp(received.name, "input_locale") &&
 		      !strcmp(received.value, "ru"),
-	      "SETTING carries the input language through name and value");
+	      "legacy C input language becomes a typed setting");
 	for (size_t i = 0; i < sizeof(invalid) / sizeof(invalid[0]); ++i)
 		check(receive_raw(sender, receiver, invalid[i], &received) ==
 				      -1 &&
@@ -479,11 +483,12 @@ static void check_state_packets(int sender, int receiver)
 	      "battery -1 means no battery");
 	check(receive_raw(sender, receiver,
 			  "{\"type\":\"SELECT\",\"selected_id\":\"org.a\","
-			  "\"value\":\"catalogue\"}",
+			  "\"launcher_view\":\"catalogue\"}",
 			  &received) == 1 &&
 		      received.type == FPLINUX_UI_SESSION_SELECT &&
 		      !strcmp(received.selected_id, "org.a") &&
-		      !strcmp(received.value, "catalogue") &&
+		      received.launcher_view ==
+			      FPLINUX_UI_LAUNCHER_VIEW_CATALOGUE &&
 		      received.display == FPLINUX_UI_SESSION_DISPLAY_ON &&
 		      !received.locked,
 	      "SELECT reports catalogue selection with absent state defaults");
@@ -546,6 +551,18 @@ static void check_tasks_view(int sender, int receiver)
 	sent.tasks_view = true;
 	check(!fplinux_ui_session_send(sender, &sent) && errno == EINVAL,
 	      "sender rejects a true Tasks subview outside ACTIVE");
+	check(receive_raw(
+		      sender, receiver,
+		      "{\"type\":\"SELECT\",\"launcher_view\":\"tasks\",\"enabled\":true,\"selected_id\":\"org.a\"}",
+		      &received) == -1 &&
+		      errno == EPROTO,
+	      "opening Tasks cannot change the base selection");
+	check(receive_raw(
+		      sender, receiver,
+		      "{\"type\":\"SELECT\",\"launcher_view\":\"quick-settings\",\"enabled\":true,\"launcher_catalogue\":\"list\"}",
+		      &received) == -1 &&
+		      errno == EPROTO,
+	      "opening Quick settings cannot change the catalogue layout");
 }
 
 static void check_playback(int sender, int receiver)
@@ -680,31 +697,25 @@ static void check_clock_packets(int sender, int receiver)
 		"\"overflow\":18446744073709551616,"
 		"\"value\":1,\"value\":2,\"\\u0076alue\":3}";
 	static const char *const domain_text[] = {
-		"{",
-		"[]",
-		"null",
 		"{'id':1}",
 		"{\"id\":01}",
 		"{\"id\":NaN}",
 		"{\"id\\u0000hidden\":1}",
-		"{}{}",
 	};
 	static const char *const invalid_packets[] = {
-		"{\"type\":\"clock\",\"clock\":{}}",
+		"{\"type\":\"clock\",\"clock\":\"{}\"}",
 		"{\"type\":\"ACTIVE\",\"clock\":[]}",
 		"{\"type\":\"clock\",\"clock\":null}",
 		"{\"type\":\"clock\",\"clock\":7}",
 		"{\"type\":\"clock\",\"clock\":true}",
-		"{\"type\":\"clock\",\"clock\":\"a\\u0000b\"}",
-		"{\"type\":\"clock\",\"clock\":\"a\\nb\"}",
-		"{\"type\":\"clock\",\"clock\":\"a\\tb\"}",
-		"{\"type\":\"clock\",\"clock\":\"a\\u007fb\"}",
-		"{\"type\":\"clock\",\"clock\":\"\xd0\"}",
+		"{\"type\":\"clock\",\"clock\":{\"label\":\"\xd0\"}}",
+		"{\"type\":\"clock\",\"clock\":{},\"\\u0063lock\":{}}",
+		"{\"type\":\"clock\",\"clock\":{}/* gap */,\"clock\":{}}",
+		"{\"type\":\"clock\",\"clock\":{},\"clock\\u0000other\":{}}",
 	};
 	struct fplinux_ui_session_message sent = {
 		.type = FPLINUX_UI_SESSION_CLOCK,
 		.serial = UINT32_MAX,
-		.name = "snapshot",
 	};
 	struct fplinux_ui_session_message received;
 	char packet[FPLINUX_UI_SESSION_CLOCK_BYTES + 64];
@@ -714,38 +725,37 @@ static void check_clock_packets(int sender, int receiver)
 			  &received) == 1 &&
 		      received.type == FPLINUX_UI_SESSION_CLOCK &&
 		      !received.clock_data[0],
-	      "a literal clock query carries no snapshot text");
+	      "a clock envelope may omit the object");
 	check(receive_raw(sender, receiver,
 			  "{\"type\":\"clock\",\"serial\":4294967295,"
-			  "\"clock\":\"{\\\"id\\\":18446744073709551615,"
-			  "\\\"title\\\":\\\"Будильник\\\"}\"}",
+			  "\"clock\":{\"id\":18446744073709551615,"
+			  "\"title\":\"Будильник\"}}",
 			  &received) == 1 &&
 		      received.type == FPLINUX_UI_SESSION_CLOCK &&
 		      received.serial == UINT32_MAX &&
 		      !strcmp(received.clock_data,
 			      "{\"id\":18446744073709551615,\"title\":\"Будильник\"}"),
-	      "literal clock text preserves quotes, UTF-8 and uint64 digits");
+	      "a nested clock object preserves UTF-8 and uint64 digits");
 	strcpy(sent.clock_data, data);
 	check(fplinux_ui_session_send(sender, &sent) &&
 		      fplinux_ui_session_receive(receiver, &received) == 1 &&
 		      received.type == FPLINUX_UI_SESSION_CLOCK &&
 		      received.serial == UINT32_MAX &&
 		      !strcmp(received.clock_data, data),
-	      "clock text preserves duplicate keys and overflowing numbers for its owner");
+	      "clock object preserves duplicate keys and overflowing numbers for its owner");
 	check(receive_raw(sender, receiver,
-			  "{\"type\":\"ACTIVE\",\"clock\":\"{\\\"id\\\":7}\","
+			  "{\"type\":\"ACTIVE\",\"\\u0063lock\":{\"id\":7},"
 			  "\"serial\":17,\"title\":\"Clock\"}",
 			  &received) == 1 &&
 		      received.type == FPLINUX_UI_SESSION_ACTIVE &&
 		      received.serial == 17 &&
 		      !strcmp(received.title, "Clock") &&
 		      !strcmp(received.clock_data, "{\"id\":7}"),
-	      "ACTIVE carries clock text beside ordinary state fields");
+	      "ACTIVE carries an object beside ordinary state fields");
 	sent.type = FPLINUX_UI_SESSION_HOME;
 	check(!fplinux_ui_session_send(sender, &sent) && errno == EINVAL,
 	      "an unrelated message cannot send clock text");
-	check(receive_raw(sender, receiver,
-			  "{\"type\":\"HOME\",\"clock\":\"{}\"}",
+	check(receive_raw(sender, receiver, "{\"type\":\"HOME\",\"clock\":{}}",
 			  &received) == -1 &&
 		      errno == EPROTO,
 	      "an unrelated literal message cannot carry clock data");
@@ -757,28 +767,30 @@ static void check_clock_packets(int sender, int receiver)
 			      fplinux_ui_session_receive(receiver, &received) ==
 				      1 &&
 			      !strcmp(received.clock_data, domain_text[i]),
-		      "transport preserves malformed domain text for the clock owner's rejection");
+		      "transport preserves domain tokens for the clock owner's strict check");
 	}
 	for (size_t i = 0;
 	     i < sizeof(invalid_packets) / sizeof(invalid_packets[0]); ++i)
 		check(receive_raw(sender, receiver, invalid_packets[i],
 				  &received) == -1 &&
 			      errno == EPROTO,
-		      "clock transport rejects non-strings, controls, NUL and invalid UTF-8");
-	for (size_t i = 0; i < sizeof(sent.clock_data) - 1; ++i)
-		sent.clock_data[i] = i % 2 ? '\\' : '"';
-	sent.clock_data[sizeof(sent.clock_data) - 1] = '\0';
+		      "clock transport rejects scalars, duplicate members and invalid UTF-8");
+	strcpy(sent.clock_data, "{\"label\":\"");
+	prefix = strlen(sent.clock_data);
+	memset(sent.clock_data + prefix, 'x',
+	       sizeof(sent.clock_data) - prefix - 3);
+	memcpy(sent.clock_data + sizeof(sent.clock_data) - 3, "\"}", 3);
 	check(fplinux_ui_session_send(sender, &sent) &&
 		      fplinux_ui_session_receive(receiver, &received) == 1 &&
 		      !strcmp(received.clock_data, sent.clock_data),
-	      "maximum clock text fits when every quote and backslash needs escaping");
-	prefix = strlen("{\"type\":\"clock\",\"clock\":\"");
-	memcpy(packet, "{\"type\":\"clock\",\"clock\":\"", prefix);
+	      "the largest bounded clock object fits in one packet");
+	prefix = strlen("{\"type\":\"clock\",\"clock\":{\"label\":\"");
+	memcpy(packet, "{\"type\":\"clock\",\"clock\":{\"label\":\"", prefix);
 	memset(packet + prefix, 'x', FPLINUX_UI_SESSION_CLOCK_BYTES);
-	memcpy(packet + prefix + FPLINUX_UI_SESSION_CLOCK_BYTES, "\"}", 3);
+	memcpy(packet + prefix + FPLINUX_UI_SESSION_CLOCK_BYTES, "\"}}", 4);
 	check(receive_raw(sender, receiver, packet, &received) == -1 &&
 		      errno == EPROTO,
-	      "clock text exceeding its own bound is rejected inside a valid packet");
+	      "clock object exceeding its own bound is rejected inside a valid packet");
 	const char *const controls[] = { "a\nb", "a\tb",
 					 "a\x7f"
 					 "b" };
@@ -787,7 +799,7 @@ static void check_clock_packets(int sender, int receiver)
 		strcpy(sent.clock_data, controls[i]);
 		check(!fplinux_ui_session_send(sender, &sent) &&
 			      errno == EINVAL,
-		      "sender rejects clock control characters before escaping expands them");
+		      "sender rejects invalid clock data");
 	}
 	memset(sent.clock_data, 'x', sizeof(sent.clock_data));
 	check(!fplinux_ui_session_send(sender, &sent) && errno == EINVAL,
@@ -970,6 +982,11 @@ static void check_close_preparation(int sender, int receiver)
 {
 	struct fplinux_ui_session_message received;
 	static const char *const replies[] = { "ready", "cancel", "wait" };
+	static const enum fplinux_ui_session_close_response decisions[] = {
+		FPLINUX_UI_SESSION_CLOSE_READY,
+		FPLINUX_UI_SESSION_CLOSE_CANCEL,
+		FPLINUX_UI_SESSION_CLOSE_WAIT,
+	};
 	static const char *const invalid[] = {
 		"{\"type\":\"PREPARE_CLOSE\"}",
 		"{\"type\":\"PREPARE_CLOSE\",\"serial\":0}",
@@ -1008,7 +1025,7 @@ static void check_close_preparation(int sender, int receiver)
 		check(receive_raw(sender, receiver, packet, &received) == 1 &&
 			      received.type == FPLINUX_UI_SESSION_CLOSE_REPLY &&
 			      received.serial == 17 &&
-			      !strcmp(received.value, replies[i]),
+			      received.close_response == decisions[i],
 		      "close reply preserves its attempt and decision");
 	}
 	for (size_t i = 0; i < sizeof(invalid) / sizeof(invalid[0]); ++i)
@@ -1022,11 +1039,11 @@ static void check_storage_results(int sender, int receiver)
 {
 	struct fplinux_ui_session_message received;
 	static const char *const valid[] = {
-		"{\"type\":\"SETTING\",\"name\":\"theme\",\"value\":\"dark\","
+		"{\"type\":\"SETTING\",\"setting\":{\"kind\":\"theme\",\"op\":\"result\",\"theme\":\"dark\"},"
 		"\"applied\":true,\"storage_state\":\"durable\",\"storage_error\":0}",
-		"{\"type\":\"ERROR\",\"name\":\"theme\",\"value\":\"dark\","
+		"{\"type\":\"ERROR\",\"setting\":{\"kind\":\"theme\",\"op\":\"result\",\"theme\":\"dark\"},"
 		"\"applied\":true,\"storage_state\":\"unpublished\",\"storage_error\":28}",
-		"{\"type\":\"ERROR\",\"name\":\"locale\",\"value\":\"ru\","
+		"{\"type\":\"ERROR\",\"setting\":{\"kind\":\"locale\",\"op\":\"result\",\"locale\":\"ru\"},"
 		"\"applied\":true,\"storage_state\":\"published-unsynced\",\"storage_error\":5}",
 	};
 	static const char *const invalid[] = {
@@ -1069,6 +1086,69 @@ static void check_storage_results(int sender, int receiver)
 				      -1 &&
 			      errno == EPROTO,
 		      "invalid storage facts and unrelated packet fields are rejected");
+}
+
+static void check_setting_packets(int sender, int receiver)
+{
+	static const char *const invalid[] = {
+		"{\"type\":\"SETTING\",\"name\":\"volume\",\"value\":\"3\"}",
+		"{\"type\":\"SETTING\",\"setting\":{\"kind\":\"wifi\",\"op\":\"set\",\"enabled\":1}}",
+		"{\"type\":\"SETTING\",\"setting\":{\"kind\":\"wifi\",\"op\":\"get\",\"enabled\":true}}",
+		"{\"type\":\"SETTING\",\"setting\":{\"kind\":\"wifi\",\"op\":\"preview\",\"enabled\":true}}",
+		"{\"type\":\"SETTING\",\"setting\":{\"kind\":\"volume\",\"op\":\"set\",\"level\":\"3\"}}",
+		"{\"type\":\"SETTING\",\"setting\":{\"kind\":\"brightness_preview\",\"op\":\"cancel\",\"level\":0}}",
+		"{\"type\":\"SETTING\",\"setting\":{\"kind\":\"media_volume_step\",\"op\":\"step\",\"step\":0}}",
+		"{\"type\":\"SETTING\",\"setting\":{\"kind\":\"audio_output\",\"op\":\"set\",\"route\":\"USB\"}}",
+		"{\"type\":\"SETTING\",\"applied\":true,\"setting\":{\"kind\":\"audio_outputs\",\"op\":\"result\",\"routes\":[\"AUTO\",\"AUTO\"]}}",
+	};
+	struct fplinux_ui_session_message received;
+	struct fplinux_ui_session_message legacy = {
+		.type = FPLINUX_UI_SESSION_SETTING,
+		.name = "media_volume_step",
+		.value = "-1",
+		.serial = 57,
+	};
+	char packet[FPLINUX_UI_SESSION_PACKET_BYTES] = { 0 };
+
+	check(receive_raw(
+		      sender, receiver,
+		      "{\"type\":\"SETTING\",\"setting\":{\"kind\":\"wifi\",\"op\":\"set\",\"enabled\":false}}",
+		      &received) == 1 &&
+		      received.setting.kind == FPLINUX_UI_SETTING_WIFI &&
+		      received.setting.operation == FPLINUX_UI_SETTING_SET &&
+		      !received.setting.value.enabled,
+	      "Wi-Fi off is a boolean mutation");
+	check(receive_raw(
+		      sender, receiver,
+		      "{\"type\":\"SETTING\",\"applied\":true,\"setting\":{\"kind\":\"audio_outputs\",\"op\":\"result\",\"routes\":[\"HEADPHONES\",\"AUTO\"]}}",
+		      &received) == 1 &&
+		      received.setting.value.routes ==
+			      (FPLINUX_UI_AUDIO_OUTPUT(
+				       FPLINUX_AUDIO_ROUTE_AUTO) |
+			       FPLINUX_UI_AUDIO_OUTPUT(
+				       FPLINUX_AUDIO_ROUTE_HEADPHONES)),
+	      "Available audio outputs are a set independent of wire order");
+	check(receive_raw(
+		      sender, receiver,
+		      "{\"type\":\"SETTING\",\"applied\":true,\"serial\":57,\"setting\":{\"kind\":\"media_volume_step\",\"op\":\"result\",\"level\":9}}",
+		      &received) == 1 &&
+		      received.setting.value.level == 9 &&
+		      received.serial == 57 &&
+		      !strcmp(received.name, "media_volume_step") &&
+		      !strcmp(received.value, "9"),
+	      "Media step replies preserve the documented C name and serial");
+	check(fplinux_ui_session_send(sender, &legacy) &&
+		      recv(receiver, packet, sizeof(packet) - 1, 0) > 0 &&
+		      strstr(packet,
+			     "\"setting\":{\"kind\":\"media_volume_step\",\"op\":\"step\",\"step\":-1}") &&
+		      !strstr(packet, "\"name\"") &&
+		      !strstr(packet, "\"value\""),
+	      "Legacy C source arguments produce a numeric step packet");
+	for (size_t i = 0; i < sizeof(invalid) / sizeof(invalid[0]); ++i)
+		check(receive_raw(sender, receiver, invalid[i], &received) ==
+				      -1 &&
+			      errno == EPROTO,
+		      "Invalid setting operations and payloads are rejected");
 }
 
 static void check_activation(int sender, int receiver)
@@ -1538,6 +1618,7 @@ int main(void)
 	check_tasks(pair[0], pair[1]);
 	check_close_preparation(pair[0], pair[1]);
 	check_storage_results(pair[0], pair[1]);
+	check_setting_packets(pair[0], pair[1]);
 	check_launch_frame(pair[0], pair[1]);
 	for (size_t i = 0; i < sizeof(invalid) / sizeof(invalid[0]); ++i)
 		check(receive_raw(pair[0], pair[1], invalid[i], &received) ==

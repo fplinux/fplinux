@@ -3,21 +3,15 @@
 #include "session-audio.h"
 
 #include <errno.h>
-#include <limits.h>
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
 #include <sys/epoll.h>
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <unistd.h>
 
-#include "fplinux-audio-protocol.h"
-
 /* Packets read from the service in one dispatch; the rest wait for the next. */
 #define FPLINUX_SESSION_AUDIO_READS 32
-
-static const char *const class_names[] = { "MEDIA", "ALARM" };
 
 _Static_assert(FPLINUX_SESSION_AUDIO_PATH_BYTES ==
 		       sizeof(((struct sockaddr_un *)0)->sun_path),
@@ -32,7 +26,7 @@ void fplinux_session_audio_init(struct fplinux_session_audio *audio,
 	audio->backoff_ms = FPLINUX_SESSION_AUDIO_RETRY_MS;
 	for (unsigned int i = 0; i < FPLINUX_SESSION_AUDIO_CLASSES; ++i)
 		audio->volume[i].desired = FPLINUX_AUDIO_VOLUME_MAX;
-	strcpy(audio->desired_output, "AUTO");
+	audio->desired_output = FPLINUX_AUDIO_ROUTE_AUTO;
 	if (!socket_path)
 		return;
 	if (strlen(socket_path) >= sizeof(audio->socket_path)) {
@@ -88,19 +82,13 @@ static void lose(struct fplinux_session_audio *audio, const char *reason,
 }
 
 /* A command never waits: one that cannot go now closes the connection. */
-static bool send_text(struct fplinux_session_audio *audio, const char *text,
-		      uint64_t now_ms)
+static bool send_control(struct fplinux_session_audio *audio,
+			 const struct fplinux_audio_control *message,
+			 uint64_t now_ms)
 {
-	size_t length = strlen(text);
-	ssize_t sent;
-
-	do {
-		sent = send(audio->fd, text, length,
-			    MSG_DONTWAIT | MSG_NOSIGNAL);
-	} while (sent < 0 && errno == EINTR);
-	if (sent == (ssize_t)length)
+	if (fplinux_audio_control_send(audio->fd, message) == 0)
 		return true;
-	lose(audio, sent < 0 ? strerror(errno) : "short send", now_ms);
+	lose(audio, strerror(errno), now_ms);
 	return false;
 }
 
@@ -108,11 +96,16 @@ static bool send_volume(struct fplinux_session_audio *audio,
 			enum fplinux_session_audio_class class, uint64_t now_ms)
 {
 	struct fplinux_session_audio_volume *volume = &audio->volume[class];
-	char text[FPLINUX_AUDIO_CONTROL_BYTES];
+	struct fplinux_audio_control command = {
+		.type = FPLINUX_AUDIO_SET_VOLUME,
+		.volume = {
+			.class = class == FPLINUX_SESSION_AUDIO_MEDIA ?
+					 FPLINUX_AUDIO_MEDIA : FPLINUX_AUDIO_ALARM,
+			.level = volume->desired,
+		},
+	};
 
-	snprintf(text, sizeof(text), FPLINUX_AUDIO_CONTROL_VOLUME " %s %u",
-		 class_names[class], volume->desired);
-	if (!send_text(audio, text, now_ms))
+	if (!send_control(audio, &command, now_ms))
 		return false;
 	volume->sent = volume->desired;
 	volume->waiting = true;
@@ -122,13 +115,14 @@ static bool send_volume(struct fplinux_session_audio *audio,
 
 static bool send_output(struct fplinux_session_audio *audio, uint64_t now_ms)
 {
-	char text[FPLINUX_AUDIO_CONTROL_BYTES];
+	struct fplinux_audio_control command = {
+		.type = FPLINUX_AUDIO_SET_OUTPUT,
+		.route = audio->desired_output,
+	};
 
-	snprintf(text, sizeof(text), FPLINUX_AUDIO_CONTROL_OUTPUT " %s",
-		 audio->desired_output);
-	if (!send_text(audio, text, now_ms))
+	if (!send_control(audio, &command, now_ms))
 		return false;
-	strcpy(audio->sent_output, audio->desired_output);
+	audio->sent_output = audio->desired_output;
 	audio->output_waiting = true;
 	audio->output_error = 0;
 	audio->output_deadline_ms =
@@ -139,11 +133,15 @@ static bool send_output(struct fplinux_session_audio *audio, uint64_t now_ms)
 static bool tell(struct fplinux_session_audio *audio,
 		 struct fplinux_session_audio_process *process, uint64_t now_ms)
 {
-	char text[FPLINUX_AUDIO_CONTROL_BYTES];
+	struct fplinux_audio_control command = {
+		.type = FPLINUX_AUDIO_CONTROL_ELIGIBLE,
+		.eligible = {
+			.pid = process->pid,
+			.enabled = process->eligible,
+		},
+	};
 
-	snprintf(text, sizeof(text), FPLINUX_AUDIO_CONTROL_ELIGIBLE " %ld %d",
-		 (long)process->pid, process->eligible);
-	if (!send_text(audio, text, now_ms))
+	if (!send_control(audio, &command, now_ms))
 		return false;
 	process->told_eligible = process->eligible;
 	return true;
@@ -154,18 +152,26 @@ static bool announce(struct fplinux_session_audio *audio,
 		     struct fplinux_session_audio_process *process,
 		     uint64_t now_ms)
 {
-	char text[FPLINUX_AUDIO_CONTROL_BYTES];
+	struct fplinux_audio_control command;
 
 	if (process->clock)
-		snprintf(text, sizeof(text),
-			 FPLINUX_AUDIO_CONTROL_CLOCK " %ld %lu",
-			 (long)process->pid, (unsigned long)process->uid);
+		command = (struct fplinux_audio_control){
+			.type = FPLINUX_AUDIO_CONTROL_CLOCK,
+			.clock = {
+				.pid = process->pid,
+				.uid = process->uid,
+			},
+		};
 	else
-		snprintf(text, sizeof(text),
-			 FPLINUX_AUDIO_CONTROL_APP " %ld %lu %s %d",
-			 (long)process->pid, (unsigned long)process->uid,
-			 process->app_id, process->background);
-	if (!send_text(audio, text, now_ms))
+		command = (struct fplinux_audio_control){
+			.type = FPLINUX_AUDIO_CONTROL_APP,
+			.app = {
+				.pid = process->pid,
+				.uid = process->uid,
+				.background = process->background,
+			},
+		};
+	if (!send_control(audio, &command, now_ms))
 		return false;
 	process->announced = true;
 	return tell(audio, process, now_ms);
@@ -246,8 +252,8 @@ bool fplinux_session_audio_app(struct fplinux_session_audio *audio, pid_t pid,
 	struct fplinux_session_audio_process *process;
 	unsigned int i;
 
-	if (!audio->enabled || pid <= 0 ||
-	    !is_word(app_id, sizeof(process->app_id)))
+	if (!audio->enabled || pid <= 0 || uid == (uid_t)-1 ||
+	    !is_word(app_id, FPLINUX_UI_SESSION_ID_BYTES))
 		return false;
 	process = find_process(audio, pid);
 	for (i = 0; !process && i < FPLINUX_SESSION_AUDIO_PROCESSES; ++i)
@@ -264,7 +270,6 @@ bool fplinux_session_audio_app(struct fplinux_session_audio *audio, pid_t pid,
 		.uid = uid,
 		.background = background,
 	};
-	strcpy(process->app_id, app_id);
 	for (i = 0; background && i < FPLINUX_SESSION_AUDIO_PROCESSES; ++i)
 		if (&audio->processes[i] != process)
 			audio->processes[i].background = false;
@@ -280,7 +285,7 @@ bool fplinux_session_audio_clock(struct fplinux_session_audio *audio, pid_t pid,
 		find_process(audio, pid);
 	unsigned int i;
 
-	if (!audio->enabled || pid <= 0)
+	if (!audio->enabled || pid <= 0 || uid == (uid_t)-1)
 		return false;
 	for (i = 0; i < FPLINUX_SESSION_AUDIO_PROCESSES; ++i) {
 		if (audio->processes[i].clock && audio->processes[i].pid != pid)
@@ -305,15 +310,15 @@ void fplinux_session_audio_gone(struct fplinux_session_audio *audio, pid_t pid,
 {
 	struct fplinux_session_audio_process *process =
 		find_process(audio, pid);
-	char text[FPLINUX_AUDIO_CONTROL_BYTES];
+	struct fplinux_audio_control command = {
+		.type = FPLINUX_AUDIO_CONTROL_GONE,
+		.gone = pid,
+	};
 
 	if (!process)
 		return;
-	if (audio->fd >= 0 && process->announced) {
-		snprintf(text, sizeof(text), FPLINUX_AUDIO_CONTROL_GONE " %ld",
-			 (long)pid);
-		send_text(audio, text, now_ms);
-	}
+	if (audio->fd >= 0 && process->announced)
+		send_control(audio, &command, now_ms);
 	memset(process, 0, sizeof(*process));
 }
 
@@ -337,7 +342,7 @@ bool fplinux_session_audio_set_volume(struct fplinux_session_audio *audio,
 {
 	struct fplinux_session_audio_volume *volume;
 
-	if (class >= FPLINUX_SESSION_AUDIO_CLASSES ||
+	if ((unsigned int)class >= FPLINUX_SESSION_AUDIO_CLASSES ||
 	    level > FPLINUX_AUDIO_VOLUME_MAX)
 		return false;
 	volume = &audio->volume[class];
@@ -352,7 +357,7 @@ bool fplinux_session_audio_volume_applied(
 	const struct fplinux_session_audio *audio,
 	enum fplinux_session_audio_class class, unsigned int *level)
 {
-	if (class >= FPLINUX_SESSION_AUDIO_CLASSES ||
+	if ((unsigned int)class >= FPLINUX_SESSION_AUDIO_CLASSES ||
 	    !audio->volume[class].known)
 		return false;
 	if (level)
@@ -366,7 +371,7 @@ bool fplinux_session_audio_volume_pending(
 {
 	const struct fplinux_session_audio_volume *volume;
 
-	if (class >= FPLINUX_SESSION_AUDIO_CLASSES)
+	if ((unsigned int)class >= FPLINUX_SESSION_AUDIO_CLASSES)
 		return true;
 	volume = &audio->volume[class];
 	return !volume->known || volume->waiting ||
@@ -374,15 +379,15 @@ bool fplinux_session_audio_volume_pending(
 }
 
 bool fplinux_session_audio_set_output(struct fplinux_session_audio *audio,
-				      const char *output, uint64_t now_ms)
+				      enum fplinux_audio_route output,
+				      uint64_t now_ms)
 {
-	if (strcmp(output, "AUTO") && strcmp(output, "SPEAKER") &&
-	    strcmp(output, "HEADPHONES"))
+	if (!fplinux_audio_route_name(output))
 		return false;
-	strcpy(audio->desired_output, output);
+	audio->desired_output = output;
 	audio->output_error = 0;
 	if (audio->fd >= 0 && audio->ready && !audio->output_waiting &&
-	    (!audio->output_known || strcmp(audio->applied_output, output)))
+	    (!audio->output_known || audio->applied_output != output))
 		send_output(audio, now_ms);
 	return true;
 }
@@ -399,75 +404,69 @@ static bool complete_replay(struct fplinux_session_audio *audio,
 		return true;
 	}
 	if (!audio->ready) {
+		const struct fplinux_audio_control sync = {
+			.type = FPLINUX_AUDIO_CONTROL_SYNC,
+		};
+
 		audio->ready = true;
 		if (!announce_all(audio, now_ms))
 			return false;
-		if (!send_text(audio, FPLINUX_AUDIO_CONTROL_SYNC, now_ms))
+		if (!send_control(audio, &sync, now_ms))
 			return false;
 		audio->backoff_ms = FPLINUX_SESSION_AUDIO_RETRY_MS;
 	}
 	return true;
 }
 
-static bool acknowledge(struct fplinux_session_audio *audio, const char *packet,
+static bool acknowledge(struct fplinux_session_audio *audio,
+			const struct fplinux_audio_control *message,
 			uint64_t now_ms)
 {
-	char expected[FPLINUX_AUDIO_CONTROL_BYTES];
+	if (message->type == FPLINUX_AUDIO_VOLUME_APPLIED) {
+		enum fplinux_session_audio_class class =
+			message->volume.class == FPLINUX_AUDIO_MEDIA ?
+				FPLINUX_SESSION_AUDIO_MEDIA :
+				FPLINUX_SESSION_AUDIO_ALARM;
+		struct fplinux_session_audio_volume *volume =
+			&audio->volume[class];
 
-	for (unsigned int i = 0; i < FPLINUX_SESSION_AUDIO_CLASSES; ++i) {
-		struct fplinux_session_audio_volume *volume = &audio->volume[i];
-
-		snprintf(expected, sizeof(expected), "VOLUME %s %u",
-			 class_names[i], volume->sent);
-		if (!volume->waiting || strcmp(packet, expected))
-			continue;
+		if (!volume->waiting || volume->sent != message->volume.level)
+			goto invalid;
 		volume->waiting = false;
 		volume->known = true;
-		volume->applied = volume->sent;
+		volume->applied = message->volume.level;
 		volume->confirmed = true;
 		if (volume->desired != volume->applied &&
-		    !send_volume(audio, i, now_ms))
+		    !send_volume(audio, class, now_ms))
 			return false;
 		return complete_replay(audio, now_ms);
 	}
-	if (audio->output_waiting) {
-		char *end;
-		long error;
-
-		snprintf(expected, sizeof(expected), "OUTPUT %s",
-			 audio->sent_output);
-		if (!strcmp(packet, expected)) {
-			audio->output_waiting = false;
-			audio->output_known = true;
-			strcpy(audio->applied_output, audio->sent_output);
-			if (strcmp(audio->desired_output,
-				   audio->applied_output))
-				return send_output(audio, now_ms);
-			return complete_replay(audio, now_ms);
-		}
-		if (!strncmp(packet, "OUTPUT ERROR ", 13)) {
-			errno = 0;
-			error = strtol(packet + 13, &end, 10);
-			if (!errno && end != packet + 13 && !*end &&
-			    error > 0 && error <= 4095) {
-				audio->output_waiting = false;
-				audio->output_error = (int)error;
-				/* A rejected preference cannot authorize replay. */
-				if (!audio->ready) {
-					if (!strcmp(audio->sent_output,
-						    "AUTO")) {
-						lose(audio,
-						     "output replay rejected",
-						     now_ms);
-						return false;
-					}
-					strcpy(audio->desired_output, "AUTO");
-					return send_output(audio, now_ms);
-				}
-				return true;
-			}
-		}
+	if (!audio->output_waiting)
+		goto invalid;
+	if (message->type == FPLINUX_AUDIO_OUTPUT_APPLIED) {
+		if (message->route != audio->sent_output)
+			goto invalid;
+		audio->output_waiting = false;
+		audio->output_known = true;
+		audio->applied_output = message->route;
+		if (audio->desired_output != audio->applied_output)
+			return send_output(audio, now_ms);
+		return complete_replay(audio, now_ms);
 	}
+	if (message->type == FPLINUX_AUDIO_OUTPUT_ERROR) {
+		audio->output_waiting = false;
+		audio->output_error = message->error;
+		if (audio->ready)
+			return true;
+		/* A rejected preference cannot authorize replay. */
+		if (audio->sent_output == FPLINUX_AUDIO_ROUTE_AUTO) {
+			lose(audio, "output replay rejected", now_ms);
+			return false;
+		}
+		audio->desired_output = FPLINUX_AUDIO_ROUTE_AUTO;
+		return send_output(audio, now_ms);
+	}
+invalid:
 	lose(audio, "invalid acknowledgement", now_ms);
 	return false;
 }
@@ -489,52 +488,33 @@ fplinux_session_audio_playback(const struct fplinux_session_audio *audio,
 	return FPLINUX_UI_SESSION_PLAYBACK_NONE;
 }
 
-static bool receive_activity(struct fplinux_session_audio *audio,
-			     const char *packet)
+static void receive_activity(struct fplinux_session_audio *audio,
+			     const struct fplinux_audio_control *message)
 {
-	static const char *const names[] = {
-		"none", "paused", "held", "unavailable", "playing",
+	static const enum fplinux_ui_session_playback states[] = {
+		[FPLINUX_AUDIO_ACTIVITY_NONE] =
+			FPLINUX_UI_SESSION_PLAYBACK_NONE,
+		[FPLINUX_AUDIO_ACTIVITY_PAUSED] =
+			FPLINUX_UI_SESSION_PLAYBACK_PAUSED,
+		[FPLINUX_AUDIO_ACTIVITY_HELD] =
+			FPLINUX_UI_SESSION_PLAYBACK_HELD,
+		[FPLINUX_AUDIO_ACTIVITY_UNAVAILABLE] =
+			FPLINUX_UI_SESSION_PLAYBACK_UNAVAILABLE,
+		[FPLINUX_AUDIO_ACTIVITY_PLAYING] =
+			FPLINUX_UI_SESSION_PLAYBACK_PLAYING,
 	};
-	const char *number = packet + sizeof(FPLINUX_AUDIO_CONTROL_ACTIVITY);
-	struct fplinux_session_audio_process *process;
-	char expected[FPLINUX_AUDIO_CONTROL_BYTES];
-	char *end;
-	unsigned long uid;
-	unsigned int activity;
-	long pid;
+	struct fplinux_session_audio_process *process =
+		find_process(audio, message->activity.pid);
 
-	errno = 0;
-	pid = strtol(number, &end, 10);
-	if (errno || end == number || *end != ' ' || pid <= 0 || pid > INT_MAX)
-		return false;
-	number = end + 1;
-	errno = 0;
-	uid = strtoul(number, &end, 10);
-	if (errno || end == number || *end != ' ' || uid >= UINT_MAX)
-		return false;
-	for (activity = 0; activity < sizeof(names) / sizeof(names[0]);
-	     ++activity)
-		if (!strcmp(end + 1, names[activity]))
-			break;
-	if (activity == sizeof(names) / sizeof(names[0]))
-		return false;
-	snprintf(expected, sizeof(expected),
-		 FPLINUX_AUDIO_CONTROL_ACTIVITY " %ld %lu %s", pid, uid,
-		 names[activity]);
-	if (strcmp(packet, expected))
-		return false;
-	process = find_process(audio, (pid_t)pid);
 	/* GONE or a replaced process can leave an older notification in flight. */
 	if (audio->ready && process && process->announced && !process->clock &&
-	    process->uid == (uid_t)uid)
-		process->playback = (enum fplinux_ui_session_playback)activity;
-	return true;
+	    process->uid == message->activity.uid)
+		process->playback = states[message->activity.state];
 }
 
 void fplinux_session_audio_dispatch(struct fplinux_session_audio *audio,
 				    uint64_t now_ms)
 {
-	char packet[FPLINUX_AUDIO_CONTROL_BYTES];
 	unsigned int count;
 
 	if (!audio->enabled)
@@ -555,33 +535,22 @@ void fplinux_session_audio_dispatch(struct fplinux_session_audio *audio,
 		return;
 	}
 	for (count = 0; count < FPLINUX_SESSION_AUDIO_READS; ++count) {
-		ssize_t bytes = recv(audio->fd, packet, sizeof(packet),
-				     MSG_DONTWAIT | MSG_TRUNC);
+		struct fplinux_audio_control message;
+		int result = fplinux_audio_control_receive(
+			audio->fd, FPLINUX_AUDIO_TO_MANAGER, &message);
 
-		if (bytes < 0 && errno == EINTR)
+		if (result < 0 && errno == EINTR)
 			continue;
-		if (bytes > 0) {
-			if (bytes >= (ssize_t)sizeof(packet) ||
-			    memchr(packet, '\0', (size_t)bytes)) {
-				lose(audio, "invalid acknowledgement", now_ms);
-				return;
-			}
-			packet[bytes] = '\0';
-			if (!strncmp(packet, FPLINUX_AUDIO_CONTROL_ACTIVITY " ",
-				     sizeof(FPLINUX_AUDIO_CONTROL_ACTIVITY))) {
-				if (!receive_activity(audio, packet)) {
-					lose(audio, "invalid activity", now_ms);
-					return;
-				}
-				continue;
-			}
-			if (!acknowledge(audio, packet, now_ms))
+		if (result > 0) {
+			if (message.type == FPLINUX_AUDIO_CONTROL_ACTIVITY)
+				receive_activity(audio, &message);
+			else if (!acknowledge(audio, &message, now_ms))
 				return;
 			continue;
 		}
-		if (bytes < 0 && (errno == EAGAIN || errno == EWOULDBLOCK))
+		if (result < 0 && (errno == EAGAIN || errno == EWOULDBLOCK))
 			return;
-		lose(audio, bytes ? strerror(errno) : "closed by the service",
+		lose(audio, result ? strerror(errno) : "closed by the service",
 		     now_ms);
 		return;
 	}

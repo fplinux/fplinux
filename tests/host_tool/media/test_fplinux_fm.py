@@ -30,6 +30,7 @@ def fm(tmp_path_factory: pytest.TempPathFactory) -> Path:
             "-Werror",
             f"-I{ROOT / 'include/fplinux'}",
             str(ROOT / "alpine/aports/fplinux-fm/fplinux-fm.c"),
+            str(ROOT / "lib/fplinux-shared/fplinux-audio-radio.c"),
             str(ROOT / "lib/fplinux-shared/fplinux-cli.c"),
             str(ROOT / "tests/host_tool/media/fixtures/fplinux-fm/boundary.c"),
         ],
@@ -109,18 +110,22 @@ def test_signal_releases_service_lease(fm: Path) -> None:
 @pytest.mark.parametrize(
     ("reply", "error"),
     [
-        ("ERROR 19", errno.ENODEV),
-        ("ERROR 5", errno.EIO),
-        ("ERROR 16", errno.EBUSY),
-        ("ERROR +19", errno.EBUSY),
-        ("ERROR 19 extra", errno.EBUSY),
-        ("ERROR 0", errno.EBUSY),
-        ("ERROR 2147483648", errno.EBUSY),
-        ("ERROR 19" + " " * 32, errno.EBUSY),
+        (b"\x04\x13\x00\x00\x00", errno.ENODEV),
+        (b"\x04\x05\x00\x00\x00", errno.EIO),
+        (b"\x04\x10\x00\x00\x00", errno.EBUSY),
+        (b"\x04\x13\x00\x00", errno.EBUSY),
+        (b"\x03\x00", errno.EBUSY),
+        (b"\x04\x00\x00\x00\x00", errno.EBUSY),
+        (b"\x04\x00\x00\x00\x80", errno.EBUSY),
+        (b"\x04\x13\x00\x00\x00" + bytes(32), errno.EBUSY),
+        (b"\x02\xd7\x03", errno.EBUSY),
+        (b"", errno.EBUSY),
     ],
 )
-def test_service_refusal_reports_cause_and_closes_lease(fm: Path, reply: str, error: int) -> None:
-    result = run_fm(fm, ["play", "98.3"], FM_TEST_SERVICE_REPLY=reply)
+def test_service_refusal_reports_cause_and_closes_lease(
+    fm: Path, reply: bytes, error: int
+) -> None:
+    result = run_fm(fm, ["play", "98.3"], FM_TEST_SERVICE_REPLY=reply.hex())
     assert result.returncode == 1
     assert result.stdout == ""
     assert result.stderr.splitlines() == [

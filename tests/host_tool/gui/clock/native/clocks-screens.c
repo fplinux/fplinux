@@ -85,12 +85,20 @@ static void reply_result(struct capture *capture,
 		.type = FPLINUX_UI_SESSION_CLOCK,
 		.serial = request->serial,
 	};
+	const char *name = request->name;
 
-	strcpy(response.name, request->name);
-	assert(clock_wire_snapshot_encode(&capture->owner, result,
-					  response.serial, response.clock_data,
-					  sizeof(response.clock_data)) ==
-	       CLOCK_OK);
+	if (!name[0]) {
+		struct clock_request operation;
+
+		assert(clock_wire_request_decode(request->clock_data,
+						 strlen(request->clock_data),
+						 &operation) == CLOCK_OK);
+		name = clock_wire_request_name(operation.op);
+	}
+	strcpy(response.name, name);
+	assert(clock_wire_snapshot_encode(
+		       &capture->owner, result, response.clock_data,
+		       sizeof(response.clock_data)) == CLOCK_OK);
 	assert(fplinux_ui_session_send(capture->session, &response));
 }
 
@@ -144,8 +152,7 @@ static void pump(struct capture *capture)
 				       message.clock_data,
 				       strlen(message.clock_data),
 				       &operation) == CLOCK_OK);
-			assert(!strcmp(message.name,
-				       clock_wire_request_name(operation.op)));
+			assert(!message.name[0]);
 			if (operation.op == CLOCK_REQUEST_SNAPSHOT) {
 				++capture->snapshots;
 				if (capture->drop_snapshot)
@@ -156,8 +163,6 @@ static void pump(struct capture *capture)
 				if (capture->has_request) {
 					assert(message.serial ==
 					       capture->request.serial);
-					assert(!strcmp(message.name,
-						       capture->request.name));
 					assert(!strcmp(
 						message.clock_data,
 						capture->request.clock_data));
@@ -250,6 +255,7 @@ static void redraw(struct capture *capture)
 {
 	struct fplinux_ui_session_message setting = {
 		.type = FPLINUX_UI_SESSION_SETTING,
+		.applied = true,
 		.serial = ++capture->redraw_serial,
 	};
 	const char *theme = getenv("FPLINUX_CLOCKS_TEST_THEME");

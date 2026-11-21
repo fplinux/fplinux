@@ -10,6 +10,7 @@
 #include <fplinux/fplinux-ui-locale.h>
 #include <fplinux/fplinux-ui-screen.h>
 #include <fplinux/fplinux-ui-session.h>
+#include <fplinux/fplinux-ui-session-internal.h>
 #include <fplinux/fplinux-ui-system.h>
 
 #include <assert.h>
@@ -17,6 +18,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/socket.h>
+#include <unistd.h>
 
 FILE *__real_fopen(const char *path, const char *mode);
 FILE *__wrap_fopen(const char *path, const char *mode)
@@ -213,9 +216,22 @@ static void choose_row(struct fplinux_ui *ui, const char *text)
 	}
 }
 
+static void pass_session_packet(const struct fplinux_ui_session_message *sent,
+				struct fplinux_ui_session_message *received)
+{
+	int sockets[2];
+
+	assert(!socketpair(AF_UNIX, SOCK_SEQPACKET, 0, sockets));
+	assert(fplinux_ui_session_send(sockets[0], sent));
+	assert(fplinux_ui_session_receive(sockets[1], received) == 1);
+	close(sockets[0]);
+	close(sockets[1]);
+}
+
 static void deliver_reply(struct fplinux_ui *ui,
 			  const struct fplinux_ui_session_message *message)
 {
+	struct fplinux_ui_session_message normalized;
 	struct fplinux_ui_event event = {
 		.type = FPLINUX_UI_EVENT_SESSION,
 		.session = message,
@@ -229,6 +245,13 @@ static void deliver_reply(struct fplinux_ui *ui,
 		return;
 	}
 
+	if ((message->type == FPLINUX_UI_SESSION_SETTING ||
+	     message->type == FPLINUX_UI_SESSION_ERROR) &&
+	    message->setting.kind == FPLINUX_UI_SETTING_NONE) {
+		pass_session_packet(message, &normalized);
+		message = &normalized;
+		event.session = message;
+	}
 	if (message->applied) {
 		if (!strcmp(message->name, "input_locale"))
 			copy_text(ui->input_locale, sizeof(ui->input_locale),
@@ -1099,9 +1122,10 @@ static void test_date_save_retains_draft(struct fplinux_ui *ui,
 			       FPLINUX_UI_SESSION_ERROR;
 	message.applied = message.type == FPLINUX_UI_SESSION_SETTING ||
 			  !strcmp(outcome, "partial");
+	if (message.applied)
+		message.setting.operation = FPLINUX_UI_SETTING_RESULT;
 	if (!strcmp(outcome, "success"))
-		copy_text(message.value, sizeof(message.value),
-			  "2024-02-29 08:45:01");
+		message.setting.value.time.second = 1;
 	copy_text(message.reason, sizeof(message.reason),
 		  !strcmp(outcome, "not-foreground") ? "not-foreground" :
 						       "failed");
@@ -1604,7 +1628,11 @@ bool fplinux_ui_send(struct fplinux_ui *ui,
 		     const struct fplinux_ui_session_message *message)
 {
 	assert(ui->sent_count < 64);
-	ui->sent[ui->sent_count++] = *message;
+	if (message->type == FPLINUX_UI_SESSION_SETTING)
+		pass_session_packet(message, &ui->sent[ui->sent_count]);
+	else
+		ui->sent[ui->sent_count] = *message;
+	++ui->sent_count;
 	return true;
 }
 

@@ -9,6 +9,7 @@ import fcntl
 import mmap
 import os
 import select
+import signal
 import socket
 import struct
 import subprocess
@@ -22,6 +23,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from tests import audio_wire
 from tests.c_harness import c_build_directory, compile_c
 from tests.process import connect_unix_seqpacket, run_process
 
@@ -204,38 +206,27 @@ class AudioService:
         control = connect_unix_seqpacket(self.work / "control.sock")
         self.sockets.append(control)
         for kind in ("MEDIA", "ALARM"):
-            command = f"VOLUME {kind} 10".encode()
-            control.send(command)
-            self.expect_control(control, command)
+            self.set_volume(control, kind, 10)
         if sync:
-            control.send(b"SYNC")
+            control.send(audio_wire.SYNC)
         return control
 
-    def status(self) -> dict[str, str]:
+    def status(self) -> dict[str, int]:
         """Request an actual read-only device snapshot from this daemon."""
         with connect_unix_seqpacket(self.work / "status.sock") as status:
-            fields = status.recv(512).decode("ascii").split(" ")
-        assert fields[0] == "STATE"
-        return dict(field.split("=", 1) for field in fields[1:])
+            return audio_wire.status(status)
 
     def radio(self) -> socket.socket:
         """Acquire one real service FM lease against the tuner boundary."""
         radio = connect_unix_seqpacket(self.work / "radio.sock")
         self.sockets.append(radio)
-        radio.send(b"PLAY 999")
-        assert radio.recv(32) == b"READY"
+        radio.send(audio_wire.radio_play(999))
+        assert radio.recv(32) == audio_wire.RADIO_READY
         return radio
 
     def activity(self, packet: bytes) -> tuple[int, int, str]:
         """Validate and retain one asynchronous manager activity notification."""
-        fields = packet.decode("ascii").split(" ")
-        assert len(fields) == 4
-        assert fields[0] == "ACTIVITY"
-        pid, uid = int(fields[1]), int(fields[2])
-        assert pid > 0
-        assert uid >= 0
-        assert fields[3] in {"none", "paused", "held", "unavailable", "playing"}
-        result = (pid, uid, fields[3])
+        result = audio_wire.activity(packet)
         self.activities.append(result)
         return result
 
@@ -243,11 +234,16 @@ class AudioService:
         """Keep asynchronous activity separate from an exact command reply."""
         while True:
             packet = control.recv(256)
-            if packet.startswith(b"ACTIVITY "):
+            if audio_wire.is_activity(packet):
                 self.activity(packet)
             else:
                 assert packet == expected
                 return
+
+    def set_volume(self, control: socket.socket, kind: str, level: int) -> None:
+        """Require the service to acknowledge the applied class and level."""
+        control.send(audio_wire.set_volume(kind, level))
+        self.expect_control(control, audio_wire.volume_applied(kind, level))
 
     def expect_activity(self, control: socket.socket, pid: int, state: str) -> None:
         """Wait for a service-owned state of this exact application process."""
@@ -279,12 +275,12 @@ class AudioService:
     ) -> None:
         """Declare the process's trusted role and foreground eligibility."""
         command = (
-            f"CLOCK {pid} {os.geteuid()}"
+            audio_wire.clock(pid, os.geteuid())
             if clock
-            else (f"APP {pid} {os.geteuid()} org.fplinux.test {int(background)}")
+            else audio_wire.app(pid, os.geteuid(), background=background)
         )
-        control.send(command.encode())
-        control.send(f"ELIGIBLE {pid} {int(eligible)}".encode())
+        control.send(command)
+        control.send(audio_wire.eligible(pid, enabled=eligible))
 
     @staticmethod
     def send(client: socket.socket, kind: int, **fields: int) -> None:
@@ -383,6 +379,9 @@ def audiod_executable(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path
                     str(APORT / name)
                     for name in ("audiod.c", "audio-device.c", "audio-mixer.c", "audio-streams.c")
                 ),
+                str(ROOT / "lib/fplinux-shared/fplinux-audio-control.c"),
+                str(ROOT / "lib/fplinux-shared/fplinux-audio-radio.c"),
+                str(ROOT / "lib/fplinux-shared/fplinux-audio-status.c"),
                 str(ROOT / "lib/fplinux-shared/fplinux-cli.c"),
                 str(FIXTURE / "boundary.c"),
                 "-pthread",
@@ -403,6 +402,50 @@ def audiod(audiod_executable: Path) -> Iterator[AudioService]:
             service.close()
 
 
+def test_session_client_replays_after_queue_pressure_and_output_refusal(
+    audiod: AudioService, tmp_path: Path
+) -> None:
+    client = tmp_path / "session-audio"
+    session = ROOT / "alpine/aports/fplinux-session"
+    compile_c(
+        client,
+        [
+            "-std=c11",
+            "-Wall",
+            "-Wextra",
+            "-Werror",
+            f"-I{ROOT / 'include/fplinux'}",
+            f"-I{session}",
+            str(ROOT / "tests/host_tool/gui/session/session-audio-test.c"),
+            str(session / "session-audio.c"),
+            str(ROOT / "lib/fplinux-shared/fplinux-audio-control.c"),
+        ],
+        name="compile the production Session client for audiod",
+    )
+
+    def exercise() -> None:
+        assert audiod.process is not None
+        process = audiod.process
+        control = audiod.work / "control.sock"
+        audiod.wait(control.exists, "audiod did not open the control socket")
+        try:
+            result = run_process(
+                [str(client), "--live", str(control), str(process.pid)],
+                name="run the production Session client through audiod control",
+                timeout=11,
+                check=True,
+            )
+        finally:
+            # The harness pauses only our daemon while filling the socket queue.
+            with contextlib.suppress(ProcessLookupError):
+                process.send_signal(signal.SIGCONT)
+        assert result.stdout == "session audio: OK\n"
+        state = audiod.status()
+        assert (state["media"], state["alarm"], state["output"], state["applied"]) == (4, 0, 0, 2)
+
+    audiod.run(exercise, FPLINUX_AUDIOD_FAKE_NO_PROFILE="1")
+
+
 def test_activity_tracks_real_queued_playback_pause_focus_and_close(audiod: AudioService) -> None:
     hold_pcm = audiod.work / "hold-pcm"
 
@@ -413,7 +456,7 @@ def test_activity_tracks_real_queued_playback_pause_focus_and_close(audiod: Audi
         audiod.hello(media)
         stream, ring = audiod.open_stream(media)
         assert not select.select([control], [], [], 0.05)[0]
-        control.send(b"SYNC")
+        control.send(audio_wire.SYNC)
         audiod.expect_activity(control, pid, "none")
         assert not select.select([control], [], [], 0.05)[0]
         audiod.write(media, stream, ring, 0, 9600)
@@ -429,7 +472,7 @@ def test_activity_tracks_real_queued_playback_pause_focus_and_close(audiod: Audi
         audiod.hello(clock)
         clock_stream, clock_ring = audiod.open_stream(clock)
         audiod.write(clock, clock_stream, clock_ring, 0, 9600)
-        audiod.wait(lambda: audiod.status()["clock"] == "1", "Clock did not take focus")
+        audiod.wait(lambda: audiod.status()["clock"] == 1, "Clock did not take focus")
         assert ring.field(WRITE) == 14400
         assert ring.field(READ) == media_read < 14400
         assert (clock_ring.field(WRITE), clock_ring.field(READ)) == (9600, 0)
@@ -476,9 +519,9 @@ def test_activity_reconnect_waits_for_sync_and_reports_current_output_state(
         control = audiod.manager(sync=False)
         audiod.announce(control, pid, background=True)
         assert not select.select([control], [], [], 0.05)[0]
-        control.send(b"SYNC")
+        control.send(audio_wire.SYNC)
         audiod.expect_activity(control, pid, "unavailable")
-        control.send(f"GONE {pid}".encode())
+        control.send(audio_wire.gone(pid))
         audiod.wait(lambda: ring.field(STATE) == ENDED, "GONE kept the stream")
         assert not select.select([control], [], [], 0.05)[0]
 
@@ -516,7 +559,7 @@ def test_hello_rejects_unannounced_pid_wrong_uid_and_version(audiod: AudioServic
         assert audiod.closed(stranger)
 
         (impostor,), pid = audiod.connect()
-        control.send(f"APP {pid} {os.geteuid() + 1} org.fplinux.test 0".encode())
+        control.send(audio_wire.app(pid, os.geteuid() + 1))
         assert audiod.refused(impostor, HELLO, version=1) == errno.EACCES
         assert audiod.closed(impostor)
 
@@ -545,11 +588,9 @@ def test_hello_waits_for_manager_announcement_and_starts_paused(
         readable, _, _ = select.select([client], [], [], 0.1)
         assert not readable, "stream replied before the manager identified its peer"
         command = (
-            f"CLOCK {pid} {os.geteuid()}"
-            if clock
-            else (f"APP {pid} {os.geteuid()} org.fplinux.test 0")
+            audio_wire.clock(pid, os.geteuid()) if clock else audio_wire.app(pid, os.geteuid())
         )
-        control.send(command.encode())
+        control.send(command)
         message, descriptors = audiod.receive(client)
         assert message[0] == OPENED
         assert message[2] != 0
@@ -578,14 +619,14 @@ def test_pause_resume_preserves_every_frame_and_ramps_boundary(audiod: AudioServ
         control, client, pid, stream, ring = audiod.playing_stream()
         audiod.write(client, stream, ring, 0, 9600)
         audiod.wait(lambda: ring.field(READ) >= 4800, "stream did not play")
-        control.send(f"ELIGIBLE {pid} 0".encode())
+        control.send(audio_wire.eligible(pid, enabled=False))
         barrier, _ = audiod.open_stream(client)
         audiod.send(client, CLOSE, stream=barrier)
         audiod.wait(lambda: ring.field(STATE) == PAUSED, "stream did not pause")
         stopped = ring.field(READ)
         time.sleep(0.1)
         assert ring.field(READ) == stopped < 9600
-        control.send(f"ELIGIBLE {pid} 1".encode())
+        control.send(audio_wire.eligible(pid, enabled=True))
         audiod.wait(
             lambda: ring.field(READ) == 9600 and ring.field(HEARD) == 9600,
             "resumed stream did not finish",
@@ -613,9 +654,7 @@ def test_class_volume_ack_mute_and_reconnect_for_app_and_clock(audiod: AudioServ
         control = audiod.manager()
         control.settimeout(3)
         for kind in ("MEDIA", "ALARM"):
-            command = f"VOLUME {kind} 0".encode()
-            control.send(command)
-            audiod.expect_control(control, command)
+            audiod.set_volume(control, kind, 0)
         owners = []
         for clock in (False, True):
             (client,), pid = audiod.connect()
@@ -637,15 +676,13 @@ def test_class_volume_ack_mute_and_reconnect_for_app_and_clock(audiod: AudioServ
         )
         control = audiod.manager(sync=False)
         control.settimeout(3)
-        control.send(b"VOLUME MEDIA 5")
-        audiod.expect_control(control, b"VOLUME MEDIA 5")
-        control.send(b"VOLUME ALARM 10")
-        audiod.expect_control(control, b"VOLUME ALARM 10")
+        audiod.set_volume(control, "MEDIA", 5)
+        audiod.set_volume(control, "ALARM", 10)
         for index, (client, pid, stream, ring) in enumerate(owners):
             ring.append(4800, 4800, level=20000)
             audiod.announce(control, pid, clock=bool(index))
             audiod.send(client, KICK, stream=stream)
-        control.send(b"SYNC")
+        control.send(audio_wire.SYNC)
         audiod.wait(
             lambda: all(ring.field(READ) == 9600 for _, _, _, ring in owners),
             "resynced streams did not play",
@@ -657,25 +694,23 @@ def test_class_volume_ack_mute_and_reconnect_for_app_and_clock(audiod: AudioServ
     assert 3556 in played
 
 
-def test_noncanonical_volume_packets_leave_both_levels_unchanged(audiod: AudioService) -> None:
+def test_invalid_volume_packets_leave_both_levels_unchanged(audiod: AudioService) -> None:
     def exercise() -> None:
         control = audiod.manager()
-        control.send(b"VOLUME MEDIA 0")
-        audiod.expect_control(control, b"VOLUME MEDIA 0")
+        audiod.set_volume(control, "MEDIA", 0)
         for command in (
-            b"VOLUME  MEDIA 7",
-            b"VOLUME MEDIA  7",
-            b"VOLUME ALARM 2 ",
-            b"VOLUME MEDIA +7",
-            b"VOLUME ALARM -2",
-            b"VOLUME MEDIA 07",
-            b"VOLUME ALARM 11",
+            b"\x01\x01",
+            b"\x01\x01\x07\x00",
+            b"\x01\x01\x07" + bytes(32),
+            b"\x01\x03\x07",
+            b"\x01\x02\x0b",
+            b"\x08\x01\x07",
         ):
             control.send(command)
-        control.send(b"OUTPUT AUTO")
-        audiod.expect_control(control, b"OUTPUT AUTO")
+        control.send(audio_wire.set_output(0))
+        audiod.expect_control(control, audio_wire.output_applied(0))
         status = audiod.status()
-        assert (status["media"], status["alarm"]) == ("0", "10")
+        assert (status["media"], status["alarm"]) == (0, 10)
 
     audiod.run(exercise)
 
@@ -701,7 +736,7 @@ def test_kick_opens_default_pcm_and_idle_releases_after_three_seconds(
         assert (ring.field(STATE), ring.field(SLEEPING)) == (PLAYING, 1)
         assert [event for _, event in events if event.startswith("open")] == ["open default"]
         assert "hw 48000 2 480 1440" in [event for _, event in events]
-        control.send(f"ELIGIBLE {pid} 0".encode())
+        control.send(audio_wire.eligible(pid, enabled=False))
         audiod.wait(lambda: ring.field(STATE) == PAUSED, "stream did not pause")
         audiod.write(client, stream, ring, 2400, 2400)
         audiod.send(client, KICK, stream=stream)
@@ -775,7 +810,7 @@ def test_gone_ends_all_process_connections_but_keeps_other_application(
         _, ring_a = audiod.open_stream(first)
         _, ring_b = audiod.open_stream(second, 8000, 2)
         _, ring_c = audiod.open_stream(other)
-        control.send(f"GONE {pid}".encode())
+        control.send(audio_wire.gone(pid))
         assert audiod.closed(first)
         assert audiod.closed(second)
         assert (ring_a.field(STATE), ring_b.field(STATE)) == (ENDED, ENDED)
@@ -796,7 +831,7 @@ def test_gone_rejects_late_hello_until_same_live_process_is_announced(
         audiod.announce(control, peer.pid)
         audiod.hello(first)
         _, ring = audiod.open_stream(first)
-        control.send(f"GONE {peer.pid}".encode())
+        control.send(audio_wire.gone(peer.pid))
         assert audiod.closed(first)
         assert ring.field(STATE) == ENDED
         late = peer.connect()
@@ -843,7 +878,7 @@ def test_manager_drop_pauses_application_and_clock_resync_preserves_only_announc
         connected = time.monotonic()
         audiod.announce(control, app[1])
         audiod.announce(control, clock[1], clock=True)
-        control.send(b"SYNC")
+        control.send(audio_wire.SYNC)
         audiod.wait(
             lambda: app[3].field(READ) == 9600 and clock[3].field(READ) == 9600,
             "resynced streams did not resume",
@@ -914,8 +949,8 @@ def test_clock_reserved_ring_survives_full_app_pool_and_app_pause_then_gone(
             audiod.open_stream(second[0])
         assert audiod.refused(first[0], OPEN, rate=48000, channels=1) == errno.EMFILE
         # Same uid, a clock-looking app ID and a client flag grant no role.
-        control.send(f"APP {third[1]} {os.geteuid()} org.fplinux.clock 0".encode())
-        control.send(f"ELIGIBLE {third[1]} 1".encode())
+        control.send(audio_wire.app(third[1], os.geteuid()))
+        control.send(audio_wire.eligible(third[1], enabled=True))
         assert audiod.refused(third[0], OPEN, rate=48000, channels=1, flags=1) == errno.EINVAL
         assert audiod.refused(third[0], OPEN, rate=48000, channels=1) == errno.EBUSY
         (clock,), clock_pid = audiod.connect()
@@ -927,21 +962,21 @@ def test_clock_reserved_ring_survives_full_app_pool_and_app_pause_then_gone(
         audiod.write(first[0], app_stream, app_ring, 0, 9600)
         audiod.wait(lambda: app_ring.field(READ) >= 960, "app stream did not play")
         for _, pid in applications:
-            control.send(f"ELIGIBLE {pid} 0".encode())
+            control.send(audio_wire.eligible(pid, enabled=False))
         audiod.wait(lambda: app_ring.field(STATE) == PAUSED, "app did not pause")
         stopped = app_ring.field(READ)
-        control.send(f"ELIGIBLE {clock_pid} 1".encode())
+        control.send(audio_wire.eligible(clock_pid, enabled=True))
         clock_ring.append(0, 9600, level=12345)
         audiod.send(clock, KICK, stream=clock_stream)
         audiod.wait(lambda: clock_ring.field(READ) >= 960, "clock reserved ring did not play")
         assert app_ring.field(READ) == stopped
         assert 12345 in audiod.played_left(), "the clock signal did not reach PCM output"
-        control.send(f"GONE {clock_pid}".encode())
+        control.send(audio_wire.gone(clock_pid))
         assert audiod.closed(clock)
         assert clock_ring.field(STATE) == ENDED
         clock_stopped = clock_ring.field(READ)
         clock_ring.append(9600, 480)
-        control.send(f"ELIGIBLE {first[1]} 1".encode())
+        control.send(audio_wire.eligible(first[1], enabled=True))
         audiod.wait(lambda: app_ring.field(READ) == 9600, "CLOCK GONE stopped application")
         assert clock_ring.field(READ) == clock_stopped
         assert app_ring.field(STATE) == PLAYING
@@ -968,10 +1003,10 @@ def test_clock_hello_rejects_wrong_uid_and_second_clock_process(audiod: AudioSer
     def exercise() -> None:
         control = audiod.manager()
         (wrong,), wrong_pid = audiod.connect()
-        control.send(f"CLOCK {wrong_pid} {os.geteuid() + 1}".encode())
+        control.send(audio_wire.clock(wrong_pid, os.geteuid() + 1))
         assert audiod.refused(wrong, HELLO, version=1) == errno.EACCES
         assert audiod.closed(wrong)
-        control.send(f"GONE {wrong_pid}".encode())
+        control.send(audio_wire.gone(wrong_pid))
         (clock,), pid = audiod.connect()
         audiod.announce(control, pid, clock=True)
         audiod.hello(clock)
@@ -1024,19 +1059,93 @@ def test_late_fm_node_changes_status_without_restarting_daemon(audiod: AudioServ
     def exercise() -> None:
         assert audiod.process is not None
         pid = audiod.process.pid
-        assert audiod.status()["fm"] == "0"
+        assert audiod.status()["fm"] == 0
         audiod.radio_ready.touch()
         audiod.wait(
-            lambda: audiod.status()["fm"] == "1",
+            lambda: audiod.status()["fm"] == 1,
             "New FM node did not become available without restarting",
         )
         assert audiod.process.pid == pid
         assert audiod.process.poll() is None
         control = audiod.manager()
         before = audiod.card_events()
-        control.send(b"VOLUME MEDIA 6")
-        audiod.expect_control(control, b"VOLUME MEDIA 6")
+        audiod.set_volume(control, "MEDIA", 6)
         assert audiod.card_events() == before
+
+    audiod.run(exercise)
+
+
+def test_fm_rejects_invalid_packets_and_reports_device_error_before_releasing(
+    audiod: AudioService,
+) -> None:
+    def exercise() -> None:
+        path = audiod.work / "radio.sock"
+        for packet in (
+            b"\x02\xe7",
+            b"\x02\xe7\x03\x00",
+            b"\x02\xe7\x03" + bytes(32),
+            b"\x02\x6a\x03",
+            b"\x03",
+        ):
+            with connect_unix_seqpacket(path) as radio:
+                radio.send(packet)
+                assert radio.recv(32) == b""
+        with connect_unix_seqpacket(path) as radio:
+            radio.send(b"\x02\xe7\x03")
+            assert radio.recv(32) == b"\x04\x02\x00\x00\x00"
+            assert radio.recv(32) == b""
+        with connect_unix_seqpacket(path) as scan:
+            scan.send(b"\x01")
+            assert scan.recv(32) == b"\x03"
+            with connect_unix_seqpacket(path) as competing:
+                assert competing.recv(32) == b""
+
+    audiod.run(exercise)
+
+
+def test_fm_frontend_reports_refusal_and_releases_playback_lease(
+    audiod: AudioService, tmp_path: Path
+) -> None:
+    frontend = tmp_path / "fplinux-fm"
+    compile_c(
+        frontend,
+        [
+            "-std=c11",
+            "-Wall",
+            "-Wextra",
+            "-Werror",
+            f"-I{ROOT / 'include/fplinux'}",
+            str(ROOT / "alpine/aports/fplinux-fm/fplinux-fm.c"),
+            str(ROOT / "lib/fplinux-shared/fplinux-audio-radio.c"),
+            str(ROOT / "lib/fplinux-shared/fplinux-cli.c"),
+            str(FIXTURE / "fm-socket-path.c"),
+            "-Wl,--wrap=connect",
+        ],
+        name="compile FM frontend with the audiod fixture socket path",
+    )
+
+    def exercise() -> None:
+        socket_path = audiod.work / "radio.sock"
+        audiod.wait(socket_path.exists, "audiod did not open the FM socket")
+
+        def play() -> subprocess.CompletedProcess[str]:
+            return run_process(
+                [str(frontend), "play", "98.3", "--seconds=1"],
+                name="request FM playback from the real audiod",
+                timeout=4,
+                env={"FPLINUX_TEST_RADIO_SOCKET": str(socket_path)},
+            )
+
+        refused = play()
+        assert refused.returncode == 1
+        assert refused.stdout == ""
+        assert refused.stderr == f"fplinux-fm: audio service: {os.strerror(errno.ENOENT)}\n"
+        audiod.radio_ready.touch()
+        playing = play()
+        assert playing.returncode == 0, playing.stderr
+        assert playing.stdout == "Playing 98.3 MHz; press Ctrl-C to stop.\n"
+        audiod.wait(lambda: audiod.status()["fm_active"] == 0, "FM lease did not close")
+        assert audiod.count("radio tune 983") == 1
 
     audiod.run(exercise)
 
@@ -1051,23 +1160,21 @@ def test_pcm_maximum_reference_and_fm_volume_survive_routes_alarm_and_cleanup(
         audiod.wait(lambda: ring.field(HEARD) == 4800, "Initial PCM did not drain")
         assert "pcm levels 9 9 9" in [event for _, event in audiod.card_events()]
         assert audiod.played_left()[:4800] == [sample(frame) for frame in range(4800)]
-        control.send(b"VOLUME MEDIA 7")
-        audiod.expect_control(control, b"VOLUME MEDIA 7")
+        audiod.set_volume(control, "MEDIA", 7)
         radio = audiod.radio()
         assert "radio levels 6 9 9" in [event for _, event in audiod.card_events()]
-        control.send(b"OUTPUT HEADPHONES")
-        audiod.expect_control(control, b"OUTPUT HEADPHONES")
-        assert audiod.status()["applied"] == "2"
+        control.send(audio_wire.set_output(2))
+        audiod.expect_control(control, audio_wire.output_applied(2))
+        assert audiod.status()["applied"] == 2
         assert audiod.card_events()[-1][1] == "radio levels 6 6 6"
         before_mute = len(audiod.card_events())
-        control.send(b"VOLUME MEDIA 0")
-        audiod.expect_control(control, b"VOLUME MEDIA 0")
+        audiod.set_volume(control, "MEDIA", 0)
         muted_events = [event for _, event in audiod.card_events()[before_mute:]]
         assert "radio mute 0" not in muted_events
-        assert audiod.status()["media"] == "0"
-        control.send(b"OUTPUT SPEAKER")
-        audiod.expect_control(control, b"OUTPUT SPEAKER")
-        assert audiod.status()["applied"] == "1"
+        assert audiod.status()["media"] == 0
+        control.send(audio_wire.set_output(1))
+        audiod.expect_control(control, audio_wire.output_applied(1))
+        assert audiod.status()["applied"] == 1
         assert "speaker volume 0" in [event for _, event in audiod.card_events()]
         (clock,), clock_pid = audiod.connect()
         audiod.announce(control, clock_pid, clock=True)
@@ -1077,17 +1184,16 @@ def test_pcm_maximum_reference_and_fm_volume_survive_routes_alarm_and_cleanup(
         audiod.send(clock, KICK, stream=clock_stream)
         audiod.wait(lambda: clock_ring.field(HEARD) == 4800, "Alarm did not drain during muted FM")
         audiod.wait(
-            lambda: audiod.status()["fm_active"] == "1",
+            lambda: audiod.status()["fm_active"] == 1,
             "FM did not resume after Alarm",
         )
         assert 20000 in audiod.played_left()
         assert "pcm levels 9 9 9" in [event for _, event in audiod.card_events()]
         assert audiod.card_events()[-1][1] == "fm on"
-        control.send(b"VOLUME MEDIA 7")
-        audiod.expect_control(control, b"VOLUME MEDIA 7")
+        audiod.set_volume(control, "MEDIA", 7)
         assert audiod.card_events()[-1][1] == "radio levels 6 9 9"
         radio.close()
-        audiod.wait(lambda: audiod.status()["fm_active"] == "0", "FM lease did not close")
+        audiod.wait(lambda: audiod.status()["fm_active"] == 0, "FM lease did not close")
         first_media = len(audiod.played_left())
         ring.append(4800, 4800, level=20000)
         audiod.send(client, KICK, stream=stream)
@@ -1121,23 +1227,20 @@ def test_exclusive_fm_media_levels_use_available_hardware_range_and_zero_mutes(
         control = audiod.manager()
         audiod.radio()
         for level, ordinal in enumerate(ordinals, start=1):
-            command = f"VOLUME MEDIA {level}".encode()
-            control.send(command)
-            audiod.expect_control(control, command)
+            audiod.set_volume(control, "MEDIA", level)
             expected = (
                 f"radio levels 6 {ordinal} {ordinal}"
                 if headphones_only
                 else f"radio levels {ordinal} 9 9"
             )
             assert audiod.card_events()[-1][1] == expected
-            assert audiod.status()["media"] == str(level)
+            assert audiod.status()["media"] == level
         before_mute = len(audiod.card_events())
-        control.send(b"VOLUME MEDIA 0")
-        audiod.expect_control(control, b"VOLUME MEDIA 0")
+        audiod.set_volume(control, "MEDIA", 0)
         events = [event for _, event in audiod.card_events()[before_mute:]]
         assert "radio mute 1" in events
         assert "radio mute 0" not in events
-        assert (audiod.status()["fm_active"], audiod.status()["media"]) == ("1", "0")
+        assert (audiod.status()["fm_active"], audiod.status()["media"]) == (1, 0)
         assert audiod.count("open ") == 0
 
     audiod.run(exercise, **({"FPLINUX_AUDIOD_FAKE_NO_PROFILE": "1"} if headphones_only else {}))
@@ -1151,19 +1254,17 @@ def test_failed_fm_gain_does_not_acknowledge_or_commit_requested_media_level(
     def exercise() -> None:
         audiod.radio_ready.touch()
         control = audiod.manager()
-        control.send(b"VOLUME MEDIA 7")
-        audiod.expect_control(control, b"VOLUME MEDIA 7")
+        audiod.set_volume(control, "MEDIA", 7)
         audiod.radio()
         failure.write_text("4\n", encoding="ascii")
-        control.send(b"VOLUME MEDIA 5")
+        control.send(audio_wire.set_volume("MEDIA", 5))
         assert audiod.closed(control)
-        assert audiod.status()["media"] == "7"
-        assert audiod.status()["error"] == str(errno.EIO)
+        assert audiod.status()["media"] == 7
+        assert audiod.status()["error"] == errno.EIO
         failure.unlink()
         control = audiod.manager()
-        control.send(b"VOLUME MEDIA 7")
-        audiod.expect_control(control, b"VOLUME MEDIA 7")
-        assert audiod.status()["media"] == "7"
+        audiod.set_volume(control, "MEDIA", 7)
+        assert audiod.status()["media"] == 7
         assert audiod.card_events()[-1][1] == "radio levels 6 9 9"
 
     audiod.run(exercise, FPLINUX_AUDIOD_FAKE_FAIL_GAIN=str(failure))
@@ -1205,7 +1306,7 @@ def test_qin_fixed_speaker_uses_master_maximum_and_restores_original(
 ) -> None:
     def exercise() -> None:
         state = audiod.status()
-        assert (state["rate"], state["speaker"], state["headphones"]) == ("44100", "1", "0")
+        assert (state["rate"], state["speaker"], state["headphones"]) == (44100, 1, 0)
         _, client, _, stream, ring = audiod.playing_stream()
         audiod.write(client, stream, ring, 0, 4800)
         audiod.wait(lambda: ring.field(HEARD) == 4800, "Qin native path did not drain")
@@ -1221,7 +1322,7 @@ def test_missing_speaker_profile_keeps_generic_headphone_pcm(
 ) -> None:
     def exercise() -> None:
         state = audiod.status()
-        assert (state["speaker"], state["headphones"], state["applied"]) == ("0", "1", "2")
+        assert (state["speaker"], state["headphones"], state["applied"]) == (0, 1, 2)
         _, client, _, stream, ring = audiod.playing_stream()
         audiod.write(client, stream, ring, 0, 4800)
         audiod.wait(lambda: ring.field(HEARD) == 4800, "Generic headphone PCM did not drain")

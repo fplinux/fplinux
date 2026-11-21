@@ -54,15 +54,16 @@ static void test_offered_choices_reach_manager(void)
 		"OFF", "-1", "15", "7", "00", "05", "+5", "5 ", " 5", ""
 	};
 	struct fplinux_session_settings settings = { 0 };
+	struct fplinux_ui_setting request = { .operation =
+						      FPLINUX_UI_SETTING_SET };
 	char value[16];
 
 	assert(FPLINUX_SETTINGS_SCREEN_OFF_COUNT == ARRAY_SIZE(screen_off));
 	for (size_t i = 0; i < ARRAY_SIZE(screen_off); i++) {
-		assert(!strcmp(fplinux_settings_screen_off_values[i],
-			       screen_off[i]));
-		assert(fplinux_session_settings_parse(
-			&settings, NULL, FPLINUX_SESSION_SETTING_SCREEN_OFF,
-			fplinux_settings_screen_off_values[i]));
+		request.kind = FPLINUX_UI_SETTING_SCREEN_OFF;
+		request.value.seconds = fplinux_settings_screen_off_values[i];
+		assert(fplinux_session_settings_apply(&settings, NULL,
+						      &request));
 		assert(fplinux_session_settings_format(
 			&settings, FPLINUX_SESSION_SETTING_SCREEN_OFF, value,
 			sizeof(value)));
@@ -70,11 +71,10 @@ static void test_offered_choices_reach_manager(void)
 	}
 	assert(FPLINUX_SETTINGS_AUTO_LOCK_COUNT == ARRAY_SIZE(auto_lock));
 	for (size_t i = 0; i < ARRAY_SIZE(auto_lock); i++) {
-		assert(!strcmp(fplinux_settings_auto_lock_values[i],
-			       auto_lock[i]));
-		assert(fplinux_session_settings_parse(
-			&settings, NULL, FPLINUX_SESSION_SETTING_AUTO_LOCK,
-			fplinux_settings_auto_lock_values[i]));
+		request.kind = FPLINUX_UI_SETTING_AUTO_LOCK;
+		request.value.seconds = fplinux_settings_auto_lock_values[i];
+		assert(fplinux_session_settings_apply(&settings, NULL,
+						      &request));
 		assert(fplinux_session_settings_format(
 			&settings, FPLINUX_SESSION_SETTING_AUTO_LOCK, value,
 			sizeof(value)));
@@ -94,31 +94,26 @@ static void test_offered_choices_reach_manager(void)
 	}
 }
 
-static void test_time_format(void)
+static void test_time_selection(void)
 {
 	struct tm date = { .tm_year = 126, .tm_mon = 7, .tm_mday = 30 };
 	struct tm clock = { .tm_hour = 7, .tm_min = 5, .tm_sec = 9 };
-	char value[20];
+	struct fplinux_ui_setting_time value;
 
-	assert(fplinux_settings_time_value(&date, &clock, value,
-					   sizeof(value)));
-	assert(!strcmp(value, "2026-08-30 07:05:09"));
-	assert(!fplinux_settings_time_value(&date, &clock, value, 19));
+	assert(fplinux_settings_time_value(&date, &clock, &value));
+	assert(value.year == 2026 && value.month == 8 && value.day == 30 &&
+	       value.hour == 7 && value.minute == 5 && value.second == 9);
 	clock.tm_sec = 60;
-	assert(fplinux_settings_time_value(&date, &clock, value,
-					   sizeof(value)));
-	assert(!strcmp(value, "2026-08-30 07:05:59"));
+	assert(fplinux_settings_time_value(&date, &clock, &value));
+	assert(value.second == 59);
 	clock.tm_sec = -1;
-	assert(!fplinux_settings_time_value(&date, &clock, value,
-					    sizeof(value)));
+	assert(!fplinux_settings_time_value(&date, &clock, &value));
 	clock.tm_sec = 0;
 	clock.tm_hour = 24;
-	assert(!fplinux_settings_time_value(&date, &clock, value,
-					    sizeof(value)));
+	assert(!fplinux_settings_time_value(&date, &clock, &value));
 	clock.tm_hour = 0;
 	date.tm_mon = 12;
-	assert(!fplinux_settings_time_value(&date, &clock, value,
-					    sizeof(value)));
+	assert(!fplinux_settings_time_value(&date, &clock, &value));
 }
 
 static void test_save_uses_live_clock(void)
@@ -127,65 +122,54 @@ static void test_save_uses_live_clock(void)
 	const time_t now = 1790900246;
 	const time_t next_day = 1790986436;
 	const time_t seven = 1790924733;
-	char value[20];
+	static const int years[] = { 1979, 1980, 2099, 2100 };
+	struct fplinux_ui_setting_time value;
 
-	assert(fplinux_settings_save_time(now, NULL, NULL, value,
-					  sizeof(value)));
-	assert(!strcmp(value, "2026-10-02 00:17:26"));
-	assert(fplinux_settings_save_time(now, &next_day, NULL, value,
-					  sizeof(value)));
-	assert(!strcmp(value, "2026-10-03 00:17:26"));
-	assert(fplinux_settings_save_time(now, NULL, &seven, value,
-					  sizeof(value)));
-	assert(!strcmp(value, "2026-10-02 07:05:00"));
-	assert(fplinux_settings_save_time(now, &next_day, &seven, value,
-					  sizeof(value)));
-	assert(!strcmp(value, "2026-10-03 07:05:00"));
-	assert(!fplinux_settings_save_time(now, NULL, NULL, value, 19));
-	assert(fplinux_settings_time_in_range("1980-01-01 00:00:00"));
-	assert(fplinux_settings_time_in_range("2099-12-31 23:59:59"));
-	assert(!fplinux_settings_time_in_range("1979-12-31 23:59:59"));
-	assert(!fplinux_settings_time_in_range("2100-01-01 00:00:00"));
-	assert(!fplinux_settings_time_in_range("19x0-01-01 00:00:00"));
-	assert(!fplinux_settings_time_in_range(""));
+	assert(fplinux_settings_save_time(now, NULL, NULL, &value));
+	assert(value.year == 2026 && value.month == 10 && value.day == 2 &&
+	       value.hour == 0 && value.minute == 17 && value.second == 26);
+	assert(fplinux_settings_save_time(now, &next_day, NULL, &value));
+	assert(value.day == 3 && value.hour == 0 && value.minute == 17 &&
+	       value.second == 26);
+	assert(fplinux_settings_save_time(now, NULL, &seven, &value));
+	assert(value.day == 2 && value.hour == 7 && value.minute == 5 &&
+	       value.second == 0);
+	assert(fplinux_settings_save_time(now, &next_day, &seven, &value));
+	assert(value.day == 3 && value.hour == 7 && value.minute == 5 &&
+	       value.second == 0);
+	for (size_t i = 0; i < ARRAY_SIZE(years); ++i) {
+		value.year = years[i];
+		assert(fplinux_settings_time_in_range(&value) ==
+		       (i == 1 || i == 2));
+	}
 }
 
 static void test_offered_years_reach_manager(void)
 {
-	static const char *const invalid[] = {
-		"1979-12-31 23:59:59", "2100-01-01 00:00:00",
-		"2026-04-31 12:00:00", "2025-02-29 12:00:00",
-		"2026-01-01 24:00:00", "2026-01-01 12:60:00",
-		"2026-01-01 12:00:60", "2026-1-01 12:00:00",
-	};
 	struct tm date = { .tm_mon = 0, .tm_mday = 1 };
 	struct tm clock = { .tm_hour = 12 };
 	time_t seconds;
-	char value[20];
+	struct fplinux_ui_setting_time value;
 
 	for (int year = FPLINUX_SETTINGS_YEAR_MIN;
 	     year <= FPLINUX_SETTINGS_YEAR_MAX; year++) {
 		date.tm_year = year - 1900;
-		assert(fplinux_settings_time_value(&date, &clock, value,
-						   sizeof(value)));
-		assert(fplinux_settings_time_in_range(value));
-		assert(fplinux_session_time_parse(value, &seconds));
+		assert(fplinux_settings_time_value(&date, &clock, &value));
+		assert(fplinux_settings_time_in_range(&value));
+		assert(fplinux_session_time_setpoint(&value, &seconds));
 	}
-	assert(fplinux_session_time_parse("1980-01-01 00:00:00", &seconds));
+	value = (struct fplinux_ui_setting_time){ 1980, 1, 1, 0, 0, 0 };
+	assert(fplinux_session_time_setpoint(&value, &seconds));
 	assert(seconds == 315532800);
-	assert(fplinux_session_time_parse("2099-12-31 23:59:59", &seconds));
+	value = (struct fplinux_ui_setting_time){ 2099, 12, 31, 23, 59, 59 };
+	assert(fplinux_session_time_setpoint(&value, &seconds));
 	assert(seconds == 4102444799LL);
-	for (size_t i = 0; i < ARRAY_SIZE(invalid); i++)
-		assert(!fplinux_session_time_parse(invalid[i], &seconds));
 }
 
-static void test_detail_and_choices(void)
+static void test_date_time_detail(void)
 {
-	static const char *const choices[] = { "first", "second" };
 	char detail[48];
 
-	assert(fplinux_settings_choice_find(choices, 2, "second") == 1);
-	assert(fplinux_settings_choice_find(choices, 2, "missing") == 2);
 	assert(fplinux_settings_date_time_detail("03.10.2026", "14:05", detail,
 						 17));
 	assert(!strcmp(detail, "03.10.2026 14:05"));
@@ -205,10 +189,10 @@ int main(void)
 	tzset();
 	test_brightness();
 	test_offered_choices_reach_manager();
-	test_time_format();
+	test_time_selection();
 	test_save_uses_live_clock();
 	test_offered_years_reach_manager();
-	test_detail_and_choices();
+	test_date_time_detail();
 	puts("settings-core: all checks passed");
 	return 0;
 }

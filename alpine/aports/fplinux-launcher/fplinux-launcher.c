@@ -406,6 +406,13 @@ static void report_view(struct launcher *launcher, bool force)
 {
 	struct fplinux_ui_session_message message = {
 		.type = FPLINUX_UI_SESSION_SELECT,
+		.launcher_view = launcher->view == FPLINUX_LAUNCHER_VIEW_HOME ?
+					 FPLINUX_UI_LAUNCHER_VIEW_HOME :
+					 FPLINUX_UI_LAUNCHER_VIEW_CATALOGUE,
+		.launcher_catalogue =
+			launcher->presentation == FPLINUX_LAUNCHER_VIEW_LIST ?
+				FPLINUX_UI_LAUNCHER_CATALOGUE_LIST :
+				FPLINUX_UI_LAUNCHER_CATALOGUE_GRID,
 	};
 
 	if (!launcher->session_known ||
@@ -413,9 +420,6 @@ static void report_view(struct launcher *launcher, bool force)
 	     !strcmp(selected_id(launcher), launcher->reported_selection)))
 		return;
 	strcpy(message.selected_id, selected_id(launcher));
-	strcpy(message.value, fplinux_launcher_view_value(launcher->view));
-	strcpy(message.name,
-	       fplinux_launcher_presentation_name(launcher->presentation));
 	if (!fplinux_ui_send(launcher->ui, &message))
 		return;
 	launcher->reported_view = launcher->view;
@@ -837,7 +841,7 @@ static void tasks_view_changed(void *context)
 	struct fplinux_ui_session_message message = {
 		.type = FPLINUX_UI_SESSION_SELECT,
 		.enabled = open,
-		.value = "tasks",
+		.launcher_view = FPLINUX_UI_LAUNCHER_VIEW_TASKS,
 	};
 
 	update_clock(launcher);
@@ -856,7 +860,7 @@ static void quick_settings_view_changed(void *context)
 	struct fplinux_ui_session_message message = {
 		.type = FPLINUX_UI_SESSION_SELECT,
 		.enabled = open,
-		.value = "quick-settings",
+		.launcher_view = FPLINUX_UI_LAUNCHER_VIEW_QUICK_SETTINGS,
 	};
 
 	update_clock(launcher);
@@ -1826,15 +1830,17 @@ static void receive_active(struct launcher *launcher,
 	 * A launcher restarted after a fullscreen application, a crash or a
 	 * language change opens the view the manager last learned about.
 	 */
-	if (first && fplinux_launcher_view_from_names(
-			     message->value, message->name, &launcher->view,
-			     &launcher->presentation))
+	if (first &&
+	    fplinux_launcher_view_from_session(
+		    message->launcher_view, message->launcher_catalogue,
+		    &launcher->view, &launcher->presentation))
 		launcher->reported_view = launcher->view;
 	/* EXIT returns to the catalogue, HOME to the home view. */
 	if (was_active && !launcher->active) {
 		bool home = launcher->home_pending ||
 			    (message->tasks_view &&
-			     !strcmp(message->value, "home"));
+			     message->launcher_view ==
+				     FPLINUX_UI_LAUNCHER_VIEW_HOME);
 
 		launcher->view = home ? FPLINUX_LAUNCHER_VIEW_HOME :
 					launcher->presentation;

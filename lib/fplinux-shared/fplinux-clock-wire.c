@@ -772,6 +772,61 @@ enum clock_status clock_wire_request_apply(struct clock_model *model,
 	return CLOCK_INVALID;
 }
 
+static bool same_alarm(const struct clock_alarm_spec *left,
+		       const struct clock_alarm_spec *right)
+{
+	return !strcmp(left->label, right->label) &&
+	       left->schedule == right->schedule &&
+	       left->once_utc == right->once_utc && left->hour == right->hour &&
+	       left->minute == right->minute &&
+	       left->repeat_days == right->repeat_days &&
+	       left->enabled == right->enabled;
+}
+
+bool clock_wire_request_equal(const struct clock_request *left,
+			      const struct clock_request *right)
+{
+	if (left->op != right->op || !clock_wire_request_name(left->op))
+		return false;
+
+	switch (left->op) {
+	case CLOCK_REQUEST_ALARM_ADD:
+		return same_alarm(&left->alarm, &right->alarm);
+	case CLOCK_REQUEST_ALARM_EDIT:
+		return left->id == right->id &&
+		       left->cancel_active == right->cancel_active &&
+		       same_alarm(&left->alarm, &right->alarm);
+	case CLOCK_REQUEST_ALARM_ENABLE:
+		return left->id == right->id &&
+		       left->cancel_active == right->cancel_active &&
+		       left->enabled == right->enabled;
+	case CLOCK_REQUEST_ALARM_DELETE:
+		return left->id == right->id &&
+		       left->cancel_active == right->cancel_active;
+	case CLOCK_REQUEST_ALARM_CANCEL_SNOOZE:
+	case CLOCK_REQUEST_WORLD_DELETE:
+		return left->id == right->id;
+	case CLOCK_REQUEST_DISMISS:
+		return left->event_id == right->event_id;
+	case CLOCK_REQUEST_SNOOZE:
+		return left->event_id == right->event_id &&
+		       left->minutes == right->minutes;
+	case CLOCK_REQUEST_TIMER_SET:
+		return left->seconds == right->seconds;
+	case CLOCK_REQUEST_WORLD_ADD:
+		return left->offset_minutes == right->offset_minutes;
+	case CLOCK_REQUEST_WORLD_EDIT:
+		return left->id == right->id &&
+		       left->offset_minutes == right->offset_minutes;
+	case CLOCK_REQUEST_SET_VIEW:
+		return left->view == right->view;
+	case CLOCK_REQUEST_SET_SNOOZE:
+		return left->minutes == right->minutes;
+	default:
+		return true;
+	}
+}
+
 static bool wall_value(struct json_object *object, const char *name,
 		       int64_t maximum, bool allow_zero, int64_t *value)
 {
@@ -1348,25 +1403,22 @@ static bool read_result(struct json_object *object, struct clock_result *result)
 }
 
 static bool read_snapshot(struct json_object *object, struct clock_model *model,
-			  struct clock_result *result, uint64_t *serial)
+			  struct clock_result *result)
 {
 	struct json_object *data;
-	return shape(object, 7) && literal_value(object, "op", "snapshot") &&
+	return shape(object, 6) && literal_value(object, "op", "snapshot") &&
 	       read_result(object, result) &&
-	       unsigned_value(object, "serial", UINT64_MAX, serial) &&
 	       member(object, "model", json_type_object, &data) &&
 	       read_model(data, model);
 }
 
 enum clock_status clock_wire_snapshot_encode(const struct clock_model *model,
 					     const struct clock_result *result,
-					     uint64_t serial, char *json,
-					     size_t capacity)
+					     char *json, size_t capacity)
 {
 	struct json_object *object;
 	struct clock_model checked = { 0 };
 	struct clock_result checked_result;
-	uint64_t checked_serial;
 	if (!model || !result ||
 	    (unsigned int)result->status > CLOCK_STORAGE_ERROR ||
 	    !storage_name(result->storage.state))
@@ -1384,11 +1436,9 @@ enum clock_status clock_wire_snapshot_encode(const struct clock_model *model,
 		object, "storage",
 		json_object_new_string(storage_name(result->storage.state)));
 	add_int(object, "error", result->storage.error);
-	add_uint(object, "serial", serial);
 	json_object_object_add(object, "model", make_model(model));
 	enum clock_status status =
-		read_snapshot(object, &checked, &checked_result,
-			      &checked_serial) ?
+		read_snapshot(object, &checked, &checked_result) ?
 			write_object(object, json, capacity) :
 			CLOCK_INVALID;
 	json_object_put(object);
@@ -1397,25 +1447,21 @@ enum clock_status clock_wire_snapshot_encode(const struct clock_model *model,
 
 enum clock_status clock_wire_snapshot_decode(const char *json, size_t length,
 					     struct clock_model *model,
-					     struct clock_result *result,
-					     uint64_t *serial)
+					     struct clock_result *result)
 {
 	struct clock_model decoded = { 0 };
 	struct clock_result decoded_result;
-	uint64_t decoded_serial;
 	struct json_object *object;
-	if (!model || !result || !serial)
+	if (!model || !result)
 		return CLOCK_INVALID;
 	object = parse_object(json, length);
-	bool valid = read_snapshot(object, &decoded, &decoded_result,
-				   &decoded_serial);
+	bool valid = read_snapshot(object, &decoded, &decoded_result);
 	if (object)
 		json_object_put(object);
 	if (!valid)
 		return CLOCK_INVALID;
 	*model = decoded;
 	*result = decoded_result;
-	*serial = decoded_serial;
 	return CLOCK_OK;
 }
 
@@ -1430,13 +1476,11 @@ void clock_wire_ring_from_model(const struct clock_model *model,
 	ring->missed_total = model->missed_total;
 }
 
-static bool read_ring(struct json_object *object, struct clock_ring *ring,
-		      uint64_t *serial)
+static bool read_ring(struct json_object *object, struct clock_ring *ring)
 {
 	struct json_object *event;
 	uint64_t snooze;
-	if (!shape(object, 5) || !literal_value(object, "op", "ring") ||
-	    !unsigned_value(object, "serial", UINT64_MAX, serial) ||
+	if (!shape(object, 4) || !literal_value(object, "op", "ring") ||
 	    !member(object, "event", json_type_object, &event) ||
 	    !read_event(event, &ring->event) ||
 	    ring->event.missed_reason != CLOCK_MISSED_NONE ||
@@ -1449,11 +1493,9 @@ static bool read_ring(struct json_object *object, struct clock_ring *ring,
 }
 
 enum clock_status clock_wire_ring_encode(const struct clock_ring *ring,
-					 uint64_t serial, char *json,
-					 size_t capacity)
+					 char *json, size_t capacity)
 {
 	struct clock_ring checked = { 0 };
-	uint64_t checked_serial;
 	struct json_object *object;
 	if (!ring)
 		return CLOCK_INVALID;
@@ -1461,12 +1503,11 @@ enum clock_status clock_wire_ring_encode(const struct clock_ring *ring,
 	if (!object)
 		return CLOCK_INVALID;
 	json_object_object_add(object, "op", json_object_new_string("ring"));
-	add_uint(object, "serial", serial);
 	json_object_object_add(object, "event", make_event(&ring->event));
 	add_uint(object, "snooze_minutes", ring->snooze_minutes);
 	add_uint(object, "missed_total", ring->missed_total);
 	enum clock_status result =
-		read_ring(object, &checked, &checked_serial) ?
+		read_ring(object, &checked) ?
 			write_object(object, json, capacity) :
 			CLOCK_INVALID;
 	json_object_put(object);
@@ -1474,21 +1515,18 @@ enum clock_status clock_wire_ring_encode(const struct clock_ring *ring,
 }
 
 enum clock_status clock_wire_ring_decode(const char *json, size_t length,
-					 struct clock_ring *ring,
-					 uint64_t *serial)
+					 struct clock_ring *ring)
 {
 	struct clock_ring decoded = { 0 };
-	uint64_t decoded_serial;
 	struct json_object *object;
-	if (!ring || !serial)
+	if (!ring)
 		return CLOCK_INVALID;
 	object = parse_object(json, length);
-	bool valid = read_ring(object, &decoded, &decoded_serial);
+	bool valid = read_ring(object, &decoded);
 	if (object)
 		json_object_put(object);
 	if (!valid)
 		return CLOCK_INVALID;
 	*ring = decoded;
-	*serial = decoded_serial;
 	return CLOCK_OK;
 }

@@ -7,26 +7,19 @@
 #include <stdint.h>
 #include <time.h>
 
+#include "fplinux-ui-session.h"
+
 enum fplinux_launcher_view {
 	FPLINUX_LAUNCHER_VIEW_HOME,
 	FPLINUX_LAUNCHER_VIEW_GRID,
 	FPLINUX_LAUNCHER_VIEW_LIST,
 };
 
-/*
- * The manager's spelling of the launcher views, in SELECT and ACTIVE: value is
- * "home" or "catalogue" and name the catalogue presentation, "grid" or "list".
- */
-const char *fplinux_launcher_view_value(enum fplinux_launcher_view view);
-const char *
-fplinux_launcher_presentation_name(enum fplinux_launcher_view presentation);
-/*
- * Reads the view and presentation that ACTIVE asks a new launcher to open.
- * False, with both left unchanged, unless both names are valid.
- */
-bool fplinux_launcher_view_from_names(const char *value, const char *name,
-				      enum fplinux_launcher_view *view,
-				      enum fplinux_launcher_view *presentation);
+bool fplinux_launcher_view_from_session(
+	enum fplinux_ui_launcher_view screen,
+	enum fplinux_ui_launcher_catalogue layout,
+	enum fplinux_launcher_view *view,
+	enum fplinux_launcher_view *presentation);
 
 /*
  * Notice codes from the manager: ACTIVE.reason (application notices and

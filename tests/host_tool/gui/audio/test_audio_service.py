@@ -6,6 +6,7 @@ from __future__ import annotations
 import array
 import errno
 import os
+import socket
 import subprocess
 import time
 from contextlib import ExitStack
@@ -15,12 +16,11 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from tests import ROOT
+from tests import ROOT, audio_wire
 from tests.c_harness import compile_c
 from tests.process import connect_unix_seqpacket, read_process_line, run_process
 
 if TYPE_CHECKING:
-    import socket
     from collections.abc import Iterator
 
 APORT = ROOT / "alpine/aports/fplinux-audiod"
@@ -42,6 +42,9 @@ def programs(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path, Path]:
             str(APORT / "audiod.c"),
             str(APORT / "audio-streams.c"),
             str(APORT / "audio-mixer.c"),
+            str(ROOT / "lib/fplinux-shared/fplinux-audio-control.c"),
+            str(ROOT / "lib/fplinux-shared/fplinux-audio-radio.c"),
+            str(ROOT / "lib/fplinux-shared/fplinux-audio-status.c"),
             str(ROOT / "lib/fplinux-shared/fplinux-cli.c"),
             str(HERE / "audio-device-peer.c"),
         ],
@@ -147,42 +150,34 @@ class Service:
         self.volume("MEDIA", 10)
         self.volume("ALARM", 10)
         if ready:
-            self.control("SYNC")
+            self.control(audio_wire.SYNC)
 
-    def control(self, command: str) -> None:
+    def control(self, command: bytes) -> None:
         """Send one policy command over the current manager connection."""
         assert self.manager is not None
-        self.manager.send(command.encode())
+        self.manager.send(command)
 
     def volume(self, kind: str, level: int) -> None:
         """Set a class volume and require its exact applied ACK."""
-        command = f"VOLUME {kind} {level}"
-        self.control(command)
-        assert self.manager is not None
-        self.expect_reply(command)
+        self.control(audio_wire.set_volume(kind, level))
+        self.expect_reply(audio_wire.volume_applied(kind, level))
 
-    def expect_reply(self, expected: str) -> None:
+    def expect_reply(self, expected: bytes) -> None:
         """Route validated activity notifications without mistaking them for ACKs."""
         assert self.manager is not None
         while True:
-            packet = self.manager.recv(256).decode("ascii")
-            if not packet.startswith("ACTIVITY "):
+            packet = self.manager.recv(256)
+            if not audio_wire.is_activity(packet):
                 assert packet == expected
                 return
-            fields = packet.split(" ")
-            assert len(fields) == 4
-            pid, uid = int(fields[1]), int(fields[2])
-            assert pid > 0
-            assert uid >= 0
-            assert fields[3] in {"none", "paused", "held", "unavailable", "playing"}
-            self.activities.append((pid, uid, fields[3]))
+            self.activities.append(audio_wire.activity(packet))
 
     def announce(self, stream: Stream, *, background: bool = False, clock: bool = False) -> None:
         """Authorize the producer's credentials and assigned role."""
         self.control(
-            f"CLOCK {stream.pid} {os.getuid()}"
+            audio_wire.clock(stream.pid, os.getuid())
             if clock
-            else f"APP {stream.pid} {os.getuid()} test {int(background)}"
+            else audio_wire.app(stream.pid, os.getuid(), background=background)
         )
 
     def stream(self, *, background: bool = False, clock: bool = False) -> Stream:
@@ -285,7 +280,7 @@ def test_foreground_pcm_interrupts_background_and_user_pause_survives_alarm(
     background = service.stream(background=True)
     foreground = service.stream()
     clock = service.stream(clock=True)
-    service.control(f"ELIGIBLE {foreground.pid} 1")
+    service.control(audio_wire.eligible(foreground.pid, enabled=True))
     assert background.command("WRITE 12000 12000") == "OK"
     service.wait_read(background, 480)
     service.wait_state(background, state=0, reason=0)
@@ -293,7 +288,7 @@ def test_foreground_pcm_interrupts_background_and_user_pause_survives_alarm(
     paused = service.wait_state(background, state=1, reason=3)
     time.sleep(0.025)
     assert background.state()[0] == paused[0]
-    service.control(f"ELIGIBLE {clock.pid} 1")
+    service.control(audio_wire.eligible(clock.pid, enabled=True))
     assert clock.command("WRITE 4800 30000") == "OK"
     service.wait_state(foreground, state=1, reason=4)
     assert background.command("PAUSE 1") == "OK"
@@ -312,7 +307,7 @@ def test_media_mute_does_not_mute_alarm_and_gain_applies_once(service: Service) 
     service.wait_read(media, 2400)
     service.volume("ALARM", 5)
     clock = service.stream(clock=True)
-    service.control(f"ELIGIBLE {clock.pid} 1")
+    service.control(audio_wire.eligible(clock.pid, enabled=True))
     assert clock.command("WRITE 2400 20000") == "OK"
     service.wait_read(clock, 2400)
     service.volume("ALARM", 0)
@@ -347,7 +342,7 @@ def test_class_gain_uses_one_three_db_curve(
     service.volume(kind, level)
     stream = service.stream(background=kind == "MEDIA", clock=kind == "ALARM")
     if kind == "ALARM":
-        service.control(f"ELIGIBLE {stream.pid} 1")
+        service.control(audio_wire.eligible(stream.pid, enabled=True))
     assert stream.command("WRITE 2400 20000") == "OK"
     service.wait_read(stream, 2400)
     samples = array.array("h", (service.directory / "samples").read_bytes())
@@ -362,7 +357,8 @@ def test_manager_disconnect_revokes_old_grant_and_diagnostic_does_not_replace_it
     assert old.command("WRITE 12000 10000") == "OK"
     service.wait_read(old, 480)
     with service.socket("status.sock") as diagnostic:
-        assert diagnostic.recv(512).startswith(b"STATE media=10 alarm=10 rate=48000")
+        state = audio_wire.status(diagnostic)
+        assert (state["media"], state["alarm"], state["rate"]) == (10, 10, 48000)
     with service.socket("control.sock") as other:
         assert other.recv(32) == b""
     service.volume("MEDIA", 7)
@@ -376,7 +372,7 @@ def test_manager_disconnect_revokes_old_grant_and_diagnostic_does_not_replace_it
     assert current.command("WRITE 4800 20000") == "OK"
     service.wait_state(current, state=1, reason=2)
     assert current.state()[0] == 0
-    service.control("SYNC")
+    service.control(audio_wire.SYNC)
     service.wait_read(current, 4800)
     assert old.state()[0] == paused[0]
     service.wait_state(old, state=1, reason=2)
@@ -389,11 +385,11 @@ def test_fm_closes_pcm_before_claim_and_alarm_releases_then_restores_radio(
     assert media.command("WRITE 12000 10000") == "OK"
     service.wait_read(media, 480)
     with service.socket("radio.sock") as radio:
-        radio.send(b"PLAY 999")
-        assert radio.recv(32) == b"READY"
+        radio.send(audio_wire.radio_play(999))
+        assert radio.recv(32) == audio_wire.RADIO_READY
         service.wait_state(media, state=1, reason=6)
         clock = service.stream(clock=True)
-        service.control(f"ELIGIBLE {clock.pid} 1")
+        service.control(audio_wire.eligible(clock.pid, enabled=True))
         assert clock.command("WRITE 2400 18000") == "OK"
         service.wait_read(clock, 2400)
         service.wait_state(media, state=1, reason=6)
@@ -414,7 +410,7 @@ def test_headphone_loss_pauses_media_before_speaker_fallback_and_alarm_still_pla
     paused = service.wait_state(media, state=1, reason=5)
     service.wait_device_events("PCM OPEN", "PCM CLOSE", "ROUTE SPEAKER")
     clock = service.stream(clock=True)
-    service.control(f"ELIGIBLE {clock.pid} 1")
+    service.control(audio_wire.eligible(clock.pid, enabled=True))
     assert clock.command("WRITE 2400 18000") == "OK"
     service.wait_read(clock, 2400)
     assert media.state()[0] == paused[0]
@@ -428,7 +424,7 @@ def test_unconfirmed_clock_ring_expires_after_reconnect_and_silent_alarm_resumes
     media = service.stream(background=True)
     clock = service.stream(clock=True)
     service.volume("ALARM", 0)
-    service.control(f"ELIGIBLE {clock.pid} 1")
+    service.control(audio_wire.eligible(clock.pid, enabled=True))
     assert clock.command("WRITE 4800 20000") == "OK"
     assert media.command("WRITE 12000 10000") == "OK"
     service.wait_state(media, state=1, reason=4)
@@ -441,7 +437,7 @@ def test_unconfirmed_clock_ring_expires_after_reconnect_and_silent_alarm_resumes
     service.wait_state(media, state=1, reason=2)
     service.connect(ready=False)
     service.announce(media, background=True)
-    service.control("SYNC")
+    service.control(audio_wire.SYNC)
     service.wait_read(media, 12000)
     service.wait_state(clock, state=3, reason=2)
 
@@ -449,23 +445,24 @@ def test_unconfirmed_clock_ring_expires_after_reconnect_and_silent_alarm_resumes
 def test_selected_missing_headphones_hold_new_media_until_connection_while_alarm_drains(
     service: Service,
 ) -> None:
-    service.control("OUTPUT HEADPHONES")
+    service.control(audio_wire.set_output(2))
     assert service.manager is not None
-    service.expect_reply("OUTPUT HEADPHONES")
+    service.expect_reply(audio_wire.output_applied(2))
     service.change_jack(b"U")
     media = service.stream(background=True)
     assert media.command("WRITE 12000 10000") == "OK"
     service.wait_state(media, state=1, reason=5)
     assert media.state()[0] == 0
     clock = service.stream(clock=True)
-    service.control(f"ELIGIBLE {clock.pid} 1")
+    service.control(audio_wire.eligible(clock.pid, enabled=True))
     assert clock.command("WRITE 2400 18000") == "OK"
     service.wait_read(clock, 2400)
     assert media.state()[0] == 0
     service.change_jack(b"I")
     service.wait_read(media, 12000)
     with service.socket("status.sock") as diagnostic:
-        assert b"output=2 applied=2" in diagnostic.recv(512)
+        state = audio_wire.status(diagnostic)
+        assert (state["output"], state["applied"]) == (2, 2)
 
 
 def test_auto_route_with_no_speaker_and_known_missing_headphones_cannot_claim_playback(
@@ -476,7 +473,7 @@ def test_auto_route_with_no_speaker_and_known_missing_headphones_cannot_claim_pl
     assert media.command("WRITE 12000 10000") == "OK"
     service.wait_state(media, state=1, reason=5)
     clock = service.stream(clock=True)
-    service.control(f"ELIGIBLE {clock.pid} 1")
+    service.control(audio_wire.eligible(clock.pid, enabled=True))
     assert clock.command("WRITE 2400 18000") == "OK"
     service.wait_state(clock, state=2, reason=5)
     assert media.state()[0] == 0
@@ -499,6 +496,80 @@ def test_status_cli_reads_running_state_without_opening_devices_or_replacing_man
     service.volume("MEDIA", 6)
 
 
+STATUS_PACKET = bytes.fromhex(
+    "01 07 02 44 ac 00 00 01 02 00 01 01 01 01 00 01 00 01 ff ff ff ff ff ff ff ff 13 00 00 00"
+)
+
+
+@pytest.mark.parametrize(
+    ("packet", "error"),
+    [
+        (STATUS_PACKET, None),
+        (None, errno.ETIMEDOUT),
+        (b"", errno.EPROTO),
+        (STATUS_PACKET[:-1], errno.EPROTO),
+        (STATUS_PACKET + bytes(32), errno.EPROTO),
+        (b"\x02" + STATUS_PACKET[1:], errno.EPROTO),
+        (b"\x01\x0b" + STATUS_PACKET[2:], errno.EPROTO),
+        (STATUS_PACKET[:3] + bytes(4) + STATUS_PACKET[7:], errno.EPROTO),
+        (STATUS_PACKET[:8] + b"\x03" + STATUS_PACKET[9:], errno.EPROTO),
+        (STATUS_PACKET[:9] + b"\x02" + STATUS_PACKET[10:], errno.EPROTO),
+        (STATUS_PACKET[:-1] + b"\x80", errno.EPROTO),
+    ],
+    ids=[
+        "valid",
+        "timeout",
+        "closed",
+        "short",
+        "truncated",
+        "wrong-type",
+        "level",
+        "rate",
+        "route",
+        "flag",
+        "errno",
+    ],
+)
+def test_status_cli_requires_one_valid_snapshot(
+    service_directory: Path,
+    programs: tuple[Path, Path],
+    packet: bytes | None,
+    error: int | None,
+) -> None:
+    with ExitStack() as cleanup:
+        listener = cleanup.enter_context(socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET))
+        listener.bind(str(service_directory / "status.sock"))
+        listener.listen()
+        listener.settimeout(2)
+
+        def send_snapshot(_process: subprocess.Popen[str], _deadline: float) -> None:
+            connection, _ = listener.accept()
+            cleanup.callback(connection.close)
+            if packet is not None:
+                if packet:
+                    connection.sendall(packet)
+                connection.close()
+
+        result = run_process(
+            [str(programs[0]), "--dir", str(service_directory), "--status"],
+            name="read an independent audiod snapshot through the status CLI",
+            timeout=3,
+            while_running=send_snapshot,
+        )
+    if error is not None:
+        assert result.returncode == 1
+        assert result.stdout == ""
+        assert result.stderr == f"fplinux-audiod: status: {os.strerror(error)}\n"
+    else:
+        assert result.returncode == 0
+        assert result.stderr == ""
+        assert result.stdout == (
+            "STATE media=7 alarm=2 rate=44100 output=1 applied=2 speaker=0 headphones=1"
+            " jack=1 plugged=1 fm=1 fm_active=0 clock=1 foreground=0 pcm=1"
+            " clipped=18446744073709551615 error=19\n"
+        )
+
+
 def test_status_cli_help_returns_before_device_initialization(programs: tuple[Path, Path]) -> None:
     result = run_process(
         [str(programs[0]), "--status", "--help"],
@@ -514,28 +585,28 @@ def test_status_cli_help_returns_before_device_initialization(programs: tuple[Pa
 def test_explicit_speaker_keeps_playing_when_unused_headphone_antenna_is_removed(
     service: Service, *, radio: bool
 ) -> None:
-    service.control("OUTPUT SPEAKER")
+    service.control(audio_wire.set_output(1))
     assert service.manager is not None
-    service.expect_reply("OUTPUT SPEAKER")
+    service.expect_reply(audio_wire.output_applied(1))
     media = service.stream(background=True)
     with ExitStack() as cleanup:
         if radio:
             lease = cleanup.enter_context(service.socket("radio.sock"))
-            lease.send(b"PLAY 999")
-            assert lease.recv(32) == b"READY"
+            lease.send(audio_wire.radio_play(999))
+            assert lease.recv(32) == audio_wire.RADIO_READY
         assert media.command("WRITE 12000 10000") == "OK"
         previous = media.state()[0]
         service.change_jack(b"U")
         deadline = time.monotonic() + 3
         while True:
             with service.socket("status.sock") as diagnostic:
-                state = diagnostic.recv(512)
-            if b"plugged=0 " in state:
+                state = audio_wire.status(diagnostic)
+            if state["plugged"] == 0:
                 break
             assert time.monotonic() < deadline
-        assert b"output=1 applied=1 " in state
+        assert (state["output"], state["applied"]) == (1, 1)
         if radio:
-            assert b"fm_active=1 " in state
+            assert state["fm_active"] == 1
             service.wait_state(media, state=1, reason=6)
             lease.settimeout(0.03)
             with pytest.raises(TimeoutError):

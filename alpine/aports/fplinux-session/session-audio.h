@@ -6,6 +6,7 @@
 #include <stdint.h>
 #include <sys/types.h>
 
+#include "fplinux-audio-control.h"
 #include "fplinux-ui-session.h"
 
 /* Retained application tasks and the single bounded clock helper. */
@@ -25,7 +26,6 @@ struct fplinux_session_audio_process {
 	/* 0 for a free entry. */
 	pid_t pid;
 	uid_t uid;
-	char app_id[FPLINUX_UI_SESSION_ID_BYTES];
 	bool clock;
 	bool background;
 	bool eligible;
@@ -54,8 +54,8 @@ struct fplinux_session_audio_volume {
 
 /*
  * The manager's client of the audio service's control socket
- * (fplinux-audio-protocol.h). It holds the processes the service must know,
- * with their uid, application ID, grant and foreground eligibility, and sends
+ * (fplinux-audio-control.h). It holds the processes the service must know,
+ * with their uid, grant and foreground eligibility, and sends
  * each change as it happens, in the order of the calls.
  *
  * Nothing blocks: the socket is nonblocking, and a send that fails or would
@@ -82,9 +82,9 @@ struct fplinux_session_audio {
 	struct fplinux_session_audio_volume
 		volume[FPLINUX_SESSION_AUDIO_CLASSES];
 	bool ready;
-	char desired_output[16];
-	char sent_output[16];
-	char applied_output[16];
+	enum fplinux_audio_route desired_output;
+	enum fplinux_audio_route sent_output;
+	enum fplinux_audio_route applied_output;
 	bool output_waiting;
 	bool output_known;
 	int output_error;
@@ -129,7 +129,8 @@ bool fplinux_session_audio_volume_pending(
 	const struct fplinux_session_audio *audio,
 	enum fplinux_session_audio_class class);
 bool fplinux_session_audio_set_output(struct fplinux_session_audio *audio,
-				      const char *output, uint64_t now_ms);
+				      enum fplinux_audio_route output,
+				      uint64_t now_ms);
 /* Only the current announced APP's service-owned media state is returned. */
 enum fplinux_ui_session_playback
 fplinux_session_audio_playback(const struct fplinux_session_audio *audio,

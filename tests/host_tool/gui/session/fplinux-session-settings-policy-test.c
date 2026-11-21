@@ -215,41 +215,32 @@ static void test_setting_values(void)
 
 static void test_time_values(void)
 {
-	static const char *const invalid[] = {
-		"2026-02-29 10:00",	"1979-12-31 23:59",
-		"2100-01-01 00:00",	"2026-10-01 24:00",
-		"2026-10-01 12:60",	"2026-10-01T12:34",
-		"2026-1-01 12:34",	"",
-		"2026-00-10 10:00",	"2026-04-31 10:00",
-		"2026-10-01 12:34:60",	"2026-10-01 12:34:5",
-		"2026-10-01 12:34-05",	"2026-10-01 12:34:0x",
-		"2026-10-01 12:34:000", "2026-04-31 10:00:00",
-		"2026-10-01 12:34:",
+	static const struct fplinux_ui_setting_time invalid[] = {
+		{ 2026, 2, 29, 10, 0, 0 },  { 1979, 12, 31, 23, 59, 0 },
+		{ 2100, 1, 1, 0, 0, 0 },    { 2026, 10, 1, 24, 0, 0 },
+		{ 2026, 10, 1, 12, 60, 0 }, { 2026, 0, 10, 10, 0, 0 },
+		{ 2026, 4, 31, 10, 0, 0 },  { 2026, 10, 1, 12, 34, 60 },
 	};
-	char value[32];
+	struct fplinux_ui_setting_time value = { 2026, 10, 1, 12, 34, 0 };
 	time_t seconds = 0;
 	unsigned int i;
 
 	setenv("TZ", "UTC0", 1);
 	tzset();
-	check(fplinux_session_time_parse("2026-10-01 12:34", &seconds) &&
+	check(fplinux_session_time_setpoint(&value, &seconds) &&
 		      seconds == 1790858040,
 	      "local time without a zone is UTC");
-	check(fplinux_session_time_parse("2024-02-29 10:00", &seconds) &&
-		      seconds == 1709200800,
-	      "a leap day is accepted");
-	check(fplinux_session_time_parse("2026-10-01 12:34:56", &seconds) &&
+	value.second = 56;
+	check(fplinux_session_time_setpoint(&value, &seconds) &&
 		      seconds == 1790858040 + 56,
 	      "seconds are accepted, so a date-only edit keeps them");
-	check(fplinux_session_time_parse("2026-10-01 12:34:00", &seconds) &&
-		      seconds == 1790858040,
-	      "zero seconds equal the form without seconds");
+	value = (struct fplinux_ui_setting_time){ 2024, 2, 29, 10, 0, 0 };
+	check(fplinux_session_time_setpoint(&value, &seconds) &&
+		      seconds == 1709200800,
+	      "a leap day is accepted");
 	for (i = 0; i < sizeof(invalid) / sizeof(*invalid); ++i)
-		check(!fplinux_session_time_parse(invalid[i], &seconds),
+		check(!fplinux_session_time_setpoint(&invalid[i], &seconds),
 		      "malformed or out-of-range time is rejected");
-	check(fplinux_session_time_format(1790858040, value, sizeof(value)) &&
-		      !strcmp(value, "2026-10-01 12:34"),
-	      "time is reported as YYYY-MM-DD HH:MM");
 }
 
 static bool file_is(const char *path, const char *expected)

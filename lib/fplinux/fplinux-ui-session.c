@@ -195,6 +195,65 @@ static const char *const storage_names[] = {
 	[FPLINUX_STORAGE_DURABLE] = "durable",
 };
 
+static const char *const route_names[] = {
+	[FPLINUX_AUDIO_ROUTE_AUTO] = "AUTO",
+	[FPLINUX_AUDIO_ROUTE_SPEAKER] = "SPEAKER",
+	[FPLINUX_AUDIO_ROUTE_HEADPHONES] = "HEADPHONES",
+};
+
+static const char *const setting_names[] = {
+	[FPLINUX_UI_SETTING_BRIGHTNESS] = "brightness",
+	[FPLINUX_UI_SETTING_BRIGHTNESS_PREVIEW] = "brightness_preview",
+	[FPLINUX_UI_SETTING_VOLUME] = "volume",
+	[FPLINUX_UI_SETTING_VOLUME_PREVIEW] = "volume_preview",
+	[FPLINUX_UI_SETTING_VOLUME_STEP] = "volume_step",
+	[FPLINUX_UI_SETTING_VOLUME_COMMIT] = "volume_commit",
+	[FPLINUX_UI_SETTING_MEDIA_VOLUME_STEP] = "media_volume_step",
+	[FPLINUX_UI_SETTING_ALARM_VOLUME] = "alarm_volume",
+	[FPLINUX_UI_SETTING_ALARM_VOLUME_PREVIEW] = "alarm_volume_preview",
+	[FPLINUX_UI_SETTING_ALARM_VOLUME_COMMIT] = "alarm_volume_commit",
+	[FPLINUX_UI_SETTING_AUDIO_OUTPUT] = "audio_output",
+	[FPLINUX_UI_SETTING_AUDIO_OUTPUTS] = "audio_outputs",
+	[FPLINUX_UI_SETTING_AUDIO_OUTPUT_ACTIVE] = "audio_output_active",
+	[FPLINUX_UI_SETTING_SCREEN_OFF] = "screen_off_seconds",
+	[FPLINUX_UI_SETTING_AUTO_LOCK] = "auto_lock_seconds",
+	[FPLINUX_UI_SETTING_LOCALE] = "locale",
+	[FPLINUX_UI_SETTING_INPUT_LOCALE] = "input_locale",
+	[FPLINUX_UI_SETTING_TIME] = "time",
+	[FPLINUX_UI_SETTING_THEME] = "theme",
+	[FPLINUX_UI_SETTING_WIFI] = "wifi",
+	[FPLINUX_UI_SETTING_UNKNOWN] = "unknown",
+};
+
+static const char *const setting_operation_names[] = {
+	[FPLINUX_UI_SETTING_GET] = "get",
+	[FPLINUX_UI_SETTING_SET] = "set",
+	[FPLINUX_UI_SETTING_PREVIEW] = "preview",
+	[FPLINUX_UI_SETTING_CANCEL] = "cancel",
+	[FPLINUX_UI_SETTING_STEP] = "step",
+	[FPLINUX_UI_SETTING_COMMIT] = "commit",
+	[FPLINUX_UI_SETTING_RESULT] = "result",
+	[FPLINUX_UI_SETTING_INVALID] = "invalid",
+};
+
+static const char *const launcher_view_names[] = {
+	[FPLINUX_UI_LAUNCHER_VIEW_HOME] = "home",
+	[FPLINUX_UI_LAUNCHER_VIEW_CATALOGUE] = "catalogue",
+	[FPLINUX_UI_LAUNCHER_VIEW_TASKS] = "tasks",
+	[FPLINUX_UI_LAUNCHER_VIEW_QUICK_SETTINGS] = "quick-settings",
+};
+
+static const char *const launcher_catalogue_names[] = {
+	[FPLINUX_UI_LAUNCHER_CATALOGUE_GRID] = "grid",
+	[FPLINUX_UI_LAUNCHER_CATALOGUE_LIST] = "list",
+};
+
+static const char *const close_response_names[] = {
+	[FPLINUX_UI_SESSION_CLOSE_READY] = "ready",
+	[FPLINUX_UI_SESSION_CLOSE_CANCEL] = "cancel",
+	[FPLINUX_UI_SESSION_CLOSE_WAIT] = "wait",
+};
+
 /* Every field a packet may carry; anything else makes it invalid. */
 static const char *const field_names[] = {
 	"type",
@@ -219,6 +278,9 @@ static const char *const field_names[] = {
 	"input_locale",
 	"name",
 	"value",
+	"setting",
+	"launcher_view",
+	"launcher_catalogue",
 	"battery",
 	"charging",
 	"notice",
@@ -303,16 +365,183 @@ static bool clock_data_valid(const char *text)
 	return true;
 }
 
-static bool get_clock(struct json_object *object, unsigned int type, char *data)
+static const char *json_space(const char *cursor, const char *end)
+{
+	while (cursor < end && (*cursor == ' ' || *cursor == '\t' ||
+				*cursor == '\n' || *cursor == '\r'))
+		++cursor;
+	return cursor;
+}
+
+static const char *json_string_end(const char *cursor, const char *end)
+{
+	if (cursor == end || *cursor++ != '"')
+		return NULL;
+	while (cursor < end) {
+		char byte = *cursor++;
+
+		if (byte == '"')
+			return cursor;
+		if (byte == '\\' && cursor < end)
+			++cursor;
+	}
+	return NULL;
+}
+
+/* Find the end of a value in an already parsed packet. Only the clock owner
+ * interprets the original domain tokens, including duplicate keys.
+ */
+static const char *json_value_end(const char *cursor, const char *end)
+{
+	size_t depth = 0;
+
+	if (cursor == end)
+		return NULL;
+	if (*cursor == '"')
+		return json_string_end(cursor, end);
+	if (*cursor != '{' && *cursor != '[') {
+		const char *start = cursor;
+
+		while (cursor < end && *cursor != ',' && *cursor != '}' &&
+		       json_space(cursor, end) == cursor)
+			++cursor;
+		return cursor == start ? NULL : cursor;
+	}
+	while (cursor < end) {
+		char byte = *cursor;
+
+		if (byte == '"') {
+			cursor = json_string_end(cursor, end);
+			if (!cursor)
+				return NULL;
+			continue;
+		}
+		++cursor;
+		if (byte == '{' || byte == '[')
+			++depth;
+		else if ((byte == '}' || byte == ']') && !--depth)
+			return cursor;
+	}
+	return NULL;
+}
+
+static int clock_key(const char *key, size_t bytes)
+{
+	struct json_tokener *tokener;
+	struct json_object *name;
+	int result = -1;
+
+	if (bytes == sizeof("\"clock\"") - 1 &&
+	    !memcmp(key, "\"clock\"", bytes))
+		return 1;
+	if (!memchr(key, '\\', bytes))
+		return 0;
+	tokener = json_tokener_new();
+	if (!tokener)
+		return -1;
+	name = json_tokener_parse_ex(tokener, key, (int)bytes);
+	if (json_tokener_get_error(tokener) == json_tokener_success &&
+	    json_object_is_type(name, json_type_string)) {
+		const char *text = json_object_get_string(name);
+		size_t length = (size_t)json_object_get_string_len(name);
+
+		if (!memchr(text, '\0', length))
+			result = length == 5 && !memcmp(text, "clock", length);
+	}
+	json_object_put(name);
+	json_tokener_free(tokener);
+	return result;
+}
+
+static bool copy_clock_object(const char *packet, size_t bytes, char *data)
+{
+	const char *end = packet + bytes;
+	const char *cursor = json_space(packet, end);
+	bool found = false;
+
+	if (cursor == end || *cursor++ != '{')
+		return false;
+	while ((cursor = json_space(cursor, end)) < end && *cursor != '}') {
+		const char *key = cursor;
+		const char *key_end = json_string_end(key, end);
+		const char *value, *value_end;
+		int is_clock;
+
+		if (!key_end)
+			return false;
+		is_clock = clock_key(key, (size_t)(key_end - key));
+		cursor = json_space(key_end, end);
+		if (is_clock < 0 || cursor == end || *cursor++ != ':')
+			return false;
+		value = json_space(cursor, end);
+		value_end = json_value_end(value, end);
+		if (!value_end)
+			return false;
+		if (is_clock) {
+			size_t length = value_end - value;
+
+			if (found || *value != '{' ||
+			    length >= FPLINUX_UI_SESSION_CLOCK_BYTES)
+				return false;
+			memcpy(data, value, length);
+			data[length] = '\0';
+			found = true;
+		}
+		cursor = json_space(value_end, end);
+		if (cursor == end)
+			return false;
+		if (*cursor == '}')
+			return found && json_space(cursor + 1, end) == end;
+		if (*cursor++ != ',')
+			return false;
+	}
+	return false;
+}
+
+static bool get_clock(struct json_object *object, unsigned int type,
+		      const char *packet, size_t bytes, char *data)
 {
 	struct json_object *field;
 
-	if (json_object_object_get_ex(object, "clock", &field) &&
-	    type != FPLINUX_UI_SESSION_CLOCK &&
-	    type != FPLINUX_UI_SESSION_ACTIVE)
+	if (!json_object_object_get_ex(object, "clock", &field))
+		return true;
+	return (type == FPLINUX_UI_SESSION_CLOCK ||
+		type == FPLINUX_UI_SESSION_ACTIVE) &&
+	       json_object_is_type(field, json_type_object) &&
+	       copy_clock_object(packet, bytes, data);
+}
+
+static bool add_clock(struct json_object *object, const char *data)
+{
+	struct json_tokener *tokener;
+	struct json_object *field;
+	size_t bytes = strlen(data);
+	bool valid;
+
+	if (!bytes)
+		return true;
+	tokener = json_tokener_new();
+	if (!tokener)
 		return false;
-	return get_string(object, "clock", data,
-			  FPLINUX_UI_SESSION_CLOCK_BYTES);
+	json_tokener_set_flags(tokener, JSON_TOKENER_VALIDATE_UTF8);
+	field = json_tokener_parse_ex(tokener, data, (int)bytes);
+	valid = json_tokener_get_error(tokener) == json_tokener_success &&
+		json_tokener_get_parse_end(tokener) == bytes &&
+		json_object_is_type(field, json_type_object);
+	json_tokener_free(tokener);
+	if (!valid) {
+		json_object_put(field);
+		errno = EINVAL;
+		return false;
+	}
+	/* Preserve the checked object's raw tokens until this packet is sent. */
+	json_object_set_serializer(field, json_object_userdata_to_json_string,
+				   (void *)data, NULL);
+	if (json_object_object_add(object, "clock", field) < 0) {
+		json_object_put(field);
+		return false;
+	}
+	return true;
 }
 
 static bool get_int(struct json_object *object, const char *name, int *value)
@@ -1076,10 +1305,588 @@ static bool get_task_fields(struct json_object *object, unsigned int type,
 	return true;
 }
 
-static bool close_response_valid(const char *value)
+enum setting_payload {
+	SETTING_NO_PAYLOAD,
+	SETTING_LEVEL,
+	SETTING_STEP,
+	SETTING_SECONDS,
+	SETTING_ROUTE,
+	SETTING_ROUTES,
+	SETTING_LOCALE,
+	SETTING_TIME,
+	SETTING_THEME,
+	SETTING_ENABLED,
+};
+
+static enum setting_payload
+setting_payload(const struct fplinux_ui_setting *setting)
 {
-	return !strcmp(value, "ready") || !strcmp(value, "cancel") ||
-	       !strcmp(value, "wait");
+	switch (setting->operation) {
+	case FPLINUX_UI_SETTING_GET:
+	case FPLINUX_UI_SETTING_CANCEL:
+	case FPLINUX_UI_SETTING_COMMIT:
+	case FPLINUX_UI_SETTING_INVALID:
+		return SETTING_NO_PAYLOAD;
+	case FPLINUX_UI_SETTING_STEP:
+		return SETTING_STEP;
+	default:
+		break;
+	}
+	switch (setting->kind) {
+	case FPLINUX_UI_SETTING_AUDIO_OUTPUT:
+	case FPLINUX_UI_SETTING_AUDIO_OUTPUT_ACTIVE:
+		return SETTING_ROUTE;
+	case FPLINUX_UI_SETTING_AUDIO_OUTPUTS:
+		return SETTING_ROUTES;
+	case FPLINUX_UI_SETTING_SCREEN_OFF:
+	case FPLINUX_UI_SETTING_AUTO_LOCK:
+		return SETTING_SECONDS;
+	case FPLINUX_UI_SETTING_LOCALE:
+	case FPLINUX_UI_SETTING_INPUT_LOCALE:
+		return SETTING_LOCALE;
+	case FPLINUX_UI_SETTING_TIME:
+		return SETTING_TIME;
+	case FPLINUX_UI_SETTING_THEME:
+		return SETTING_THEME;
+	case FPLINUX_UI_SETTING_WIFI:
+		return SETTING_ENABLED;
+	default:
+		return SETTING_LEVEL;
+	}
+}
+
+static bool setting_operation_valid(const struct fplinux_ui_setting *setting)
+{
+	if (setting->kind == FPLINUX_UI_SETTING_UNKNOWN)
+		return setting->operation == FPLINUX_UI_SETTING_INVALID;
+	if (setting->operation == FPLINUX_UI_SETTING_RESULT ||
+	    setting->operation == FPLINUX_UI_SETTING_INVALID)
+		return true;
+	switch (setting->kind) {
+	case FPLINUX_UI_SETTING_BRIGHTNESS_PREVIEW:
+	case FPLINUX_UI_SETTING_VOLUME_PREVIEW:
+	case FPLINUX_UI_SETTING_ALARM_VOLUME_PREVIEW:
+		return setting->operation == FPLINUX_UI_SETTING_PREVIEW ||
+		       setting->operation == FPLINUX_UI_SETTING_CANCEL;
+	case FPLINUX_UI_SETTING_VOLUME_STEP:
+	case FPLINUX_UI_SETTING_MEDIA_VOLUME_STEP:
+		return setting->operation == FPLINUX_UI_SETTING_STEP;
+	case FPLINUX_UI_SETTING_VOLUME_COMMIT:
+	case FPLINUX_UI_SETTING_ALARM_VOLUME_COMMIT:
+		return setting->operation == FPLINUX_UI_SETTING_COMMIT;
+	case FPLINUX_UI_SETTING_AUDIO_OUTPUTS:
+	case FPLINUX_UI_SETTING_AUDIO_OUTPUT_ACTIVE:
+		return setting->operation == FPLINUX_UI_SETTING_GET;
+	default:
+		return setting->operation == FPLINUX_UI_SETTING_GET ||
+		       setting->operation == FPLINUX_UI_SETTING_SET;
+	}
+}
+
+static bool setting_time_shape(const struct fplinux_ui_setting_time *time)
+{
+	return time->year >= 0 && time->year <= 9999 && time->month >= 0 &&
+	       time->month <= 99 && time->day >= 0 && time->day <= 99 &&
+	       time->hour >= 0 && time->hour <= 99 && time->minute >= 0 &&
+	       time->minute <= 99 && time->second >= 0 && time->second <= 99;
+}
+
+static bool setting_time_parse(const char *value,
+			       struct fplinux_ui_setting_time *time)
+{
+	static const char pattern[] = "dddd-dd-dd dd:dd:dd";
+	size_t length = strlen(value);
+	struct fplinux_ui_setting_time parsed = { 0 };
+
+	if (length != 16 && length != 19)
+		return false;
+	for (size_t i = 0; i < length; ++i)
+		if (pattern[i] == 'd' ? value[i] < '0' || value[i] > '9' :
+					value[i] != pattern[i])
+			return false;
+	if (sscanf(value, "%d-%d-%d %d:%d:%d", &parsed.year, &parsed.month,
+		   &parsed.day, &parsed.hour, &parsed.minute,
+		   &parsed.second) != (length == 16 ? 5 : 6))
+		return false;
+	*time = parsed;
+	return true;
+}
+
+static bool setting_value_valid(const struct fplinux_ui_setting *setting)
+{
+	const union fplinux_ui_setting_value *value = &setting->value;
+	unsigned int valid_routes =
+		FPLINUX_UI_AUDIO_OUTPUT(FPLINUX_AUDIO_ROUTE_AUTO) |
+		FPLINUX_UI_AUDIO_OUTPUT(FPLINUX_AUDIO_ROUTE_SPEAKER) |
+		FPLINUX_UI_AUDIO_OUTPUT(FPLINUX_AUDIO_ROUTE_HEADPHONES);
+
+	switch (setting_payload(setting)) {
+	case SETTING_STEP:
+		return value->step == -1 || value->step == 1;
+	case SETTING_ROUTE:
+		return (unsigned int)value->route < ARRAY_SIZE(route_names);
+	case SETTING_ROUTES:
+		return (value->routes &
+			FPLINUX_UI_AUDIO_OUTPUT(FPLINUX_AUDIO_ROUTE_AUTO)) &&
+		       !(value->routes & ~valid_routes);
+	case SETTING_LOCALE:
+		return value->locale[0] &&
+		       memchr(value->locale, '\0', sizeof(value->locale));
+	case SETTING_TIME:
+		return setting_time_shape(&value->time);
+	case SETTING_THEME:
+		return (unsigned int)value->theme < ARRAY_SIZE(theme_names);
+	default:
+		return true;
+	}
+}
+
+static bool setting_valid(enum fplinux_ui_session_message_type type,
+			  bool applied,
+			  const struct fplinux_ui_setting *setting)
+{
+	return setting->kind > FPLINUX_UI_SETTING_NONE &&
+	       (unsigned int)setting->kind < ARRAY_SIZE(setting_names) &&
+	       setting_operation_valid(setting) &&
+	       setting_value_valid(setting) &&
+	       (!applied || setting->operation == FPLINUX_UI_SETTING_RESULT) &&
+	       (type != FPLINUX_UI_SESSION_SETTING ||
+		setting->operation != FPLINUX_UI_SETTING_RESULT || applied) &&
+	       (type == FPLINUX_UI_SESSION_ERROR ||
+		type == FPLINUX_UI_SESSION_SETTING);
+}
+
+static bool setting_number(const char *text, int *value)
+{
+	int number = 0;
+
+	if (!text[0] || (text[0] == '0' && text[1]))
+		return false;
+	for (; *text; ++text) {
+		int digit = *text - '0';
+
+		if (digit < 0 || digit > 9 || number > (INT32_MAX - digit) / 10)
+			return false;
+		number = number * 10 + digit;
+	}
+	*value = number;
+	return true;
+}
+
+static unsigned int name_index(const char *text, const char *const *names,
+			       size_t count)
+{
+	for (size_t i = 0; i < count; ++i)
+		if (names[i] && !strcmp(text, names[i]))
+			return i;
+	return count;
+}
+
+static bool setting_from_text(struct fplinux_ui_setting *setting,
+			      const char *text)
+{
+	union fplinux_ui_setting_value *value = &setting->value;
+	unsigned int choice;
+
+	switch (setting_payload(setting)) {
+	case SETTING_NO_PAYLOAD:
+		return !text[0];
+	case SETTING_LEVEL:
+		return setting_number(text, &value->level);
+	case SETTING_STEP:
+		if (strcmp(text, "1") && strcmp(text, "-1"))
+			return false;
+		value->step = text[0] == '-' ? -1 : 1;
+		return true;
+	case SETTING_SECONDS:
+		if (setting->kind == FPLINUX_UI_SETTING_AUTO_LOCK &&
+		    !strcmp(text, "off")) {
+			value->seconds = -1;
+			return true;
+		}
+		return setting_number(text, &value->seconds);
+	case SETTING_ROUTE:
+		choice = name_index(text, route_names, ARRAY_SIZE(route_names));
+		value->route = choice;
+		return choice < ARRAY_SIZE(route_names);
+	case SETTING_ROUTES:
+		while (*text) {
+			size_t length = strcspn(text, ",");
+
+			for (choice = 0; choice < ARRAY_SIZE(route_names);
+			     ++choice)
+				if (length == strlen(route_names[choice]) &&
+				    !strncmp(text, route_names[choice], length))
+					break;
+			if (choice == ARRAY_SIZE(route_names))
+				return false;
+			value->routes |= FPLINUX_UI_AUDIO_OUTPUT(choice);
+			text += length;
+			if (*text)
+				++text;
+		}
+		return setting_value_valid(setting);
+	case SETTING_LOCALE:
+		if (!text[0] || strlen(text) >= sizeof(value->locale))
+			return false;
+		strcpy(value->locale, text);
+		return true;
+	case SETTING_TIME:
+		return setting_time_parse(text, &value->time);
+	case SETTING_THEME:
+		choice = name_index(text, theme_names, ARRAY_SIZE(theme_names));
+		value->theme = choice;
+		return choice < ARRAY_SIZE(theme_names);
+	case SETTING_ENABLED:
+		if (strcmp(text, "0") && strcmp(text, "1"))
+			return false;
+		value->enabled = text[0] == '1';
+		return true;
+	}
+	return false;
+}
+
+static enum fplinux_ui_setting_operation
+legacy_setting_operation(enum fplinux_ui_setting_kind kind, bool has_value)
+{
+	switch (kind) {
+	case FPLINUX_UI_SETTING_BRIGHTNESS_PREVIEW:
+	case FPLINUX_UI_SETTING_VOLUME_PREVIEW:
+	case FPLINUX_UI_SETTING_ALARM_VOLUME_PREVIEW:
+		return has_value ? FPLINUX_UI_SETTING_PREVIEW :
+				   FPLINUX_UI_SETTING_CANCEL;
+	case FPLINUX_UI_SETTING_VOLUME_STEP:
+	case FPLINUX_UI_SETTING_MEDIA_VOLUME_STEP:
+		return FPLINUX_UI_SETTING_STEP;
+	case FPLINUX_UI_SETTING_VOLUME_COMMIT:
+	case FPLINUX_UI_SETTING_ALARM_VOLUME_COMMIT:
+		return FPLINUX_UI_SETTING_COMMIT;
+	default:
+		return has_value ? FPLINUX_UI_SETTING_SET :
+				   FPLINUX_UI_SETTING_GET;
+	}
+}
+
+/* Normalize existing C callers before the packet is encoded. */
+static struct fplinux_ui_setting
+setting_for_send(const struct fplinux_ui_session_message *message)
+{
+	struct fplinux_ui_setting setting = message->setting;
+	unsigned int kind;
+
+	if (setting.kind != FPLINUX_UI_SETTING_NONE ||
+	    (message->type != FPLINUX_UI_SESSION_SETTING &&
+	     message->type != FPLINUX_UI_SESSION_ERROR))
+		return setting;
+	kind = name_index(message->name, setting_names,
+			  ARRAY_SIZE(setting_names));
+	if (kind >= FPLINUX_UI_SETTING_UNKNOWN) {
+		if (message->type == FPLINUX_UI_SESSION_SETTING) {
+			setting.kind = FPLINUX_UI_SETTING_UNKNOWN;
+			setting.operation = FPLINUX_UI_SETTING_INVALID;
+		}
+		return setting;
+	}
+	setting.kind = kind;
+	if (message->applied)
+		setting.operation = FPLINUX_UI_SETTING_RESULT;
+	else
+		setting.operation =
+			legacy_setting_operation(kind, message->value[0]);
+	if (!setting_operation_valid(&setting) ||
+	    !setting_from_text(&setting, message->value))
+		setting.operation = FPLINUX_UI_SETTING_INVALID;
+	return setting;
+}
+
+static void setting_to_text(const struct fplinux_ui_setting *setting,
+			    char *text, size_t size)
+{
+	const union fplinux_ui_setting_value *value = &setting->value;
+	const struct fplinux_ui_setting_time *time = &value->time;
+	size_t offset = 0;
+
+	switch (setting_payload(setting)) {
+	case SETTING_NO_PAYLOAD:
+		break;
+	case SETTING_LEVEL:
+		snprintf(text, size, "%d", value->level);
+		break;
+	case SETTING_STEP:
+		snprintf(text, size, "%d", value->step);
+		break;
+	case SETTING_SECONDS:
+		if (value->seconds == -1)
+			snprintf(text, size, "off");
+		else
+			snprintf(text, size, "%d", value->seconds);
+		break;
+	case SETTING_ROUTE:
+		snprintf(text, size, "%s", route_names[value->route]);
+		break;
+	case SETTING_ROUTES:
+		for (size_t i = 0; i < ARRAY_SIZE(route_names); ++i)
+			if (value->routes & FPLINUX_UI_AUDIO_OUTPUT(i))
+				offset += snprintf(text + offset, size - offset,
+						   "%s%s", offset ? "," : "",
+						   route_names[i]);
+		break;
+	case SETTING_LOCALE:
+		snprintf(text, size, "%s", value->locale);
+		break;
+	case SETTING_TIME:
+		offset = snprintf(text, size, "%04d-%02d-%02d %02d:%02d",
+				  time->year, time->month, time->day,
+				  time->hour, time->minute);
+		if (time->second ||
+		    setting->operation == FPLINUX_UI_SETTING_SET)
+			snprintf(text + offset, size - offset, ":%02d",
+				 time->second);
+		break;
+	case SETTING_THEME:
+		snprintf(text, size, "%s", theme_names[value->theme]);
+		break;
+	case SETTING_ENABLED:
+		snprintf(text, size, "%d", value->enabled);
+		break;
+	}
+}
+
+static void add_setting(struct json_object *object,
+			const struct fplinux_ui_session_message *message,
+			const struct fplinux_ui_setting *setting)
+{
+	const union fplinux_ui_setting_value *value = &setting->value;
+	enum setting_payload payload = setting_payload(setting);
+	struct json_object *entry = json_object_new_object();
+	struct json_object *field;
+
+	add_string(entry, "kind", setting_names[setting->kind]);
+	add_string(entry, "op", setting_operation_names[setting->operation]);
+	if (setting->kind == FPLINUX_UI_SETTING_UNKNOWN)
+		add_string(entry, "key", message->name);
+	switch (payload) {
+	case SETTING_NO_PAYLOAD:
+		break;
+	case SETTING_LEVEL:
+		json_object_object_add(entry, "level",
+				       json_object_new_int(value->level));
+		break;
+	case SETTING_STEP:
+		json_object_object_add(entry, "step",
+				       json_object_new_int(value->step));
+		break;
+	case SETTING_SECONDS:
+		json_object_object_add(entry, "seconds",
+				       json_object_new_int(value->seconds));
+		break;
+	case SETTING_ROUTE:
+		add_string(entry, "route", route_names[value->route]);
+		break;
+	case SETTING_ROUTES:
+		field = json_object_new_array();
+		for (size_t i = 0; i < ARRAY_SIZE(route_names); ++i)
+			if (value->routes & FPLINUX_UI_AUDIO_OUTPUT(i))
+				json_object_array_add(
+					field,
+					json_object_new_string(route_names[i]));
+		json_object_object_add(entry, "routes", field);
+		break;
+	case SETTING_LOCALE:
+		add_string(entry, "locale", value->locale);
+		break;
+	case SETTING_TIME:
+		field = json_object_new_object();
+		json_object_object_add(field, "year",
+				       json_object_new_int(value->time.year));
+		json_object_object_add(field, "month",
+				       json_object_new_int(value->time.month));
+		json_object_object_add(field, "day",
+				       json_object_new_int(value->time.day));
+		json_object_object_add(field, "hour",
+				       json_object_new_int(value->time.hour));
+		json_object_object_add(field, "minute",
+				       json_object_new_int(value->time.minute));
+		json_object_object_add(field, "second",
+				       json_object_new_int(value->time.second));
+		json_object_object_add(entry, "time", field);
+		break;
+	case SETTING_THEME:
+		add_string(entry, "theme", theme_names[value->theme]);
+		break;
+	case SETTING_ENABLED:
+		json_object_object_add(entry, "enabled",
+				       json_object_new_boolean(value->enabled));
+		break;
+	}
+	json_object_object_add(object, "setting", entry);
+}
+
+static bool required_int(struct json_object *object, const char *key,
+			 int *value)
+{
+	struct json_object *field;
+
+	return json_object_object_get_ex(object, key, &field) &&
+	       get_int(object, key, value);
+}
+
+static bool get_setting_routes(struct json_object *entry, unsigned int *routes)
+{
+	struct json_object *field;
+
+	if (!json_object_object_get_ex(entry, "routes", &field) ||
+	    !json_object_is_type(field, json_type_array) ||
+	    json_object_array_length(field) > ARRAY_SIZE(route_names))
+		return false;
+	for (size_t i = 0; i < json_object_array_length(field); ++i) {
+		struct json_object *route = json_object_array_get_idx(field, i);
+		const char *name;
+		unsigned int choice;
+
+		if (!json_object_is_type(route, json_type_string))
+			return false;
+		name = json_object_get_string(route);
+		choice = name_index(name, route_names, ARRAY_SIZE(route_names));
+		if (strlen(name) != (size_t)json_object_get_string_len(route) ||
+		    choice >= ARRAY_SIZE(route_names) ||
+		    (*routes & FPLINUX_UI_AUDIO_OUTPUT(choice)))
+			return false;
+		*routes |= FPLINUX_UI_AUDIO_OUTPUT(choice);
+	}
+	return true;
+}
+
+static bool get_setting_payload(struct json_object *entry,
+				struct fplinux_ui_setting *setting)
+{
+	union fplinux_ui_setting_value *value = &setting->value;
+	struct json_object *field;
+	unsigned int choice;
+
+	switch (setting_payload(setting)) {
+	case SETTING_NO_PAYLOAD:
+		return true;
+	case SETTING_LEVEL:
+		return required_int(entry, "level", &value->level);
+	case SETTING_STEP:
+		return required_int(entry, "step", &value->step);
+	case SETTING_SECONDS:
+		return required_int(entry, "seconds", &value->seconds);
+	case SETTING_ROUTE:
+		if (!get_choice(entry, "route", route_names,
+				ARRAY_SIZE(route_names),
+				ARRAY_SIZE(route_names), &choice))
+			return false;
+		value->route = choice;
+		return true;
+	case SETTING_ROUTES:
+		return get_setting_routes(entry, &value->routes);
+	case SETTING_LOCALE:
+		return get_string(entry, "locale", value->locale,
+				  sizeof(value->locale));
+	case SETTING_TIME:
+		return json_object_object_get_ex(entry, "time", &field) &&
+		       json_object_is_type(field, json_type_object) &&
+		       json_object_object_length(field) == 6 &&
+		       required_int(field, "year", &value->time.year) &&
+		       required_int(field, "month", &value->time.month) &&
+		       required_int(field, "day", &value->time.day) &&
+		       required_int(field, "hour", &value->time.hour) &&
+		       required_int(field, "minute", &value->time.minute) &&
+		       required_int(field, "second", &value->time.second);
+	case SETTING_THEME:
+		if (!get_choice(entry, "theme", theme_names,
+				ARRAY_SIZE(theme_names),
+				ARRAY_SIZE(theme_names), &choice))
+			return false;
+		value->theme = choice;
+		return true;
+	case SETTING_ENABLED:
+		return json_object_object_get_ex(entry, "enabled", &field) &&
+		       get_bool(entry, "enabled", &value->enabled);
+	}
+	return false;
+}
+
+static bool get_setting(struct json_object *object,
+			enum fplinux_ui_session_message_type type,
+			struct fplinux_ui_session_message *message)
+{
+	struct fplinux_ui_setting *setting = &message->setting;
+	struct json_object *entry, *field;
+	unsigned int kind, operation;
+	bool has_key;
+
+	if (!json_object_object_get_ex(object, "setting", &entry))
+		return type != FPLINUX_UI_SESSION_SETTING &&
+		       (type != FPLINUX_UI_SESSION_ERROR ||
+			(!message->applied &&
+			 name_index(message->name, setting_names,
+				    ARRAY_SIZE(setting_names)) >=
+				 FPLINUX_UI_SETTING_UNKNOWN));
+	if (!json_object_is_type(entry, json_type_object) ||
+	    json_object_object_get_ex(object, "name", &field) ||
+	    json_object_object_get_ex(object, "value", &field) ||
+	    !get_choice(entry, "kind", setting_names, ARRAY_SIZE(setting_names),
+			FPLINUX_UI_SETTING_NONE, &kind) ||
+	    !get_choice(entry, "op", setting_operation_names,
+			ARRAY_SIZE(setting_operation_names),
+			ARRAY_SIZE(setting_operation_names), &operation) ||
+	    operation >= ARRAY_SIZE(setting_operation_names))
+		return false;
+	setting->kind = kind;
+	setting->operation = operation;
+	has_key = kind == FPLINUX_UI_SETTING_UNKNOWN &&
+		  json_object_object_get_ex(entry, "key", &field);
+	if (json_object_object_length(entry) !=
+		    2 + (has_key ||
+			 setting_payload(setting) != SETTING_NO_PAYLOAD) ||
+	    !get_setting_payload(entry, setting) ||
+	    !setting_valid(type, message->applied, setting))
+		return false;
+	if (has_key)
+		return get_string(entry, "key", message->name,
+				  sizeof(message->name));
+	strcpy(message->name, setting_names[kind]);
+	setting_to_text(setting, message->value, sizeof(message->value));
+	return true;
+}
+
+static bool get_launcher_view(struct json_object *object,
+			      enum fplinux_ui_session_message_type type,
+			      struct fplinux_ui_session_message *message)
+{
+	struct json_object *field;
+	unsigned int view, catalogue;
+
+	if (type != FPLINUX_UI_SESSION_ACTIVE &&
+	    type != FPLINUX_UI_SESSION_SELECT)
+		return !json_object_object_get_ex(object, "launcher_view",
+						  &field) &&
+		       !json_object_object_get_ex(object, "launcher_catalogue",
+						  &field);
+	if (json_object_object_get_ex(object, "name", &field) ||
+	    json_object_object_get_ex(object, "value", &field) ||
+	    !get_choice(object, "launcher_view", launcher_view_names,
+			ARRAY_SIZE(launcher_view_names),
+			FPLINUX_UI_LAUNCHER_VIEW_NONE, &view) ||
+	    !get_choice(object, "launcher_catalogue", launcher_catalogue_names,
+			ARRAY_SIZE(launcher_catalogue_names),
+			FPLINUX_UI_LAUNCHER_CATALOGUE_NONE, &catalogue) ||
+	    (type == FPLINUX_UI_SESSION_ACTIVE &&
+	     view > FPLINUX_UI_LAUNCHER_VIEW_CATALOGUE) ||
+	    (view > FPLINUX_UI_LAUNCHER_VIEW_CATALOGUE &&
+	     (catalogue != FPLINUX_UI_LAUNCHER_CATALOGUE_NONE ||
+	      message->selected_id[0])))
+		return false;
+	message->launcher_view = view;
+	message->launcher_catalogue = catalogue;
+	if (view)
+		strcpy(message->value, launcher_view_names[view]);
+	if (catalogue)
+		strcpy(message->name, launcher_catalogue_names[catalogue]);
+	return true;
 }
 
 static bool volume_text_valid(const char *text, size_t capacity)
@@ -1620,12 +2427,29 @@ static bool input_locale_valid(const char *locale)
 bool fplinux_ui_session_send(int fd,
 			     const struct fplinux_ui_session_message *message)
 {
+	struct fplinux_ui_setting setting = setting_for_send(message);
+	unsigned int launcher_view = message->launcher_view;
+	unsigned int launcher_catalogue = message->launcher_catalogue;
+	unsigned int close_response = message->close_response;
+	bool launcher = message->type == FPLINUX_UI_SESSION_SELECT ||
+			message->type == FPLINUX_UI_SESSION_ACTIVE;
 	struct json_object *object;
 	const char *packet;
 	size_t length;
 	ssize_t sent;
 	int error;
 
+	if (launcher && !launcher_view && message->value[0])
+		launcher_view = name_index(message->value, launcher_view_names,
+					   ARRAY_SIZE(launcher_view_names));
+	if (launcher && !launcher_catalogue && message->name[0])
+		launcher_catalogue =
+			name_index(message->name, launcher_catalogue_names,
+				   ARRAY_SIZE(launcher_catalogue_names));
+	if (message->type == FPLINUX_UI_SESSION_CLOSE_REPLY && !close_response)
+		close_response = name_index(message->value,
+					    close_response_names,
+					    ARRAY_SIZE(close_response_names));
 	if ((unsigned int)message->type >= ARRAY_SIZE(message_names) ||
 	    (unsigned int)message->mode >= ARRAY_SIZE(mode_names) ||
 	    (unsigned int)message->display >= ARRAY_SIZE(display_names) ||
@@ -1636,6 +2460,15 @@ bool fplinux_ui_session_send(int fd,
 	    !storage_result_valid(message) || !document_fields_valid(message) ||
 	    !volume_fields_valid(message) || !system_levels_valid(message) ||
 	    !light_fields_valid(message) || !wifi_fields_valid(message) ||
+	    (setting.kind &&
+	     !setting_valid(message->type, message->applied, &setting)) ||
+	    (launcher &&
+	     (launcher_view >= ARRAY_SIZE(launcher_view_names) ||
+	      launcher_catalogue >= ARRAY_SIZE(launcher_catalogue_names) ||
+	      (message->type == FPLINUX_UI_SESSION_ACTIVE &&
+	       launcher_view > FPLINUX_UI_LAUNCHER_VIEW_CATALOGUE) ||
+	      (launcher_view > FPLINUX_UI_LAUNCHER_VIEW_CATALOGUE &&
+	       (launcher_catalogue || message->selected_id[0])))) ||
 	    (message->tasks_view &&
 	     message->type != FPLINUX_UI_SESSION_ACTIVE) ||
 	    (message->background_playing &&
@@ -1680,14 +2513,18 @@ bool fplinux_ui_session_send(int fd,
 	      message->type == FPLINUX_UI_SESSION_CLOSE_REPLY) &&
 	     !message->serial) ||
 	    (message->type == FPLINUX_UI_SESSION_CLOSE_REPLY &&
-	     !close_response_valid(message->value))) {
+	     (!close_response ||
+	      close_response >= ARRAY_SIZE(close_response_names)))) {
 		errno = EINVAL;
 		return false;
 	}
 	object = json_object_new_object();
 	if (!object)
 		return false;
-	add_string(object, "clock", message->clock_data);
+	if (!add_clock(object, message->clock_data)) {
+		json_object_put(object);
+		return false;
+	}
 	if (message->type == FPLINUX_UI_SESSION_ACTIVE)
 		add_clock_presentation(object, &message->clock_presentation);
 	add_string(object, "type", message_names[message->type]);
@@ -1860,8 +2697,23 @@ bool fplinux_ui_session_send(int fd,
 	if (message->type == FPLINUX_UI_SESSION_CONFIG ||
 	    message->type == FPLINUX_UI_SESSION_ACTIVE)
 		add_string(object, "input_locale", message->input_locale);
-	add_string(object, "name", message->name);
-	add_string(object, "value", message->value);
+	if (setting.kind)
+		add_setting(object, message, &setting);
+	else if (launcher) {
+		if (launcher_view)
+			add_string(object, "launcher_view",
+				   launcher_view_names[launcher_view]);
+		if (launcher_catalogue)
+			add_string(
+				object, "launcher_catalogue",
+				launcher_catalogue_names[launcher_catalogue]);
+	} else if (message->type == FPLINUX_UI_SESSION_CLOSE_REPLY) {
+		add_string(object, "value",
+			   close_response_names[close_response]);
+	} else {
+		add_string(object, "name", message->name);
+		add_string(object, "value", message->value);
+	}
 	add_string(object, "notice", message->notice);
 	add_string(object, "display", display_names[message->display]);
 	add_string(object, "theme", theme_names[message->theme]);
@@ -2109,7 +2961,8 @@ int fplinux_ui_session_receive(int fd,
 	if (valid)
 		valid = get_task_fields(object, type, message);
 	if (valid)
-		valid = get_clock(object, type, message->clock_data);
+		valid = get_clock(object, type, packet, (size_t)received,
+				  message->clock_data);
 	if (valid)
 		valid = get_clock_presentation(object, type, message);
 	if (valid)
@@ -2125,8 +2978,17 @@ int fplinux_ui_session_receive(int fd,
 	if (valid)
 		valid = get_system_levels(object, type,
 					  &message->system_levels);
-	if (valid && type == FPLINUX_UI_SESSION_CLOSE_REPLY)
-		valid = close_response_valid(message->value);
+	if (valid)
+		valid = get_setting(object, type, message) &&
+			get_launcher_view(object, type, message);
+	if (valid && type == FPLINUX_UI_SESSION_CLOSE_REPLY) {
+		unsigned int response =
+			name_index(message->value, close_response_names,
+				   ARRAY_SIZE(close_response_names));
+
+		valid = response < ARRAY_SIZE(close_response_names);
+		message->close_response = response;
+	}
 	if (valid && json_object_object_get_ex(object, "serial", &field)) {
 		int64_t serial = json_object_get_int64(field);
 

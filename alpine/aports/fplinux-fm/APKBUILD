@@ -13,6 +13,9 @@ options="!check"
 source="
 	fplinux-fm.c
 	fplinux-audio-protocol.h
+	fplinux-audio-route.h
+	fplinux-audio-radio.c
+	fplinux-audio-radio.h
 	fplinux-cli.c
 	fplinux-cli.h
 "
@@ -26,6 +29,7 @@ build() {
 	export RANLIB=/usr/lib/llvm23/bin/llvm-ranlib
 	"$CC" $CPPFLAGS $CFLAGS -std=c11 -Wall -Wextra -Werror \
 		-I"$srcdir" "$srcdir/fplinux-fm.c" "$srcdir/fplinux-cli.c" \
+		"$srcdir/fplinux-audio-radio.c" \
 		$LDFLAGS -Wl,--gc-sections -o fplinux-fm
 }
 
@@ -34,8 +38,11 @@ package() {
 }
 
 sha512sums="
-8683907f8996d372b62a13e0d94dc1a7912e8c7ce068760bcbf418036695cbfdfc057faad93fb5e9b5e27d28fd2127530cd759911e95dabe5f8f79bc774fa0da  fplinux-fm.c
-61bffb69909cb687fcfe923d75eed6ef85235d3dec9602a7a0ad0077153ef07cb3bd5caf79c49462e4b1d9d613f349c6a4cc214f8b6922cc49c2c3d2ee1f0de6  fplinux-audio-protocol.h
+d51133487721103d25b8a354b0853afbdc7730bbf738aa43029be6de8f8713c98dd2e96801bbfe329133eecf104436ea0c46fc76a52c1a3a4a6277099ead37db  fplinux-fm.c
+d5df2d97620c4546691cf8d6ec13b98140904d5de1dcb0b2537d0a03e71e44a158e324059e4384455101b5a177477eaf9c723b17cb4751728b2e8807c373a193  fplinux-audio-protocol.h
+2bba6fc98b713cf8672b9ab0f69b75f1650fbba008fffd6eae02f6ab2fc0058bff809b321efdd5c6dd4a4badf431ed3dbe76461f7b0cb071d2d52ff28f73d4e6  fplinux-audio-route.h
+c29f5b90db675cbf85fc8590e9d5a593470053486e9df67775e1aef85ce7ebbbb915d627d262421b6b88bd4541d7d59c7c1caebd1ecd8f3a6323d33b5d19d52e  fplinux-audio-radio.c
+dff31584a122880c9514f0533ba03a645ffa6bb73704c3354d958a12b2ace02025babbd347eceb9342f0b2109a35a85fbffcd340d4386bdfaa6821e31f2dd49f  fplinux-audio-radio.h
 60be1ccccf0215ea13bc64fd442a0498e7db203234ce74f92cec502295e8ac703a089438848b9a1850102836855537f561e9bd8313751574a069eb0ec6dcf31a  fplinux-cli.c
 9677a324ea1cbcca154f472c83eb0660badfa11c2b444116f27080bd839dee2ab9ea6ef3b0c495f6074207559b813c843f284786f8b1e3c89023121b5aacb453  fplinux-cli.h
 "

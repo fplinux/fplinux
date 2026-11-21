@@ -6,6 +6,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "fplinux-audio-route.h"
 #include "fplinux-storage.h"
 #include "fplinux-system-levels.h"
 #include "fplinux-ui-document.h"
@@ -19,7 +20,6 @@
 #define FPLINUX_UI_SESSION_ID_BYTES 128
 #define FPLINUX_UI_SESSION_TEXT_BYTES 128
 #define FPLINUX_UI_SESSION_CLOCK_BYTES 16384
-/* Clock text may double when quotes and backslashes are escaped. */
 #define FPLINUX_UI_SESSION_PACKET_BYTES \
 	(2 * FPLINUX_UI_SESSION_CLOCK_BYTES + 4096)
 #define FPLINUX_UI_SESSION_LOCALE_BYTES 8
@@ -220,6 +220,95 @@ enum fplinux_ui_session_theme {
 	FPLINUX_UI_SESSION_THEME_DARK,
 };
 
+enum fplinux_ui_setting_kind {
+	FPLINUX_UI_SETTING_NONE,
+	FPLINUX_UI_SETTING_BRIGHTNESS,
+	FPLINUX_UI_SETTING_BRIGHTNESS_PREVIEW,
+	FPLINUX_UI_SETTING_VOLUME,
+	FPLINUX_UI_SETTING_VOLUME_PREVIEW,
+	FPLINUX_UI_SETTING_VOLUME_STEP,
+	FPLINUX_UI_SETTING_VOLUME_COMMIT,
+	FPLINUX_UI_SETTING_MEDIA_VOLUME_STEP,
+	FPLINUX_UI_SETTING_ALARM_VOLUME,
+	FPLINUX_UI_SETTING_ALARM_VOLUME_PREVIEW,
+	FPLINUX_UI_SETTING_ALARM_VOLUME_COMMIT,
+	FPLINUX_UI_SETTING_AUDIO_OUTPUT,
+	FPLINUX_UI_SETTING_AUDIO_OUTPUTS,
+	FPLINUX_UI_SETTING_AUDIO_OUTPUT_ACTIVE,
+	FPLINUX_UI_SETTING_SCREEN_OFF,
+	FPLINUX_UI_SETTING_AUTO_LOCK,
+	FPLINUX_UI_SETTING_LOCALE,
+	FPLINUX_UI_SETTING_INPUT_LOCALE,
+	FPLINUX_UI_SETTING_TIME,
+	FPLINUX_UI_SETTING_THEME,
+	FPLINUX_UI_SETTING_WIFI,
+	FPLINUX_UI_SETTING_UNKNOWN,
+};
+
+enum fplinux_ui_setting_operation {
+	FPLINUX_UI_SETTING_GET,
+	FPLINUX_UI_SETTING_SET,
+	FPLINUX_UI_SETTING_PREVIEW,
+	FPLINUX_UI_SETTING_CANCEL,
+	FPLINUX_UI_SETTING_STEP,
+	FPLINUX_UI_SETTING_COMMIT,
+	FPLINUX_UI_SETTING_RESULT,
+	/* Invalid source arguments are reported by the Session owner. */
+	FPLINUX_UI_SETTING_INVALID,
+};
+
+/* A local calendar reading, independent of the sender's time zone. */
+struct fplinux_ui_setting_time {
+	int year;
+	int month;
+	int day;
+	int hour;
+	int minute;
+	int second;
+};
+
+/* One bit per enum fplinux_audio_route. */
+#define FPLINUX_UI_AUDIO_OUTPUT(route) (1U << (route))
+
+union fplinux_ui_setting_value {
+	int level;
+	int step;
+	int seconds; /* -1 means that auto-lock is off. */
+	enum fplinux_audio_route route;
+	unsigned int routes;
+	enum fplinux_ui_session_theme theme;
+	bool enabled;
+	char locale[FPLINUX_UI_SESSION_LOCALE_BYTES];
+	struct fplinux_ui_setting_time time;
+};
+
+struct fplinux_ui_setting {
+	enum fplinux_ui_setting_kind kind;
+	enum fplinux_ui_setting_operation operation;
+	union fplinux_ui_setting_value value;
+};
+
+enum fplinux_ui_launcher_view {
+	FPLINUX_UI_LAUNCHER_VIEW_NONE,
+	FPLINUX_UI_LAUNCHER_VIEW_HOME,
+	FPLINUX_UI_LAUNCHER_VIEW_CATALOGUE,
+	FPLINUX_UI_LAUNCHER_VIEW_TASKS,
+	FPLINUX_UI_LAUNCHER_VIEW_QUICK_SETTINGS,
+};
+
+enum fplinux_ui_launcher_catalogue {
+	FPLINUX_UI_LAUNCHER_CATALOGUE_NONE,
+	FPLINUX_UI_LAUNCHER_CATALOGUE_GRID,
+	FPLINUX_UI_LAUNCHER_CATALOGUE_LIST,
+};
+
+enum fplinux_ui_session_close_response {
+	FPLINUX_UI_SESSION_CLOSE_NONE,
+	FPLINUX_UI_SESSION_CLOSE_READY,
+	FPLINUX_UI_SESSION_CLOSE_CANCEL,
+	FPLINUX_UI_SESSION_CLOSE_WAIT,
+};
+
 struct fplinux_ui_session_clock_presentation {
 	bool analog;
 	/* The nearest alarm uses UTC, or a monotonic snooze deadline. */
@@ -241,16 +330,16 @@ struct fplinux_ui_session_clock_presentation {
  *
  * READY follows the first submitted frame. ACTIVE names an application only
  * after that frame, and supplies the launcher's title, three softkey labels,
- * view (value), presentation (name), theme, display, lock and battery state.
+ * launcher_view, launcher_catalogue, theme, display, lock and battery state.
  * A nonzero ACTIVE serial is acknowledged after the launcher commits its new
  * view and receives the following Wayland sync reply. ACTIVE_ACK carries that
  * serial; the manager may finish the handoff after 500 ms without an answer.
  *
  * Only the launcher may LAUNCH, SELECT, CANCEL or DISMISS. SELECT reports the
  * selected_id, base view (home/catalogue) and presentation (grid/list).
- * SELECT(value=tasks, enabled) reports whether Tasks covers that base without
- * changing its selection or presentation; SELECT(value=quick-settings,
- * enabled) does the same for Quick settings. ACTIVE returns the base view,
+ * Selecting the Tasks or Quick settings view uses enabled to report whether
+ * the overlay covers that base, preserving its selection and presentation.
+ * ACTIVE returns the base view,
  * including after a launcher restart, and tasks_view reports whether the
  * manager-owned Tasks subview covers it. ACTIVE.enabled remains launch
  * progress. LAUNCH may
@@ -262,7 +351,7 @@ struct fplinux_ui_session_clock_presentation {
  * and a return to the catalogue; a cancelled close keeps the application.
  * LIFECYCLE reports foreground, background or closing independently of surface
  * VISIBILITY. PREPARE_CLOSE(serial, reason) starts an ordinary user close.
- * CLOSE_REPLY returns the same serial with value ready, cancel or wait. Wait
+ * CLOSE_REPLY returns the same serial and a close_response. Wait
  * leaves the application interactive for its decision. Repeated Close keeps
  * that decision. CLOSE_ACK confirms the decision frame after its commit and
  * following Wayland sync. An unanswered preparation has a bounded timeout.
@@ -272,19 +361,16 @@ struct fplinux_ui_session_clock_presentation {
  * Ordinary input arrives through Wayland keyboard events.
  * KEEP_SCREEN_ON applies only while the requesting application is visible.
  *
- * SETTING(name, value) belongs to org.fplinux.settings: empty value queries,
- * otherwise it sets a value. The launcher may also query, preview and save
- * brightness and volume while Quick settings covers the unlocked Home;
- * ending Quick settings restores an unsaved preview. volume_step takes -1 or
- * 1 and changes the manager's current volume preview. volume_commit takes an
- * empty value and saves that preview, including pending steps. volume and
- * nonempty volume_preview set absolute levels 0..10; empty volume queries,
- * and empty volume_preview restores the level before the preview. Volume
- * operations echo the request serial in replies and errors; successful steps
- * reply as volume_preview, and commits as volume. The manager replies with the
- * applied SETTING or ERROR. Reply applied records whether the value already took effect;
- * storage_state and storage_error report publication and synchronization
- * separately. An applied ERROR still supplies the current value.
+ * SETTING carries a typed setting with a request operation. Settings may read
+ * and change system values while foreground. Quick settings owns brightness,
+ * Media and Wi-Fi while it covers the unlocked Home. Cancelling or leaving
+ * an editor restores unsaved previews. A volume preview can be stepped by -1
+ * or +1 and committed with its pending steps. Successful steps report the
+ * preview level and commits report the stored level. Applications may query
+ * sound settings and request a persistent Media step while foreground.
+ * The manager replies with SETTING or ERROR. The applied flag records whether
+ * the value took effect. storage_state and storage_error report publication
+ * and synchronization. An applied ERROR supplies the current value.
  * input_locale selects the keypad language independently of locale.
  * Applied theme/locale replies, including save-failed errors, carry a nonzero
  * serial. REDRAW_ACK acknowledges the complete view drawn for that reply after
@@ -343,8 +429,13 @@ struct fplinux_ui_session_message {
 	bool background_playing;
 	char locale[FPLINUX_UI_SESSION_LOCALE_BYTES];
 	char input_locale[FPLINUX_UI_SESSION_LOCALE_BYTES];
+	/* Diagnostic fields and the source C representation of setting replies. */
 	char name[FPLINUX_UI_SESSION_NAME_BYTES];
 	char value[FPLINUX_UI_SESSION_TEXT_BYTES];
+	struct fplinux_ui_setting setting;
+	enum fplinux_ui_launcher_view launcher_view;
+	enum fplinux_ui_launcher_catalogue launcher_catalogue;
+	enum fplinux_ui_session_close_response close_response;
 	int battery;
 	bool charging;
 	char notice[FPLINUX_UI_SESSION_NAME_BYTES];
@@ -361,7 +452,7 @@ struct fplinux_ui_session_message {
 	bool has_tasks;
 	unsigned int task_count;
 	struct fplinux_ui_session_task tasks[FPLINUX_UI_SESSION_TASK_MAX];
-	/* CLOCK or ACTIVE: control-free text interpreted by the clock owner. */
+	/* CLOCK or ACTIVE: original bytes of the object owned by Clock. */
 	char clock_data[FPLINUX_UI_SESSION_CLOCK_BYTES];
 	/* ACTIVE: stable Home state; countdowns use CLOCK_MONOTONIC locally. */
 	struct fplinux_ui_session_clock_presentation clock_presentation;

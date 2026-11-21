@@ -729,8 +729,8 @@ date_draft_survives_pending_home_and_refusal(struct capture *capture)
 	message.type = FPLINUX_UI_SESSION_SETTING;
 	message.applied = true;
 	/* The manager formats the live clock after setting it, rather than echoing input. */
-	assert(strlen(message.value) == 19);
-	message.value[18] = '1';
+	message.setting.operation = FPLINUX_UI_SETTING_RESULT;
+	message.setting.value.time.second = 1;
 	capture->has_request = false;
 	assert(fplinux_ui_session_send(capture->session, &message));
 	wait_label(capture, "Time & language");

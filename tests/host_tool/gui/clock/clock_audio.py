@@ -11,6 +11,7 @@ import time
 from contextlib import contextmanager
 from typing import TYPE_CHECKING
 
+from tests import audio_wire
 from tests.process import run_process
 
 if TYPE_CHECKING:
@@ -128,21 +129,21 @@ class ClockAudioService:
         """Keep the authenticated manager socket alive for the exercise."""
         with socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET) as control:
             control.connect(str(self.work / "control.sock"))
-            control.send(b"SYNC")
+            control.send(audio_wire.SYNC)
             yield control
 
     @staticmethod
     def clock(control: socket.socket, pid: int) -> None:
         """Announce the launched helper's actual credentials and allow its audio."""
-        control.send(f"CLOCK {pid} {os.geteuid()}".encode())
-        control.send(f"ELIGIBLE {pid} 1".encode())
+        control.send(audio_wire.clock(pid, os.geteuid()))
+        control.send(audio_wire.eligible(pid, enabled=True))
 
     @contextmanager
     def application(self, control: socket.socket) -> Iterator[ApplicationAudio]:
         """Own a normal application's socket and real service-created ring."""
         pid = os.getpid()
-        control.send(f"APP {pid} {os.geteuid()} org.fplinux.test 0".encode())
-        control.send(f"ELIGIBLE {pid} 1".encode())
+        control.send(audio_wire.app(pid, os.geteuid()))
+        control.send(audio_wire.eligible(pid, enabled=True))
         with socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET) as client:
             client.settimeout(3)
             client.connect(str(self.work / "stream.sock"))
