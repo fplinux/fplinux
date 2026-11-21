@@ -24,5 +24,5 @@ Path(os.environ["FPLINUX_TEST_SC9820E_UPLOADS"]).write_text(
 print("FPLINUX_BOOTROM_READY", flush=True)
 if "--ready-ack" not in sys.argv or sys.stdin.buffer.read(1) != b"\x06":
     raise SystemExit(9)
-print("SC9820E RAM uploads acknowledged", flush=True)
+print("SC9820E RAM uploads acknowledged", file=sys.stderr, flush=True)
 raise SystemExit(int(os.environ.get("FPLINUX_TEST_LOADER_STATUS", "0")))

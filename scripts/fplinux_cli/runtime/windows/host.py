@@ -14,14 +14,18 @@ import subprocess
 import sys
 import tempfile
 import time
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import suppress
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NoReturn
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from concurrent.futures import Future
+    from typing import BinaryIO
 
-_USB_READY_MARKERS = (b"FPLINUX_BOOTROM_READY\n", b"FPLINUX_BOOTROM_READY\r\n")
+_USB_READY_RECORDS = (b"FPLINUX_BOOTROM_READY\n", b"FPLINUX_BOOTROM_READY\r\n")
+_USB_READY_READ_BYTES = max(map(len, _USB_READY_RECORDS)) + 1
 
 
 def console_creation_flags() -> int:
@@ -74,49 +78,55 @@ def _cancellable_discovery(
         process.communicate()
 
 
+def _loader_status_before_ack(process: subprocess.Popen[bytes], *, deadline: float) -> int:
+    status = process.wait(timeout=max(0, deadline - time.monotonic()))
+    if status == 2:
+        raise BootromDriverRequiredError
+    if status == 0:
+        fail("The RAM loader exited without confirming its USB connection")
+    return status
+
+
 def _wait_usb_loader(  # noqa: PLR0913 -- native progress and reconnect observers stay explicit.
     process: subprocess.Popen[bytes],
+    readiness: Future[bytes],
     *,
     timeout: int,
-    log: Path,
-    offset: int,
+    output: BinaryIO,
     on_usb_ready: Callable[[], None],
     on_wait: Callable[[], None] | None,
 ) -> int:
     """Observe this child's USB acquisition without delaying its native discovery."""
     deadline = time.monotonic() + timeout
-    pending = b""
-    suffix_length = max(len(marker) for marker in _USB_READY_MARKERS) - 1
-    with log.open("rb") as stream:
-        stream.seek(offset)
-        while True:
-            status = process.poll()
-            remaining = deadline - time.monotonic()
-            if status is None and remaining <= 0:
-                raise subprocess.TimeoutExpired(process.args, timeout)
-            chunk = stream.read(65536)
-            if chunk:
-                pending += chunk
-                if any(marker in pending for marker in _USB_READY_MARKERS):
-                    on_usb_ready()
-                    if process.stdin is None:
-                        fail("USB loader acknowledgement pipe is unavailable")
-                    with suppress(BrokenPipeError):
-                        process.stdin.write(b"\x06")
-                        process.stdin.flush()
-                    return process.wait(timeout=max(0, deadline - time.monotonic()))
-                pending = pending[-suffix_length:]
-                continue
-            if status is not None:
-                if status == 2:
-                    raise BootromDriverRequiredError
-                if status == 0:
-                    fail("The RAM loader exited without confirming its USB connection")
-                return status
-            if on_wait is not None:
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise subprocess.TimeoutExpired(process.args, timeout)
+        try:
+            record = readiness.result(timeout=min(0.1, remaining))
+        except TimeoutError:
+            if on_wait is not None and not readiness.done():
                 on_wait()
-            with suppress(subprocess.TimeoutExpired):
-                process.wait(timeout=min(0.1, remaining))
+        else:
+            break
+
+    if not record:
+        return _loader_status_before_ack(process, deadline=deadline)
+    if record not in _USB_READY_RECORDS:
+        fail("The RAM loader returned an invalid USB readiness response")
+    if process.stdin is None:
+        fail("USB loader acknowledgement pipe is unavailable")
+    output.write(record)
+    output.flush()
+    on_usb_ready()
+    if time.monotonic() >= deadline:
+        raise subprocess.TimeoutExpired(process.args, timeout)
+    try:
+        process.stdin.write(b"\x06")
+        process.stdin.flush()
+    except BrokenPipeError:
+        return _loader_status_before_ack(process, deadline=deadline)
+    return process.wait(timeout=max(0, deadline - time.monotonic()))
 
 
 def exact_usb_devices(snapshot: dict[str, Any], vendor: int, product: int) -> list[str]:
@@ -463,37 +473,42 @@ class WindowsHost:
         child_environment = None
         if environment is not None:
             child_environment = {**os.environ, **environment}
-        with log.open("ab") as output:
-            offset = output.tell()
-            process = subprocess.Popen(
+        with (
+            log.open("ab") as output,
+            subprocess.Popen(
                 [argv[0], "--ready-ack", *argv[1:]] if on_usb_ready is not None else argv,
                 cwd=cwd,
                 stdin=subprocess.PIPE if on_usb_ready is not None else subprocess.DEVNULL,
-                stdout=output,
-                stderr=subprocess.STDOUT,
+                stdout=subprocess.PIPE if on_usb_ready is not None else output,
+                stderr=output if on_usb_ready is not None else subprocess.STDOUT,
                 creationflags=console_creation_flags(),
                 env=child_environment,
-            )
+            ) as process,
+            ThreadPoolExecutor(max_workers=1, thread_name_prefix="fplinux-loader") as reader,
+        ):
             try:
                 if on_usb_ready is None:
                     status = process.wait(timeout=timeout)
                 else:
+                    assert process.stdout is not None
+                    readiness = reader.submit(process.stdout.readline, _USB_READY_READ_BYTES)
                     status = _wait_usb_loader(
                         process,
+                        readiness,
                         timeout=timeout,
-                        log=log,
-                        offset=offset,
+                        output=output,
                         on_usb_ready=on_usb_ready,
                         on_wait=on_wait,
                     )
             except subprocess.TimeoutExpired:
                 fail(f"{Path(argv[0]).name} exceeded its {timeout}s deadline; see {log}")
             finally:
+                # Termination closes the native writer before the reading task joins.
+                if process.poll() is None:
+                    process.kill()
+                process.wait()
                 if process.stdin is not None:
                     with suppress(BrokenPipeError):
                         process.stdin.close()
-                if process.poll() is None:
-                    process.kill()
-                    process.wait()
         if status:
             fail(f"{Path(argv[0]).name} failed with status {status}; see {log}")

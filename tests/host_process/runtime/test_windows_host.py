@@ -635,7 +635,17 @@ def test_loader_debug_environment_is_local_to_the_owned_child(
 
 
 @pytest.mark.parametrize(
-    "scenario", ["ready", "ready-crlf", "driver-needed", "missing-ready", "transfer-error"]
+    "scenario",
+    [
+        "ready",
+        "ready-crlf",
+        "ready-fragmented",
+        "driver-needed",
+        "missing-ready",
+        "incomplete-ready",
+        "overlong-ready",
+        "transfer-error",
+    ],
 )
 def test_native_usb_progress_belongs_to_the_current_child_and_precedes_transfer(
     tmp_path: Path, scenario: str
@@ -648,6 +658,12 @@ def test_native_usb_progress_belongs_to_the_current_child_and_precedes_transfer(
     log.write_text("FPLINUX_BOOTROM_READY\nprevious invocation\n")
     host = StubWindowsHost({})
     notifications: list[str] = []
+    expects_ready = scenario in {"ready", "ready-crlf", "ready-fragmented", "transfer-error"}
+
+    def waiting() -> None:
+        if (tmp_path / "partial-ready").exists():
+            assert notifications == []
+            (tmp_path / "release-ready").touch()
 
     def acquired() -> None:
         notifications.append("acquired")
@@ -660,6 +676,7 @@ def test_native_usb_progress_belongs_to_the_current_child_and_precedes_transfer(
             cwd=tmp_path,
             log=log,
             on_usb_ready=acquired,
+            on_wait=waiting,
         )
 
     if scenario == "driver-needed":
@@ -668,19 +685,23 @@ def test_native_usb_progress_belongs_to_the_current_child_and_precedes_transfer(
     elif scenario == "missing-ready":
         with pytest.raises(SystemExit, match="without confirming its USB connection"):
             run()
+    elif scenario in {"incomplete-ready", "overlong-ready"}:
+        with pytest.raises(SystemExit, match="invalid USB readiness response"):
+            run()
     elif scenario == "transfer-error":
         with pytest.raises(SystemExit, match="failed with status 2"):
             run()
     else:
         run()
 
-    assert notifications == (
-        ["acquired"] if scenario in {"ready", "ready-crlf", "transfer-error"} else []
-    )
+    assert notifications == (["acquired"] if expects_ready else [])
+    assert (tmp_path / "usb-transfer-started").exists() is expects_ready
     contents = log.read_text()
     assert contents.startswith("FPLINUX_BOOTROM_READY\nprevious invocation\n")
     assert "native discovery started\n" in contents
-    if scenario in {"ready", "ready-crlf", "transfer-error"}:
+    if scenario == "driver-needed":
+        assert contents.endswith("FPLINUX_BOOTROM_READY\nnative driver unsupported\n")
+    if expects_ready:
         ending = b"\r\n" if scenario == "ready-crlf" else b"\n"
         assert log.read_bytes().endswith(
             b"FPLINUX_BOOTROM_READY" + ending + b"native transfer ended\n"

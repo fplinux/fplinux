@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import subprocess
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
@@ -14,7 +15,6 @@ from tests.process import run_process
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
-    from pathlib import Path
 
 FIXTURES = ROOT / "tests/host_tool/loader"
 
@@ -154,6 +154,30 @@ def test_native_ack_byte_allows_the_literal_fdl_upload(
     assert result.stdout == "FPLINUX_BOOTROM_READY\n"
     assert "out 7:8 7e00020004467d5e7d5d313b9e7e\n" in log
     assert log.endswith("close 7:8\nexit\n")
+
+
+def test_native_loader_does_not_transfer_when_readiness_flush_fails(
+    uploader: Path, fdl_upload: tuple[Path, list[str]]
+) -> None:
+    directory, plan = fdl_upload
+    (directory / "usb-peer-scenario").write_text("discovery-ready\n")
+    (directory / "usb-peer.plan").write_text("\n".join(plan) + "\n")
+    with Path("/dev/full").open("w", encoding="ascii") as unavailable_stdout:
+        result = subprocess.run(
+            [str(uploader), "--wait", "0", "--ready-ack", "fdl", "fdl1.bin", "0x5000"],
+            cwd=directory,
+            input="\x06",
+            stdout=unavailable_stdout,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+
+    assert result.returncode == 1, result.stderr
+    assert "Cannot report BootROM readiness" in result.stderr
+    trace = (directory / "usb-peer.log").read_text()
+    assert trace == "init\nlist\nopen 7:8\nclaim 7:8 0\nclose 7:8\nexit\n"
 
 
 @pytest.mark.parametrize("wait_seconds", [0, 1])

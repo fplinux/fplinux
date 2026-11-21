@@ -149,17 +149,31 @@
  #else
  		serial = open(tty, O_RDWR | O_NOCTTY | O_SYNC);
  		if (serial >= 0) break;
-@@ -1190,6 +1271,14 @@
+@@ -1190,6 +1271,28 @@
  
  #if USE_LIBUSB
  	io = spdio_init(device, 0);
-+	printf("FPLINUX_BOOTROM_READY\n");
-+	fflush(stdout);
-+	if (ready_ack && getchar() != 0x06) {
-+		fprintf(stderr, "BootROM transfer was not acknowledged\n");
-+		spdio_free(io);
-+		libusb_exit(NULL);
-+		return 1;
++	if (ready_ack) {
++		int ready = 0;
++		/* Route subsequent stdout diagnostics to stderr. */
++		if (fputs("FPLINUX_BOOTROM_READY\n", stdout) == EOF ||
++		    fflush(stdout) == EOF) {
++			perror("Cannot report BootROM readiness");
++		} else if (dup2(STDERR_FILENO, STDOUT_FILENO) < 0) {
++			perror("Cannot redirect BootROM diagnostics");
++		} else if (getchar() != 0x06) {
++			fprintf(stderr, "BootROM transfer was not acknowledged\n");
++		} else {
++			ready = 1;
++		}
++		if (!ready) {
++			spdio_free(io);
++			libusb_exit(NULL);
++			return 1;
++		}
++	} else {
++		printf("FPLINUX_BOOTROM_READY\n");
++		fflush(stdout);
 +	}
  #else
  	io = spdio_init(serial, 0);

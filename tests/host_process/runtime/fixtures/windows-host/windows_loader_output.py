@@ -21,6 +21,7 @@ if Path.cwd().name == "payload" and (destination := os.environ.get("FPLINUX_TEST
         encoding="utf-8",
     )
 
+ready_ack = "--ready-ack" in sys.argv
 if Path(sys.argv[0]).name == "spd_dump.exe":
     if image := os.environ.get("FPLINUX_TEST_LOADER_IMAGE"):
         Path(image).write_bytes(Path("image.bin").read_bytes())
@@ -28,9 +29,9 @@ if Path(sys.argv[0]).name == "spd_dump.exe":
         Path(pending).write_text(str(os.getpid()), encoding="ascii")
         time.sleep(60)
     print("FPLINUX_BOOTROM_READY", flush=True)
-    if "--ready-ack" in sys.argv and sys.stdin.buffer.read(1) != b"\x06":
+    if ready_ack and sys.stdin.buffer.read(1) != b"\x06":
         raise SystemExit(1)
-print("controlled loader output", flush=True)
+print("controlled loader output", file=sys.stderr if ready_ack else sys.stdout, flush=True)
 print("controlled loader diagnostic", file=sys.stderr, flush=True)
 status_name = (
     "FPLINUX_TEST_BRIDGE_STATUS" if Path.cwd().name == "payload" else "FPLINUX_TEST_LOADER_STATUS"
