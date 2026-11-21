@@ -574,6 +574,20 @@ url = "https://raw.githubusercontent.com/alpinelinux/aports/dff61c85c6c68e2c5fb8
 algorithm = "sha512"
 checksum = "990855f875513a85c2b737685ac5bfdfa86f8dadacf00c1826a456547f99b69d4ecf1b9a09c0ce002f1df618b44b1febabe53f95a2c0cd02b504d565bccb50c8"
 
+[aport_fm1gm_7a40a75a_license]
+version = "0_git20261108"
+name = "fm1gm-LICENSE"
+url = "https://raw.githubusercontent.com/jartificer/fm1-gm/7a40a75adcae898e345c5bb6072fa0f69902e3a2/assets/soundfont/LICENSE"
+algorithm = "sha512"
+checksum = "65e5faad9785b71779cda164671bb00e6bfc232d91b8e95b6155ac9d41eae1beb5b61de2ceb61c10a5fb8f8fb7afd061ce8245169c2c78c9ee5035e222cab3a0"
+
+[aport_fm1gm_7a40a75a_sf2]
+version = "0_git20261108"
+name = "fm1gm.sf2"
+url = "https://raw.githubusercontent.com/jartificer/fm1-gm/7a40a75adcae898e345c5bb6072fa0f69902e3a2/assets/soundfont/fm1gm.sf2"
+algorithm = "sha512"
+checksum = "95c1f360308a8c98639b901900a1e9bc81e9ac9c7c80051586ac550349266ad08a13f389e1d5a8dbedd9a8cfef64cd331bc631e857b6946747772994e532c502"
+
 [aport_galmuri11_2_40_4_ttf]
 version = "2.40.4"
 name = "Galmuri11-2.40.4.ttf"

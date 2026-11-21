@@ -35,6 +35,8 @@ packages = [
   "fplinux-ncurses-curses",
   "fplinux-phoneme",
   "fplinux-sbc",
+  "fplinux-soundfont",
+  "fplinux-soundfont-lite",
   "fplinux-tyrquake",
 ]
 

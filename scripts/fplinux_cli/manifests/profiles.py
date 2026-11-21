@@ -354,12 +354,17 @@ def load_profile(
     rootfs = exact_table(config["rootfs"], {"packages"}, f"profile {profile} rootfs")
     packages = package_array(rootfs["packages"], f"profile {profile} rootfs packages")
     expected_packages = (
-        ["fplinux-microsd-root", "fplinux-ncurses-curses", "fplinux-resize2fs"]
+        [
+            "fplinux-microsd-root",
+            "fplinux-ncurses-curses",
+            "fplinux-resize2fs",
+            "fplinux-soundfont",
+        ]
         if profile != "default"
-        else []
+        else ["fplinux-soundfont-lite"]
     )
     if packages != expected_packages:
-        fail(f"profile {profile} rootfs packages must describe only boot maintenance")
+        fail(f"profile {profile} rootfs packages must match the system content policy")
     runtime = exact_table(
         config["runtime"], {"transport", "runnable"}, f"profile {profile} runtime"
     )

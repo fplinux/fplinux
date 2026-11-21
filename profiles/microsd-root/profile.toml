@@ -11,6 +11,7 @@ packages = [
   "fplinux-microsd-root",
   "fplinux-ncurses-curses",
   "fplinux-resize2fs",
+  "fplinux-soundfont",
 ]
 
 [bootstrap]

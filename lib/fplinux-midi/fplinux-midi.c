@@ -14,7 +14,7 @@
 #include <tsf.h>
 
 #ifndef FPLINUX_MIDI_SOUNDFONT
-#define FPLINUX_MIDI_SOUNDFONT "/usr/share/fplinux/soundfonts/TimGM6mb.sf2"
+#define FPLINUX_MIDI_SOUNDFONT "/usr/share/fplinux/soundfonts/default.sf2"
 #endif
 
 #define MIDI_EVENT_STEPS 256U
@@ -107,11 +107,14 @@ static int initialize_channels(tsf *synth)
 
 static int load_shared_synth(void)
 {
+	const char *soundfont = getenv("FPLINUX_MIDI_SOUNDFONT_PATH");
 	struct stat status;
 	int fd;
 	int error = EIO;
 
-	fd = open(FPLINUX_MIDI_SOUNDFONT, O_RDONLY | O_CLOEXEC);
+	if (!soundfont || !*soundfont)
+		soundfont = FPLINUX_MIDI_SOUNDFONT;
+	fd = open(soundfont, O_RDONLY | O_CLOEXEC);
 	if (fd < 0) {
 		errno = EIO;
 		return -1;

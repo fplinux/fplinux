@@ -1,0 +1,22 @@
+# Maintainer: FPLinux contributors <fplinux@example.invalid>
+pkgname=fplinux-soundfont-lite
+pkgver=@version:aport_fm1gm_7a40a75a_sf2@
+pkgrel=0
+pkgdesc="Small General MIDI SoundFont for FPLinux"
+url="https://github.com/jartificer/fm1-gm"
+arch="noarch"
+license="MIT"
+options="!check"
+source="
+	@source:aport_fm1gm_7a40a75a_sf2@
+	@source:aport_fm1gm_7a40a75a_license@
+"
+builddir="$srcdir"
+
+package() {
+	install -Dm644 fm1gm.sf2 "$pkgdir/usr/share/fplinux/soundfonts/fm1gm.sf2"
+	install -Dm644 fm1gm-LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}
+
+sha512sums="
+"

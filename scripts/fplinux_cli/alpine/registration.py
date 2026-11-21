@@ -450,7 +450,6 @@ LOCAL_BUILD_DEPENDENCIES = {
     "fplinux-mesa": ("fplinux-expat-dev", "fplinux-libdrm", "fplinux-mesa-gbm"),
     "fplinux-mesa-gbm": ("fplinux-libdrm",),
     "fplinux-media": ("fplinux-amr-nb-dev", "fplinux-mpg123"),
-    "fplinux-midi": ("fplinux-soundfont",),
     "fplinux-mre": ("fplinux-ui", "fplinux-font-terminus", "fplinux-runtime-media"),
     "fplinux-music": ("fplinux-ui", "fplinux-media"),
     "fplinux-libweston": (

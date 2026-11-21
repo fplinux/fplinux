@@ -15,7 +15,7 @@ source="
 builddir="$srcdir/timgm6mb-soundfont_$pkgver"
 
 package() {
-	install -Dm644 TimGM6mb.sf2 "$pkgdir/usr/share/fplinux/soundfonts/TimGM6mb.sf2"
+	install -Dm644 TimGM6mb.sf2 "$pkgdir/usr/share/fplinux/soundfonts/timgm6mb.sf2"
 	install -Dm644 "$srcdir/COPYRIGHT" "$pkgdir/usr/share/licenses/$pkgname/COPYRIGHT"
 	install -Dm644 "$srcdir/GPL-2.0-only.txt" "$pkgdir/usr/share/licenses/$pkgname/GPL-2.0.txt"
 }

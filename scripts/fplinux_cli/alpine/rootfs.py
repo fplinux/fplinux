@@ -33,6 +33,7 @@ from .packages import (
 )
 from .recipes import alpine_rootfs_recipe
 from .rootfs_files import (
+    _install_default_soundfont,
     _install_display_brightness,
     _normalize_rootfs,
     _stamp_release,
@@ -152,7 +153,7 @@ def _rootfs_remove_command(
 
 
 def shared_ram_packages(
-    platform: Mapping[str, object], target: Mapping[str, object]
+    platform: Mapping[str, object], target: dict[str, Any]
 ) -> tuple[str, ...] | None:
     """Select the common and platform packages for every UMS9117 RAM root."""
     if target.get("platform") != "ums9117":
@@ -161,7 +162,7 @@ def shared_ram_packages(
         platform,
         {
             "build_type": target.get("build_type"),
-            "rootfs": {"base_packages": [], "packages": []},
+            "rootfs": {"base_packages": [], "packages": target["rootfs"]["packages"]},
         },
     )
 
@@ -355,6 +356,7 @@ def build_rootfs(  # noqa: PLR0913 -- rootfs content and optional image output s
             )
 
             firmware_inputs.install_firmware_inputs(root, firmware)
+            _install_default_soundfont(root, root_kind=root_kind)
             _install_display_brightness(root, display_brightness)
             _stamp_release(root, release)
             _verify_alpine_rootfs(

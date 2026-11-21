@@ -149,6 +149,7 @@ class NewTargetTests:
         declared_apks = {
             f"apks/{name}.apk"
             for name in (*platform["bundle"]["packages"], *config["bundle"]["packages"])
+            if name != "fplinux-soundfont-lite"
         }
         release_apks = {
             relative
@@ -159,8 +160,9 @@ class NewTargetTests:
             "apks/fplinux-font-terminus-8x16.apk",
             "apks/fplinux-midi.apk",
             "apks/fplinux-runtime-media.apk",
-            "apks/fplinux-soundfont.apk",
         }
+        assert "apks/fplinux-soundfont.apk" in release_apks
+        assert "fplinux-soundfont-lite" in rootfs_packages
         assert "fplinux-font-terminus-6x12" in rootfs_packages
         assert "apks/fplinux-font-terminus-6x12.apk" not in release_apks
 

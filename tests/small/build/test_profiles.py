@@ -105,7 +105,8 @@ class GlobalProfileTests:
                 "partuuid": "46504c58-02",
             }
         )
-        assert (ram["rootfs"]["packages"]) == ([])
+        assert (ram["rootfs"]["packages"]) == (["fplinux-soundfont-lite"])
+        assert "fplinux-soundfont" in card["rootfs"]["packages"]
         assert (card["rootfs"]["base_packages"]) == (ram["rootfs"]["base_packages"])
         assert (card["device_data"]["groups"]["bluetooth"]) == (
             [
@@ -162,7 +163,7 @@ class GlobalProfileTests:
         """Feature-package ownership is rejected at the boot-policy boundary."""
         path = profile_context.root / "profiles/default/profile.toml"
         shutil.copyfile(PROFILE_FIXTURES / "feature-package/profile.toml", path)
-        with pytest.raises(SystemExit, match="boot maintenance"):
+        with pytest.raises(SystemExit, match="system content policy"):
             targets.load_target("first")
 
     @pytest.mark.parametrize("profile", ["default", "microsd-uboot"])

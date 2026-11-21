@@ -6,7 +6,6 @@ pkgdesc="Shared bounded MIDI and tone renderer for FPLinux applications"
 url="https://github.com/fplinux/fplinux"
 arch="armv7"
 license="LGPL-2.1-or-later AND MIT"
-depends="fplinux-soundfont"
 makedepends_build="clang23 lld23 patch"
 makedepends_host="musl-dev"
 subpackages="$pkgname-dev"
@@ -53,7 +52,7 @@ package() {
 }
 
 sha512sums="
-3ce69ba7286be2efe404c13863b3b5fb71937a760f6b0c2502038f82563e641e242d826ed655b64dc66f7c648e44bf48665cb923f967cf5cfc4c7a0b34058a71  fplinux-midi.c
+b6ed749d61771729e840eb31ded4f1c20fb652bfb1aa1e9d9763a302268ab4bb04da77c97cb4c811a4aa41fc66d2e230f8c77b8a2935487624f51e067ffb63b6  fplinux-midi.c
 dc56ce3a3a151f2915127a8aee2bf25e11daf066f3e7f3079f85171e054146780b32cf1cdf17d31dde8203cee17780cca7bbeece068d9a59b864a9e0043e3abd  fplinux-midi-smf.c
 6442f54ba03524f646a8f285857f5ce02558da0736960a070cc3c3b51b6571fd1d435431b274dede4790ddfd93c5548d34e4223d1388d269c1ce7a0f77e51981  fplinux-midi-tone.c
 cad8b4565c93b11be8e61357efdf4567426f25b699423d9d8373f9d5b01b59e6930b0e47eec321076171a73eaac0753539328fe8d66cb2278a00bf7ee6eb7965  fplinux-midi-synth.c

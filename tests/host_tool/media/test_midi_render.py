@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -91,6 +92,20 @@ def test_midi_missing_bank_reports_failure_before_playing(
         check=True,
     )
     assert result.stdout == "midi missing bank: ok\n"
+
+
+def test_midi_uses_selected_bank_instead_of_missing_default(
+    midi_renderers: tuple[Path, Path],
+    native_midi: Path,
+) -> None:
+    result = run_process(
+        [str(midi_renderers[1])],
+        name="render through the bank selected at application startup",
+        env={**os.environ, "FPLINUX_MIDI_SOUNDFONT_PATH": str(native_midi / "bank/TimGM6mb.sf2")},
+        timeout=30,
+        check=True,
+    )
+    assert result.stdout == "midi render: ok\n"
 
 
 def test_midi_borrowed_samples_gm_routes_reference_gain_and_bounded_memory(

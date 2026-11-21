@@ -59,6 +59,13 @@ def _install_display_brightness(root: Path, display_brightness: dict[str, Any] |
     destination.chmod(0o644)
 
 
+def _install_default_soundfont(root: Path, *, root_kind: str) -> None:
+    directory = root / "usr/share/fplinux/soundfonts"
+    bank = "timgm6mb.sf2" if root_kind == "external" else "fm1gm.sf2"
+    if (directory / bank).is_file():
+        (directory / "default.sf2").symlink_to(bank)
+
+
 def _normalize_rootfs(root: Path) -> None:
     timestamp = int(SOURCE_DATE_EPOCH)
     for path in [*sorted(root.rglob("*"), reverse=True), root]:

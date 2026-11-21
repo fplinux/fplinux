@@ -5,7 +5,7 @@ name = "default"
 kind = "initramfs"
 
 [rootfs]
-packages = []
+packages = ["fplinux-soundfont-lite"]
 
 [bootstrap]
 kind = "linux"
