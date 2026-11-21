@@ -169,7 +169,8 @@ void MRE_ABI utility_viewer_run(struct utility_viewer *self)
 		height = 1;
 	int left = (MRE_FRAME_WIDTH - width) / 2;
 	int top = (MRE_FRAME_HEIGHT - height) / 2;
-	write_protocol("VIEW_PICTURE\n", sizeof("VIEW_PICTURE\n") - 1);
+	send_control((struct mre_control_message){
+		.opcode = MRE_CONTROL_VIEW_PICTURE });
 	memset(app.shared->pixels, 0, sizeof(app.shared->pixels));
 	for (int y = 0; y < height; ++y) {
 		int source_y = y * image.height / height;

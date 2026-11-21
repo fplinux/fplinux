@@ -149,6 +149,7 @@ def test_actual_mre_first_frame_home_replace_cancel_and_close(
     (tmp_path / "first.vxp").write_bytes(b"A execution-peer fixture")
     (tmp_path / "second.vxp").write_bytes(b"B execution-peer fixture")
     (tmp_path / "invalid.vxp").write_bytes(b"- rejected by execution peer")
+    (tmp_path / "файл.txt").write_bytes(b"\x00\x0a\x89\xff")
     record = tmp_path / "engine.log"
     result = run_process(
         [
@@ -167,6 +168,7 @@ def test_actual_mre_first_frame_home_replace_cancel_and_close(
             "FPLINUX_UI_LOCALE_DIRECTORY": str(mre_native / "locale"),
             "FPLINUX_MRE_TEST_ENGINE": str(mre_native / "engine-peer"),
             "FPLINUX_MRE_ENGINE_RECORD": str(record),
+            "FPLINUX_MRE_CHECK_SNAPSHOT": "1",
             "FPLINUX_APP_FRAME_RECORD": str(tmp_path / "frames.log"),
             "XDG_STATE_HOME": str(tmp_path / "state"),
         },
@@ -190,6 +192,7 @@ def test_actual_mre_first_frame_home_replace_cancel_and_close(
         str(tmp_path / "first.vxp"),
     ]
     first_pid = started[0][2]
+    assert ["Q", "A", first_pid] in records
     assert all(pid == first_pid for kind, program, pid in records if program == "A")
     assert sum(kind == "K" and program == "A" for kind, program, _ in records) == 2
 

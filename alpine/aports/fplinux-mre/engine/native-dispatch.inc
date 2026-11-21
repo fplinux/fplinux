@@ -32,23 +32,18 @@ static int dispatch_editor(void)
 	memcpy(app.shared->editor_title, app.editor_title,
 	       strlen(app.editor_title) + 1);
 	__atomic_thread_fence(__ATOMIC_RELEASE);
-	write_protocol("INPUT\n", 6);
-	char line[WIRE_LINE_BYTES];
-	int32_t state;
-	for (;;) {
-		if (!receive_viewer_line(line))
-			return 0;
-		if (!strcmp(line, "INPUT_DONE")) {
-			state = 1;
-			break;
-		}
-		if (!strcmp(line, "INPUT_CANCEL")) {
-			state = 0;
-			break;
-		}
-		if (!utility_queue_service_line(line))
-			utility_defer_input(line);
-	}
+	send_control(
+		(struct mre_control_message){ .opcode = MRE_CONTROL_INPUT });
+	struct mre_control_message reply;
+
+	if (!wait_for_viewer_reply(&reply,
+				   (struct mre_control_message){
+					   .opcode = MRE_CONTROL_INPUT_DONE,
+				   },
+				   MRE_CONTROL_INPUT_CANCEL))
+		return 0;
+	int32_t state = reply.opcode == MRE_CONTROL_INPUT_DONE;
+
 	app.input_text[0] = 0;
 	if (state == 1) {
 		__atomic_thread_fence(__ATOMIC_ACQUIRE);
@@ -85,43 +80,28 @@ static int dispatch_selector(void)
 	if (!publish_frame())
 		return 0;
 	__atomic_thread_fence(__ATOMIC_RELEASE);
-	write_protocol("SELECTOR\n", 9);
-	char line[WIRE_LINE_BYTES];
+	send_control(
+		(struct mre_control_message){ .opcode = MRE_CONTROL_SELECTOR });
+	struct mre_control_message reply;
 	uint16_t *selected = NULL;
 	size_t units = 0;
-	for (;;) {
-		if (!receive_viewer_line(line))
-			return 0;
-		if (!strcmp(line, "SELECT_CANCEL"))
-			break;
-		if (!strncmp(line, "SELECT\t", 7)) {
-			const char *hex = line + 7;
-			size_t length = strlen(hex);
-			char path[MRE_VFS_PATH_BYTES];
-			if (!length || (length & 1) ||
-			    length / 2 >= sizeof(path))
-				fail("selected virtual path exceeds SDK path capacity");
-			for (size_t i = 0; i < length / 2; ++i) {
-				int hi = hex_digit((unsigned char)hex[2 * i]);
-				int lo = hex_digit(
-					(unsigned char)hex[2 * i + 1]);
-				if (hi < 0 || lo < 0 || !(hi || lo))
-					fail("selected virtual path has invalid hex encoding");
-				path[i] = (char)((hi << 4) | lo);
-			}
-			path[length / 2] = 0;
-			if (length / 2 < 3 || path[1] != ':' ||
-			    path[2] != '\\' ||
-			    (path[0] != 'E' && path[0] != 'C') ||
-			    !mre_utf8_decode((const unsigned char *)path,
-					     length / 2, app.input_text,
-					     MRE_VFS_PATH_BYTES, &units))
-				fail("selected virtual path is not bounded UTF8/UCS2");
-			selected = app.input_text;
-			break;
-		}
-		if (!utility_queue_service_line(line))
-			utility_defer_input(line);
+
+	if (!wait_for_viewer_reply(&reply,
+				   (struct mre_control_message){
+					   .opcode = MRE_CONTROL_SELECT,
+				   },
+				   MRE_CONTROL_SELECT_CANCEL))
+		return 0;
+	if (reply.opcode == MRE_CONTROL_SELECT) {
+		const char *path = reply.text.data;
+
+		if (reply.text.length < 3 || path[1] != ':' ||
+		    path[2] != '\\' || (path[0] != 'E' && path[0] != 'C') ||
+		    !mre_utf8_decode((const unsigned char *)path,
+				     reply.text.length, app.input_text,
+				     MRE_VFS_PATH_BYTES, &units))
+			fail("selected virtual path is not bounded UTF8/UCS2");
+		selected = app.input_text;
 	}
 	selector_fn callback = app.selector_callback;
 	app.selector_pending = 0;
@@ -151,7 +131,11 @@ static int guest_has_callbacks(void)
 
 static void dispatch_viewer(void)
 {
-	write_protocol("DISPLAY\t240\t320\n", 16);
+	send_control((struct mre_control_message){
+		.opcode = MRE_CONTROL_DISPLAY,
+		.display = { .width = MRE_FRAME_WIDTH,
+			     .height = MRE_FRAME_HEIGHT },
+	});
 	call_event(app.system_callback, 4, 0, "CREATE");
 	app.paint_pending = 0;
 	if (!app.pending && !app.selector_pending)
@@ -160,7 +144,7 @@ static void dispatch_viewer(void)
 		return;
 	if (!app.exited && !guest_has_callbacks())
 		app.exited = 1;
-	char line[WIRE_LINE_BYTES];
+	struct mre_control_message message;
 	while (!app.exited) {
 		if (app.selector_pending && !dispatch_selector())
 			return;
@@ -170,30 +154,27 @@ static void dispatch_viewer(void)
 			break;
 		if (app.selector_pending || app.pending)
 			continue;
-		if (!receive_interactive_command(line))
+		if (!receive_interactive_command(&message))
 			break;
-		if (utility_queue_service_line(line))
+		if (queue_service_message(&message))
 			continue;
-		if (!strncmp(line, "KEY\t", 4)) {
-			int event, key, used;
-			if (sscanf(line + 4, "%d\t%d%n", &event, &key, &used) !=
-				    2 ||
-			    line[4 + used] || (event != 1 && event != 2))
-				fail("invalid SDK keyboard event");
+		switch (message.opcode) {
+		case MRE_CONTROL_KEY: {
+			int32_t event = message.input.key.event;
+			int32_t key = message.input.key.code;
+
 			debug_trace("KEY concurrent mode=%d\n",
 				    handheld_two_key_mode());
 			if (app.visible) {
 				(void)editor_key(event, key);
 				call_event(app.key_callback, event, key, "KEY");
 			}
-		} else if (!strncmp(line, "PEN\t", 4)) {
-			int event, x, y, used;
-			if (sscanf(line + 4, "%d\t%d\t%d%n", &event, &x, &y,
-				   &used) != 3 ||
-			    line[4 + used] || event < 1 || event > 3 || x < 0 ||
-			    x >= MRE_FRAME_WIDTH || y < 0 ||
-			    y >= MRE_FRAME_HEIGHT)
-				fail("invalid SDK pen event");
+			break;
+		}
+		case MRE_CONTROL_PEN: {
+			int32_t x = message.input.pen.x;
+			int32_t y = message.input.pen.y;
+
 			if (app.visible && app.pen_callback) {
 				struct display_viewport viewport =
 					display_viewport();
@@ -210,12 +191,14 @@ static void dispatch_viewer(void)
 				if (y >= guest_screen_height())
 					y = guest_screen_height() - 1;
 				(void)invoke_guest((uintptr_t)app.pen_callback,
-						   event, x, y, 0);
+						   message.input.pen.event, x,
+						   y, 0);
 			}
-		} else if (!strncmp(line, "VISIBILITY\t", 11) &&
-			   (!strcmp(line + 11, "0") ||
-			    !strcmp(line + 11, "1"))) {
-			int visible = line[11] == '1';
+			break;
+		}
+		case MRE_CONTROL_VISIBILITY: {
+			bool visible = message.input.visible;
+
 			if (visible != app.visible) {
 				app.visible = visible;
 				call_event(app.system_callback, visible ? 2 : 3,
@@ -227,11 +210,16 @@ static void dispatch_viewer(void)
 					call_event(app.system_callback, 6, 0,
 						   "HIDE");
 			}
-		} else
-			fail("unexpected parent event '%s'", line);
+			break;
+		}
+		default:
+			fail("unexpected viewer event opcode %u",
+			     message.opcode);
+		}
 		if (!publish_frame())
 			return;
 	}
 	if (app.exited)
-		write_protocol("END\n", 4);
+		send_control((struct mre_control_message){
+			.opcode = MRE_CONTROL_END });
 }

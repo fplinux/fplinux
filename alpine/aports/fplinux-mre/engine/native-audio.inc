@@ -27,20 +27,12 @@ static struct native_audio_handle *native_audio_find(uint32_t id)
 	return NULL;
 }
 
-static int native_audio_receive(const char *line)
+static void native_audio_receive(uint32_t id, int32_t event)
 {
-	if (strncmp(line, "AUDIO_EVENT\t", 12))
-		return 0;
-	unsigned int id;
-	int event, used;
-
-	if (sscanf(line + 12, "%u\t%d%n", &id, &event, &used) != 2 ||
-	    line[12 + used])
-		fail("invalid audio event record");
 	struct native_audio_handle *handle = native_audio_find(id);
 
 	if (!handle || !handle->live)
-		return 1;
+		return;
 	if (handle->kind == MRE_AUDIO_MIDI && event == 1) {
 		handle->start_pending = 1;
 	} else if ((handle->kind == MRE_AUDIO_MIDI && event == 2) ||
@@ -52,7 +44,6 @@ static int native_audio_receive(const char *line)
 	} else {
 		fail("audio event does not belong to the guest ABI");
 	}
-	return 1;
 }
 
 static void native_audio_begin_request(uint32_t operation, uint32_t id)

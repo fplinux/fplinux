@@ -59,6 +59,7 @@ build() {
 	"$CC" $CPPFLAGS $CFLAGS -Os -std=c11 -Wall -Wextra -Werror \
 		-I"$srcdir/include" -I"$startdir" $(pkg-config --cflags fplinux-ui fplinux-runtime-media libcurl) \
 		fplinux-mre.c mre-selector-files.c runtime-paths.c text-codec.c \
+		"$startdir/ipc/mre-control.c" \
 		"$startdir/brokers/vfs-broker.c" "$startdir/brokers/vfs-path.c" \
 		"$startdir/brokers/http-broker.c" "$startdir/brokers/audio-broker.c" fplinux-cli.c \
 		$(pkg-config --libs fplinux-ui fplinux-runtime-media libcurl libcrypto) $LDFLAGS \
@@ -91,7 +92,7 @@ build() {
 
 	mkdir -p engine-objects
 	local unit
-	for unit in engine/engine ads/ads_image memory/mre-memory gif/resize-image text-codec; do
+	for unit in engine/engine ipc/mre-control ads/ads_image memory/mre-memory gif/resize-image text-codec; do
 		"$CC" $CPPFLAGS $CFLAGS -marm -std=c11 -Wall -Wextra -Werror \
 			-I"$srcdir/include" -I"$srcdir" -I"$startdir" \
 			-c "$startdir/$unit.c" -o "engine-objects/${unit##*/}.o"
@@ -114,7 +115,7 @@ build() {
 			-c "$startdir/$unit.S" -o "engine-objects/${unit##*/}.o"
 	done
 	"$CC" $CFLAGS -marm -static \
-		engine-objects/engine.o \
+		engine-objects/engine.o engine-objects/mre-control.o \
 		engine-objects/text-codec.o \
 		engine-objects/ads_image.o engine-objects/fplinux-font.o \
 		engine-objects/fplinux-utf8.o \
@@ -152,7 +153,7 @@ package() {
 
 sha512sums="
 f199f96b30558ca3fa5b5b218d224519c74acf507a967d3ad45a2ac4195d090cb5edfd0d2184ed5f514df935b7accee8a28f71b86e59017ecd26347a0ef796c7  subblock-length.patch
-808f8b64dcf2cfe6552bdb47ffba9aa33362aa25460b97821a436eeafd1eb9d4244f011e3c8ec08735708ed1a805593242c7aaec3eec1075d27c5742fb89d41d  fplinux-mre.c
+dc79e862f5b626e98b4981bcbeda5c482cac15b59043a455a03533da24d6cb9ba34964b127c8eac203d60bad8e1063f073095fc68f9666c1c16d18d1a727754d  fplinux-mre.c
 3319217790f76d4180a0154aff6cbdff6daa0ee1947decaf13dccfd16fa1b92968ef7ababfb6bf61dd54e513e8823f3fdb96dc6ff1c44056aed7cc994fe4dd23  mre-selector-files.c
 403e538f2a6ba540d106086455336d7b2f0209453b01305bb36aeb5fb3f2afadc22bf33d3416f97f1661f81a87e99eb52f2354d9f1f8880330545dd2fabdb7df  mre-selector-files.h
 46496612c694514c87634e89cbb1c35d1c69b68a214b5d99707eaea722891727dab16cc9121fa8f0b177aa15b4ca82cfd80f2ebe97b9fe1c43fa9606b73a5f8f  runtime-paths.c

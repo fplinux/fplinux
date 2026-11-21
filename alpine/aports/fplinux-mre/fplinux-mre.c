@@ -15,6 +15,7 @@
 #include "brokers/audio-broker.h"
 #include "brokers/http-broker.h"
 #include "brokers/vfs-broker.h"
+#include "ipc/mre-control.h"
 #include "ipc/mre-ipc.h"
 #include "mre-selector-files.h"
 #include "text-codec.h"
@@ -41,14 +42,9 @@
 #define UI_ID "org.fplinux.mre"
 #define _(text) gettext(text)
 #define ENGINE "/usr/libexec/fplinux/mre-engine"
-#define PROTOCOL_LIMIT 16384U
 #define SEND_LIMIT 65536U
 #define VFS_REQUEST_LIMIT 1000000U
 #define HTTP_REQUEST_LIMIT 100000U
-#define MRE_KEY_EVENT_DOWN 2
-#define MRE_KEY_EVENT_UP 1
-#define MRE_PEN_EVENT_TAP 1
-#define MRE_PEN_EVENT_RELEASE 2
 #define POINTER_STEP_PX 16
 #define POINTER_SIZE_PX 9
 
@@ -116,9 +112,8 @@ struct app {
 	char selector_folder[MRE_VFS_PATH_BYTES];
 	int selector_type;
 	bool modal;
-	char protocol[PROTOCOL_LIMIT + 1];
-	size_t protocol_used;
-	char outgoing[SEND_LIMIT];
+	struct mre_control_reader reader;
+	uint8_t outgoing[SEND_LIMIT];
 	size_t outgoing_used;
 	pid_t child, validator;
 	uint64_t validation_started;
@@ -135,7 +130,7 @@ struct app {
 	bool waiting, wait_ending;
 	void (*wait_outcome)(struct app *app);
 	/* An error that the end of the wait shows. */
-	char error[PROTOCOL_LIMIT / 2U + 1U];
+	char error[MRE_CONTROL_ERROR_BYTES + 1];
 	struct mre_vfs *vfs;
 	uint32_t vfs_sequence;
 	struct mre_http_broker *http;
@@ -156,7 +151,6 @@ static void show_idle(struct app *app);
 static void show_error(struct app *app, const char *message);
 static void show_selector(struct app *app);
 static bool show_native(struct app *app);
-static bool send_line(struct app *app, const char *line);
 static void accept_document_ui(struct app *app);
 static void start_engine_document(struct app *app);
 static void finish_document(struct app *app,
@@ -177,8 +171,8 @@ static void update_tick(struct app *app)
 {
 	bool active = app->validator > 0 || app->child > 0 ||
 		      app->input_fd >= 0 || app->output_fd >= 0 ||
-		      app->outgoing_used || app->protocol_used || app->http ||
-		      app->http_active_id || app->transport_failure_at;
+		      app->outgoing_used || app->http || app->http_active_id ||
+		      app->transport_failure_at;
 
 	if (!app->tick)
 		return;
@@ -252,7 +246,7 @@ static void close_pipe(struct app *app)
 	if (app->input_fd >= 0)
 		close(app->input_fd);
 	app->output_fd = app->input_fd = -1;
-	app->outgoing_used = app->protocol_used = 0;
+	app->outgoing_used = app->reader.used = 0;
 	app->transport_failure_at = 0;
 }
 
@@ -796,44 +790,43 @@ static void open_settings_choice(struct app *app)
 
 static bool flush_outgoing(struct app *app)
 {
-	while (app->outgoing_used && app->input_fd >= 0) {
-		ssize_t count =
-			write(app->input_fd, app->outgoing, app->outgoing_used);
-		if (count < 0) {
-			if (errno == EINTR)
-				continue;
-			if (errno == EAGAIN || errno == EWOULDBLOCK)
-				return true;
-			if (errno == EPIPE) {
-				/* Drain END and reap before classifying a
-                                 * final ACK racing with ordinary child exit. */
-				close(app->input_fd);
-				app->input_fd = -1;
-				app->outgoing_used = 0;
-				app->transport_failure_at = fplinux_ui_now_ms();
-				return true;
-			}
-			return false;
-		}
-		if (!count)
-			return false;
-		memmove(app->outgoing, app->outgoing + count,
-			app->outgoing_used - (size_t)count);
-		app->outgoing_used -= (size_t)count;
-	}
-	return !app->outgoing_used;
+	if (app->input_fd < 0)
+		return !app->outgoing_used;
+	if (mre_control_flush(app->input_fd, app->outgoing,
+			      &app->outgoing_used))
+		return true;
+	if (errno != EPIPE)
+		return false;
+	/* Drain END and reap before classifying a final ACK racing with exit. */
+	close(app->input_fd);
+	app->input_fd = -1;
+	app->outgoing_used = 0;
+	app->transport_failure_at = fplinux_ui_now_ms();
+	return true;
 }
 
-static bool send_line(struct app *app, const char *line)
+static bool send_control(struct app *app, struct mre_control_message message)
 {
-	size_t length = strlen(line);
-	if (app->input_fd < 0 || length > PIPE_BUF ||
-	    length > SEND_LIMIT - app->outgoing_used)
+	if (app->input_fd < 0)
+		return false;
+	size_t length =
+		mre_control_encode(&message, MRE_CONTROL_FRONTEND,
+				   app->outgoing + app->outgoing_used,
+				   sizeof(app->outgoing) - app->outgoing_used);
+	if (!length)
 		return false;
 	__atomic_thread_fence(__ATOMIC_RELEASE);
-	memcpy(app->outgoing + app->outgoing_used, line, length);
 	app->outgoing_used += length;
 	return flush_outgoing(app);
+}
+
+static bool send_key(struct app *app, enum mre_key_event event, int32_t code)
+{
+	return send_control(
+		app, (struct mre_control_message){
+			     .opcode = MRE_CONTROL_KEY,
+			     .input.key = { .event = event, .code = code },
+		     });
 }
 
 static bool cancel_guest_keys(struct app *app)
@@ -846,13 +839,10 @@ static bool cancel_guest_keys(struct app *app)
 	app->pointer_fire_withheld = false;
 	for (int index = 0; index < 5; ++index) {
 		if (held & (1U << index)) {
-			char line[32];
 			int code = index < 4 && app->held_direction[index] ?
 					   app->held_direction[index] :
 					   -index - 1;
-			snprintf(line, sizeof(line), "KEY\t%d\t%d\n",
-				 MRE_KEY_EVENT_UP, code);
-			if (!send_line(app, line)) {
+			if (!send_key(app, MRE_KEY_EVENT_UP, code)) {
 				show_error(
 					app,
 					_("The application did not respond."));
@@ -868,14 +858,15 @@ static bool cancel_guest_keys(struct app *app)
 static void sync_visibility(struct app *app)
 {
 	bool visible = app->ui_visible && (!app->home || app->starting_guest);
-	char line[32];
 
 	mre_audio_broker_set_visible(app->audio, visible);
 	if (!app->native || app->input_fd < 0 || visible == app->viewer_visible)
 		return;
 	app->viewer_visible = visible;
-	snprintf(line, sizeof(line), "VISIBILITY\t%d\n", visible ? 1 : 0);
-	if (!send_line(app, line))
+	if (!send_control(app, (struct mre_control_message){
+				       .opcode = MRE_CONTROL_VISIBILITY,
+				       .input.visible = visible,
+			       }))
 		show_error(app, _("The application did not respond."));
 }
 
@@ -899,69 +890,6 @@ static void leave_home(struct app *app)
 	if (app->view == VIEW_NATIVE)
 		fplinux_ui_set_fullscreen(app->ui, true);
 	sync_visibility(app);
-}
-
-static bool parse_number(const char *text, uint32_t *number)
-{
-	char *end;
-	unsigned long value;
-	if (!text[0])
-		return false;
-	for (const char *cursor = text; *cursor; ++cursor)
-		if (*cursor < '0' || *cursor > '9')
-			return false;
-	errno = 0;
-	value = strtoul(text, &end, 10);
-	if (errno || *end || value > UINT32_MAX)
-		return false;
-	*number = (uint32_t)value;
-	return true;
-}
-
-static int hex_digit(unsigned char byte)
-{
-	if (byte >= '0' && byte <= '9')
-		return byte - '0';
-	if (byte >= 'a' && byte <= 'f')
-		return byte - 'a' + 10;
-	if (byte >= 'A' && byte <= 'F')
-		return byte - 'A' + 10;
-	return -1;
-}
-
-static bool decode_text(const char *hex, char *text, size_t capacity)
-{
-	size_t length = strlen(hex);
-	if (length % 2U || length / 2U >= capacity)
-		return false;
-	for (size_t i = 0; i < length / 2U; ++i) {
-		int high = hex_digit((unsigned char)hex[i * 2U]);
-		int low = hex_digit((unsigned char)hex[i * 2U + 1U]);
-		if (high < 0 || low < 0 || !(high | low))
-			return false;
-		text[i] = (char)((high << 4) | low);
-	}
-	text[length / 2U] = '\0';
-	return mre_utf8_decode((const unsigned char *)text, length / 2U, NULL,
-			       capacity, NULL);
-}
-
-static bool send_path(struct app *app, const char *command, const char *path)
-{
-	static const char digits[] = "0123456789abcdef";
-	char line[MRE_VFS_PATH_BYTES * 2U + 32U];
-	size_t used = (size_t)snprintf(line, sizeof(line), "%s\t", command);
-	size_t bytes = strlen(path);
-	if (bytes >= MRE_VFS_PATH_BYTES)
-		return false;
-	for (size_t i = 0; i < bytes; ++i) {
-		unsigned char byte = (unsigned char)path[i];
-		line[used++] = digits[byte >> 4];
-		line[used++] = digits[byte & 15U];
-	}
-	line[used++] = '\n';
-	line[used] = '\0';
-	return send_line(app, line);
 }
 
 static bool frame_viewport(struct app *app,
@@ -1011,13 +939,16 @@ static void layout_pointer(struct app *app)
 				  !fplinux_ui_is_fullscreen(app->ui));
 }
 
-static bool send_pen(struct app *app, int event)
+static bool send_pen(struct app *app, enum mre_pen_event event)
 {
-	char line[64];
-
-	snprintf(line, sizeof(line), "PEN\t%d\t%d\t%d\n", event, app->pointer_x,
-		 app->pointer_y);
-	if (send_line(app, line))
+	if (send_control(app, (struct mre_control_message){
+				  .opcode = MRE_CONTROL_PEN,
+				  .input.pen = {
+					  .event = event,
+					  .x = (uint16_t)app->pointer_x,
+					  .y = (uint16_t)app->pointer_y,
+				  },
+			  }))
 		return true;
 	show_error(app, _("The application did not respond."));
 	return false;
@@ -1130,7 +1061,6 @@ static void native_key(struct fplinux_ui *ui, struct fplinux_ui_screen *screen,
 		       const struct fplinux_ui_key *key, void *context)
 {
 	struct app *app = context;
-	char line[64];
 	int code = 0, physical_code;
 	(void)ui;
 	(void)screen;
@@ -1205,9 +1135,8 @@ static void native_key(struct fplinux_ui *ui, struct fplinux_ui_screen *screen,
 		if (!key->pressed)
 			app->held_direction[index] = 0;
 	}
-	snprintf(line, sizeof(line), "KEY\t%d\t%d\n",
-		 key->pressed ? MRE_KEY_EVENT_DOWN : MRE_KEY_EVENT_UP, code);
-	if (!send_line(app, line))
+	if (!send_key(app, key->pressed ? MRE_KEY_EVENT_DOWN : MRE_KEY_EVENT_UP,
+		      code))
 		show_error(app, _("The application did not respond."));
 	else if (physical_code <= -1 && physical_code >= -5) {
 		unsigned int bit = 1U << (-physical_code - 1);
@@ -1374,7 +1303,11 @@ static void submit_editor(struct app *app, bool accepted)
 		memcpy(app->shared->editor_data, text, bytes + 1U);
 		app->shared->editor_bytes = (uint32_t)bytes;
 	}
-	if (!send_line(app, accepted ? "INPUT_DONE\n" : "INPUT_CANCEL\n")) {
+	if (!send_control(app,
+			  (struct mre_control_message){
+				  .opcode = accepted ? MRE_CONTROL_INPUT_DONE :
+						       MRE_CONTROL_INPUT_CANCEL,
+			  })) {
 		show_error(app, _("The application did not respond."));
 		return;
 	}
@@ -1553,7 +1486,11 @@ static void select_file(struct app *app, size_t selected)
 		return;
 	}
 	close(fd);
-	if (!send_path(app, "SELECT", path)) {
+	if (!send_control(app, (struct mre_control_message){
+				       .opcode = MRE_CONTROL_SELECT,
+				       .text = { .data = path,
+						 .length = strlen(path) },
+			       })) {
 		show_error(app, _("The application did not respond."));
 		return;
 	}
@@ -1564,7 +1501,6 @@ static bool dispatch_vfs(struct app *app, uint32_t sequence)
 {
 	struct mre_vfs_request request;
 	struct mre_vfs_response response;
-	char line[64];
 	if (!app->shared || !app->vfs || !sequence ||
 	    sequence > VFS_REQUEST_LIMIT || sequence <= app->vfs_sequence)
 		return false;
@@ -1575,15 +1511,16 @@ static bool dispatch_vfs(struct app *app, uint32_t sequence)
 	mre_vfs_dispatch(app->vfs, &request, &response);
 	app->vfs_sequence = sequence;
 	memcpy(&app->shared->vfs_response, &response, sizeof(response));
-	snprintf(line, sizeof(line), "VFS_REPLY\t%u\n", sequence);
-	return send_line(app, line);
+	return send_control(app, (struct mre_control_message){
+					 .opcode = MRE_CONTROL_VFS_REPLY,
+					 .sequence = sequence,
+				 });
 }
 
 static bool publish_audio_reply(uint32_t sequence, int32_t result,
 				void *context)
 {
 	struct app *app = context;
-	char line[64];
 
 	if (!app->shared || app->saw_end)
 		return false;
@@ -1591,8 +1528,11 @@ static bool publish_audio_reply(uint32_t sequence, int32_t result,
 		.sequence = sequence,
 		.result = result,
 	};
-	snprintf(line, sizeof(line), "AUDIO_REPLY\t%u\n", sequence);
-	bool success = send_line(app, line);
+	bool success =
+		send_control(app, (struct mre_control_message){
+					  .opcode = MRE_CONTROL_AUDIO_REPLY,
+					  .sequence = sequence,
+				  });
 
 	if (!success)
 		app->audio_failed = true;
@@ -1602,12 +1542,14 @@ static bool publish_audio_reply(uint32_t sequence, int32_t result,
 static bool publish_audio_event(uint32_t handle, int32_t event, void *context)
 {
 	struct app *app = context;
-	char line[64];
 
 	if (!app->shared || app->saw_end)
 		return false;
-	snprintf(line, sizeof(line), "AUDIO_EVENT\t%u\t%d\n", handle, event);
-	bool success = send_line(app, line);
+	bool success = send_control(
+		app, (struct mre_control_message){
+			     .opcode = MRE_CONTROL_AUDIO_EVENT,
+			     .audio = { .handle = handle, .event = event },
+		     });
 
 	if (!success)
 		app->audio_failed = true;
@@ -1643,19 +1585,19 @@ static bool dispatch_audio(struct app *app, uint32_t sequence)
 static bool publish_http(struct app *app,
 			 const struct mre_http_response *response)
 {
-	char line[64];
 	if (!app->shared)
 		return false;
 	memcpy(&app->shared->http_response, response, sizeof(*response));
-	snprintf(line, sizeof(line), "HTTP_RESPONSE\t%u\n", response->id);
-	return send_line(app, line);
+	return send_control(app, (struct mre_control_message){
+					 .opcode = MRE_CONTROL_HTTP_RESPONSE,
+					 .http_id = response->id,
+				 });
 }
 
 static bool request_http(struct app *app, uint32_t id)
 {
 	struct mre_http_request request;
 	struct mre_http_response failure = { .id = id, .transport = 2 };
-	char accepted[64];
 	if (!app->shared || !id || id > INT32_MAX || id <= app->http_last_id)
 		return false;
 	__atomic_thread_fence(__ATOMIC_ACQUIRE);
@@ -1665,8 +1607,10 @@ static bool request_http(struct app *app, uint32_t id)
 	app->http_last_id = id;
 	/* Release the SDK producer only after its shared slot has been copied.
 	 * Acceptance confirms ownership of arguments, not HTTP success. */
-	snprintf(accepted, sizeof(accepted), "HTTP_ACCEPTED\t%u\n", id);
-	if (!send_line(app, accepted))
+	if (!send_control(app, (struct mre_control_message){
+				       .opcode = MRE_CONTROL_HTTP_ACCEPTED,
+				       .http_id = id,
+			       }))
 		return false;
 	if (app->http_active_id || ++app->http_requests > HTTP_REQUEST_LIMIT ||
 	    !memchr(request.url, 0, sizeof(request.url)))
@@ -1704,47 +1648,39 @@ static bool poll_http(struct app *app)
 	return publish_http(app, &response);
 }
 
-static void protocol_line(struct app *app, char *line)
+static void dispatch_engine_message(struct app *app,
+				    const struct mre_control_message *message)
 {
-	uint32_t number;
-	char message[PROTOCOL_LIMIT / 2U + 1U];
-	if (!strncmp(line, "AUDIO_REQUEST\t", 14)) {
-		if (!parse_number(line + 14, &number) ||
-		    !dispatch_audio(app, number))
+	switch (message->opcode) {
+	case MRE_CONTROL_AUDIO_REQUEST:
+		if (!dispatch_audio(app, message->sequence))
 			goto malformed;
 		return;
-	}
-	if (!strncmp(line, "VFS_REQUEST\t", 12)) {
-		if (!parse_number(line + 12, &number) ||
-		    !dispatch_vfs(app, number))
+	case MRE_CONTROL_VFS_REQUEST:
+		if (!dispatch_vfs(app, message->sequence))
 			goto malformed;
 		return;
-	}
-	if (!strncmp(line, "HTTP_REQUEST\t", 13)) {
-		if (!parse_number(line + 13, &number) ||
-		    !request_http(app, number))
+	case MRE_CONTROL_HTTP_REQUEST:
+		if (!request_http(app, message->http_id))
 			goto malformed;
 		return;
-	}
-	if (!strncmp(line, "HTTP_CANCEL\t", 12)) {
-		if (!parse_number(line + 12, &number) || !number ||
-		    number > app->http_last_id)
+	case MRE_CONTROL_HTTP_CANCEL:
+		if (!message->http_id || message->http_id > app->http_last_id)
 			goto malformed;
-		if (number == app->http_active_id) {
-			mre_http_broker_cancel(app->http, number);
+		if (message->http_id == app->http_active_id) {
+			mre_http_broker_cancel(app->http, message->http_id);
 			mre_http_broker_destroy(app->http);
 			app->http = NULL;
 			app->http_active_id = 0;
 		}
 		return;
-	}
-	if (!strcmp(line, "VIEW_PICTURE") && app->native) {
+	case MRE_CONTROL_VIEW_PICTURE:
+		if (!app->native)
+			goto malformed;
 		app->picture_requested = true;
 		return;
-	}
-	if (!strcmp(line, "POINTER_AVAILABLE\t1") ||
-	    !strcmp(line, "POINTER_AVAILABLE\t0")) {
-		bool available = line[18] == '1';
+	case MRE_CONTROL_POINTER_AVAILABLE: {
+		bool available = message->pointer_available;
 		bool was_available = app->pointer_available;
 		if (!available && !pause_pointer(app))
 			return;
@@ -1754,10 +1690,12 @@ static void protocol_line(struct app *app, char *line)
 		layout_pointer(app);
 		return;
 	}
-	if (!strcmp(line, "DISPLAY\t240\t320") && app->shared) {
+	case MRE_CONTROL_DISPLAY:
+		if (!app->shared)
+			goto malformed;
 		__atomic_thread_fence(__ATOMIC_ACQUIRE);
-		if (app->shared->screen_width != MRE_FRAME_WIDTH ||
-		    app->shared->screen_height != MRE_FRAME_HEIGHT)
+		if (app->shared->screen_width != message->display.width ||
+		    app->shared->screen_height != message->display.height)
 			goto malformed;
 		app->native = true;
 		app->viewer_visible = true;
@@ -1767,22 +1705,22 @@ static void protocol_line(struct app *app, char *line)
 				calloc(MRE_FRAME_WIDTH * MRE_FRAME_HEIGHT,
 				       sizeof(*app->frame_pixels));
 		if (!app->frame_pixels)
-			goto no_memory;
+			show_error(app, _("Not enough memory."));
 		return;
-	}
-	if (!strncmp(line, "FRAME\t", 6) && app->native && app->shared) {
-		char ack[64];
-		if (!parse_number(line + 6, &number))
+	case MRE_CONTROL_FRAME:
+		if (!app->native || !app->shared)
 			goto malformed;
 		__atomic_thread_fence(__ATOMIC_ACQUIRE);
-		if (app->shared->frame_sequence != number)
+		if (app->shared->frame_sequence != message->sequence)
 			goto malformed;
 		memcpy(app->frame_pixels, app->shared->pixels,
 		       sizeof(app->shared->pixels));
 		app->has_frame = true;
 		/* ACK belongs to transport progress, including modal screens. */
-		snprintf(ack, sizeof(ack), "ACK\t%u\n", number);
-		if (!send_line(app, ack))
+		if (!send_control(app, (struct mre_control_message){
+					       .opcode = MRE_CONTROL_ACK,
+					       .sequence = message->sequence,
+				       }))
 			goto malformed;
 		if (app->waiting) {
 			guest_ready(app);
@@ -1793,8 +1731,9 @@ static void protocol_line(struct app *app, char *line)
 			accept_document_ui(app);
 		}
 		return;
-	}
-	if (!strcmp(line, "INPUT") && app->shared && !app->modal) {
+	case MRE_CONTROL_INPUT:
+		if (!app->shared || app->modal)
+			goto malformed;
 		__atomic_thread_fence(__ATOMIC_ACQUIRE);
 		if (app->decision || app->waiting || app->home) {
 			app->deferred_modal = VIEW_INPUT;
@@ -1806,8 +1745,9 @@ static void protocol_line(struct app *app, char *line)
 		if (!show_editor(app))
 			goto malformed;
 		return;
-	}
-	if (!strcmp(line, "SELECTOR") && app->shared && !app->modal) {
+	case MRE_CONTROL_SELECTOR:
+		if (!app->shared || app->modal)
+			goto malformed;
 		__atomic_thread_fence(__ATOMIC_ACQUIRE);
 		if (!memchr(app->shared->selector_folder, 0,
 			    sizeof(app->shared->selector_folder)) ||
@@ -1829,11 +1769,14 @@ static void protocol_line(struct app *app, char *line)
 			show_selector(app);
 		}
 		return;
-	}
-	if (!strncmp(line, "SNAPSHOT\t", 9) && app->shared) {
-		char path[MRE_VFS_PATH_BYTES];
+	case MRE_CONTROL_SNAPSHOT: {
+		const char *path = message->text.data;
 		uint32_t bytes = 0;
-		if (!decode_text(line + 9, path, sizeof(path)))
+
+		if (!app->shared ||
+		    !mre_utf8_decode((const unsigned char *)path,
+				     message->text.length, NULL,
+				     MRE_VFS_PATH_BYTES, NULL))
 			goto malformed;
 		app->shared->file_bytes = 0;
 		app->shared->file_path[0] = 0;
@@ -1841,30 +1784,38 @@ static void protocol_line(struct app *app, char *line)
 						app->shared->file_data,
 						MRE_FILE_BYTES, &bytes) == 0;
 		if (success) {
-			memcpy(app->shared->file_path, path, strlen(path) + 1U);
+			memcpy(app->shared->file_path, path,
+			       message->text.length + 1U);
 			app->shared->file_bytes = bytes;
 		}
-		if (!send_line(app, success ? "SNAPSHOT_DONE\n" :
-					      "SNAPSHOT_ERROR\n"))
+		if (!send_control(
+			    app,
+			    (struct mre_control_message){
+				    .opcode =
+					    success ?
+						    MRE_CONTROL_SNAPSHOT_DONE :
+						    MRE_CONTROL_SNAPSHOT_ERROR,
+			    }))
 			goto malformed;
 		return;
 	}
-	if (!strcmp(line, "END")) {
+	case MRE_CONTROL_END:
 		app->saw_end = true;
 		mre_audio_broker_close(app->audio);
 		app->audio = NULL;
 		return;
-	}
-	if (!strncmp(line, "ERROR\t", 6) &&
-	    decode_text(line + 6, message, sizeof(message))) {
-		show_error(app, message);
+	case MRE_CONTROL_ERROR:
+		if (!mre_utf8_decode((const unsigned char *)message->text.data,
+				     message->text.length, NULL,
+				     MRE_CONTROL_ERROR_BYTES + 1U, NULL))
+			goto malformed;
+		show_error(app, message->text.data);
 		return;
+	default:
+		break;
 	}
 malformed:
 	show_error(app, _("Invalid application response."));
-	return;
-no_memory:
-	show_error(app, _("Not enough memory."));
 }
 
 static void engine_output(struct fplinux_ui *ui, int fd, short events,
@@ -1874,19 +1825,17 @@ static void engine_output(struct fplinux_ui *ui, int fd, short events,
 	(void)ui;
 	(void)events;
 	while (app->output_fd == fd) {
-		ssize_t count = read(fd, app->protocol + app->protocol_used,
-				     PROTOCOL_LIMIT - app->protocol_used);
-		if (count < 0) {
-			if (errno == EINTR)
-				continue;
-			if (errno == EAGAIN || errno == EWOULDBLOCK)
-				return;
-			show_error(
-				app,
-				_("Cannot read the application's response."));
+		struct mre_control_message message;
+		enum mre_control_read_result result = mre_control_read(
+			&app->reader, fd, MRE_CONTROL_ENGINE, &message);
+
+		switch (result) {
+		case MRE_CONTROL_MESSAGE:
+			dispatch_engine_message(app, &message);
+			break;
+		case MRE_CONTROL_WAIT:
 			return;
-		}
-		if (count == 0) {
+		case MRE_CONTROL_EOF:
 			mre_audio_broker_close(app->audio);
 			app->audio = NULL;
 			fplinux_ui_unwatch_fd(app->ui, app->output_fd);
@@ -1894,30 +1843,19 @@ static void engine_output(struct fplinux_ui *ui, int fd, short events,
 			app->output_fd = -1;
 			if (!app->transport_failure_at)
 				app->transport_failure_at = fplinux_ui_now_ms();
-			if (app->protocol_used)
-				show_error(
-					app,
-					_("The application ended with an incomplete response."));
 			return;
-		}
-		app->protocol_used += (size_t)count;
-		app->protocol[app->protocol_used] = '\0';
-		char *newline;
-		while ((newline = memchr(app->protocol, '\n',
-					 app->protocol_used))) {
-			size_t used = (size_t)(newline - app->protocol) + 1;
-			*newline = '\0';
-			protocol_line(app, app->protocol);
-			if (app->output_fd != fd)
-				return;
-			memmove(app->protocol, app->protocol + used,
-				app->protocol_used - used);
-			app->protocol_used -= used;
-		}
-		if (app->protocol_used == PROTOCOL_LIMIT) {
+		case MRE_CONTROL_TRUNCATED:
 			show_error(
 				app,
-				_("The application's response is too long."));
+				_("The application ended with an incomplete response."));
+			return;
+		case MRE_CONTROL_INVALID:
+			show_error(app, _("Invalid application response."));
+			return;
+		case MRE_CONTROL_IO_ERROR:
+			show_error(
+				app,
+				_("Cannot read the application's response."));
 			return;
 		}
 	}
@@ -2596,7 +2534,11 @@ static void screen_command(struct fplinux_ui *ui,
 		if (id == FPLINUX_UI_SELECT_COMMAND) {
 			select_file(app, fplinux_ui_list_get_focused(screen));
 		} else if (id == CMD_CANCEL) {
-			if (!send_line(app, "SELECT_CANCEL\n"))
+			if (!send_control(
+				    app,
+				    (struct mre_control_message){
+					    .opcode = MRE_CONTROL_SELECT_CANCEL,
+				    }))
 				show_error(
 					app,
 					_("The application did not respond."));

@@ -65,16 +65,6 @@ static struct {
 	int response_ready, response_failure, callback_cancelled;
 } native_http;
 
-static void native_http_emit(const char *command, uint32_t id)
-{
-	char line[64];
-	int length =
-		snprintf(line, sizeof(line), "%s\t%" PRIu32 "\n", command, id);
-	if (length < 0 || (size_t)length >= sizeof(line))
-		fail("HTTP protocol line bound");
-	write_protocol(line, (size_t)length);
-}
-
 static int native_http_copy_string(char *out, size_t capacity,
 				   const char *guest)
 {
@@ -267,7 +257,10 @@ static void native_http_free_session(struct sdk_http_session *session)
 static void native_http_cancel_all(void)
 {
 	if (native_http.active_id)
-		native_http_emit("HTTP_CANCEL", native_http.active_id);
+		send_control((struct mre_control_message){
+			.opcode = MRE_CONTROL_HTTP_CANCEL,
+			.http_id = native_http.active_id,
+		});
 	native_http.active_id = 0;
 	native_http.request_identity = 0;
 	native_http.response_ready = 0;
@@ -370,7 +363,10 @@ int32_t MRE_ABI host_asyn_http_req(struct sdk_asyn_http_request *request,
 	native_http.response_ready = 0;
 	memcpy(&app.shared->http_request, &wire, sizeof(wire));
 	__atomic_thread_fence(__ATOMIC_RELEASE);
-	native_http_emit("HTTP_REQUEST", wire.id);
+	send_control((struct mre_control_message){
+		.opcode = MRE_CONTROL_HTTP_REQUEST,
+		.http_id = wire.id,
+	});
 	utility_http_accept(wire.id);
 	return 0;
 }

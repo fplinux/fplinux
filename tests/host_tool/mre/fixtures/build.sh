@@ -19,6 +19,7 @@ msgfmt --check --output-file="$work/locale/ru/LC_MESSAGES/fplinux-ui.mo" "$root/
 # shellcheck disable=SC2046
 ui_host_build_application -I"$aport" -I"$shared" \
 	"$aport/fplinux-mre.c" "$aport/mre-selector-files.c" \
+	"$aport/ipc/mre-control.c" \
 	"$aport/runtime-paths.c" "$aport/brokers/vfs-broker.c" "$aport/brokers/vfs-path.c" \
 	"$aport/text-codec.c" "$aport/brokers/http-broker.c" "$fixtures/adapter.c" \
 	"$fixtures/audio-boundary.c" \

@@ -29,6 +29,7 @@
 #include <time.h>
 #include <ucontext.h>
 #include <unistd.h>
+#include "../ipc/mre-control.h"
 #include "../ipc/mre-ipc.h"
 #include "text-codec.h"
 #include "ads/ads_image.h"
@@ -47,8 +48,6 @@
 #define STACK_SIZE (64u * 1024u)
 #define SEGMENT_CAP 16u
 #define EDITOR_CHARS MRE_EDITOR_UNITS
-#define WIRE_LINE_BYTES 1024u
-#define PROTOCOL_CAP 16384u
 #define TIMER_CAP 10u
 #define ALL_TIMER_CAP (2u * TIMER_CAP)
 #define RESOURCE_CAP 1024u
@@ -105,6 +104,7 @@ struct sdk_layer {
 	uint16_t *pixels;
 	int live, transparent, opacity;
 };
+
 static struct {
 	uint8_t *image, *stack_map, *stack_low, *stack_top;
 	size_t image_size, stack_mapping_size, page_size;
@@ -148,8 +148,8 @@ static struct {
 	int clip_x, clip_y, clip_width, clip_height;
 	uint32_t frame_sequence;
 	int editor_resuming;
-	char deferred[32][WIRE_LINE_BYTES];
-	unsigned deferred_count;
+	struct mre_control_reader reader;
+	struct mre_control_deferred deferred;
 	uint32_t vfs_sequence;
 } app;
 static int free_canvas_pointer(void *pointer);
@@ -180,7 +180,6 @@ static int native_http_receive_response(uint32_t id);
 static void utility_http_accept(uint32_t id);
 static int native_http_response_pending(void);
 static void native_http_dispatch_response(void);
-static int receive_viewer_line(char line[static WIRE_LINE_BYTES]);
 static int utility_charset(int32_t source, int32_t destination,
 			   const char *text, uint16_t *out, int32_t bytes);
 static int trace_enabled;
@@ -231,44 +230,51 @@ static struct display_viewport display_viewport(void)
 					  width, MRE_FRAME_HEIGHT };
 }
 
-static void write_protocol(const char *line, size_t length)
+static bool shared_mode;
+
+static bool write_control(struct mre_control_message message)
 {
-	if (length > PROTOCOL_CAP)
-		_exit(65);
-	while (length) {
-		ssize_t count = write(STDOUT_FILENO, line, length);
-		if (count < 0 && errno == EINTR)
-			continue;
-		if (count <= 0)
-			_exit(0); /* The parent closed its pipe. */
-		line += count;
-		length -= (size_t)count;
+	uint8_t frame[MRE_CONTROL_FRAME_BYTES];
+	size_t length = mre_control_encode(&message, MRE_CONTROL_ENGINE, frame,
+					   sizeof(frame));
+
+	if (!length) {
+		errno = EPROTO;
+		return false;
 	}
-}
-static void hex_encode(char *out, const char *text, size_t length)
-{
-	static const char digits[] = "0123456789abcdef";
-	for (size_t i = 0; i < length; ++i) {
-		unsigned byte = (uint8_t)text[i];
-		out[2 * i] = digits[byte >> 4];
-		out[2 * i + 1] = digits[byte & 15];
+	if (!mre_control_flush(STDOUT_FILENO, frame, &length))
+		return false;
+	if (length) {
+		errno = EAGAIN;
+		return false;
 	}
+	return true;
 }
+
 static void fail(const char *format, ...) __attribute__((noreturn));
 static void fail(const char *format, ...)
 {
-	char message[512], line[1032];
+	char message[MRE_CONTROL_ERROR_BYTES + 1];
 	va_list arguments;
 	va_start(arguments, format);
 	vsnprintf(message, sizeof(message), format, arguments);
 	va_end(arguments);
 	fprintf(stderr, "REJECT: %s\n", message);
-	size_t length = strlen(message);
-	memcpy(line, "ERROR\t", 6);
-	hex_encode(line + 6, message, length);
-	line[6 + 2 * length] = '\n';
-	write_protocol(line, 7 + 2 * length);
+	if (shared_mode)
+		(void)write_control((struct mre_control_message){
+			.opcode = MRE_CONTROL_ERROR,
+			.text = { .data = message, .length = strlen(message) },
+		});
 	_exit(65);
+}
+
+static void send_control(struct mre_control_message message)
+{
+	if (!write_control(message)) {
+		if (errno == EPIPE)
+			_exit(0);
+		fail("writing viewer request failed");
+	}
 }
 static char *fault_field(char *out, const char *name, uint32_t value)
 {
@@ -969,9 +975,10 @@ void MRE_ABI host_register_pen(pen_fn callback)
 	if (callback && !guest_code((uintptr_t)callback))
 		fail("pen callback outside guest code");
 	app.pen_callback = callback;
-	const char *available = callback ? "POINTER_AVAILABLE\t1\n" :
-					   "POINTER_AVAILABLE\t0\n";
-	write_protocol(available, strlen(available));
+	send_control((struct mre_control_message){
+		.opcode = MRE_CONTROL_POINTER_AVAILABLE,
+		.pointer_available = callback != NULL,
+	});
 	fprintf(stderr,
 		"PEN_CALLBACK %p (registered; parent provides keypad events)\n",
 		(void *)callback);
@@ -2423,115 +2430,116 @@ static void sdk_seccomp(void)
 	fprintf(stderr,
 		"SECCOMP installed ARM filter; stdio IPC only; no open/exec/socket/ioctl/clone\n");
 }
-static int hex_digit(unsigned char c)
+static bool receive_viewer_message(struct mre_control_message *message)
 {
-	if (c >= '0' && c <= '9')
-		return c - '0';
-	if (c >= 'a' && c <= 'f')
-		return c - 'a' + 10;
-	if (c >= 'A' && c <= 'F')
-		return c - 'A' + 10;
-	return -1;
+	switch (mre_control_read(&app.reader, STDIN_FILENO,
+				 MRE_CONTROL_FRONTEND, message)) {
+	case MRE_CONTROL_MESSAGE:
+		return true;
+	case MRE_CONTROL_EOF:
+		return false;
+	case MRE_CONTROL_TRUNCATED:
+		fail("viewer closed with an incomplete response");
+	case MRE_CONTROL_INVALID:
+		fail("invalid viewer response");
+	case MRE_CONTROL_WAIT:
+		fail("viewer input pipe is not blocking");
+	case MRE_CONTROL_IO_ERROR:
+		fail("reading viewer response: %s", strerror(errno));
+	}
+	fail("unknown viewer read result");
 }
-static int receive_viewer_line(char line[static WIRE_LINE_BYTES])
+
+static bool queue_service_message(const struct mre_control_message *message)
 {
-	memset(line, 0, WIRE_LINE_BYTES);
-	size_t length = 0;
-	for (;;) {
-		char byte = 0;
-		ssize_t count = read(STDIN_FILENO, &byte, 1);
-		if (count < 0 && errno == EINTR)
-			continue;
-		if (count < 0)
-			fail("reading viewer response: %s", strerror(errno));
-		if (!count)
-			return 0;
-		if (byte == '\n') {
-			line[length] = 0;
-			return 1;
-		}
-		if (length == WIRE_LINE_BYTES - 1 || !byte)
-			fail("viewer response exceeds bounded line protocol");
-		line[length++] = byte;
+	switch (message->opcode) {
+	case MRE_CONTROL_AUDIO_EVENT:
+		native_audio_receive(message->audio.handle,
+				     message->audio.event);
+		return true;
+	case MRE_CONTROL_HTTP_RESPONSE:
+		(void)native_http_receive_response(message->http_id);
+		return true;
+	default:
+		return false;
 	}
 }
-static int receive_viewer_command(char line[WIRE_LINE_BYTES])
+
+static bool wait_for_viewer_reply(struct mre_control_message *message,
+				  struct mre_control_message expected,
+				  enum mre_control_opcode alternate)
 {
-	if (!app.deferred_count)
-		return receive_viewer_line(line);
-	memcpy(line, app.deferred[0], sizeof(app.deferred[0]));
-	app.deferred_count--;
-	memmove(app.deferred, app.deferred + 1,
-		app.deferred_count * sizeof(app.deferred[0]));
-	return 1;
+	while (receive_viewer_message(message)) {
+		switch (mre_control_route_reply(&app.deferred, message,
+						&expected, alternate)) {
+		case MRE_CONTROL_REPLY_MATCH:
+			return true;
+		case MRE_CONTROL_REPLY_SERVICE:
+			(void)queue_service_message(message);
+			break;
+		case MRE_CONTROL_REPLY_DEFERRED:
+			break;
+		case MRE_CONTROL_REPLY_WRONG_IDENTITY:
+			fail("viewer reply identity mismatch for opcode %u",
+			     expected.opcode);
+		case MRE_CONTROL_REPLY_UNEXPECTED:
+			fail("unexpected opcode %u waiting for viewer opcode %u",
+			     message->opcode, expected.opcode);
+		case MRE_CONTROL_REPLY_QUEUE_FULL:
+			fail("too many input events queued before viewer reply");
+		}
+	}
+	return false;
 }
-static int utility_queue_service_line(const char *line)
+
+static bool wait_for_viewer_sequence(enum mre_control_opcode expected,
+				     uint32_t sequence)
 {
-	if (native_audio_receive(line))
-		return 1;
-	if (strncmp(line, "HTTP_RESPONSE\t", 14))
-		return 0;
-	unsigned id;
-	int used;
-	if (sscanf(line + 14, "%u%n", &id, &used) != 1 || line[14 + used])
-		fail("invalid HTTP response id");
-	(void)native_http_receive_response(id);
-	return 1;
+	struct mre_control_message reply;
+
+	return wait_for_viewer_reply(
+		&reply,
+		(struct mre_control_message){ .opcode = expected,
+					      .sequence = sequence },
+		MRE_CONTROL_NO_REPLY);
 }
-static void utility_defer_input(const char *line)
-{
-	if (strncmp(line, "KEY\t", 4) && strncmp(line, "PEN\t", 4) &&
-	    strncmp(line, "VISIBILITY\t", 11))
-		fail("unexpected command while awaiting a utility broker reply");
-	if (app.deferred_count ==
-	    sizeof(app.deferred) / sizeof(app.deferred[0]))
-		fail("too many events queued while awaiting utility broker reply");
-	memcpy(app.deferred[app.deferred_count++], line, strlen(line) + 1);
-}
+
 static void utility_http_accept(uint32_t id)
 {
-	char expected[64], line[WIRE_LINE_BYTES];
-	snprintf(expected, sizeof(expected), "HTTP_ACCEPTED\t%u", id);
+	struct mre_control_message reply;
+
 	/* The parent first owns an immutable request copy. The guest may cancel
 	 * or submit again immediately after this API returns, reusing the shared
 	 * slot. Queue responses and input here without entering guest callbacks. */
-	while (receive_viewer_line(line)) {
-		if (!strcmp(line, expected)) {
-			__atomic_thread_fence(__ATOMIC_ACQUIRE);
-			return;
-		}
-		if (!utility_queue_service_line(line))
-			utility_defer_input(line);
-	}
-	_exit(0);
+	if (!wait_for_viewer_reply(&reply,
+				   (struct mre_control_message){
+					   .opcode = MRE_CONTROL_HTTP_ACCEPTED,
+					   .http_id = id },
+				   MRE_CONTROL_NO_REPLY))
+		_exit(0);
+	__atomic_thread_fence(__ATOMIC_ACQUIRE);
 }
+
 static int32_t native_audio_exchange(void)
 {
 	if (!app.shared || native_audio.sequence == INT32_MAX)
 		return -1;
 	uint32_t sequence = ++native_audio.sequence;
-	char outgoing[64], expected[64], line[WIRE_LINE_BYTES];
-
 	native_audio.request.sequence = sequence;
 	app.shared->audio_request = native_audio.request;
 	__atomic_thread_fence(__ATOMIC_RELEASE);
-	int length = snprintf(outgoing, sizeof(outgoing), "AUDIO_REQUEST\t%u\n",
-			      sequence);
-
-	write_protocol(outgoing, (size_t)length);
-	snprintf(expected, sizeof(expected), "AUDIO_REPLY\t%u", sequence);
-	while (receive_viewer_line(line)) {
-		if (!strcmp(line, expected)) {
-			__atomic_thread_fence(__ATOMIC_ACQUIRE);
-			if (app.shared->audio_response.sequence != sequence)
-				fail("audio shared response sequence mismatch");
-			return app.shared->audio_response.result;
-		}
-		if (!utility_queue_service_line(line))
-			utility_defer_input(line);
-	}
-	_exit(0);
+	send_control((struct mre_control_message){
+		.opcode = MRE_CONTROL_AUDIO_REQUEST,
+		.sequence = sequence,
+	});
+	if (!wait_for_viewer_sequence(MRE_CONTROL_AUDIO_REPLY, sequence))
+		_exit(0);
+	__atomic_thread_fence(__ATOMIC_ACQUIRE);
+	if (app.shared->audio_response.sequence != sequence)
+		fail("audio shared response sequence mismatch");
+	return app.shared->audio_response.result;
 }
+
 static int utility_vfs_exchange(const struct mre_vfs_request *request,
 				struct mre_vfs_response *response)
 {
@@ -2543,46 +2551,40 @@ static int utility_vfs_exchange(const struct mre_vfs_request *request,
 	app.shared->vfs_request = *request;
 	app.shared->vfs_request.sequence = sequence;
 	__atomic_thread_fence(__ATOMIC_RELEASE);
-	char outgoing[64], expected[64], line[WIRE_LINE_BYTES];
-	int length = snprintf(outgoing, sizeof(outgoing), "VFS_REQUEST\t%u\n",
-			      sequence);
-	write_protocol(outgoing, (size_t)length);
-	snprintf(expected, sizeof(expected), "VFS_REPLY\t%u", sequence);
-	while (receive_viewer_line(line)) {
-		if (!strcmp(line, expected)) {
-			__atomic_thread_fence(__ATOMIC_ACQUIRE);
-			if (app.shared->vfs_response.sequence != sequence)
-				fail("utility VFS shared response sequence mismatch");
-			*response = app.shared->vfs_response;
-			return 0;
-		}
-		if (!utility_queue_service_line(line))
-			utility_defer_input(line);
-	}
-	_exit(0); /* No callback may continue after its parent broker disappears. */
+	send_control((struct mre_control_message){
+		.opcode = MRE_CONTROL_VFS_REQUEST,
+		.sequence = sequence,
+	});
+	if (!wait_for_viewer_sequence(MRE_CONTROL_VFS_REPLY, sequence))
+		_exit(0); /* Never resume guest code after its broker disappears. */
+	__atomic_thread_fence(__ATOMIC_ACQUIRE);
+	if (app.shared->vfs_response.sequence != sequence)
+		fail("utility VFS shared response sequence mismatch");
+	*response = app.shared->vfs_response;
+	return 0;
 }
+
 static int utility_snapshot_exchange(const char *virtual_path)
 {
 	size_t bytes = strnlen(virtual_path, MRE_VFS_PATH_BYTES);
 	if (!app.shared || !bytes || bytes == MRE_VFS_PATH_BYTES)
 		return -1;
-	char request[2 * MRE_VFS_PATH_BYTES + 16], line[WIRE_LINE_BYTES];
-	memcpy(request, "SNAPSHOT\t", 9);
-	hex_encode(request + 9, virtual_path, bytes);
-	request[9 + 2 * bytes] = '\n';
-	write_protocol(request, 10 + 2 * bytes);
-	while (receive_viewer_line(line)) {
-		if (!strcmp(line, "SNAPSHOT_DONE")) {
-			__atomic_thread_fence(__ATOMIC_ACQUIRE);
-			return 0;
-		}
-		if (!strcmp(line, "SNAPSHOT_ERROR") ||
-		    !strncmp(line, "ERROR\t", 6))
-			return -1;
-		if (!utility_queue_service_line(line))
-			utility_defer_input(line);
-	}
-	_exit(0);
+	struct mre_control_message reply;
+
+	send_control((struct mre_control_message){
+		.opcode = MRE_CONTROL_SNAPSHOT,
+		.text = { .data = virtual_path, .length = bytes },
+	});
+	if (!wait_for_viewer_reply(&reply,
+				   (struct mre_control_message){
+					   .opcode = MRE_CONTROL_SNAPSHOT_DONE,
+				   },
+				   MRE_CONTROL_SNAPSHOT_ERROR))
+		_exit(0);
+	if (reply.opcode == MRE_CONTROL_SNAPSHOT_ERROR)
+		return -1;
+	__atomic_thread_fence(__ATOMIC_ACQUIRE);
+	return 0;
 }
 static int publish_frame(void)
 {
@@ -2597,31 +2599,17 @@ static int publish_frame(void)
 	}
 	if (!app.frame_pending)
 		return 1;
-	char line[WIRE_LINE_BYTES], expected[64], outgoing[64];
 	app.frame_pending = 0;
 	app.shared->frame_sequence = ++app.frame_sequence;
 	__atomic_thread_fence(__ATOMIC_RELEASE);
-	int length = snprintf(outgoing, sizeof(outgoing), "FRAME\t%u\n",
-			      app.frame_sequence);
-	write_protocol(outgoing, (size_t)length);
-	snprintf(expected, sizeof(expected), "ACK\t%u", app.frame_sequence);
-	while (receive_viewer_line(line)) {
-		if (!strcmp(line, expected))
-			return publish_frame();
-		if (utility_queue_service_line(line)) {
-			continue;
-		}
-		if (strncmp(line, "KEY\t", 4) &&
-		    strncmp(line, "VISIBILITY\t", 11) &&
-		    strncmp(line, "PEN\t", 4))
-			fail("expected framebuffer ACK before dispatching another guest callback");
-		if (app.deferred_count ==
-		    sizeof(app.deferred) / sizeof(app.deferred[0]))
-			fail("too many input events queued before framebuffer ACK");
-		memcpy(app.deferred[app.deferred_count++], line,
-		       strlen(line) + 1);
-	}
-	return 0;
+	send_control((struct mre_control_message){
+		.opcode = MRE_CONTROL_FRAME,
+		.sequence = app.frame_sequence,
+	});
+	if (!wait_for_viewer_sequence(MRE_CONTROL_ACK, app.frame_sequence))
+		return 0;
+	__atomic_thread_fence(__ATOMIC_ACQUIRE);
+	return publish_frame();
 }
 static void dispatch_timers(void)
 {
@@ -2647,11 +2635,11 @@ static void dispatch_timers(void)
 		app.phase = 0;
 	}
 }
-static int receive_interactive_command(char line[WIRE_LINE_BYTES])
+static int receive_interactive_command(struct mre_control_message *message)
 {
 	for (;;) {
-		if (app.deferred_count)
-			return receive_viewer_command(line);
+		if (mre_control_take_input(&app.deferred, message))
+			return 1;
 		if (native_http_response_pending())
 			native_http_dispatch_response();
 		native_audio_dispatch();
@@ -2670,7 +2658,7 @@ static int receive_interactive_command(char line[WIRE_LINE_BYTES])
 		}
 		if (!publish_frame())
 			return 0;
-		if (app.deferred_count || (app.visible && app.paint_pending) ||
+		if (app.deferred.count || (app.visible && app.paint_pending) ||
 		    native_http_response_pending() ||
 		    native_audio_events_pending())
 			continue;
@@ -2706,7 +2694,7 @@ static int receive_interactive_command(char line[WIRE_LINE_BYTES])
 			fail("polling game input/timers failed: %s",
 			     strerror(errno));
 		if (ready > 0)
-			return receive_viewer_line(line);
+			return receive_viewer_message(message);
 	}
 }
 static void call_event(event_fn callback, int32_t first, int32_t second,
@@ -2768,10 +2756,11 @@ int main(int argc, char **argv)
 	    (strcmp(argv[2], "--shared") && strcmp(argv[2], "--validate")) ||
 	    strcmp(argv[1], MRE_ORIGINAL_PATH))
 		fail("usage: mre-engine /proc/self/fd/4 --shared|--validate");
+	shared_mode = !strcmp(argv[2], "--shared");
 	close_inherited_descriptors(1, 1);
 	validate_original_descriptor();
 	/* Validation uses the same native loader without entering guest code. */
-	if (!strcmp(argv[2], "--validate")) {
+	if (!shared_mode) {
 		load_vxp(MRE_ORIGINAL_PATH);
 		cleanup();
 		return 0;

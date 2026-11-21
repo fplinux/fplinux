@@ -56,21 +56,4 @@ struct mre_shared {
 	unsigned char media_data[MRE_MEDIA_BYTES];
 };
 
-/* Protocol:
- * FRAME sequence / ACK sequence publishes the composited physical display.
- * DISPLAY width height announces the physical frame dimensions.
- * POINTER_AVAILABLE 0|1 announces a registered guest pen callback.
- * KEY event key, PEN event x y, VISIBILITY 0|1 carry ordinary UI input.
- * INPUT uses the copied editor fields; INPUT_DONE/CANCEL resumes its callback.
- * SELECTOR uses selector_type/folder; SELECT <hex virtual path>/SELECT_CANCEL.
- * VFS_REQUEST sequence / VFS_REPLY sequence exchanges SDK filesystem calls.
- * SNAPSHOT <hex virtual path> / SNAPSHOT_DONE/ERROR supplies a service image.
- * HTTP_REQUEST id / HTTP_ACCEPTED id confirms the copied request before reuse.
- * HTTP_CANCEL id / HTTP_RESPONSE id use mre-http.h.
- * AUDIO_REQUEST sequence / AUDIO_REPLY sequence exchange copied audio calls.
- * AUDIO_EVENT handle event queues a guest notification without a guest pointer.
- * VIEW_PICTURE keeps an external viewer's last frame after guest exit.
- * END closes the guest; ERROR <hex message> reports a loader/API failure.
- * GUI and SDK requests work identically for every executable.
- */
 #endif
