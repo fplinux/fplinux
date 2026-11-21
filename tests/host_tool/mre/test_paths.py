@@ -37,7 +37,7 @@ def paths(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
                 str(APORT / "text-codec.c"),
                 str(APORT / "brokers/vfs-broker.c"),
                 str(APORT / "brokers/vfs-path.c"),
-                "-lcrypto",
+                "-lmbedcrypto",
             ],
             name="compile MRE path and broker production objects",
         )

@@ -30,7 +30,7 @@ ui_host_build_application -I"$aport" -I"$shared" \
 	-Wl,--wrap=fplinux_ui_open -Wl,--wrap=lv_timer_create \
 	-Wl,--wrap=lv_timer_pause -Wl,--wrap=lv_timer_resume \
 	-Wl,--wrap=lv_display_flush_ready \
-	$(pkg-config --cflags --libs libcurl libcrypto) -o "$work/mre"
+	$(pkg-config --cflags --libs libcurl mbedcrypto) -o "$work/mre"
 # The real engine address-space limit cannot contain ASan's shadow mapping.
 ui_host_compile -fno-sanitize=all -I"$aport" "$fixtures/engine-peer.c" -o "$work/engine-peer"
 # shellcheck disable=SC2046

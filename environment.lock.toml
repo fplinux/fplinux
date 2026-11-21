@@ -84,6 +84,7 @@ apk_groups = [
     "libffi-dev=3.5.2-r1",
     "libusb-dev=1.0.30-r0",
     "llvm23-dev=23.1.6-r0",
+    "mbedtls3-dev=3.6.8-r0",
     "mpdecimal-dev=4.0.1-r0",
     "ncurses-dev=6.6_p20260516-r0",
     "openssl-dev=3.5.9-r1",
@@ -2100,6 +2101,24 @@ url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/meson-pyc-1.11.1-
 sha256 = "772b0bd3e7988810435e551b6be2d037c4ee50de16f63b5c85086e987dc83513"
 bytes = 2262916
 destination = "downloads/environment/apk/main/x86_64/meson-pyc-1.11.1-r0.apk"
+purpose = "environment-package"
+arch = "x86_64"
+
+[[input]]
+key = "environment:apk:x86_64:mbedtls3-3.6.8-r0.apk"
+url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/community/x86_64/mbedtls3-3.6.8-r0.apk"
+sha256 = "735176c22b6078b904543fb78d203f5c4ca75f17adf56cee22a80995c2fcdfa0"
+bytes = 415854
+destination = "downloads/environment/apk/community/x86_64/mbedtls3-3.6.8-r0.apk"
+purpose = "environment-package"
+arch = "x86_64"
+
+[[input]]
+key = "environment:apk:x86_64:mbedtls3-dev-3.6.8-r0.apk"
+url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/community/x86_64/mbedtls3-dev-3.6.8-r0.apk"
+sha256 = "61c9ec413b759e910c3b5a81d33eec1f9e2a5b1c1a612f1ae92a84a691900062"
+bytes = 444272
+destination = "downloads/environment/apk/community/x86_64/mbedtls3-dev-3.6.8-r0.apk"
 purpose = "environment-package"
 arch = "x86_64"
 

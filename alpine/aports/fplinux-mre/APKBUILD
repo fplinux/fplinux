@@ -9,7 +9,7 @@ arch="armv7"
 license="GPL-2.0-only AND 0BSD AND MIT AND Zlib AND libpng-2.0 AND IJG AND BSD-3-Clause"
 depends="fplinux-ui fplinux-runtime-media fplinux-font-terminus-8x16 libcurl"
 makedepends_build="clang23 lld23 pkgconf cmake samurai gettext"
-makedepends_host="musl-dev musl-libintl linux-headers gcc zlib-dev zlib-static libpng-dev libpng-static curl-dev openssl-dev fplinux-ui-dev fplinux-runtime-media-dev"
+makedepends_host="musl-dev musl-libintl linux-headers gcc zlib-dev zlib-static libpng-dev libpng-static curl-dev fplinux-mbedtls-static-dev fplinux-ui-dev fplinux-runtime-media-dev"
 options="!check"
 source="
 	@source:mre_gif@
@@ -57,12 +57,14 @@ build() {
 	export PKG_CONFIG_SYSROOT_DIR="$CBUILDROOT"
 	export PKG_CONFIG_LIBDIR="$CBUILDROOT/usr/lib/pkgconfig:$CBUILDROOT/usr/share/pkgconfig"
 	"$CC" $CPPFLAGS $CFLAGS -Os -std=c11 -Wall -Wextra -Werror \
-		-I"$srcdir/include" -I"$startdir" $(pkg-config --cflags fplinux-ui fplinux-runtime-media libcurl) \
+		-I"$srcdir/include" -I"$startdir" \
+		$(pkg-config --cflags fplinux-ui fplinux-runtime-media libcurl fplinux-mbedcrypto) \
 		fplinux-mre.c mre-selector-files.c runtime-paths.c text-codec.c \
 		"$startdir/ipc/mre-control.c" \
 		"$startdir/brokers/vfs-broker.c" "$startdir/brokers/vfs-path.c" \
 		"$startdir/brokers/http-broker.c" "$startdir/brokers/audio-broker.c" fplinux-cli.c \
-		$(pkg-config --libs fplinux-ui fplinux-runtime-media libcurl libcrypto) $LDFLAGS \
+		$(pkg-config --libs fplinux-ui fplinux-runtime-media libcurl) \
+		"$CBUILDROOT/usr/lib/fplinux-mbedtls-static/libmbedcrypto.a" $LDFLAGS \
 		-o fplinux-mre
 	msgfmt --check --output-file=ru.mo ru.po
 
@@ -149,6 +151,8 @@ package() {
 		"$pkgdir/usr/share/licenses/$pkgname/libjpeg-turbo-LICENSE.md"
 	install -Dm644 "$srcdir/libjpeg-turbo-$_jpegver/README.ijg" \
 		"$pkgdir/usr/share/licenses/$pkgname/README.ijg"
+	install -Dm644 "$CBUILDROOT/usr/share/licenses/fplinux-mbedtls-static-dev/LICENSE" \
+		"$pkgdir/usr/share/licenses/$pkgname/Mbed-TLS.txt"
 }
 
 sha512sums="
@@ -156,7 +160,7 @@ f199f96b30558ca3fa5b5b218d224519c74acf507a967d3ad45a2ac4195d090cb5edfd0d2184ed5f
 dc79e862f5b626e98b4981bcbeda5c482cac15b59043a455a03533da24d6cb9ba34964b127c8eac203d60bad8e1063f073095fc68f9666c1c16d18d1a727754d  fplinux-mre.c
 3319217790f76d4180a0154aff6cbdff6daa0ee1947decaf13dccfd16fa1b92968ef7ababfb6bf61dd54e513e8823f3fdb96dc6ff1c44056aed7cc994fe4dd23  mre-selector-files.c
 403e538f2a6ba540d106086455336d7b2f0209453b01305bb36aeb5fb3f2afadc22bf33d3416f97f1661f81a87e99eb52f2354d9f1f8880330545dd2fabdb7df  mre-selector-files.h
-46496612c694514c87634e89cbb1c35d1c69b68a214b5d99707eaea722891727dab16cc9121fa8f0b177aa15b4ca82cfd80f2ebe97b9fe1c43fa9606b73a5f8f  runtime-paths.c
+e2b895041dc513fe1bd4463d66a222ceeb2e941d2bcf83d71ec2541d00fa5c4eea423058083957c1b3a36cbe873a456ee0d972e4d63335cd56d38e789f2d3475  runtime-paths.c
 eb8bca600ed03a7d6835284ca0855b8b8270f80ee6c362a5f972321b2c8bf5baa8f134557c9a026a1c6e3d85f965a73acf5dc9c679342c797f29965afe22c002  runtime-paths.h
 8aaf5bca33329d275f83e0dc119089c30fc886382efac18c857006412b57cb25db38d8a9682afce6c5c5adcaad83bc0b8a42cb3bd71e493a1722b254b0184a76  text-codec.c
 9164e5eb748e6b4f2e419514ba97f0ff665a3d24c52fbebbf98847d38618af831bf9073633507dd2dadc52f29472ab5a05d79cda03d91df0153827ea0f6bf510  text-codec.h

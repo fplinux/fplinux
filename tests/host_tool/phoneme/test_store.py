@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import errno
+import hashlib
 import zipfile
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -40,7 +41,7 @@ def store_tool(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
                 str(PORT / "port/app/fplinux-pm-store.c"),
                 str(PORT / "vm/fplinux-pm-jar.c"),
                 str(ROOT / "lib/fplinux/fplinux-utf8.c"),
-                "-lcrypto",
+                "-lmbedcrypto",
                 "-lz",
             ],
             name="compile phoneME suite storage boundary",
@@ -76,9 +77,12 @@ def test_suite_update_and_move_reuse_store_but_other_identities_do_not(
     root.mkdir(mode=0o700)
     jar = tmp_path / "first.jar"
     write_suite(jar)
-    original = open_store(store_tool, root, jar)
-    assert original.name == "e27cfd61a9bf6c0b5769b7d3faf2d35f639b070136294eeeebb3aaa69a07e2b6"
+    # Existing RMS key for vendor "Maker" and suite name "Game".
+    original = root / "rms" / "e27cfd61a9bf6c0b5769b7d3faf2d35f639b070136294eeeebb3aaa69a07e2b6"
+    (root / "rms").mkdir(mode=0o700)
+    original.mkdir(mode=0o700)
     (original / "record").write_bytes(b"saved\x00data")
+    assert open_store(store_tool, root, jar) == original
     assert original.stat().st_mode & 0o777 == 0o700
 
     moved = tmp_path / "updated.jar"
@@ -88,7 +92,9 @@ def test_suite_update_and_move_reuse_store_but_other_identities_do_not(
 
     for name, vendor in [("game", "Maker"), ("Game", "maker"), ("Other", "Maker")]:
         write_suite(moved, name=name, vendor=vendor)
-        assert open_store(store_tool, root, moved) != original
+        other = open_store(store_tool, root, moved)
+        assert other != original
+        assert other.stat().st_mode & 0o777 == 0o700
 
     write_suite(moved, name="c", vendor="ab")
     first = open_store(store_tool, root, moved)
@@ -111,6 +117,10 @@ def test_incomplete_suite_identity_uses_normalized_absolute_jar_path(
     write_suite(first, name=name, vendor=vendor)
     write_suite(second, name=name, vendor=vendor)
     path = open_store(store_tool, root, first)
+    jar_path = bytes(first.resolve())
+    encoded_path = b"\x00" * 7 + b"\x04path" + len(jar_path).to_bytes(8, "big") + jar_path
+    key = hashlib.sha256(encoded_path)
+    assert path == root / "rms" / key.hexdigest()
     (tmp_path / "subdirectory").mkdir()
     assert open_store(store_tool, root, tmp_path / "subdirectory" / ".." / first.name) == path
     assert open_store(store_tool, root, second) != path

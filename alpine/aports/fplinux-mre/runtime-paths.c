@@ -6,7 +6,7 @@
 
 #include <errno.h>
 #include <fcntl.h>
-#include <openssl/evp.h>
+#include <mbedtls/sha256.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -145,8 +145,7 @@ failed:
 
 bool mre_document_prepare(struct mre_document *document, const char *path)
 {
-	unsigned char digest[EVP_MAX_MD_SIZE];
-	unsigned int digest_bytes;
+	unsigned char digest[32];
 	char folder[PATH_MAX];
 	int error;
 
@@ -162,13 +161,12 @@ bool mre_document_prepare(struct mre_document *document, const char *path)
 		return false;
 	}
 	memcpy(document->name, leaf, bytes + 1);
-	if (!EVP_Digest(document->path, strlen(document->path), digest,
-			&digest_bytes, EVP_sha256(), NULL) ||
-	    digest_bytes != 32) {
+	if (mbedtls_sha256((const unsigned char *)document->path,
+			   strlen(document->path), digest, 0) != 0) {
 		errno = EIO;
 		return false;
 	}
-	for (size_t i = 0; i < 32; ++i)
+	for (size_t i = 0; i < sizeof(digest); ++i)
 		snprintf(document->state_key + i * 2, 3, "%02x", digest[i]);
 	memcpy(folder, document->path, strlen(document->path) + 1);
 	size_t parent_bytes = (size_t)(leaf - document->path - 1);

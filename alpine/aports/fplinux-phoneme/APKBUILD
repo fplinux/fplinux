@@ -7,10 +7,10 @@ pkgdesc="phoneME Feature CLDC-HI VM and MIDP 2.0 for MIDlets"
 url="https://github.com/magicus/phoneME"
 arch="armv7"
 license="GPL-2.0-only AND MIT"
-depends="fplinux-ui fplinux-runtime-media libcrypto3"
+depends="fplinux-ui fplinux-runtime-media"
 makedepends_build="clang23 lld23 llvm23 binutils gcc linux-headers make patch pkgconf python3 gettext
 	glib-dev glib-static pcre2-static py3-pip py3-setuptools py3-wheel samurai zlib-static"
-makedepends_host="musl-dev musl-libintl linux-headers gcc zlib-dev openssl-dev fplinux-ui-dev fplinux-runtime-media-dev"
+makedepends_host="musl-dev musl-libintl linux-headers gcc zlib-dev fplinux-mbedtls-static-dev fplinux-ui-dev fplinux-runtime-media-dev"
 options="!check"
 
 # CLDC generators require ILP32; JDK 8 produces their input class files.
@@ -219,7 +219,8 @@ _build_app() {
 	local cldc="$srcdir/cldc-build/linux_arm_vfp"
 	# shellcheck disable=SC2046 # pkg-config flags and one object path per line
 	"$CC" $CPPFLAGS $CFLAGS -Os -std=c11 -Wall -Wextra -Werror \
-		$(pkg-config --cflags fplinux-ui fplinux-runtime-media) -I"$startdir/port/app" -I"$srcdir" \
+		$(pkg-config --cflags fplinux-ui fplinux-runtime-media fplinux-mbedcrypto) \
+		-I"$startdir/port/app" -I"$srcdir" \
 		"$startdir/port/app/fplinux-pm-app.c" \
 		"$startdir/port/app/fplinux-pm-lifecycle.c" \
 		"$startdir/port/app/fplinux-pm-store.c" \
@@ -232,7 +233,8 @@ _build_app() {
 		"$cldc/dist/lib/libcldc_vmtest.a" \
 		"$cldc/dist/lib/libcldc_vm.a" \
 		-Wl,--end-group \
-		$(pkg-config --libs fplinux-ui fplinux-runtime-media) -lz -lcrypto -lm \
+		$(pkg-config --libs fplinux-ui fplinux-runtime-media) \
+		"$CBUILDROOT/usr/lib/fplinux-mbedtls-static/libmbedcrypto.a" -lz -lm \
 		$LDFLAGS -no-pie -o "$srcdir/fplinux-phoneme"
 	msgfmt --check --output-file="$srcdir/ru.mo" "$startdir/port/app/ru.po"
 }
@@ -272,6 +274,8 @@ package() {
 	done
 	install -Dm644 "$srcdir/MascotME-$_mascot_commit/LICENSE" \
 		"$pkgdir/usr/share/licenses/$pkgname/mascotme.txt"
+	install -Dm644 "$CBUILDROOT/usr/share/licenses/fplinux-mbedtls-static-dev/LICENSE" \
+		"$pkgdir/usr/share/licenses/$pkgname/Mbed-TLS.txt"
 }
 sha512sums="
 60be1ccccf0215ea13bc64fd442a0498e7db203234ce74f92cec502295e8ac703a089438848b9a1850102836855537f561e9bd8313751574a069eb0ec6dcf31a  fplinux-cli.c

@@ -59,7 +59,7 @@ def phoneme_app(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
                 "-Wl,--wrap=fplinux_ui_state_dir",
                 "-Wl,--wrap=fplinux_ui_prefs_open",
                 "-lz",
-                "-lcrypto",
+                "-lmbedcrypto",
                 "-ljson-c",
             ],
             name="compile actual phoneME document shell with controlled UI and VM",

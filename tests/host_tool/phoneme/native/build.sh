@@ -23,5 +23,5 @@ ui_host_build_application -I"$aport/port/app" -I"$aport/vm" -I"$shared" \
 	"$screens/native-glyph-resources.c" \
 	-Wl,--wrap=open -Wl,--wrap=fsync -Wl,--wrap=fplinux_language_load \
 	-Wl,--wrap=libintl_bindtextdomain -Wl,--wrap=lv_display_flush_ready \
-	$(pkg-config --cflags --libs libcrypto) -lz -o "$work/phoneme"
+	$(pkg-config --cflags --libs mbedcrypto) -lz -o "$work/phoneme"
 sh "$shared/build-menu-screens.sh" "$root" "$work" "$3"
