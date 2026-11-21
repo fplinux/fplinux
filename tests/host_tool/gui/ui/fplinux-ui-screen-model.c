@@ -13,9 +13,11 @@
 static void command_assignment_keeps_back_and_remaining_actions(void)
 {
 	const struct fplinux_ui_command_entry commands[] = {
-		{ FPLINUX_UI_ROLE_OTHER, 3 }, { FPLINUX_UI_ROLE_OK, 0 },
-		{ FPLINUX_UI_ROLE_BACK, 2 },  { FPLINUX_UI_ROLE_OTHER, 1 },
-		{ FPLINUX_UI_ROLE_HELP, 4 },
+		{ .role = FPLINUX_UI_ROLE_OTHER, .priority = 3 },
+		{ .role = FPLINUX_UI_ROLE_OK },
+		{ .role = FPLINUX_UI_ROLE_BACK, .priority = 2 },
+		{ .role = FPLINUX_UI_ROLE_OTHER, .priority = 1, .direct = true },
+		{ .role = FPLINUX_UI_ROLE_HELP, .priority = 4 },
 	};
 	struct fplinux_ui_command_keys keys;
 	size_t menu[5];
@@ -35,9 +37,9 @@ static void command_assignment_keeps_back_and_remaining_actions(void)
 	/* Item commands precede screen commands when their priorities tie. */
 	fplinux_ui_command_keys_assign(
 		(const struct fplinux_ui_command_entry[]){
-			{ FPLINUX_UI_ROLE_OTHER, 1 },
-			{ FPLINUX_UI_ROLE_OTHER, 1 },
-			{ FPLINUX_UI_ROLE_BACK, 0 },
+			{ .role = FPLINUX_UI_ROLE_OTHER, .priority = 1 },
+			{ .role = FPLINUX_UI_ROLE_OTHER, .priority = 1 },
+			{ .role = FPLINUX_UI_ROLE_BACK },
 		},
 		3, false, false, &keys, menu);
 	assert(keys.right == 2 && keys.menu_count == 2);
@@ -46,7 +48,7 @@ static void command_assignment_keeps_back_and_remaining_actions(void)
 	/* A lone back action displaced by Clear still opens Options. */
 	fplinux_ui_command_keys_assign(
 		(const struct fplinux_ui_command_entry[]){
-			{ FPLINUX_UI_ROLE_BACK, 0 },
+			{ .role = FPLINUX_UI_ROLE_BACK, .direct = true },
 		},
 		1, false, true, &keys, menu);
 	assert(keys.right == SIZE_MAX && keys.options);
@@ -54,11 +56,24 @@ static void command_assignment_keeps_back_and_remaining_actions(void)
 
 	fplinux_ui_command_keys_assign(
 		(const struct fplinux_ui_command_entry[]){
-			{ FPLINUX_UI_ROLE_OTHER, 0 },
+			{ .role = FPLINUX_UI_ROLE_OTHER },
+		},
+		1, false, false, &keys, menu);
+	assert(keys.left == SIZE_MAX && keys.options);
+	assert(keys.menu_count == 1 && menu[0] == 0);
+
+	fplinux_ui_command_keys_assign(
+		(const struct fplinux_ui_command_entry[]){
+			{ .role = FPLINUX_UI_ROLE_OTHER, .direct = true },
 		},
 		1, false, false, &keys, menu);
 	assert(keys.left == 0 && !keys.options);
-	fplinux_ui_command_keys_collapse(&keys, menu);
+
+	fplinux_ui_command_keys_assign(
+		(const struct fplinux_ui_command_entry[]){
+			{ .role = FPLINUX_UI_ROLE_HELP, .direct = true },
+		},
+		1, false, false, &keys, menu);
 	assert(keys.left == SIZE_MAX && keys.options);
 	assert(keys.menu_count == 1 && menu[0] == 0);
 }

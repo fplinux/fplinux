@@ -95,7 +95,7 @@ def test_files_navigation_search_copy_and_lifecycle_on_actual_ui(
     assert result.returncode == 0, result.stdout + result.stderr
     assert result.stdout == (
         "files-screens: no card; parent focus; returning Options; retained search; "
-        "explicit copy destination; background progress; close WAIT/Continue; "
+        "explicit copy destination; background progress; close WAIT/Cancel; "
         "readonly system view\n"
     )
     assert (files / "large.bin").read_bytes() == contents

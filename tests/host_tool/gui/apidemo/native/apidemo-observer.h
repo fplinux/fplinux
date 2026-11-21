@@ -77,6 +77,9 @@ struct apidemo_frame_observation {
 	size_t menu_count;
 	struct apidemo_menu_observation menu[32];
 	struct apidemo_rectangle canvas;
+	struct apidemo_rectangle legend_bar;
+	char legends[3][128];
+	bool legends_fit;
 	size_t canvas_object_count;
 	struct apidemo_canvas_object_observation canvas_objects[64];
 };

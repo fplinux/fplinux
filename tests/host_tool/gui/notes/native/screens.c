@@ -25,6 +25,7 @@ struct capture {
 	unsigned int exits;
 	bool russian;
 	char left[128];
+	char right[128];
 	const char *directory;
 	const char *session_path;
 };
@@ -47,8 +48,10 @@ static void pump(struct capture *capture)
 						      &message)) == 1) {
 		if (message.type == FPLINUX_UI_SESSION_EXIT)
 			++capture->exits;
-		else if (message.type == FPLINUX_UI_SESSION_SOFTKEYS)
+		else if (message.type == FPLINUX_UI_SESSION_SOFTKEYS) {
 			strcpy(capture->left, message.left);
+			strcpy(capture->right, message.right);
+		}
 	}
 	assert(received == 0);
 }
@@ -108,8 +111,12 @@ static void wait_view(struct capture *capture, const char *text, bool dirty,
 
 static void press(struct capture *capture, unsigned int code)
 {
-	fplinux_ui_frame_send_key(&capture->peer.keyboards[0], code, true);
-	fplinux_ui_frame_send_key(&capture->peer.keyboards[0], code, false);
+	bool phone = code == KEY_F13 || code == KEY_OK || code == KEY_F14;
+	struct fplinux_ui_frame_keyboard *keyboard =
+		&capture->peer.keyboards[phone ? 1 : 0];
+
+	fplinux_ui_frame_send_key(keyboard, code, true);
+	fplinux_ui_frame_send_key(keyboard, code, false);
 	pump(capture);
 }
 
@@ -214,7 +221,9 @@ static void start(struct capture *capture, char **arguments, const char *text)
 	assert(fplinux_ui_session_send(capture->session, &config));
 	wait_view(capture, text, false, false);
 	assert(capture->peer.keyboards[0].keyboard);
+	assert(capture->peer.keyboards[1].keyboard);
 	fplinux_ui_frame_focus_keyboard(&capture->peer.keyboards[0]);
+	fplinux_ui_frame_focus_keyboard(&capture->peer.keyboards[1]);
 	pump_for(capture, 30);
 }
 
@@ -254,10 +263,17 @@ int main(int argc, char **argv)
 	assert(argc == 9);
 	start(&capture, argv, "");
 	assert(!capture.left[0]);
+	assert(!strcmp(capture.right, word(&capture, "Back", "Назад")));
 	assert(file_matches(&capture, NULL));
 	save_frame(&capture, "notes-clean");
 	press(&capture, KEY_A);
 	press(&capture, KEY_B);
+	press(&capture, KEY_C);
+	wait_view(&capture, "abc", true, false);
+	assert(!strcmp(capture.left, word(&capture, "Options", "Опции")));
+	assert(!strcmp(capture.right, word(&capture, "Clear", "Стереть")));
+	press(&capture, KEY_F14);
+	wait_view(&capture, "ab", true, false);
 	press(&capture, KEY_C);
 	wait_view(&capture, "abc", true, false);
 	assert(capture.observed.cursor == 3);
@@ -268,19 +284,20 @@ int main(int argc, char **argv)
 	       fplinux_ui_frame_now_ms() < deadline)
 		pump(&capture);
 	assert(capture.observed.cursor == 2);
-	press(&capture, KEY_COMPOSE);
+	press(&capture, KEY_F13);
 	wait_view(&capture, "abc", true, true);
 	assert(has_label(&capture, word(&capture, "Save", "Сохранить")));
+	assert(has_label(&capture, word(&capture, "Back", "Назад")));
 	save_frame(&capture, "notes-menu");
-	press(&capture, KEY_ENTER);
+	press(&capture, KEY_OK);
 	wait_view(&capture, "abc", false, false);
 	assert(capture.observed.cursor == 2);
 	assert(file_matches(&capture, "note=abc\n"));
 	save_frame(&capture, "notes-saved");
-	press(&capture, KEY_COMPOSE);
+	press(&capture, KEY_F13);
 	wait_view(&capture, "abc", false, true);
 	assert(!has_label(&capture, word(&capture, "Save", "Сохранить")));
-	press(&capture, KEY_ESC);
+	press(&capture, KEY_F14);
 	wait_view(&capture, "abc", false, false);
 	press(&capture, KEY_D);
 	wait_view(&capture, "abdc", true, false);
@@ -299,10 +316,10 @@ int main(int argc, char **argv)
 	close_and_reap(&capture);
 	capture = (struct capture){ 0 };
 	start(&capture, argv, "abdc");
-	press(&capture, KEY_COMPOSE);
+	press(&capture, KEY_F13);
 	wait_view(&capture, "abdc", false, true);
 	assert(!has_label(&capture, word(&capture, "Save", "Сохранить")));
-	press(&capture, KEY_ESC);
+	press(&capture, KEY_F14);
 	wait_view(&capture, "abdc", false, false);
 	save_frame(&capture, "notes-reopened");
 	close_and_reap(&capture);

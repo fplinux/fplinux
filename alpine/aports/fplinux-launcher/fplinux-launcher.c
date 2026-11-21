@@ -1295,7 +1295,7 @@ static void update_catalogue(struct launcher *launcher)
 		.id = CATALOGUE_COMMAND_ICONS,
 		.type = FPLINUX_UI_COMMAND_SCREEN,
 		.label = _("Icons"),
-		.keep_visible = true,
+		.direct = true,
 	};
 
 	if (launcher->catalogue_dirty) {
@@ -1434,6 +1434,14 @@ static void show_notice(struct launcher *launcher)
 	fplinux_ui_push(launcher->ui, launcher->notice_alert);
 }
 
+static size_t clock_application(const struct launcher *launcher)
+{
+	for (size_t i = 0; i < launcher->app_count; ++i)
+		if (!strcmp(launcher->apps[i].id, "org.fplinux.clock"))
+			return i;
+	return SIZE_MAX;
+}
+
 static void render(struct launcher *launcher)
 {
 	enum launcher_screen screen = current_screen(launcher);
@@ -1487,15 +1495,12 @@ static void render(struct launcher *launcher)
 		draw_clock_face(launcher);
 		legends[FPLINUX_LAUNCHER_LEGEND_LEFT] = _("Tasks");
 		legends[FPLINUX_LAUNCHER_LEGEND_CENTRE] = _("Menu");
-		for (size_t i = 0; i < launcher->app_count; ++i)
-			if (!strcmp(launcher->apps[i].id,
-				    "org.fplinux.clock")) {
-				legends[FPLINUX_LAUNCHER_LEGEND_RIGHT] =
-					_("Clock");
-				break;
-			}
+		if (clock_application(launcher) != SIZE_MAX)
+			legends[FPLINUX_LAUNCHER_LEGEND_RIGHT] = _("Clock");
 		break;
 	case SCREEN_CATALOGUE:
+		if (wants_catalogue(launcher) && launcher->catalogue)
+			break;
 		if (launcher->view == FPLINUX_LAUNCHER_VIEW_GRID ||
 		    !launcher->app_count)
 			draw_grid(launcher,
@@ -1672,14 +1677,13 @@ static void handle_key(struct launcher *launcher,
 			return;
 		}
 		if (fplinux_ui_is_softkey(key, false)) {
-			for (size_t i = 0; i < launcher->app_count; ++i)
-				if (!strcmp(launcher->apps[i].id,
-					    "org.fplinux.clock")) {
-					launcher->selected = i;
-					report_view(launcher, false);
-					activate_selected(launcher);
-					return;
-				}
+			size_t index = clock_application(launcher);
+
+			if (index != SIZE_MAX) {
+				launcher->selected = index;
+				report_view(launcher, false);
+				activate_selected(launcher);
+			}
 			return;
 		}
 		if (!confirm)

@@ -30,11 +30,11 @@ PM-LFSCREENS select 2 Gauge
 PM-LFSCREENS command Info on Menu
 [lf] stack: #1 app "suite" | #7 list "Menu" | #9 alert "Info"
 [lf] alert #9 confirmation text="First"
-[lf] keys #9: left=Again ok=OK right=-
+[lf] keys #9: left=Again ok=OK right=Back
 PM-LFSCREENS command Again on Info
 [lf] stack: #1 app "suite" | #7 list "Menu" | #10 alert "Info 2"
 [lf] alert #10 confirmation text="Second"
-[lf] keys #10: left=Again ok=OK right=-
+[lf] keys #10: left=Options[Help] ok=OK right=-
 PM-LFSCREENS command OK on Info 2
 PM-LFSCREENS command Edit on Menu
 PM-LFSCREENS rows 4 selected 3

@@ -509,6 +509,7 @@ Java_javax_microedition_lcdui_FormPeer_addItemCommand0(void)
 	if (item_args(&form, &index)) {
 		label = command_label(label_handle);
 		command.label = label && label[0] ? label : NULL;
+		command.direct = command.type != FPLINUX_UI_COMMAND_HELP;
 		/* ITEM and SCREEN commands need a label, as in fplinux-pm-lf.c. */
 		if (!command.label &&
 		    (command.type == FPLINUX_UI_COMMAND_ITEM ||

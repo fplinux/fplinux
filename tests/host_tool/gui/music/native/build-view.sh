@@ -9,13 +9,19 @@ work=$1
 # shellcheck source=tests/host_tool/gui/screens/ui-host-build.sh
 . "$common/ui-host-build.sh"
 ui_host_prepare "$root" "$work" "$2"
+shift 2
 mkdir -p "$work/locale/ru/LC_MESSAGES"
 msgfmt --check -o "$work/locale/ru/LC_MESSAGES/org.fplinux.music.mo" "$music/ru.po"
 msgfmt --check -o "$work/locale/ru/LC_MESSAGES/fplinux-ui.mo" "$root/alpine/aports/fplinux-ui/ru.po"
-ui_host_build_application -I"$music" \
-	"$screens_dir/music-view-app.c" "$music/music-view.c" \
-	-Wl,--wrap=fplinux_language_load -Wl,--wrap=libintl_bindtextdomain \
-	-o "$work/music-view"
+if [ "$#" -eq 0 ]; then
+	set -- "$screens_dir/music-view-app.c" -o "$work/music-view"
+else
+	set -- "$music/fplinux-music.c" "$music/music-player.c" "$music/music-model.c" \
+		"$@" -o "$work/music"
+fi
+ui_host_build_application -I"$music" "$music/music-view.c" \
+	"$screens_dir/music-test-locale.c" \
+	-Wl,--wrap=fplinux_language_load -Wl,--wrap=libintl_bindtextdomain "$@"
 # pkg-config supplies argument lists for the pinned protocol libraries.
 # shellcheck disable=SC2046
 ui_host_compile -I"$common" -I"$root/include/fplinux" -I"$ui_host_inputs" \

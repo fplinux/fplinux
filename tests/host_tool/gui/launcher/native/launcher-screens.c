@@ -1061,7 +1061,7 @@ static void task_overlay(struct capture *capture)
 	wait_selection(capture, "home", "list", 2);
 	save_frame(capture, "launcher-home");
 	press(capture, KEY_TAB);
-	wait_legends(capture, "Close app", "Open", "Back");
+	wait_legends(capture, "Quit", "Open", "Back");
 	wait_tasks(capture, true);
 	save_frame(capture, "launcher-tasks-first");
 	press_frame(capture, KEY_DOWN);
@@ -1070,7 +1070,7 @@ static void task_overlay(struct capture *capture)
 	press(capture, KEY_F13);
 	wait_legends(capture, "", "Close", "Cancel");
 	press(capture, KEY_F14);
-	wait_legends(capture, "Close app", "Open", "Back");
+	wait_legends(capture, "Quit", "Open", "Back");
 	assert(!capture->task_closed && !capture->has_request);
 	press(capture, KEY_F13);
 	wait_legends(capture, "", "Close", "Cancel");
@@ -1098,7 +1098,7 @@ static void task_overlay(struct capture *capture)
 	assert(capture->tasks_open);
 	assert(find_label(capture, "Open apps"));
 	wait_tasks(capture, true);
-	wait_legends(capture, "Close app", "Open", "Back");
+	wait_legends(capture, "Quit", "Open", "Back");
 	press(capture, KEY_OK);
 	wait_request(capture, FPLINUX_UI_SESSION_ACTIVATE, "org.test.app02",
 		     102);

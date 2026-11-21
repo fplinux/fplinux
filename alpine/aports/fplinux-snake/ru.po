@@ -42,10 +42,6 @@ msgstr "Играть"
 msgid "Resume"
 msgstr "Продолжить"
 
-msgctxt "short command"
-msgid "Resume"
-msgstr "Дальше"
-
 msgid "Restart"
 msgstr "Заново"
 

@@ -20,9 +20,8 @@
  *   right soft key  the first BACK, CANCEL, EXIT or STOP command by priority;
  *   OK              the focused element's own action (open, select, mark,
  *                   edit), otherwise the first OK command;
- *   left soft key   the remaining command if there is one, otherwise
- *                   "Options", which opens the options menu with all the
- *                   remaining commands in priority order.
+ *   left soft key   an explicitly direct command when it is the only
+ *                   remaining action, or "Options" for additional commands.
  *
  * Legends follow the assignment and never repeat. While the stack holds a
  * screen, the runtime handles every key for it: the application receives
@@ -48,8 +47,8 @@ enum fplinux_ui_command_type {
 };
 
 /*
- * id is the application's; a lower priority number chooses keys first, ties
- * keep the order of addition. Options keeps that order with Back last.
+ * id is the application's; lower priority numbers come first and ties keep
+ * the order of addition.
  * A NULL label uses the type's word in the system language
  * (Back, Cancel, Exit, Stop, OK, Help); ITEM and SCREEN commands need one.
  * Labels are printable text shorter than 128 bytes. HELP always goes to the
@@ -70,15 +69,12 @@ struct fplinux_ui_command {
 	 */
 	const void *icon;
 	/*
-	 * Retains a directly assigned soft-key command: the left action stays
-	 * visible when long legends need shortening, and the right action is
-	 * not displaced by a text field's Clear (then offered on the left or
-	 * in Options). Does not override command
-	 * priority or move commands out of Options.
+	 * Place an otherwise unassigned action directly on the left when it
+	 * is the only extra action. HELP remains in Options.
 	 */
-	bool keep_visible;
-	/* Optional copied legend used when full legends do not fit; Options uses label. */
-	const char *short_label;
+	bool direct;
+	/* Keep a back-type action on the right and offer Clear separately. */
+	bool keep_right_on_clear;
 };
 
 /* An implicit List reports OK on a row with this reserved command id. */
@@ -92,7 +88,7 @@ typedef void (*fplinux_ui_change_cb)(struct fplinux_ui *ui,
 				     struct fplinux_ui_screen *screen,
 				     size_t index, void *context);
 
-/* Labels and short labels are copied. Adding a command id twice replaces it. */
+/* Labels are copied. Adding a command id twice replaces it. */
 bool fplinux_ui_screen_add_command(struct fplinux_ui_screen *screen,
 				   const struct fplinux_ui_command *command);
 void fplinux_ui_screen_remove_command(struct fplinux_ui_screen *screen, int id);
@@ -714,6 +710,9 @@ typedef void (*fplinux_ui_canvas_key_cb)(struct fplinux_ui *ui,
 struct fplinux_ui_screen *fplinux_ui_canvas_new(struct fplinux_ui *ui,
 						const char *title);
 lv_obj_t *fplinux_ui_canvas_object(struct fplinux_ui_screen *canvas);
+/* Show the standard command bar and reserve its height in full screen. */
+void fplinux_ui_canvas_set_fullscreen_bar(struct fplinux_ui_screen *canvas,
+					  bool enabled);
 void fplinux_ui_canvas_set_key_handler(struct fplinux_ui_screen *canvas,
 				       fplinux_ui_canvas_key_cb handler,
 				       void *context);

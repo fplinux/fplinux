@@ -1010,6 +1010,7 @@ static const struct fplinux_ui_command refresh_command = {
 	.id = REFRESH_ID,
 	.type = FPLINUX_UI_COMMAND_SCREEN,
 	.label = "Refresh",
+	.direct = true,
 };
 static const struct fplinux_ui_command back_command = {
 	.id = BACK_ID,
@@ -1652,7 +1653,7 @@ test_fullscreen_resize_keeps_current_form_legends_above_content(void)
 	const struct fplinux_ui_command back = {
 		.id = BACK_ID,
 		.type = FPLINUX_UI_COMMAND_BACK,
-		.keep_visible = true,
+		.keep_right_on_clear = true,
 	};
 	struct fplinux_ui_screen *form = fplinux_ui_form_new(&ui, "Name");
 	int width = -1;
@@ -1691,7 +1692,7 @@ const void *fplinux_ui_glyph(struct fplinux_ui *owner, const char *name,
 	return NULL;
 }
 
-static void test_options_keeps_back_last_and_delivers_visible_actions(void)
+static void test_options_follows_priority_and_delivers_visible_actions(void)
 {
 	const struct fplinux_ui_command commands[] = {
 		{ .id = 30, .type = FPLINUX_UI_COMMAND_BACK, .priority = -50 },
@@ -1700,17 +1701,16 @@ static void test_options_keeps_back_last_and_delivers_visible_actions(void)
 		{ .id = 33, .type = FPLINUX_UI_COMMAND_STOP, .priority = -20 },
 		{ .id = 20,
 		  .type = FPLINUX_UI_COMMAND_SCREEN,
-		  .label = "Refresh",
-		  .short_label = "R" },
+		  .label = "Refresh" },
 		{ .id = 21,
 		  .type = FPLINUX_UI_COMMAND_SCREEN,
 		  .label = "Details" },
 		{ .id = 34, .type = FPLINUX_UI_COMMAND_HELP, .priority = 1 },
 	};
 	const char *const expected[] = {
-		"Cancel", "Exit", "Stop", "Refresh", "Details", "Help", "Back",
+		"Back", "Cancel", "Exit", "Stop", "Refresh", "Details", "Help",
 	};
-	const int ids[] = { 31, 32, 33, 20, 21, 34, 30 };
+	const int ids[] = { 30, 31, 32, 33, 20, 21, 34 };
 	struct fplinux_ui_screen *screen =
 		fplinux_ui_text_box_new(&ui, "Name", "abcdef", 32);
 
@@ -1742,7 +1742,7 @@ static void test_options_distinguishes_synthetic_clear_from_back(bool back)
 	const struct fplinux_ui_command cancel = {
 		.id = 31,
 		.type = FPLINUX_UI_COMMAND_CANCEL,
-		.keep_visible = true,
+		.keep_right_on_clear = true,
 		.priority = -100,
 	};
 	const struct fplinux_ui_command help = {
@@ -1766,11 +1766,11 @@ static void test_options_distinguishes_synthetic_clear_from_back(bool back)
 	CHECK(legends_are("Options", "", "Cancel"));
 	press_options();
 	CHECK(menu.count == (back ? 4 : 3));
-	CHECK(!strcmp(menu.texts[0], "Refresh"));
-	CHECK(!strcmp(menu.texts[1], "Help"));
-	CHECK(!strcmp(menu.texts[2], "Clear"));
 	if (back)
-		CHECK(!strcmp(menu.texts[3], "Back"));
+		CHECK(!strcmp(menu.texts[0], "Back"));
+	CHECK(!strcmp(menu.texts[back], "Refresh"));
+	CHECK(!strcmp(menu.texts[back + 1], "Help"));
+	CHECK(!strcmp(menu.texts[back + 2], "Clear"));
 	choose("Clear");
 	CHECK(!fired.commands);
 	CHECK(!strcmp(fplinux_ui_text_box_get(screen), "abcde"));
@@ -1881,7 +1881,7 @@ static void test_retained_save_stays_on_narrow_form_with_edit_and_cancel(void)
 		.id = REFRESH_ID,
 		.type = FPLINUX_UI_COMMAND_SCREEN,
 		.label = "Сохранить",
-		.keep_visible = true,
+		.direct = true,
 	};
 	const struct fplinux_ui_command cancel = {
 		.id = BACK_ID,
@@ -1909,8 +1909,8 @@ static void test_retained_save_stays_on_narrow_form_with_edit_and_cancel(void)
 	CHECK(legends_are("Сохранить", "Изменить", "Отмена"));
 	press(KEY_F14);
 	CHECK(fired.command_id == BACK_ID);
-	/* Other callers retain the existing collapse policy. */
-	save.keep_visible = false;
+	/* The caller can leave the same action in one-item Options. */
+	save.direct = false;
 	CHECK(fplinux_ui_screen_add_command(form, &save));
 	CHECK(legends_are("Options", "Изменить", "Отмена"));
 	finish();
@@ -1926,7 +1926,7 @@ static void test_retained_cancel_leaves_phone_text_correction_available(void)
 	const struct fplinux_ui_command cancel = {
 		.id = BACK_ID,
 		.type = FPLINUX_UI_COMMAND_CANCEL,
-		.keep_visible = true,
+		.keep_right_on_clear = true,
 	};
 	struct fplinux_ui_screen *form = fplinux_ui_form_new(&ui, "Name");
 	size_t name = fplinux_ui_form_append_text_field(
@@ -2148,8 +2148,8 @@ int main(int argc, char *argv[])
 		return EXIT_FAILURE;
 	input_languages = argv[1];
 	if (argc == 3) {
-		if (!strcmp(argv[2], "back-last"))
-			test_options_keeps_back_last_and_delivers_visible_actions();
+		if (!strcmp(argv[2], "priority"))
+			test_options_follows_priority_and_delivers_visible_actions();
 		else if (!strcmp(argv[2], "synthetic-clear"))
 			test_options_distinguishes_synthetic_clear_from_back(
 				true);

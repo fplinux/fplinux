@@ -232,7 +232,7 @@ static void editing_commands(struct fplinux_launcher_quick_settings *quick)
 		.id = QUICK_COMMAND_SAVE,
 		.type = FPLINUX_UI_COMMAND_SCREEN,
 		.label = _("Save"),
-		.keep_visible = true,
+		.direct = true,
 	};
 	const struct fplinux_ui_command cancel = {
 		.id = QUICK_COMMAND_CANCEL,

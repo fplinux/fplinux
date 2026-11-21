@@ -45,10 +45,6 @@ msgstr "Сохранение не подтверждено"
 msgid "Retry"
 msgstr "Повторить"
 
-msgctxt "short command"
-msgid "Retry"
-msgstr "Повтор"
-
 msgid "Stay"
 msgstr "Остаться"
 

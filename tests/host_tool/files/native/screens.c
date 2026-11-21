@@ -1103,7 +1103,7 @@ static void wait_reading_gone(struct capture *capture)
  */
 static void slow_folder(struct capture *capture)
 {
-	uint64_t pressed, waiting, opened;
+	uint64_t pressed, waiting, opened, deadline;
 
 	press(capture, KEY_ENTER);
 	wait_conflict_list(capture, "My files", 24, 0);
@@ -1134,6 +1134,10 @@ static void slow_folder(struct capture *capture)
 	/* Cancel on the shown alert does the same. */
 	press(capture, KEY_ENTER);
 	wait_label(capture, "Reading folder", false);
+	deadline = fplinux_ui_frame_now_ms() + 3000;
+	while (strcmp(capture->right, "Cancel") &&
+	       fplinux_ui_frame_now_ms() < deadline)
+		pump(capture);
 	assert(!strcmp(capture->right, "Cancel"));
 	press(capture, KEY_ESC);
 	release_read(capture);
@@ -1407,6 +1411,15 @@ int main(int argc, char **argv)
 	press(&capture, KEY_Z);
 	press(&capture, KEY_Z);
 	wait_editor_text(&capture, "zz");
+	assert(!strcmp(capture.left, word(&capture, "Options", "Опции")));
+	assert(!strcmp(capture.right, word(&capture, "Clear", "Стереть")));
+	fplinux_ui_frame_focus_keyboard(&capture.peer.keyboards[1]);
+	fplinux_ui_frame_send_key(&capture.peer.keyboards[1], KEY_F14, true);
+	fplinux_ui_frame_send_key(&capture.peer.keyboards[1], KEY_F14, false);
+	wait_editor_text(&capture, "z");
+	fplinux_ui_frame_focus_keyboard(&capture.peer.keyboards[0]);
+	press(&capture, KEY_Z);
+	wait_editor_text(&capture, "zz");
 	activate(&capture, true, 51);
 	assert(!strcmp(capture.observed.text, "zz"));
 	save_frame(&capture, "files-input");
@@ -1431,10 +1444,8 @@ int main(int argc, char **argv)
 	press(&capture, KEY_ENTER);
 	wait_label(&capture, "b-dir", false);
 	assert(capture.observed.count == 2);
-	fprintf(stderr, "Files destination softkeys=[%s|%s|%s]\n", capture.left,
-		capture.centre, capture.right);
-	assert(capture.left[0] &&
-	       strcmp(capture.left, word(&capture, "Options", "Опции")));
+	assert(!strcmp(capture.left, word(&capture, "Here", "Сюда")));
+	assert(!strcmp(capture.centre, word(&capture, "Open", "Открыть")));
 	save_frame(&capture, "files-destination");
 	move_to(&capture, 1);
 	press(&capture, KEY_ENTER);
@@ -1480,6 +1491,6 @@ int main(int argc, char **argv)
 			 word(&capture, "New folder", "Новая папка")));
 	save_frame(&capture, "files-system-menu");
 	close_and_reap(&capture);
-	puts("files-screens: no card; parent focus; returning Options; retained search; explicit copy destination; background progress; close WAIT/Continue; readonly system view");
+	puts("files-screens: no card; parent focus; returning Options; retained search; explicit copy destination; background progress; close WAIT/Cancel; readonly system view");
 	return 0;
 }

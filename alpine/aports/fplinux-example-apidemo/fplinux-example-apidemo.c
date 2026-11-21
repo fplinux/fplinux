@@ -356,6 +356,7 @@ static struct fplinux_ui_screen *new_catalogue(struct apidemo_main *main_app)
 		.id = COMMAND_SEARCH,
 		.type = FPLINUX_UI_COMMAND_SCREEN,
 		.label = _("Search"),
+		.direct = true,
 		.icon = apidemo_glyph(app, "search"),
 	};
 	char icon[256];

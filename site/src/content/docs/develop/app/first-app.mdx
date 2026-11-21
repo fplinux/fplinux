@@ -138,7 +138,7 @@ int main(int argc, char **argv)
 }
 ```
 
-The Form owns the displayed text and the runtime owns the screen. `app` stays alive throughout the event loop as the listener's context. If construction fails, closing the runtime also frees screens that have not been pushed. There is no separate raw key handler: command types give Centre its Add action and the soft keys their Reset and Back actions.
+The Form owns the displayed text and the runtime owns the screen. `app` stays alive throughout the event loop as the listener's context. If construction fails, closing the runtime also frees screens that have not been pushed. Command types put **Add** on Centre, **Reset** under **Options**, and **Back** on the right soft key.
 
 The CLI parser handles help and bad arguments before the program opens the UI. `gettext()` is ready after `fplinux_ui_open()` returns; without a translation catalog, the example uses its English strings.
 
@@ -224,7 +224,7 @@ From the checkout root, generate checksums and build the selected target:
 
 Replace `nokia-ta1618` with your selected phone. The directory printed after `output:` contains `apks/fplinux-example-counter.apk`. Start that build with the normal [run procedure](/fplinux/start/run/), then use [Optional packages](/fplinux/guides/packages/) to transfer and install this APK. That shared procedure owns the connection commands, profile selection and local-package installation flags.
 
-Open **Counter** from the application catalog. Add changes the count; Reset returns it to zero. Return Home and reopen it through Tasks to keep the same count. Back closes the application, and reopening begins at zero. Read application diagnostics through the [session log](/fplinux/develop/logging/#phone-userspace).
+Open **Counter** from the application catalog. **Add** changes the count, and **Options → Reset** returns it to zero. Return Home and reopen it through Tasks to keep the same count. **Back** closes the application, and reopening begins at zero. Read application diagnostics through the [session log](/fplinux/develop/logging/#phone-userspace).
 
 For another edit, close Counter, regenerate its checksums and rebuild. Remove the installed package before installing the replacement APK with the same package version; do not bump `pkgrel` for the edit. A package build establishes compilation and packaging, not correct physical display or keypad operation.
 

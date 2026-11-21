@@ -1,7 +1,6 @@
 /* SPDX-License-Identifier: 0BSD */
 #define _POSIX_C_SOURCE 200809L
 #include "fplinux-cli.h"
-#include <fplinux/fplinux-gettext.h>
 #include <fplinux/fplinux-ui.h>
 #include <fplinux/fplinux-ui-menu.h>
 #include <fplinux/fplinux-ui-prefs.h>
@@ -15,7 +14,6 @@
 #define APP_ID "org.fplinux.notes"
 #define NOTE_CHARS 1000
 #define _(text) gettext(text)
-#define NC_(context, text) context "\004" text
 
 enum command {
 	COMMAND_SAVE,
@@ -29,7 +27,7 @@ struct notes_app {
 	struct fplinux_ui *ui;
 	struct fplinux_ui_prefs *prefs;
 	struct fplinux_ui_screen *box;
-	struct fplinux_ui_screen *save_alert;
+	struct fplinux_ui_screen *save_prompt;
 	struct fplinux_storage_result saved;
 	char *durable_text;
 	bool close_pending;
@@ -49,7 +47,7 @@ static void refresh_commands(struct notes_app *app)
 		.id = COMMAND_SAVE,
 		.type = FPLINUX_UI_COMMAND_SCREEN,
 		.label = _("Save"),
-		.short_label = _("Done"),
+		.priority = -1,
 		.icon = fplinux_ui_glyph(app->ui, "save", FPLINUX_UI_GLYPH_ROW),
 	};
 	bool unsaved = needs_save(app);
@@ -110,7 +108,9 @@ static void save_error_command(struct fplinux_ui *ui,
 	struct notes_app *app = context;
 
 	(void)screen;
-	app->save_alert = NULL;
+	if (app->close_pending)
+		fplinux_ui_pop(ui);
+	app->save_prompt = NULL;
 	if (command_id == COMMAND_RETRY) {
 		if (!save_note(app)) {
 			if (!show_save_error(app) && app->close_pending) {
@@ -134,54 +134,81 @@ static void save_error_command(struct fplinux_ui *ui,
 	}
 }
 
+static size_t append_answer(struct fplinux_ui_screen *form, const char *label,
+			    int id)
+{
+	const struct fplinux_ui_command select = {
+		.id = id,
+		.type = FPLINUX_UI_COMMAND_OK,
+	};
+	size_t item = fplinux_ui_form_append_string(form, NULL, label);
+
+	if (item == SIZE_MAX ||
+	    !fplinux_ui_form_set_appearance(form, item,
+					    FPLINUX_UI_APPEARANCE_BUTTON) ||
+	    !fplinux_ui_form_add_item_command(form, item, &select))
+		return SIZE_MAX;
+	return item;
+}
+
 static bool show_save_error(struct notes_app *app)
 {
-	const struct fplinux_ui_command commands[] = {
-		{ .id = COMMAND_RETRY,
-		  .type = FPLINUX_UI_COMMAND_OK,
-		  .label = _("Retry"),
-		  .short_label = fplinux_gettext_context(
-			  NC_("short command", "Retry")),
-		  .icon = fplinux_ui_glyph(app->ui, "refresh",
-					   FPLINUX_UI_GLYPH_ROW) },
-		{ .id = COMMAND_STAY,
-		  .type = FPLINUX_UI_COMMAND_BACK,
-		  .label = _("Stay"),
-		  .icon = fplinux_ui_glyph(app->ui, "cancel",
-					   FPLINUX_UI_GLYPH_ROW) },
-		{ .id = COMMAND_DISCARD,
-		  .type = FPLINUX_UI_COMMAND_SCREEN,
-		  .label = app->saved.state ==
-					   FPLINUX_STORAGE_PUBLISHED_UNSYNCED ?
-				   _("Close anyway") :
-				   _("Discard changes"),
-		  .icon = fplinux_ui_glyph(app->ui, "delete",
-					   FPLINUX_UI_GLYPH_ROW) },
+	bool published = app->saved.state == FPLINUX_STORAGE_PUBLISHED_UNSYNCED;
+	const struct fplinux_ui_command retry = {
+		.id = COMMAND_RETRY,
+		.type = FPLINUX_UI_COMMAND_OK,
+		.label = _("Retry"),
+		.icon = fplinux_ui_glyph(app->ui, "refresh",
+					 FPLINUX_UI_GLYPH_ROW),
 	};
-	struct fplinux_ui_screen *alert;
+	const struct fplinux_ui_command stay = {
+		.id = COMMAND_STAY,
+		.type = FPLINUX_UI_COMMAND_CANCEL,
+		.label = _("Stay"),
+	};
+	const char *title = published ? _("Saving not confirmed") :
+					_("Note not saved");
+	const char *error = fplinux_ui_storage_error(app->saved);
+	struct fplinux_ui_screen *prompt;
+	bool ready;
 
-	if (app->save_alert && fplinux_ui_current(app->ui) == app->save_alert)
+	if (app->save_prompt && fplinux_ui_current(app->ui) == app->save_prompt)
 		fplinux_ui_pop(app->ui);
-	app->save_alert = NULL;
-	alert = fplinux_ui_alert_new(
-		app->ui, FPLINUX_UI_ALERT_ERROR,
-		app->saved.state == FPLINUX_STORAGE_PUBLISHED_UNSYNCED ?
-			_("Saving not confirmed") :
-			_("Note not saved"),
-		fplinux_ui_storage_error(app->saved), 0);
-	if (!alert)
+	app->save_prompt = NULL;
+	if (app->close_pending) {
+		size_t retry_item;
+
+		prompt = fplinux_ui_form_new(app->ui, _("Notes"));
+		if (!prompt)
+			return false;
+		ready = fplinux_ui_form_append_string(prompt, title, error) !=
+				SIZE_MAX &&
+			(retry_item = append_answer(prompt, retry.label,
+						    COMMAND_RETRY)) !=
+				SIZE_MAX &&
+			append_answer(prompt,
+				      published ? _("Close anyway") :
+						  _("Discard changes"),
+				      COMMAND_DISCARD) != SIZE_MAX &&
+			fplinux_ui_screen_add_command(prompt, &stay);
+		if (ready)
+			fplinux_ui_form_set_focus(prompt, retry_item);
+	} else {
+		prompt = fplinux_ui_alert_new(app->ui, FPLINUX_UI_ALERT_ERROR,
+					      title, error, 0);
+		if (!prompt)
+			return false;
+		ready = fplinux_ui_screen_add_command(prompt, &retry) &&
+			fplinux_ui_screen_add_command(prompt, &stay);
+	}
+	if (!fplinux_ui_push(app->ui, prompt))
 		return false;
-	for (size_t index = 0; index < (app->close_pending ? 3U : 2U);
-	     ++index) {
-		if (fplinux_ui_screen_add_command(alert, &commands[index]))
-			continue;
-		fplinux_ui_push(app->ui, alert);
+	if (!ready) {
 		fplinux_ui_pop(app->ui);
 		return false;
 	}
-	fplinux_ui_screen_set_listener(alert, save_error_command, NULL, app);
-	app->save_alert = alert;
-	fplinux_ui_push(app->ui, alert);
+	fplinux_ui_screen_set_listener(prompt, save_error_command, NULL, app);
+	app->save_prompt = prompt;
 	return true;
 }
 
@@ -202,7 +229,6 @@ static enum fplinux_ui_close_response prepare_close(struct fplinux_ui *ui,
 	return FPLINUX_UI_CLOSE_CANCEL;
 }
 
-/* Save stays reachable in Options while the right soft key belongs to Clear. */
 static void handle_command(struct fplinux_ui *ui,
 			   struct fplinux_ui_screen *screen, int command_id,
 			   void *context)
@@ -239,7 +265,7 @@ static void handle_event(struct fplinux_ui *ui,
 	if (event->type == FPLINUX_UI_EVENT_ACTIVATION &&
 	    event->activation == FPLINUX_UI_ACTIVATION_OPEN) {
 		fplinux_ui_menu_close(ui);
-		if (!app->save_alert && app->box)
+		if (!app->save_prompt && app->box)
 			fplinux_ui_text_box_cancel_picker(app->box);
 		return;
 	}

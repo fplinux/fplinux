@@ -178,6 +178,13 @@ static void press(struct capture *capture, unsigned int code)
 	pump_for(capture, 40);
 }
 
+static void press_keypad(struct capture *capture, unsigned int code)
+{
+	fplinux_ui_frame_send_key(&capture->peer.keyboards[1], code, true);
+	fplinux_ui_frame_send_key(&capture->peer.keyboards[1], code, false);
+	pump_for(capture, 40);
+}
+
 static void document(struct capture *capture, const char *directory,
 		     const char *name, uint32_t serial)
 {
@@ -324,17 +331,57 @@ static void replace_editor(struct capture *capture, const char *centre,
 	assert(false);
 }
 
+static void check_editor_action(struct capture *capture, const char *scenario,
+				bool russian)
+{
+	const char *select = russian ? "Выбрать" : "Select";
+	const char *cancel = russian ? "Отмена" : "Cancel";
+	const char *done = russian ? "Готово" : "Done";
+
+	if (!strcmp(scenario, "edit-cancel")) {
+		press_keypad(capture, KEY_F13);
+		wait_centre(capture, select);
+		wait_label(capture, cancel);
+		press_keypad(capture, KEY_OK);
+	} else if (!strcmp(scenario, "edit-delete")) {
+		for (size_t i = 0; i < 3; ++i)
+			press_keypad(capture, KEY_F14);
+		assert(!capture->left[0] && !strcmp(capture->centre, done) &&
+		       !strcmp(capture->right, cancel));
+		press_keypad(capture, KEY_OK);
+	} else if (!strcmp(scenario, "edit-multiline")) {
+		press_keypad(capture, KEY_NUMERIC_STAR);
+		wait_centre(capture, russian ? "Вставить" : "Insert");
+		assert(!capture->left[0] && !strcmp(capture->right, cancel));
+		press_keypad(capture, KEY_F14);
+		wait_centre(capture, russian ? "Строка" : "New line");
+		press_keypad(capture, KEY_OK);
+		press_keypad(capture, KEY_F13);
+		wait_centre(capture, select);
+		wait_label(capture, done);
+		press_keypad(capture, KEY_OK);
+	} else {
+		assert(!strcmp(scenario, "edit-readonly"));
+		press_keypad(capture, KEY_OK);
+	}
+	assert_frame(capture, 0x001f);
+}
+
 static void first_guest_ui(struct capture *capture, const char *directory,
 			   const char *locale, const char *scenario)
 {
 	const char *release = getenv("FPLINUX_MRE_ENGINE_RELEASE");
-	const char *label =
-		!strcmp(scenario, "selector") ?
-			(!strcmp(locale, "ru") ? "Выбрать" : "Select") :
-			(!strcmp(locale, "ru") ? "Удалить" : "Clear");
-	const char *actual_label = !strcmp(scenario, "selector") ?
-					   capture->centre :
-					   capture->right;
+	bool selector = !strcmp(scenario, "selector");
+	bool read_only = !strcmp(scenario, "edit-readonly");
+	bool multiline = !strcmp(scenario, "edit-multiline");
+	bool russian = !strcmp(locale, "ru");
+	const char *options = russian ? "Опции" : "Options";
+	const char *select = russian ? "Выбрать" : "Select";
+	const char *cancel = russian ? "Отмена" : "Cancel";
+	const char *clear = russian ? "Стереть" : "Clear";
+	const char *done = russian ? "Готово" : "Done";
+	const char *centre = done;
+	const char *right = clear;
 	char editor_centre[sizeof(capture->centre)];
 	char editor_right[sizeof(capture->right)];
 	char previous_left[sizeof(capture->left)];
@@ -344,6 +391,15 @@ static void first_guest_ui(struct capture *capture, const char *directory,
 	unsigned int commits, softkey_messages;
 	int fd;
 
+	if (selector) {
+		centre = select;
+		right = cancel;
+	} else if (read_only) {
+		centre = russian ? "Закрыть" : "Close";
+		right = cancel;
+	} else if (multiline) {
+		centre = russian ? "Строка" : "New line";
+	}
 	/* Hold both SHM buffers before the peer publishes its first guest UI. */
 	capture->peer.release_frames = false;
 	document(capture, directory, "first.vxp", 1);
@@ -370,9 +426,7 @@ static void first_guest_ui(struct capture *capture, const char *directory,
 		       !capture->accepted);
 	} else {
 		/* The guest UI is drawn; its legends wait for its commit. */
-		wait_label(capture, !strcmp(scenario, "selector") ?
-					    "E:\\" :
-					    "Input expression");
+		wait_label(capture, selector ? "E:\\" : "Input expression");
 		pump_for(capture, 100);
 		if (capture->peer.commits != commits ||
 		    capture->softkey_messages != softkey_messages ||
@@ -416,17 +470,22 @@ static void first_guest_ui(struct capture *capture, const char *directory,
 	strcpy(capture->left, legends.left);
 	strcpy(capture->centre, legends.centre);
 	strcpy(capture->right, legends.right);
-	assert(!strcmp(actual_label, label));
+	assert(!strcmp(capture->left, read_only ? "" : options));
+	assert(!strcmp(capture->centre, centre));
+	assert(!strcmp(capture->right, right));
 	assert(poll(&descriptor, 1, 100) == 0);
 	wait_result(capture, 1, FPLINUX_UI_DOCUMENT_ACCEPTED);
 	assert(capture->peer.commits > commits && capture->accepted == 1);
 	assert(capture->peer.width == capture->width &&
 	       capture->peer.height < capture->height);
+	if (!strncmp(scenario, "edit-", 5)) {
+		check_editor_action(capture, scenario, russian);
+		return;
+	}
 	if (!strncmp(scenario, "editor-", 7)) {
 		if (strstr(scenario, "options")) {
 			press(capture, KEY_COMPOSE);
-			wait_centre(capture, !strcmp(locale, "ru") ? "Выбрать" :
-								     "Select");
+			wait_centre(capture, select);
 		}
 		if (strstr(scenario, "end")) {
 			const char *end = getenv("FPLINUX_MRE_ENGINE_END");
@@ -467,8 +526,10 @@ static void first_guest_ui(struct capture *capture, const char *directory,
 	}
 	press(capture, KEY_ESC);
 	wait_result(capture, 3, FPLINUX_UI_DOCUMENT_CANCELLED);
-	assert(!strcmp(actual_label, label) && capture->accepted == 1);
-	press(capture, !strcmp(scenario, "selector") ? KEY_ESC : KEY_ENTER);
+	assert(!strcmp(capture->left, options) &&
+	       !strcmp(capture->centre, centre) &&
+	       !strcmp(capture->right, right) && capture->accepted == 1);
+	press_keypad(capture, selector ? KEY_F14 : KEY_OK);
 	assert_frame(capture, 0x001f);
 	assert(capture->accepted == 1);
 }
@@ -758,6 +819,7 @@ int main(int argc, char **argv)
 	assert(fplinux_ui_session_send(capture.session, &config));
 	pump_for(&capture, 100);
 	fplinux_ui_frame_focus_keyboard(&capture.peer.keyboards[0]);
+	fplinux_ui_frame_focus_keyboard(&capture.peer.keyboards[1]);
 	if (argc == 9) {
 		if (!strcmp(argv[8], "recent-remove-last")) {
 			wait_centre(&capture, "Select");
@@ -792,14 +854,10 @@ int main(int argc, char **argv)
 			press(&capture, KEY_ENTER);
 			wait_label(&capture, "first.vxp");
 			wait_centre(&capture, "Select");
-			if (!strcmp(capture.left, "Options")) {
-				press(&capture, KEY_COMPOSE);
-				wait_label(&capture, "Remove");
-				press(&capture, KEY_ENTER);
-			} else {
-				assert(!strcmp(capture.left, "Remove"));
-				press(&capture, KEY_COMPOSE);
-			}
+			assert(!strcmp(capture.left, "Options"));
+			press(&capture, KEY_COMPOSE);
+			wait_label(&capture, "Remove");
+			press(&capture, KEY_ENTER);
 			wait_centre(&capture, "");
 			assert(!capture.left[0] &&
 			       !strcmp(capture.right, "Back"));

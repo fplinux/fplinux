@@ -20,6 +20,7 @@ struct capture {
 	struct fplinux_ui_session_message result;
 	int session, listener, width, height;
 	pid_t application;
+	char left[128];
 	struct json_object *layout;
 	unsigned int layout_commit;
 	const char *commit_directory;
@@ -118,6 +119,8 @@ static void pump(struct capture *capture)
 						       &reply));
 		} else if (message.type == FPLINUX_UI_SESSION_DOCUMENT_RESULT) {
 			capture->result = message;
+		} else if (message.type == FPLINUX_UI_SESSION_SOFTKEYS) {
+			strcpy(capture->left, message.left);
 		}
 	}
 	assert(received == 0);
@@ -413,7 +416,10 @@ static void settings_scenario(struct capture *capture, const char *document,
 		open_running_settings(capture, document, true);
 		assert_settings(capture, "1:1", "270°",
 				capture->mre ? "Off" : "Auto");
+		assert(!strcmp(capture->left, "Options"));
 		press(capture, KEY_COMPOSE);
+		wait_label(capture, "Reset");
+		press(capture, KEY_ENTER);
 		assert_settings(capture, "Integer", "90°",
 				capture->mre ? "On" : "176x208");
 	} else if (!strcmp(scenario, "roundtrip-inherit")) {
@@ -490,6 +496,8 @@ static void settings_scenario(struct capture *capture, const char *document,
 
 static void capture_menus(struct capture *capture, const char *document)
 {
+	const char *options = translated(capture, "Options", "Опции");
+
 	wait_label(capture,
 		   strstr(document, ".vxp") ?
 			   translated(capture, "Open VXP", "Открыть VXP") :
@@ -505,6 +513,10 @@ static void capture_menus(struct capture *capture, const char *document)
 	press(capture, KEY_DOWN);
 	press(capture, KEY_ENTER);
 	save_frame(capture, "recent");
+	assert(!strcmp(capture->left, options));
+	press(capture, KEY_COMPOSE);
+	wait_label(capture, translated(capture, "Remove", "Удалить"));
+	press(capture, KEY_ESC);
 	press(capture, KEY_ESC);
 	press(capture, KEY_DOWN);
 	press(capture, KEY_ENTER);

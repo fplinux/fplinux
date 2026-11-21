@@ -202,6 +202,47 @@ static void collect(lv_obj_t *object,
 			menu);
 }
 
+static void collect_legends(lv_obj_t *layer,
+			    struct apidemo_frame_observation *observation)
+{
+	for (uint32_t index = 0; index < lv_obj_get_child_count(layer);
+	     ++index) {
+		lv_obj_t *bar = lv_obj_get_child(layer, (int32_t)index);
+		struct apidemo_rectangle bounds = rectangle(bar);
+		bool labels = true;
+
+		if (!lv_obj_is_visible(bar) ||
+		    lv_obj_get_child_count(bar) != 3 || bounds.left != 0 ||
+		    bounds.width != lv_obj_get_width(layer) ||
+		    bounds.top + bounds.height != lv_obj_get_height(layer))
+			continue;
+		for (int slot = 0; slot < 3; ++slot)
+			labels &= lv_obj_check_type(lv_obj_get_child(bar, slot),
+						    &lv_label_class);
+		if (!labels)
+			continue;
+		observation->legend_bar = bounds;
+		observation->legends_fit = true;
+		for (int slot = 0; slot < 3; ++slot) {
+			lv_obj_t *label = lv_obj_get_child(bar, slot);
+			const char *text = lv_label_get_text(label);
+			lv_point_t size;
+
+			lv_text_get_size(
+				&size, text,
+				lv_obj_get_style_text_font(label, 0),
+				lv_obj_get_style_text_letter_space(label, 0), 0,
+				LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+			observation->legends_fit &=
+				size.x <= lv_obj_get_content_width(label);
+			snprintf(observation->legends[slot],
+				 sizeof(observation->legends[slot]), "%s",
+				 text);
+		}
+		return;
+	}
+}
+
 bool __real_fplinux_ui_session_send(
 	int fd, const struct fplinux_ui_session_message *message);
 
@@ -256,6 +297,8 @@ bool __wrap_fplinux_ui_session_send(
 			false);
 		collect(lv_display_get_layer_top(display), &observation,
 			fplinux_ui_menu_is_open(application));
+		collect_legends(lv_display_get_layer_sys(display),
+				&observation);
 		if (canvas_area && !lv_obj_is_hidden(canvas_area)) {
 			observation.canvas = rectangle(canvas_area);
 			for (uint32_t index = 0;

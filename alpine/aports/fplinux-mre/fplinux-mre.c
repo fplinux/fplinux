@@ -56,7 +56,8 @@ enum command {
 	CMD_BACK = 1,
 	CMD_REPLACE,
 	CMD_ACCEPT,
-	CMD_RIGHT,
+	CMD_TEXT_OK,
+	CMD_CLEAR,
 	CMD_CANCEL,
 	CMD_UP,
 	CMD_CARD,
@@ -73,12 +74,20 @@ enum view {
 	VIEW_NATIVE
 };
 
+enum editor_keys {
+	EDITOR_KEYS_UNSET,
+	EDITOR_KEYS_NORMAL,
+	EDITOR_KEYS_CLEAR,
+	EDITOR_KEYS_PICKER,
+};
+
 enum { AUX_RECENT = 1, AUX_SETTINGS };
 
 struct app {
 	struct fplinux_ui *ui;
 	struct fplinux_ui_screen *screen;
 	struct fplinux_ui_text *field;
+	enum editor_keys editor_keys;
 	struct fplinux_ui_screen *home, *auxiliary;
 	struct fplinux_ui_screen *settings_scope, *settings_choice;
 	struct fplinux_ui_file_picker *picker;
@@ -204,6 +213,7 @@ static void replace_screen(struct app *app, struct fplinux_ui_screen *screen,
 		app->native_keys_held = 0;
 	}
 	app->field = NULL;
+	app->editor_keys = EDITOR_KEYS_UNSET;
 	app->canvas = app->pointer = NULL;
 	app->screen = screen;
 	app->view = view;
@@ -268,7 +278,8 @@ static void release_runtime(struct app *app)
 		fplinux_ui_canvas_set_key_handler(app->screen, NULL, NULL);
 		fplinux_ui_screen_remove_command(app->screen, CMD_ACCEPT);
 		fplinux_ui_screen_remove_command(app->screen, CMD_CANCEL);
-		fplinux_ui_screen_remove_command(app->screen, CMD_RIGHT);
+		fplinux_ui_screen_remove_command(app->screen, CMD_TEXT_OK);
+		fplinux_ui_screen_remove_command(app->screen, CMD_CLEAR);
 	}
 	close_pipe(app);
 	mre_audio_broker_close(app->audio);
@@ -1298,24 +1309,48 @@ static bool resume_native(struct app *app)
 	return app->child > 0;
 }
 
-static void sync_input_commands(struct app *app)
+static bool editor_inserts_newline(const struct app *app)
 {
-	if (app->field)
-		add_command(app, app->screen, CMD_RIGHT,
-			    FPLINUX_UI_COMMAND_CANCEL,
-			    app->shared->editor_method == 0 ? _("Close") :
-			    fplinux_ui_text_is_empty(app->field) ||
-					    fplinux_ui_text_is_picker_open(
-						    app->field) ?
-							      _("Cancel") :
-							      _("Clear"),
-			    0, NULL);
+	return app->shared->editor_max_shorts > 0 &&
+	       (app->shared->editor_method & (1 | 32)) != 0;
 }
 
 static void field_changed(struct fplinux_ui_text *field, void *context)
 {
-	(void)field;
-	sync_input_commands(context);
+	struct app *app = context;
+	struct fplinux_ui_screen *screen = app->screen;
+	bool read_only = app->shared->editor_method == 0;
+	bool newline = editor_inserts_newline(app);
+	enum editor_keys keys = EDITOR_KEYS_NORMAL;
+
+	if (fplinux_ui_text_is_picker_open(field))
+		keys = EDITOR_KEYS_PICKER;
+	else if (!read_only && app->shared->editor_max_shorts > 0 &&
+		 !fplinux_ui_text_is_empty(field))
+		keys = EDITOR_KEYS_CLEAR;
+	if (keys == app->editor_keys)
+		return;
+	app->editor_keys = keys;
+	if (keys == EDITOR_KEYS_PICKER)
+		fplinux_ui_screen_remove_command(screen, CMD_ACCEPT);
+	else
+		add_command(app, screen, CMD_ACCEPT,
+			    newline ? FPLINUX_UI_COMMAND_SCREEN :
+				      FPLINUX_UI_COMMAND_OK,
+			    read_only ? _("Close") : _("Done"), 0,
+			    read_only ? "back" : "check");
+	if (keys == EDITOR_KEYS_PICKER || newline)
+		add_command(app, screen, CMD_TEXT_OK, FPLINUX_UI_COMMAND_OK,
+			    keys == EDITOR_KEYS_PICKER ? _("Insert") :
+							 _("New line"),
+			    0, NULL);
+	else
+		fplinux_ui_screen_remove_command(screen, CMD_TEXT_OK);
+	if (keys == EDITOR_KEYS_CLEAR)
+		add_command(app, screen, CMD_CLEAR, FPLINUX_UI_COMMAND_CANCEL,
+			    _("Clear"), -1, NULL);
+	else
+		fplinux_ui_screen_remove_command(screen, CMD_CLEAR);
 }
 
 static void submit_editor(struct app *app, bool accepted)
@@ -1360,7 +1395,7 @@ static void editor_key(struct fplinux_ui *ui, struct fplinux_ui_screen *screen,
 			submit_editor(app, false);
 		return;
 	}
-	if (!(app->shared->editor_method & (1 | 32)) &&
+	if (!editor_inserts_newline(app) &&
 	    !fplinux_ui_text_is_picker_open(app->field) &&
 	    (key->code == KEY_OK || key->code == KEY_ENTER ||
 	     key->code == KEY_KPENTER)) {
@@ -1443,21 +1478,17 @@ static bool show_editor(struct app *app)
 	if (!fplinux_ui_text_set_constraint(field, constraint) ||
 	    !fplinux_ui_text_set(field, (const char *)shared->editor_data))
 		return false;
-	/* SDK method bits select the initial IME, not an app-specific parser.
-         * The native field owns Unicode, multi-tap and its symbol picker. */
+	/* Method bits select the field's initial input mode. */
 	if (shared->editor_method & 4)
 		select_input_mode(field, "123");
 	else if (shared->editor_method & (8 | 16))
 		select_input_mode(field, "abc");
-	add_command(app, screen, CMD_ACCEPT, FPLINUX_UI_COMMAND_SCREEN,
-		    shared->editor_method == 0 ? _("Close") : _("Done"), 0,
-		    shared->editor_method == 0 ? "back" : "check");
-	add_command(app, screen, CMD_CANCEL, FPLINUX_UI_COMMAND_HELP,
-		    _("Cancel input"), 1, NULL);
+	add_command(app, screen, CMD_CANCEL, FPLINUX_UI_COMMAND_CANCEL, NULL, 1,
+		    NULL);
 	fplinux_ui_canvas_set_key_handler(screen, editor_key, app);
 	fplinux_ui_canvas_set_keyboard_keys(screen, true);
 	fplinux_ui_text_set_change_cb(field, field_changed, app);
-	sync_input_commands(app);
+	field_changed(field, app);
 	accept_document_ui(app);
 	return true;
 }
@@ -2540,25 +2571,24 @@ static void screen_command(struct fplinux_ui *ui,
 	if (app->view == VIEW_INPUT) {
 		if (id == CMD_ACCEPT)
 			submit_editor(app, true);
-		else if (id == CMD_CANCEL)
-			submit_editor(app, false);
-		else if (id == CMD_RIGHT && app->field) {
+		else if (id == CMD_CANCEL && app->field) {
+			if (fplinux_ui_text_is_picker_open(app->field))
+				fplinux_ui_text_cancel_picker(app->field);
+			else
+				submit_editor(app, false);
+		} else if ((id == CMD_TEXT_OK || id == CMD_CLEAR) &&
+			   app->field) {
 			struct fplinux_ui_key key = {
 				.source = FPLINUX_UI_KEY_PHONE,
-				.code = FPLINUX_KEY_SOFT_RIGHT,
+				.code = id == CMD_TEXT_OK ?
+						KEY_OK :
+						FPLINUX_KEY_SOFT_RIGHT,
 				.pressed = true,
 			};
-			if (app->shared->editor_method == 0) {
-				submit_editor(app, true);
-				return;
-			}
-			/* A Canvas command is routed before its raw key handler.
-			 * Let the common field clear text or close its symbol picker. */
-			bool used = fplinux_ui_text_key(app->field, &key);
+
+			fplinux_ui_text_key(app->field, &key);
 			key.pressed = false;
 			fplinux_ui_text_key(app->field, &key);
-			if (!used)
-				submit_editor(app, false);
 		}
 		return;
 	}

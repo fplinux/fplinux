@@ -492,7 +492,7 @@ def test_form_value_omits_empty_caption_or_value_without_blank_lines(
         "resume",
         "open",
         "openwith",
-        "short-label",
+        "single-option",
         "canvas",
     ],
 )

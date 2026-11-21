@@ -2,7 +2,6 @@
 #include "calculator.h"
 #include "fplinux-cli.h"
 
-#include <fplinux/fplinux-gettext.h>
 #include <fplinux/fplinux-ui.h>
 #include <fplinux/fplinux-ui-locale.h>
 #include <fplinux/fplinux-ui-menu.h>
@@ -17,7 +16,6 @@
 #define APP_ID "org.fplinux.calculator"
 #define CLEAR_HOLD_MS 500U
 #define _(text) gettext(text)
-#define NC_(context, text) context "\004" text
 
 enum command {
 	COMMAND_BACK,
@@ -65,7 +63,7 @@ struct calculator_app {
 	uint64_t clear_pressed_ms;
 	bool clear_held;
 	bool failed;
-	struct fplinux_ui_screen *save_alert;
+	struct fplinux_ui_screen *save_prompt;
 	struct fplinux_storage_result saved;
 	bool discard;
 	bool finalized;
@@ -126,7 +124,8 @@ static void save_error_command(struct fplinux_ui *ui,
 	struct calculator_app *app = context;
 
 	(void)screen;
-	app->save_alert = NULL;
+	fplinux_ui_pop(ui);
+	app->save_prompt = NULL;
 	if (command_id == COMMAND_RETRY) {
 		if (!save_state(app)) {
 			if (!show_save_error(app)) {
@@ -144,55 +143,58 @@ static void save_error_command(struct fplinux_ui *ui,
 	}
 }
 
+static size_t append_save_answer(struct fplinux_ui_screen *form,
+				 const char *label, int id)
+{
+	const struct fplinux_ui_command command = {
+		.id = id,
+		.type = FPLINUX_UI_COMMAND_OK,
+	};
+	size_t item = fplinux_ui_form_append_string(form, NULL, label);
+
+	if (item == SIZE_MAX ||
+	    !fplinux_ui_form_set_appearance(form, item,
+					    FPLINUX_UI_APPEARANCE_BUTTON) ||
+	    !fplinux_ui_form_add_item_command(form, item, &command))
+		return SIZE_MAX;
+	return item;
+}
+
 static bool show_save_error(struct calculator_app *app)
 {
-	const struct fplinux_ui_command commands[] = {
-		{ .id = COMMAND_RETRY,
-		  .type = FPLINUX_UI_COMMAND_OK,
-		  .label = _("Retry"),
-		  .short_label = fplinux_gettext_context(
-			  NC_("short command", "Retry")),
-		  .icon = fplinux_ui_glyph(app->ui, "refresh",
-					   FPLINUX_UI_GLYPH_ROW) },
-		{ .id = COMMAND_STAY,
-		  .type = FPLINUX_UI_COMMAND_BACK,
-		  .label = _("Stay"),
-		  .icon = fplinux_ui_glyph(app->ui, "cancel",
-					   FPLINUX_UI_GLYPH_ROW) },
-		{ .id = COMMAND_DISCARD,
-		  .type = FPLINUX_UI_COMMAND_SCREEN,
-		  .label = app->saved.state ==
-					   FPLINUX_STORAGE_PUBLISHED_UNSYNCED ?
-				   _("Close anyway") :
-				   _("Discard changes"),
-		  .icon = fplinux_ui_glyph(app->ui, "delete",
-					   FPLINUX_UI_GLYPH_ROW) },
+	bool published = app->saved.state == FPLINUX_STORAGE_PUBLISHED_UNSYNCED;
+	const struct fplinux_ui_command stay = {
+		.id = COMMAND_STAY,
+		.type = FPLINUX_UI_COMMAND_CANCEL,
+		.label = _("Stay"),
 	};
-	struct fplinux_ui_screen *alert;
+	const char *title = published ? _("Saving not confirmed") :
+					_("Calculation not saved");
+	const char *discard = published ? _("Close anyway") :
+					  _("Discard changes");
+	struct fplinux_ui_screen *prompt = fplinux_ui_form_new(app->ui, title);
+	size_t retry_item;
+	bool ready;
 
-	stop_hold(app);
-	if (app->save_alert && fplinux_ui_current(app->ui) == app->save_alert)
-		fplinux_ui_pop(app->ui);
-	app->save_alert = NULL;
-	alert = fplinux_ui_alert_new(
-		app->ui, FPLINUX_UI_ALERT_ERROR,
-		app->saved.state == FPLINUX_STORAGE_PUBLISHED_UNSYNCED ?
-			_("Saving not confirmed") :
-			_("Calculation not saved"),
-		fplinux_ui_storage_error(app->saved), 0);
-	if (!alert)
+	if (!prompt)
 		return false;
-	for (size_t index = 0; index < sizeof(commands) / sizeof(commands[0]);
-	     ++index) {
-		if (fplinux_ui_screen_add_command(alert, &commands[index]))
-			continue;
-		fplinux_ui_push(app->ui, alert);
+	ready = fplinux_ui_form_append_string(
+			prompt, NULL, fplinux_ui_storage_error(app->saved)) !=
+			SIZE_MAX &&
+		(retry_item = append_save_answer(prompt, _("Retry"),
+						 COMMAND_RETRY)) != SIZE_MAX &&
+		append_save_answer(prompt, discard, COMMAND_DISCARD) !=
+			SIZE_MAX &&
+		fplinux_ui_screen_add_command(prompt, &stay);
+	if (!fplinux_ui_push(app->ui, prompt))
+		return false;
+	if (!ready) {
 		fplinux_ui_pop(app->ui);
 		return false;
 	}
-	fplinux_ui_screen_set_listener(alert, save_error_command, NULL, app);
-	app->save_alert = alert;
-	fplinux_ui_push(app->ui, alert);
+	fplinux_ui_form_set_focus(prompt, retry_item);
+	fplinux_ui_screen_set_listener(prompt, save_error_command, NULL, app);
+	app->save_prompt = prompt;
 	return true;
 }
 
@@ -203,6 +205,8 @@ static enum fplinux_ui_close_response prepare_close(struct fplinux_ui *ui,
 
 	(void)ui;
 	stop_hold(app);
+	if (app->save_prompt)
+		return FPLINUX_UI_CLOSE_WAIT;
 	if (save_state(app))
 		return FPLINUX_UI_CLOSE_READY;
 	if (show_save_error(app))
@@ -683,6 +687,7 @@ static bool create_view(struct calculator_app *app)
 		.id = COMMAND_BACK,
 		.type = FPLINUX_UI_COMMAND_BACK,
 		.priority = 10,
+		.direct = true,
 		.icon = fplinux_ui_glyph(app->ui, "back", FPLINUX_UI_GLYPH_ROW),
 	};
 

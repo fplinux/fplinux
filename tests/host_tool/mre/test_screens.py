@@ -219,6 +219,21 @@ def test_actual_mre_malformed_first_editor_reports_error_without_accepting(
 @pytest.mark.parametrize(
     "first_ui",
     [
+        pytest.param(("edit-cancel", "I"), id="cancel-with-nonempty-input"),
+        pytest.param(("edit-delete", "D"), id="clear-to-empty-and-confirm"),
+        pytest.param(("edit-multiline", "M"), id="picker-and-newline"),
+        pytest.param(("edit-readonly", "R"), id="read-only-close"),
+    ],
+)
+def test_actual_mre_editor_keypad_commands_reach_guest(
+    mre_native: Path, tmp_path: Path, first_ui: tuple[str, str]
+) -> None:
+    run_first_modal(mre_native, tmp_path, (128, 128), "ru", first_ui=first_ui)
+
+
+@pytest.mark.parametrize(
+    "first_ui",
+    [
         ("editor-close", "I"),
         ("editor-close-options", "I"),
         ("editor-end", "E"),
@@ -447,4 +462,4 @@ def run_first_modal(
         assert (["N", program] in records) == (program == "E")
         return
     if scenario != "malformed":
-        assert ["C" if scenario == "selector" else "E", program] in records
+        assert ["C" if scenario in {"selector", "edit-cancel"} else "E", program] in records

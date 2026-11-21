@@ -24,11 +24,11 @@ Hold a D-pad key to continue moving. In lists, <Key>Up</Key> from the first item
 
 **Back** from a page opened through **Options** returns to the menu with its previous selection. Press **Back** again to close the menu. Confirming an action, such as **Send** or **Done**, completes it and returns to the application.
 
-A short press and release of <Key>Red</Key> returns to Home and keeps the application open. <Key>Ctrl</Key>+<Key>Esc</Key> does the same on an external keyboard. To close an application, use its **Back** action from its first screen or choose **Close app** in Tasks.
+A short press and release of <Key>Red</Key> returns to Home and keeps the application open. <Key>Ctrl</Key>+<Key>Esc</Key> does the same on an external keyboard. To close an application, use its **Back** action from its first screen or choose **Quit** in Tasks.
 
 Press <Key>Dial</Key> on Home to open [Quick settings](#quick-settings).
 
-Press <Key>Left soft</Key> on Home to open **Tasks** and return to an application's previous screen, or choose **Close app** and confirm to close it. After the application closes, Tasks stays open; it shows **No open apps** when the last application has closed. Unlike opening from the catalog, returning through Tasks keeps the current page, selection and scroll position. An application that needs a save decision returns to the foreground. Confirming its close returns to Tasks; cancelling leaves the application open. Pressing <Key>Red</Key> during that decision returns Home instead. See [saving and storage errors](#saving-and-storage-errors) before discarding changes.
+Press <Key>Left soft</Key> on Home to open **Tasks** and return to an application's previous screen, or choose **Quit** and confirm to close it. After the application closes, Tasks stays open; it shows **No open apps** when the last application has closed. Unlike opening from the catalog, returning through Tasks keeps the current page, selection and scroll position. An application that needs a save decision returns to the foreground. Confirming its close returns to Tasks; cancelling leaves the application open. Pressing <Key>Red</Key> during that decision returns Home instead. See [saving and storage errors](#saving-and-storage-errors) before discarding changes.
 
 An external keyboard uses arrows, <Key>Enter</Key> and <Key>Esc</Key> for navigation. <Key>Tab</Key> opens Tasks from Home or switches the catalog view. Available Bluetooth and forwarded USB keyboards depend on the phone's [input support](/fplinux/use/connect/#type-with-your-computers-keyboard).
 
@@ -49,7 +49,7 @@ Use the D-pad to move the cursor and the on-screen **Clear**, **Options** and **
 
 ## Notes
 
-Open **Notes** from the catalog to edit your saved note, up to 1,000 characters. **Save** appears when there are changes or saving is not confirmed; it saves without leaving the editor or moving the cursor. While **Clear** occupies the right soft key, Save is in **Options**. **Back** saves and closes the note. Returning Home attempts to save and keeps the editor open; a failed save leaves the text and an unsaved marker available when you return. Follow the [save choices](#saving-and-storage-errors) before closing it.
+Open **Notes** from the catalog to edit your saved note, up to 1,000 characters. Choose **Options → Save** when there are changes or saving is unconfirmed. Saving keeps the editor open at the same cursor position. **Back** saves and closes the note. While **Clear** occupies the right soft key, choose **Options → Back**. Returning Home attempts to save and keeps the editor open. A failed save leaves the text and an unsaved marker available when you return. Follow the [save choices](#saving-and-storage-errors) before closing it.
 
 An untouched empty note creates no saved document. Clearing a previously saved note and saving replaces its text with an empty note. Notes stores one note, without a list of documents or file import.
 
@@ -65,7 +65,7 @@ Open Settings from the catalog:
 
 In **Display → Brightness**, use Left and Right to preview a level. **Save** keeps it; **Cancel** restores the previous level. Screen timeout and auto-lock are separate delays; see [Lock and screen timeout](#lock-and-screen-timeout).
 
-In **Time & language → Date and time**, select Date or Time and press Centre to edit it. Enter digits directly, use Left and Right to select a part, and Up and Down to change it. Times are in UTC. Return to the form and choose **Save** to set the clock. The form stays open until the change is confirmed; a failed attempt keeps your entered values and shows the current clock. Leaving an edited form asks whether to stay or leave without saving. Returning Home keeps the draft.
+In **Time & language → Date and time**, select Date or Time and press Centre to edit it. Enter digits directly, use Left and Right to select a part, and Up and Down to change it. Times are in UTC. Return to the form, move to **Save** and press Centre to set the clock. The form stays open until the change is confirmed; a failed attempt keeps your entered values and shows the current clock. Leaving an edited form asks whether to stay or leave without saving. Returning Home keeps the draft.
 
 The available languages come from installed language packages. The standard image includes English and Russian, with English as the default for the interface and keypad input. Saved language choices take precedence over these defaults. Changing a theme or interface language closes other graphical applications and reloads Home, so save your work first. The selection marker changes after confirmation; **Applying…** means the change is still pending. See [Clock and alarms](/fplinux/use/power/#clock-and-alarms) for clock synchronization and battery-backed time.
 
@@ -88,13 +88,13 @@ Settings use `/var/lib/fplinux/session.conf`. Notes and application preferences 
 
 ## Saving and storage errors
 
-After a failed Save, keep the application open until the data is saved or you decide to close without confirming it. Notes and Calculator offer **Retry** and **Stay** when closing requires a decision. Retry tries saving again; Stay returns to the current data. **Discard changes** closes when the new data was not written. **Close anyway** closes when the new file was published but its storage synchronization was not confirmed. Returning Home keeps the application and its current data in memory without opening a save question over Home.
+After a failed Save, keep the application open until the data is saved or you decide to close without confirming it. Notes and Calculator offer **Retry** and **Stay** when closing requires a decision. Retry tries saving again. Stay returns to the current data. **Discard changes** closes when the new data was not written. **Close anyway** closes when the new file was published but its storage synchronization was not confirmed. Use the D-pad and <Key>Centre</Key> to choose a row, or press the right soft key for **Stay**. Returning Home keeps the application and its current data in memory without opening a save question over Home.
 
 An unsaved marker means that saving is not confirmed. The error tells you whether storage is full, writing is denied or another problem occurred. **Saving not confirmed** means the app could not confirm that the data reached storage; the file may already contain the new value. Keep the app open and retry before closing it or removing power.
 
 Applied settings and a selected Terminal font can continue to work for the current session despite a save error. Confirmed Clock reminders and timer controls continue while the session retries its configuration. An unsaved alarm form remains a draft until Save is accepted.
 
-Repeating **Close app** preserves an outstanding save decision. Changing the interface theme or language restarts other applications after a warning; stopping the graphical service also closes them. Save important work before these actions. Forced termination and power-off can lose unsaved data.
+Repeating **Quit** preserves an outstanding save decision. Changing the interface theme or language restarts other applications after a warning; stopping the graphical service also closes them. Save important work before these actions. Forced termination and power-off can lose unsaved data.
 
 ## Lock and screen timeout
 

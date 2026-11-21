@@ -42,8 +42,10 @@ FILE *__wrap_fopen(const char *path, const char *mode)
 struct row {
 	char text[128];
 	char detail[128];
+	struct fplinux_ui_command action;
 	int value;
 	time_t date;
+	bool hidden;
 	bool selected;
 	bool image;
 };
@@ -62,6 +64,7 @@ struct fplinux_ui_screen {
 	bool is_form;
 	bool editing;
 	char select_label[128];
+	char header_status[128];
 	char image_source[256];
 	unsigned int image_attempts;
 };
@@ -148,6 +151,18 @@ static void open_row(struct fplinux_ui *ui, const char *text)
 	screen->focused = row_named(screen, text);
 	assert(screen->command);
 	screen->command(ui, screen, FPLINUX_UI_SELECT_COMMAND, screen->context);
+}
+
+static void activate_form_row(struct fplinux_ui *ui, const char *text)
+{
+	struct fplinux_ui_screen *form = ui->stack[ui->depth - 1];
+	size_t item = row_named(form, text);
+	const struct row *row = &form->rows[item];
+
+	assert(form->is_form && form->command && !row->hidden);
+	assert(row->action.label && row->action.type == FPLINUX_UI_COMMAND_OK);
+	form->focused = item;
+	form->command(ui, form, row->action.id, form->context);
 }
 
 static void command(struct fplinux_ui *ui, enum fplinux_ui_command_type type)
@@ -489,7 +504,8 @@ static void test_choice_reply(struct fplinux_ui *ui, bool theme,
 	if (queued_back) {
 		/* Input may drain Select and both Back keys before a reply. */
 		assert(selector->command_count == 0);
-		assert(!strcmp(selector->select_label, "Applying…"));
+		assert(!selector->select_label[0]);
+		assert(!strcmp(selector->header_status, "Applying…"));
 		choose_row(ui, before);
 		assert(selector->rows[row_named(selector, before)].selected);
 		assert(!selector->rows[row_named(selector, after)].selected);
@@ -1064,12 +1080,13 @@ static void test_date_save_retains_draft(struct fplinux_ui *ui,
 	form->focused = 1;
 	form->change(ui, form, 0, form->context);
 	form->change(ui, form, 1, form->context);
-	command(ui, FPLINUX_UI_COMMAND_SCREEN);
+	activate_form_row(ui, "Save");
 	assert(current(ui, "Date and time") == form);
 	assert(!strcmp(form->rows[1].text, "Time (UTC)"));
 	expect_sent(ui, sent, "time", "2024-02-29 08:45:00");
-	command(ui, FPLINUX_UI_COMMAND_SCREEN);
-	assert(ui->sent_count == sent + 1);
+	assert(form->command_count == 0);
+	assert(form->rows[row_named(form, "Save")].hidden);
+	assert(!strcmp(form->header_status, "Saving…"));
 	form->editing = editing;
 	set_lifecycle(ui, FPLINUX_UI_BACKGROUND);
 	set_visible(ui, false);
@@ -1099,7 +1116,7 @@ static void test_date_save_retains_draft(struct fplinux_ui *ui,
 		form->editing = false;
 		assert(ui->prepare_close(ui, ui->close_context) ==
 		       FPLINUX_UI_CLOSE_READY);
-		command(ui, FPLINUX_UI_COMMAND_SCREEN);
+		activate_form_row(ui, "Save");
 		current(ui, "Time & language");
 		assert(ui->sent_count == sent);
 		return;
@@ -1112,7 +1129,7 @@ static void test_date_save_retains_draft(struct fplinux_ui *ui,
 	assert(current(ui, "Date and time") == form);
 	assert(form->rows[0].date == 1709164800);
 	assert(form->rows[1].date == 1704098700 && form->focused == 1);
-	command(ui, FPLINUX_UI_COMMAND_SCREEN);
+	activate_form_row(ui, "Save");
 	expect_sent(ui, sent, "time", "2024-02-29 08:45:00");
 	reply(ui, FPLINUX_UI_SESSION_SETTING, "time", "2024-02-29 08:45:00",
 	      "");
@@ -1144,7 +1161,7 @@ static void test_date_prepare_close(struct fplinux_ui *ui)
 	assert(ui->depth == 4);
 	set_lifecycle(ui, FPLINUX_UI_FOREGROUND);
 	set_visible(ui, true);
-	command(ui, FPLINUX_UI_COMMAND_OK);
+	command(ui, FPLINUX_UI_COMMAND_CANCEL);
 	assert(ui->close_response == FPLINUX_UI_CLOSE_CANCEL);
 	assert(current(ui, "Date and time") == form);
 	assert(ui->prepare_close(ui, ui->close_context) ==
@@ -1224,7 +1241,7 @@ static void test_activation_date_draft(struct fplinux_ui *ui)
 	activate(ui, FPLINUX_UI_ACTIVATION_RESUME);
 	assert(current(ui, "Date and time") == question &&
 	       ui->alerts == alerts);
-	command(ui, FPLINUX_UI_COMMAND_OK);
+	command(ui, FPLINUX_UI_COMMAND_CANCEL);
 	assert(current(ui, "Date and time") == form && form->editing);
 	assert(form->focused == 1 && form->rows[0].date == 1709164800);
 	form->editing = false;
@@ -1261,7 +1278,7 @@ static void test_activation_pending_date(struct fplinux_ui *ui, bool failed,
 	form->rows[1].date = 1704098700;
 	form->change(ui, form, 0, form->context);
 	form->change(ui, form, 1, form->context);
-	command(ui, FPLINUX_UI_COMMAND_SCREEN);
+	activate_form_row(ui, "Save");
 	expect_sent(ui, sent, "time", "2024-02-29 08:45:00");
 	activate(ui, FPLINUX_UI_ACTIVATION_OPEN);
 	activate(ui, FPLINUX_UI_ACTIVATION_OPEN);
@@ -1286,13 +1303,13 @@ static void test_activation_pending_date(struct fplinux_ui *ui, bool failed,
 	} else if (changed) {
 		assert(!strcmp(current(ui, "Date and time")->message,
 			       "Return to the start without saving?"));
-		command(ui, FPLINUX_UI_COMMAND_OK);
+		command(ui, FPLINUX_UI_COMMAND_CANCEL);
 		assert(current(ui, "Date and time") == form);
 		assert(form->rows[1].date == 1704099600);
 		assert(ui->sent_count == sent + 1);
 		reply(ui, FPLINUX_UI_SESSION_SETTING, "input_locale", "ru", "");
 		assert(current(ui, "Date and time") == form);
-		command(ui, FPLINUX_UI_COMMAND_SCREEN);
+		activate_form_row(ui, "Save");
 		expect_sent(ui, sent + 1, "time", "2024-02-29 09:00:00");
 		reply(ui, FPLINUX_UI_SESSION_SETTING, "time",
 		      "2024-02-29 09:00:00", "");
@@ -1701,6 +1718,14 @@ bool fplinux_ui_list_set_select_label(struct fplinux_ui_screen *list,
 	return true;
 }
 
+bool fplinux_ui_screen_set_header_status(struct fplinux_ui_screen *screen,
+					 const char *full, const char *compact)
+{
+	(void)compact;
+	copy_text(screen->header_status, sizeof(screen->header_status), full);
+	return true;
+}
+
 /*
  * No system bus is part of this boundary: Settings has no Bluetooth adapter,
  * so it neither watches a descriptor nor waits for a change.
@@ -1949,6 +1974,33 @@ size_t fplinux_ui_form_append_property(struct fplinux_ui_screen *form,
 				       const char *label, const char *text)
 {
 	return fplinux_ui_form_append_string(form, label, text);
+}
+
+size_t fplinux_ui_form_append_value(struct fplinux_ui_screen *form,
+				    const char *label, const char *value)
+{
+	return fplinux_ui_list_append(form, label, value);
+}
+
+bool fplinux_ui_form_add_item_command(struct fplinux_ui_screen *form,
+				      size_t item,
+				      const struct fplinux_ui_command *command)
+{
+	assert(item < form->count);
+	form->rows[item].action = *command;
+	return true;
+}
+
+bool fplinux_ui_form_set_hidden(struct fplinux_ui_screen *form, size_t item,
+				bool hidden)
+{
+	assert(item < form->count);
+	form->rows[item].hidden = hidden;
+	if (hidden && form->focused == item) {
+		assert(item > 0);
+		form->focused = item - 1;
+	}
+	return true;
 }
 
 bool fplinux_ui_form_set_string(struct fplinux_ui_screen *form, size_t item,

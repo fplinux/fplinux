@@ -90,12 +90,6 @@ msgstr "Переименовать"
 msgid "Delete"
 msgstr "Удалить"
 
-msgid "Move here"
-msgstr "Перенести сюда"
-
-msgid "Copy here"
-msgstr "Копировать сюда"
-
 msgid "Places"
 msgstr "Места"
 
@@ -156,9 +150,6 @@ msgstr "%.1f КиБ"
 msgid "%.1f MiB"
 msgstr "%.1f МиБ"
 
-msgid "Here"
-msgstr "Сюда"
-
 msgid "Stop"
 msgstr "Стоп"
 
@@ -194,9 +185,6 @@ msgstr "Создать"
 
 msgid "Save"
 msgstr "Сохранить"
-
-msgid "Done"
-msgstr "Готово"
 
 #, c-format
 msgid "Delete %s?"
@@ -235,10 +223,6 @@ msgstr "Изменение видно, но не синхронизирован�
 msgid "Retry"
 msgstr "Повторить"
 
-msgctxt "short command"
-msgid "Retry"
-msgstr "Повтор"
-
 msgid "Finishing writes…"
 msgstr "Завершение записи…"
 
@@ -248,9 +232,6 @@ msgstr "%d%% · %s / %s"
 
 msgid "Safely eject"
 msgstr "Безопасно извлечь"
-
-msgid "Eject"
-msgstr "Извлечь"
 
 msgid "Connect"
 msgstr "Подключить"
@@ -291,23 +272,11 @@ msgstr "Подключена"
 msgid "Memory card"
 msgstr "Карта памяти"
 
-msgid "Cancel"
-msgstr "Отмена"
-
 msgid "Close Files?"
 msgstr "Закрыть «Файлы»?"
 
 msgid "An operation is running. Stop it and close Files?"
 msgstr "Выполняется операция. Остановить её и закрыть «Файлы»?"
-
-msgid "Stop and close"
-msgstr "Остановить и закрыть"
-
-msgid "Continue"
-msgstr "Продолжить"
-
-msgid "Resume"
-msgstr "Дальше"
 
 msgid "Open file"
 msgstr "Открытие файла"

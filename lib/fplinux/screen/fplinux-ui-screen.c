@@ -30,11 +30,11 @@ struct command {
 	enum fplinux_ui_command_type type;
 	/* NULL for the type's localized default. */
 	char *label;
-	char *short_label;
 	int priority;
 	/* The decoded options-menu image, or NULL. */
 	lv_draw_buf_t *icon;
-	bool keep_visible;
+	bool direct;
+	bool keep_right_on_clear;
 };
 
 /* A list row's or form item's own command; index follows its row. */
@@ -67,6 +67,7 @@ struct soft_keys {
 };
 
 static void restack(struct fplinux_ui_screens *layer);
+static void resize_screen(struct fplinux_ui_screen *screen);
 static void options_chosen(struct fplinux_ui *ui, int action, void *context);
 static void options_changed(struct fplinux_ui_screen *screen);
 static bool entry_current(const struct fplinux_ui_screen *screen,
@@ -169,12 +170,13 @@ lv_obj_t *fplinux_ui_screen_plain_object(lv_obj_t *parent)
 	return object;
 }
 
-/* Canvas owns its chrome; other full-display screens use the local bar. */
 static bool local_legend_bar(const struct fplinux_ui_screen *screen)
 {
-	return screen->kind != SCREEN_CANVAS &&
-	       (fplinux_ui_is_launcher(screen->ui) ||
-		fplinux_ui_is_fullscreen(screen->ui));
+	if (screen->kind == SCREEN_CANVAS)
+		return screen->canvas_fullscreen_bar &&
+		       fplinux_ui_is_fullscreen(screen->ui);
+	return fplinux_ui_is_launcher(screen->ui) ||
+	       fplinux_ui_is_fullscreen(screen->ui);
 }
 
 static int32_t screen_top(const struct fplinux_ui_screen *screen)
@@ -480,7 +482,6 @@ static size_t find_item_command(const struct fplinux_ui_screen *screen,
 static void free_command(struct command *command)
 {
 	free(command->label);
-	free(command->short_label);
 	if (command->icon)
 		lv_draw_buf_destroy(command->icon);
 }
@@ -557,15 +558,11 @@ static bool copy_command(struct fplinux_ui_screen *screen,
 		.id = from->id,
 		.type = from->type,
 		.priority = from->priority,
-		.keep_visible = from->keep_visible,
+		.direct = from->direct,
+		.keep_right_on_clear = from->keep_right_on_clear,
 	};
 	if (from->label && !(to->label = strdup(from->label)))
 		return false;
-	if (from->short_label &&
-	    !(to->short_label = strdup(from->short_label))) {
-		free(to->label);
-		return false;
-	}
 	/* A command keeps working without an image that cannot be shown. */
 	if (from->icon)
 		to->icon =
@@ -597,8 +594,7 @@ static bool valid_command(const struct fplinux_ui_command *command)
 	       command->id != FPLINUX_UI_SELECT_COMMAND &&
 	       (command->label ||
 		default_labels[command->type] != FPLINUX_UI_LABEL_COUNT) &&
-	       (!command->label || valid_label(command->label)) &&
-	       (!command->short_label || valid_label(command->short_label));
+	       (!command->label || valid_label(command->label));
 }
 
 /*
@@ -1114,6 +1110,7 @@ static size_t build_candidates(struct fplinux_ui_screen *screen)
 		screen->entries[count++] = (struct fplinux_ui_command_entry){
 			.role = role_of(command->type),
 			.priority = command->priority,
+			.direct = command->direct,
 		};
 	}
 	for (size_t i = 0; i < screen->command_count; ++i) {
@@ -1124,65 +1121,13 @@ static size_t build_candidates(struct fplinux_ui_screen *screen)
 		screen->entries[count++] = (struct fplinux_ui_command_entry){
 			.role = role_of(command->type),
 			.priority = command->priority,
+			.direct = command->direct,
 		};
 	}
 	return count;
 }
 
-static int32_t legend_width(const lv_font_t *font, const char *text)
-{
-	lv_point_t size;
-
-	if (!text[0])
-		return 0;
-	lv_text_get_size(&size, text, font, 0, 0, LV_COORD_MAX,
-			 LV_TEXT_FLAG_NONE);
-	return size.x;
-}
-
-/*
- * The launcher's soft-key bar spans the display and shows each legend at
- * its natural width while all of them fit between its margins.
- */
-static bool legends_fit(const struct fplinux_ui_screen *screen,
-			const char *const legends[3])
-{
-	const struct fplinux_ui_profile_spec *spec =
-		fplinux_ui_screen_spec(screen);
-	const lv_font_t *font = fplinux_ui_theme(screen->ui)->font_softkey;
-	int32_t width = 0;
-	int32_t shown = 0;
-
-	for (int i = 0; i < 3; ++i) {
-		int32_t legend = legend_width(font, legends[i]);
-
-		width += legend;
-		shown += legend > 0;
-	}
-	if (shown > 1)
-		width += (shown - 1) * spec->legend_gap;
-	return width <= fplinux_ui_metrics(screen->ui)->screen_width -
-				2 * spec->legend_margin;
-}
-
-static const char *short_command_label(const struct fplinux_ui_screen *screen,
-				       size_t index)
-{
-	const struct candidate *candidate;
-
-	if (system_close(screen))
-		return command_label(screen, index);
-	candidate = &screen->candidates[index];
-	if (!candidate->clear && candidate->command->short_label)
-		return candidate->command->short_label;
-	return command_label(screen, index);
-}
-
-/*
- * Assigns the keys and their legends. When the left command's legend does
- * not fit beside the others, it becomes Options with that command first
- * unless the caller explicitly keeps the action visible.
- */
+/* Use the same assignment for key dispatch, legends and the Options menu. */
 static void assign_keys(struct fplinux_ui_screen *screen,
 			struct soft_keys *soft)
 {
@@ -1206,7 +1151,7 @@ static void assign_keys(struct fplinux_ui_screen *screen,
 				       false, &soft->keys, screen->order);
 	if (!system_close(screen) && soft->keys.right != NONE)
 		soft->keep_right = screen->candidates[soft->keys.right]
-					   .command->keep_visible;
+					   .command->keep_right_on_clear;
 	if (soft->clear && soft->keep_right) {
 		/* Phones without a separate Clear key still offer deletion. */
 		screen->candidates[count] =
@@ -1214,6 +1159,7 @@ static void assign_keys(struct fplinux_ui_screen *screen,
 		screen->entries[count++] = (struct fplinux_ui_command_entry){
 			.role = FPLINUX_UI_ROLE_OTHER,
 			.priority = clear.priority,
+			.direct = true,
 		};
 		soft->clear = false;
 		fplinux_ui_command_keys_assign(entries, count,
@@ -1240,24 +1186,6 @@ static void assign_keys(struct fplinux_ui_screen *screen,
 		soft->keys.right != NONE ?
 			command_label(screen, soft->keys.right) :
 			"";
-	if (!legends_fit(screen, soft->legends)) {
-		if (soft->keys.left != NONE)
-			soft->legends[0] =
-				short_command_label(screen, soft->keys.left);
-		if (!soft->action && soft->keys.ok != NONE)
-			soft->legends[1] =
-				short_command_label(screen, soft->keys.ok);
-		if (!soft->clear && soft->keys.right != NONE)
-			soft->legends[2] =
-				short_command_label(screen, soft->keys.right);
-	}
-	if (soft->keys.left != NONE &&
-	    !screen->candidates[soft->keys.left].command->keep_visible &&
-	    !legends_fit(screen, soft->legends)) {
-		fplinux_ui_command_keys_collapse(&soft->keys, screen->order);
-		soft->legends[0] = fplinux_ui_screen_word(
-			screen, FPLINUX_UI_LABEL_OPTIONS);
-	}
 }
 
 static void update_legend_owner(struct fplinux_ui_screens *layer)
@@ -2841,6 +2769,17 @@ lv_obj_t *fplinux_ui_canvas_object(struct fplinux_ui_screen *canvas)
 	return canvas && canvas->kind == SCREEN_CANVAS ? canvas->content : NULL;
 }
 
+void fplinux_ui_canvas_set_fullscreen_bar(struct fplinux_ui_screen *canvas,
+					  bool enabled)
+{
+	if (!canvas || canvas->kind != SCREEN_CANVAS ||
+	    canvas->canvas_fullscreen_bar == enabled)
+		return;
+	canvas->canvas_fullscreen_bar = enabled;
+	resize_screen(canvas);
+	fplinux_ui_screen_changed(canvas);
+}
+
 void fplinux_ui_canvas_set_key_handler(struct fplinux_ui_screen *canvas,
 				       fplinux_ui_canvas_key_cb handler,
 				       void *context)
@@ -2899,7 +2838,6 @@ static void open_options(struct fplinux_ui_screen *screen,
 	struct fplinux_ui_menu_item *items = calloc(count, sizeof(*items));
 	struct menu_entry *entries =
 		realloc(layer->menu_entries, count * sizeof(*entries));
-	size_t visible = 0;
 
 	if (entries)
 		layer->menu_entries = entries;
@@ -2907,30 +2845,21 @@ static void open_options(struct fplinux_ui_screen *screen,
 		free(items);
 		return;
 	}
-	/* Back ends the visible menu; key assignment keeps its own priority. */
-	for (unsigned int pass = 0; pass < 2; ++pass) {
-		for (size_t i = 0; i < count; ++i) {
-			const struct candidate *candidate =
-				&screen->candidates[screen->order[i]];
-			bool back = !candidate->clear &&
-				    candidate->command->type ==
-					    FPLINUX_UI_COMMAND_BACK;
+	for (size_t i = 0; i < count; ++i) {
+		size_t index = screen->order[i];
+		const struct candidate *candidate = &screen->candidates[index];
 
-			if (back != (pass == 1))
-				continue;
-			entries[visible] = (struct menu_entry){
-				.id = candidate->command->id,
-				.item = candidate->item,
-				.clear = candidate->clear,
-				.index = focused_index(screen),
-			};
-			items[visible] = (struct fplinux_ui_menu_item){
-				.action = (int)visible,
-				.text = command_label(screen, screen->order[i]),
-				.icon = command_icon(screen, candidate),
-			};
-			++visible;
-		}
+		entries[i] = (struct menu_entry){
+			.id = candidate->command->id,
+			.item = candidate->item,
+			.clear = candidate->clear,
+			.index = focused_index(screen),
+		};
+		items[i] = (struct fplinux_ui_menu_item){
+			.action = (int)i,
+			.text = command_label(screen, index),
+			.icon = command_icon(screen, candidate),
+		};
 	}
 	layer->menu_entry_count = count;
 	layer->menu_screen = screen;

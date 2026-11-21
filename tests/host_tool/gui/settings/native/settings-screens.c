@@ -565,7 +565,8 @@ static void pending_choice_retains_applied_marker(struct capture *capture,
 
 	pump_for(capture, 100);
 	assert(capture->observed.selection_mask == selected);
-	wait_legends(capture, "", "Applying…", "");
+	wait_label(capture, "Applying…");
+	wait_legends(capture, "", "", "");
 	press(capture, KEY_UP);
 	press(capture, KEY_OK);
 	pump_for(capture, 100);
@@ -576,7 +577,8 @@ static void pending_choice_retains_applied_marker(struct capture *capture,
 	pump_for(capture, 100);
 	assert(capture->observed.selection_mask == selected);
 	assert(capture->changes == changes);
-	wait_legends(capture, "", "Applying…", "");
+	wait_label(capture, "Applying…");
+	wait_legends(capture, "", "", "");
 }
 
 static void wait_time_request(struct capture *capture)
@@ -617,6 +619,15 @@ static void home_and_resume_inline_edit(struct capture *capture, uint64_t item)
 	       capture->observed.focused_item == item);
 }
 
+static void save_date_form(struct capture *capture)
+{
+	wait_legends(capture, "", "Edit", "Back");
+	press(capture, KEY_DOWN);
+	wait_label(capture, "Save");
+	wait_legends(capture, "", "Save", "Back");
+	press(capture, KEY_OK);
+}
+
 static void
 date_draft_survives_pending_home_and_refusal(struct capture *capture)
 {
@@ -651,13 +662,15 @@ date_draft_survives_pending_home_and_refusal(struct capture *capture)
 	       capture->observed.focused_item == 1);
 	date = capture->observed.date_value;
 	time = capture->observed.time_value;
-	press(capture, KEY_F13);
+	save_date_form(capture);
 	wait_time_request(capture);
 	request = capture->request;
 	assert(!strcmp(request.value, "2024-02-29 08:45:00"));
 	changes = capture->changes;
-	wait_legends(capture, "Saving…", "Edit", "");
-	press(capture, KEY_F13);
+	wait_label(capture, "Saving…");
+	wait_legends(capture, "", "Edit", "");
+	assert(!has_label(capture, "Save"));
+	press(capture, KEY_DOWN);
 	pump_for(capture, 100);
 	assert(capture->changes == changes);
 	message.type = FPLINUX_UI_SESSION_LIFECYCLE;
@@ -682,7 +695,7 @@ date_draft_survives_pending_home_and_refusal(struct capture *capture)
 	assert(fplinux_ui_session_send(capture->session, &message));
 	wait_label(capture, "The setting was not changed. Try again.");
 	press(capture, KEY_F14);
-	wait_legends(capture, "Save", "Edit", "Back");
+	wait_legends(capture, "", "Edit", "Back");
 	pump_for(capture, 100);
 	assert(capture->observed.date_value == date);
 	assert(capture->observed.time_value == time);
@@ -696,12 +709,12 @@ date_draft_survives_pending_home_and_refusal(struct capture *capture)
 	wait_label(capture, "Leave without saving?");
 	assert(!strcmp(capture->close_value, "wait"));
 	press(capture, KEY_F14);
-	wait_legends(capture, "Save", "Edit", "Back");
+	wait_legends(capture, "", "Edit", "Back");
 	pump_for(capture, 100);
 	assert(!strcmp(capture->close_value, "cancel"));
 	assert(capture->observed.date_value == date &&
 	       capture->observed.time_value == time);
-	press(capture, KEY_F13);
+	save_date_form(capture);
 	expect_request(capture, "time", request.value);
 	message = request;
 	message.type = FPLINUX_UI_SESSION_SETTING;
@@ -1128,16 +1141,7 @@ static void wait_screen_hold(struct capture *capture, bool enabled)
 
 static void wait_scan_controls(struct capture *capture)
 {
-	bool small = atoi(getenv("FPLINUX_SETTINGS_TEST_WIDTH")) <= 128;
-	const char *left = small ? "Options" : "Stop search";
-
-	wait_legends(capture, left, "Select", "Back");
-	if (small) {
-		press(capture, KEY_F13);
-		wait_label(capture, "Stop search");
-		press(capture, KEY_F14);
-		wait_legends(capture, left, "Select", "Back");
-	}
+	wait_legends(capture, "Options", "Select", "Stop");
 }
 
 static void bluetooth_name_wait_retains_editor(struct capture *capture)
@@ -1152,7 +1156,10 @@ static void bluetooth_name_wait_retains_editor(struct capture *capture)
 	press(capture, KEY_NUMERIC_2);
 	press(capture, KEY_NUMERIC_3);
 	wait_form_text(capture, "Test adapter123");
+	wait_legends(capture, "Options", "", "Clear");
 	bluez_fake_answer(capture->bluez, BLUEZ_FAKE_FAIL, 1000);
+	press(capture, KEY_DOWN);
+	wait_legends(capture, "", "Save", "Back");
 	press(capture, KEY_OK);
 	pump_for(capture, 150);
 	assert(has_label(capture, "Name"));
@@ -1163,6 +1170,7 @@ static void bluetooth_name_wait_retains_editor(struct capture *capture)
 	press(capture, KEY_F14);
 	wait_label(capture, "Name");
 	wait_form_text(capture, "Test adapter123");
+	wait_legends(capture, "", "Save", "Back");
 	bluez_fake_answer(capture->bluez, BLUEZ_FAKE_APPLY, 1000);
 	press(capture, KEY_OK);
 	pump_for(capture, 150);
@@ -1175,6 +1183,31 @@ static void bluetooth_name_wait_retains_editor(struct capture *capture)
 	bluez_fake_answer(capture->bluez, BLUEZ_FAKE_APPLY, 0);
 	press(capture, KEY_UP);
 	press(capture, KEY_UP);
+}
+
+static void bluetooth_pair_with_passkey(struct capture *capture)
+{
+	uint64_t deadline;
+
+	bluez_fake_request_agent(capture->bluez, BLUEZ_FAKE_AGENT_PASSKEY,
+				 VISITOR, 0, 0, NULL);
+	wait_label(capture, "Passkey");
+	wait_legends(capture, "", "", "Reject");
+	for (unsigned int key = KEY_NUMERIC_1; key <= KEY_NUMERIC_6; ++key)
+		press(capture, key);
+	wait_legends(capture, "Options", "", "Clear");
+	press(capture, KEY_DOWN);
+	wait_label(capture, "Pair");
+	wait_legends(capture, "", "Pair", "Reject");
+	press(capture, KEY_OK);
+	deadline = fplinux_ui_frame_now_ms() + 3000;
+	while (!bluez_fake_agent_answered(capture->bluez) &&
+	       fplinux_ui_frame_now_ms() < deadline)
+		pump(capture);
+	assert(bluez_fake_agent_answered(capture->bluez));
+	assert(!bluez_fake_agent_rejected(capture->bluez));
+	assert(!strcmp(bluez_fake_agent_code(capture->bluez), "123456"));
+	wait_legends(capture, "", "Open", "Back");
 }
 
 /* Navigate the real device inventory; only the radio daemon is replaced. */
@@ -1310,9 +1343,11 @@ static void bluetooth_devices(struct capture *capture)
 	assert(fplinux_ui_session_send(capture->session, &lifecycle));
 	pump_for(capture, 150);
 	assert(bluez_fake_agent_registered(capture->bluez));
+	wait_legends(capture, "Options", "Select", "Back");
 	press(capture, KEY_F14);
 	wait_label(capture, "Bluetooth");
 	wait_legends(capture, "", "Open", "Back");
+	bluetooth_pair_with_passkey(capture);
 	bluez_fake_request_agent(capture->bluez, BLUEZ_FAKE_AGENT_AUTHORIZATION,
 				 VISITOR, 0, 0, NULL);
 	wait_label(capture, "Allow pairing with Visitor?");
@@ -1381,7 +1416,7 @@ static void choose_transfer_folder(struct capture *capture)
 {
 	wait_label(capture, "My files");
 	press(capture, KEY_OK);
-	wait_legends(capture, "Receive here", "", "Back");
+	wait_legends(capture, "Here", "", "Back");
 	press(capture, KEY_F13);
 }
 
@@ -1408,7 +1443,7 @@ static void request_user_close(struct capture *capture)
 	send_prepare_close(capture, ++capture->serial);
 	assert(!strcmp(capture->close_value, "wait"));
 	wait_label(capture,
-		   "Cancel the current file transfer and close Settings?");
+		   "Stop the current file transfer and close Settings?");
 }
 
 static void wait_for_cancelled_receive(struct capture *capture)
@@ -1472,7 +1507,7 @@ static void bluetooth_transfers(struct capture *capture)
 	obex = start_obex(capture, "send-fast", "send");
 	press(capture, KEY_OK);
 	wait_label(capture, "Test peer");
-	wait_legends(capture, "Stop search", "Select", "Back");
+	wait_scan_controls(capture);
 	press(capture, KEY_OK);
 	capture->stage = "send: choose file";
 	wait_label(capture, "My files");
@@ -1494,7 +1529,7 @@ static void bluetooth_transfers(struct capture *capture)
 	obex = start_obex(capture, "receive", "receive");
 	press(capture, KEY_OK);
 	wait_label(capture, "Test peer");
-	wait_legends(capture, "Stop search", "Select", "Back");
+	wait_scan_controls(capture);
 	press(capture, KEY_OK);
 	capture->stage = "receive: choose destination";
 	choose_transfer_folder(capture);
@@ -1524,12 +1559,16 @@ static void bluetooth_transfers(struct capture *capture)
 	capture->stage = "cancel new send: choose peer";
 	press(capture, KEY_OK);
 	wait_label(capture, "Test peer");
-	wait_legends(capture, "Stop search", "Select", "Back");
+	wait_scan_controls(capture);
 	press(capture, KEY_OK);
 	capture->stage = "cancel new send: cancel picker";
 	wait_label(capture, "My files");
 	press(capture, KEY_F14);
 	wait_label(capture, "Test peer");
+	wait_scan_controls(capture);
+	press(capture, KEY_F14);
+	wait_legends(capture, "Options", "Select", "Back");
+	assert(!bluez_fake_discovering(capture->bluez, HCI0));
 	press(capture, KEY_F14);
 	wait_label(capture, "Bluetooth");
 	wait_legends(capture, "", "Open", "Back");
@@ -1545,7 +1584,7 @@ static void bluetooth_transfers(struct capture *capture)
 	obex = start_obex(capture, "receive-cancel-held", "cancel");
 	press(capture, KEY_OK);
 	wait_label(capture, "Test peer");
-	wait_legends(capture, "Stop search", "Select", "Back");
+	wait_scan_controls(capture);
 	press(capture, KEY_OK);
 	capture->stage = "cancel receive: choose destination";
 	choose_transfer_folder(capture);
@@ -1554,6 +1593,7 @@ static void bluetooth_transfers(struct capture *capture)
 	press(capture, KEY_OK);
 	capture->stage = "cancel receive: await partial bytes";
 	wait_label(capture, "3 / 7 bytes");
+	wait_legends(capture, "Options", "", "Stop");
 	save_frame(capture, "settings-bluetooth-transfer");
 	capture->stage = "cancel receive: stay after close";
 	request_user_close(capture);
@@ -1573,11 +1613,55 @@ static void bluetooth_transfers(struct capture *capture)
 	puts("settings-bluetooth-transfers: shared pickers send bytes, consent publishes received files, document results return, and close waits for cancellation");
 }
 
+static void bluetooth_conflict(struct capture *capture, const char *choice)
+{
+	bool cancel = !strcmp(choice, "cancel");
+	const char *result = cancel ? "Cancelled" : "Complete";
+	pid_t obex;
+
+	bluez_fake_add_device(capture->bluez, TRANSFER_PEER,
+			      "01:23:45:67:89:AB", "Test peer", true);
+	pump_for(capture, 100);
+	press(capture, KEY_DOWN);
+	press(capture, KEY_DOWN);
+	press(capture, KEY_OK);
+	wait_label(capture, "Power");
+	for (size_t i = 0; i < 6; ++i)
+		press(capture, KEY_DOWN);
+	capture->stage = "conflict: choose peer and destination";
+	obex = start_obex(capture, "receive", "conflict");
+	press(capture, KEY_OK);
+	wait_label(capture, "Test peer");
+	wait_scan_controls(capture);
+	press(capture, KEY_OK);
+	choose_transfer_folder(capture);
+	capture->stage = "conflict: consent and choose how to publish";
+	wait_label(capture, "Receive incoming.txt from Test peer?");
+	press(capture, KEY_OK);
+	wait_label(capture, "incoming.txt already exists.");
+	wait_label(capture, "Keep both");
+	wait_label(capture, "Replace");
+	wait_legends(capture, "", "Keep both", "Cancel");
+	if (!strcmp(choice, "replace")) {
+		press(capture, KEY_DOWN);
+		wait_legends(capture, "", "Replace", "Cancel");
+	}
+	press(capture, cancel ? KEY_F14 : KEY_OK);
+	wait_legends(capture, "", cancel ? "" : "Open file", "Back");
+	for (size_t i = 0; i < 3 && !has_label(capture, result); ++i)
+		press(capture, KEY_DOWN);
+	wait_label(capture, result);
+	reap_obex(capture, obex);
+}
+
 int main(int argc, char **argv)
 {
 	struct capture capture = { 0 };
+	const char *conflict_choice = NULL;
 
 	assert(setvbuf(stdout, NULL, _IONBF, 0) == 0);
+	if (argc == 7 && !strncmp(argv[6], "bluetooth-conflict-", 19))
+		conflict_choice = argv[6] + 19;
 	assert(argc == 6 ||
 	       (argc == 7 &&
 		(!strcmp(argv[6], "root-values") ||
@@ -1586,11 +1670,12 @@ int main(int argc, char **argv)
 		 !strcmp(argv[6], "bluetooth-transfers") ||
 		 !strcmp(argv[6], "section-values") ||
 		 !strcmp(argv[6], "sound") || !strcmp(argv[6], "root-sound") ||
-		 !strcmp(argv[6], "about-edges"))));
+		 !strcmp(argv[6], "about-edges") || conflict_choice)));
 	capture.bluetooth = argc == 7 &&
 			    (!strcmp(argv[6], "bluetooth") ||
 			     !strcmp(argv[6], "bluetooth-devices") ||
-			     !strcmp(argv[6], "bluetooth-transfers"));
+			     !strcmp(argv[6], "bluetooth-transfers") ||
+			     conflict_choice);
 	capture.initial_media_unknown = argc == 7 &&
 					!strcmp(argv[6], "root-sound");
 	if (capture.bluetooth) {
@@ -1604,7 +1689,9 @@ int main(int argc, char **argv)
 			bluetooth_transfers(&capture);
 			bluez_fake_stop(capture.bluez);
 			return 0;
-		} else if (!strcmp(argv[6], "bluetooth-devices"))
+		} else if (conflict_choice)
+			bluetooth_conflict(&capture, conflict_choice);
+		else if (!strcmp(argv[6], "bluetooth-devices"))
 			bluetooth_devices(&capture);
 		else
 			bluetooth_switch(&capture);

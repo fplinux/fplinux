@@ -62,7 +62,7 @@ An application's catalog icon is package-owned; the [desktop-entry guide](/fplin
 
 High-level screens choose the soft keys from command types and priority. Give commands short, translated action words, then let the runtime assign and fit their legends. A label is not a second keyboard handler.
 
-For a raw fullscreen screen, `fplinux_ui_softkey_bar_create()` and `fplinux_ui_softkey_bar_set()` draw a standard legend bar. The system places the volume indicator above a visible bar. Reserve the bar’s height, update it after resize and keep its labels consistent with the actions your key handler accepts. Built-in modal screens provide their own legends over fullscreen content.
+Call `fplinux_ui_canvas_set_fullscreen_bar()` on a Canvas that should keep the shared command bar in fullscreen. Lay out its content using `fplinux_ui_screen_get_content_size()` after a resize. Built-in modal screens also show their own commands over fullscreen content.
 
 ## Keep drawing and memory bounded
 

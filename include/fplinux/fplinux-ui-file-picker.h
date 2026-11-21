@@ -24,7 +24,7 @@ struct fplinux_ui_file_picker_options {
 	/* Absolute My files path. All strings and extensions are copied. */
 	const char *home;
 	const char *title;
-	/* Folder action, for example "Copy here"; NULL uses "Select". */
+	/* Direct folder action, for example "Play folder". NULL uses "Here". */
 	const char *folder_action;
 	/* NULL-terminated ASCII extensions without dots; NULL accepts all files. */
 	const char *const *extensions;

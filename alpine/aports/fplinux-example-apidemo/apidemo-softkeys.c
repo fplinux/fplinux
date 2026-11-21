@@ -1,14 +1,6 @@
 /* SPDX-License-Identifier: 0BSD */
-/*
- * Application-owned legends, with the runtime's geometry and bar appearance.
- * In full screen, where no system bar shows, the example draws its own bar
- * in that place with the screen's keys; otherwise the system bar alone
- * shows them.
- */
+/* The same screen commands supply the legends in both display modes. */
 #include "apidemo.h"
-
-#include <errno.h>
-#include <stdio.h>
 
 enum {
 	COMMAND_CHANGE = 1,
@@ -17,14 +9,13 @@ enum {
 
 static struct {
 	struct fplinux_ui_screen *canvas;
-	lv_obj_t *bar;
 	lv_obj_t *scroll;
 	bool changed;
 } preview;
 
 static const char *change_label(void)
 {
-	return preview.changed ? _("Restore legends") : _("Change legends");
+	return preview.changed ? _("Restore") : _("Change");
 }
 
 /* OK changes the legends: its own command, whose label says so, included. */
@@ -34,7 +25,6 @@ static void add_change(struct apidemo *app)
 		.id = COMMAND_CHANGE,
 		.type = FPLINUX_UI_COMMAND_OK,
 		.label = change_label(),
-		.short_label = _("Change"),
 		.icon = apidemo_glyph(app, "edit"),
 	};
 
@@ -42,37 +32,27 @@ static void add_change(struct apidemo *app)
 }
 
 /*
- * Refit after a surface resize, which a change of display mode also brings,
- * and after the live example changes its keys.
+ * Refit after a surface resize, which a change of display mode also brings.
  */
 static void layout_preview(struct apidemo *app)
 {
-	bool shown = fplinux_ui_is_fullscreen(app->ui);
 	int width;
 	int height;
 
-	if (!preview.bar)
+	if (!preview.scroll)
 		return;
 	if (!fplinux_ui_screen_get_content_size(preview.canvas, &width,
 						&height)) {
 		apidemo_error(app, "fplinux_ui_screen_get_content_size");
 		return;
 	}
-	lv_obj_set_hidden(preview.bar, !shown);
-	/* The keys' actions: the mode command, OK and Back. */
-	if (shown && !fplinux_ui_softkey_bar_set(app->ui, preview.bar,
-						 _("Toggle full screen"),
-						 change_label(), _("Back")))
-		apidemo_error(app, "fplinux_ui_softkey_bar_set");
-	lv_obj_set_size(preview.scroll, width,
-			shown ? height - app->metrics->softkey_height : height);
+	lv_obj_set_size(preview.scroll, width, height);
 }
 
 static void preview_deleted(lv_event_t *event)
 {
 	(void)event;
 	preview.canvas = NULL;
-	preview.bar = NULL;
 	preview.scroll = NULL;
 }
 
@@ -106,7 +86,6 @@ static void preview_command(struct fplinux_ui *ui,
 	} else if (command_id == COMMAND_CHANGE) {
 		preview.changed = !preview.changed;
 		add_change(app);
-		layout_preview(app);
 	}
 }
 
@@ -114,12 +93,10 @@ static void open_preview(struct apidemo *app, const struct apidemo_entry *entry)
 {
 	struct fplinux_ui_screen *canvas =
 		fplinux_ui_canvas_new(app->ui, _(entry->title));
-	/* Short labels keep both on their keys rather than in Options. */
 	const struct fplinux_ui_command mode = {
 		.id = COMMAND_FULLSCREEN,
 		.type = FPLINUX_UI_COMMAND_SCREEN,
 		.label = _("Toggle full screen"),
-		.short_label = _("Screen"),
 		.icon = apidemo_glyph(app, "fullscreen"),
 	};
 	lv_obj_t *area;
@@ -132,18 +109,8 @@ static void open_preview(struct apidemo *app, const struct apidemo_entry *entry)
 	area = fplinux_ui_canvas_object(canvas);
 	preview.canvas = canvas;
 	preview.changed = false;
-	preview.bar = fplinux_ui_softkey_bar_create(app->ui, area);
-	if (!preview.bar) {
-		int saved = errno;
-
-		fplinux_ui_push(app->ui, canvas);
-		fplinux_ui_pop(app->ui);
-		errno = saved;
-		apidemo_error(app, "fplinux_ui_softkey_bar_create");
-		return;
-	}
-	lv_obj_add_event_cb(preview.bar, preview_deleted, LV_EVENT_DELETE,
-			    NULL);
+	fplinux_ui_canvas_set_fullscreen_bar(canvas, true);
+	lv_obj_add_event_cb(area, preview_deleted, LV_EVENT_DELETE, NULL);
 	preview.scroll = lv_obj_create(area);
 	lv_obj_remove_style_all(preview.scroll);
 	lv_obj_set_style_pad_hor(preview.scroll, app->metrics->margin, 0);
@@ -156,9 +123,9 @@ static void open_preview(struct apidemo *app, const struct apidemo_entry *entry)
 	lv_label_set_long_mode(hint, LV_LABEL_LONG_MODE_WRAP);
 	lv_label_set_text(
 		hint,
-		_("Toggle full screen shows this example's own legend bar in "
-		  "place of the system bar, with the same keys. Change legends "
-		  "updates OK's legend; Back leaves full screen, then returns."));
+		_("Options > Toggle full screen uses the same commands in both "
+		  "views. Change and Restore switch the centre label. Back "
+		  "leaves full screen, then returns to the catalogue."));
 	layout_preview(app);
 	apidemo_add_back(canvas);
 	fplinux_ui_screen_add_command(canvas, &mode);
@@ -172,8 +139,7 @@ static void open_preview(struct apidemo *app, const struct apidemo_entry *entry)
 }
 
 static const struct apidemo_entry entries[] = {
-	{ N_("Soft-key preview"),
-	  "fplinux_ui_softkey_bar_create · fplinux_ui_softkey_bar_set",
+	{ N_("Soft-key preview"), "fplinux_ui_canvas_set_fullscreen_bar",
 	  open_preview, 0, N_("Change legends and toggle full screen") },
 };
 

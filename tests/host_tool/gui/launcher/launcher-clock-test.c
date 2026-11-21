@@ -374,7 +374,7 @@ static void test_alarm(struct fplinux_ui *ui,
 		       "Stop"));
 	assert(!strcmp(find_command(alert, FPLINUX_UI_COMMAND_SCREEN)->label,
 		       "Snooze"));
-	assert(find_command(alert, FPLINUX_UI_COMMAND_SCREEN)->keep_visible);
+	assert(find_command(alert, FPLINUX_UI_COMMAND_SCREEN)->direct);
 	alert_response(ui, FPLINUX_UI_COMMAND_SCREEN);
 	assert(ui->sent_count == 1 && ui->sent[0].serial != 0);
 	assert(ui->sent[0].type == FPLINUX_UI_SESSION_CLOCK);

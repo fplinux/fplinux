@@ -27,6 +27,9 @@ struct fplinux_ui_screen {
 	int stay_command;
 	int discard_command;
 	char discard_label[64];
+	char heading[128];
+	size_t form_items;
+	bool form;
 	enum fplinux_ui_alert_kind kind;
 	unsigned int timeout_ms;
 };
@@ -185,15 +188,8 @@ bool fplinux_ui_screen_add_command(struct fplinux_ui_screen *screen,
 		assert(command->icon && !strcmp(command->icon, "refresh"));
 		screen->retry_command = command->id;
 	} else if (command->label && !strcmp(command->label, "Stay")) {
-		assert(command->icon && !strcmp(command->icon, "cancel"));
+		assert(command->type == FPLINUX_UI_COMMAND_CANCEL);
 		screen->stay_command = command->id;
-	} else if (command->label &&
-		   (!strcmp(command->label, "Discard changes") ||
-		    !strcmp(command->label, "Close anyway"))) {
-		assert(command->icon && !strcmp(command->icon, "delete"));
-		screen->discard_command = command->id;
-		snprintf(screen->discard_label, sizeof(screen->discard_label),
-			 "%s", command->label);
 	} else if (command->type == FPLINUX_UI_COMMAND_BACK) {
 		assert(command->icon && !strcmp(command->icon, "back"));
 		screen->back_command = command->id;
@@ -254,6 +250,60 @@ struct fplinux_ui_screen *fplinux_ui_alert_new(struct fplinux_ui *ui,
 	return alert;
 }
 
+struct fplinux_ui_screen *fplinux_ui_form_new(struct fplinux_ui *ui,
+					      const char *title)
+{
+	struct fplinux_ui_screen *form = calloc(1, sizeof(*form));
+
+	assert(ui == &runtime && form);
+	form->form = true;
+	snprintf(form->title, sizeof(form->title), "%s", title);
+	return form;
+}
+
+size_t fplinux_ui_form_append_string(struct fplinux_ui_screen *form,
+				     const char *label, const char *text)
+{
+	assert(form->form && form->form_items < 3);
+	if (!form->form_items) {
+		assert(label);
+		snprintf(form->heading, sizeof(form->heading), "%s", label);
+		snprintf(form->text, sizeof(form->text), "%s", text);
+	} else if (form->form_items == 1)
+		assert(!strcmp(text, "Retry"));
+	else
+		snprintf(form->discard_label, sizeof(form->discard_label), "%s",
+			 text);
+	return form->form_items++;
+}
+
+bool fplinux_ui_form_set_appearance(struct fplinux_ui_screen *form, size_t item,
+				    enum fplinux_ui_appearance appearance)
+{
+	assert(form->form && (item == 1 || item == 2));
+	assert(appearance == FPLINUX_UI_APPEARANCE_BUTTON);
+	return true;
+}
+
+bool fplinux_ui_form_add_item_command(struct fplinux_ui_screen *form,
+				      size_t item,
+				      const struct fplinux_ui_command *command)
+{
+	assert(form->form && command->type == FPLINUX_UI_COMMAND_OK);
+	if (item == 1)
+		form->retry_command = command->id;
+	else {
+		assert(item == 2);
+		form->discard_command = command->id;
+	}
+	return true;
+}
+
+void fplinux_ui_form_set_focus(struct fplinux_ui_screen *form, size_t item)
+{
+	assert(form->form && item == 1);
+}
+
 bool fplinux_ui_push(struct fplinux_ui *ui, struct fplinux_ui_screen *screen)
 {
 	ui->current = screen;
@@ -310,11 +360,12 @@ void fplinux_ui_go_back(struct fplinux_ui *ui)
 static void choose(struct fplinux_ui *ui, int command)
 {
 	struct fplinux_ui_screen *screen = ui->current;
+	bool alert = screen != ui->editor && !screen->form;
 
-	if (screen != ui->editor)
+	if (alert)
 		ui->current = ui->editor;
 	screen->listener(ui, screen, command, screen->context);
-	if (screen != ui->editor)
+	if (alert)
 		free(screen);
 }
 
@@ -517,7 +568,9 @@ int fplinux_ui_run(struct fplinux_ui *ui)
 				   ui->editor->save_command);
 		assert(ui->exits == 0 && ui->current != ui->editor);
 		assert(!strcmp(preferences.saved, draft));
-		assert(!strcmp(ui->current->title, "Saving not confirmed"));
+		assert(!strcmp(ui->current->form ? ui->current->heading :
+						   ui->current->title,
+			       "Saving not confirmed"));
 		assert(!strcmp(ui->current->text,
 			       "Storage input/output error"));
 		assert(ui->editor->has_save);

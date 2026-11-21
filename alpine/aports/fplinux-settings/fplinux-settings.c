@@ -41,7 +41,6 @@ enum command {
 	COMMAND_SAVE,
 	COMMAND_CANCEL,
 	COMMAND_LEAVE,
-	COMMAND_STAY,
 	COMMAND_CLOSE,
 	COMMAND_CHANGE,
 };
@@ -238,6 +237,7 @@ struct settings_app {
 	/* Date and time: an item follows the clock until the user edits it. */
 	size_t date_item;
 	size_t time_item;
+	size_t date_save_item;
 	size_t current_time_item;
 	bool date_show_current;
 	bool date_edited;
@@ -453,8 +453,11 @@ static void show_choice_state(struct settings_app *app)
 				current = i;
 	for (size_t i = 0; i < count; ++i)
 		fplinux_ui_list_set_selected(app->choice_list, i, i == current);
-	fplinux_ui_list_set_select_label(
-		app->choice_list, app->choice_pending ? _("Applying…") : NULL);
+	fplinux_ui_list_set_select_label(app->choice_list,
+					 app->choice_pending ? "" : NULL);
+	fplinux_ui_screen_set_header_status(
+		app->choice_list, app->choice_pending ? _("Applying…") : NULL,
+		NULL);
 	if (app->choice_pending)
 		fplinux_ui_screen_remove_command(app->choice_list,
 						 COMMAND_BACK);
@@ -496,6 +499,7 @@ static void confirm_change(struct settings_app *app, const char *name,
 		.id = COMMAND_CHANGE,
 		.type = FPLINUX_UI_COMMAND_SCREEN,
 		.label = _("Change"),
+		.direct = true,
 		.icon = fplinux_ui_glyph(app->ui, "edit", FPLINUX_UI_GLYPH_ROW),
 	};
 	const struct fplinux_ui_command cancel = {
@@ -766,7 +770,6 @@ static void volume_command(struct fplinux_ui *ui,
 	struct settings_app *app = context;
 
 	(void)ui;
-	(void)form;
 	if (app->volume_pending)
 		return;
 	if (command_id == COMMAND_SAVE) {
@@ -777,6 +780,9 @@ static void volume_command(struct fplinux_ui *ui,
 					     "volume_commit" :
 					     "alarm_volume_commit",
 				     "");
+		if (app->volume_pending)
+			fplinux_ui_screen_set_header_status(form, _("Saving…"),
+							    NULL);
 	} else if (command_id == COMMAND_CANCEL) {
 		end_volume_preview(app);
 		close_screen(app, &app->volume_form);
@@ -912,16 +918,12 @@ static void clock_tick(lv_timer_t *timer)
 
 static void date_commands(struct settings_app *app)
 {
-	const struct fplinux_ui_command save = {
-		.id = COMMAND_SAVE,
-		.type = FPLINUX_UI_COMMAND_SCREEN,
-		.label = app->date_pending ? _("Saving…") : _("Save"),
-		.icon = fplinux_ui_glyph(app->ui, "save", FPLINUX_UI_GLYPH_ROW),
-	};
-
 	if (!app->date_form)
 		return;
-	fplinux_ui_screen_add_command(app->date_form, &save);
+	fplinux_ui_screen_set_header_status(
+		app->date_form, app->date_pending ? _("Saving…") : NULL, NULL);
+	fplinux_ui_form_set_hidden(app->date_form, app->date_save_item,
+				   app->date_pending);
 	if (app->date_pending)
 		fplinux_ui_screen_remove_command(app->date_form, COMMAND_BACK);
 	else
@@ -986,10 +988,6 @@ static void save_date_time(struct settings_app *app)
 	date_commands(app);
 }
 
-/*
- * The confirmation has gone when its listener runs; the form is on top and
- * Stay or Cancel continue editing it.
- */
 static void leave_command(struct fplinux_ui *ui,
 			  struct fplinux_ui_screen *alert, int command_id,
 			  void *context)
@@ -1022,19 +1020,11 @@ static void leave_command(struct fplinux_ui *ui,
 
 static void confirm_leave(struct settings_app *app)
 {
-	const struct fplinux_ui_command stay = {
-		.id = COMMAND_STAY,
-		.type = FPLINUX_UI_COMMAND_OK,
-		.label = _("Stay"),
-		.priority = 0,
-		.icon = fplinux_ui_glyph(app->ui, "cancel",
-					 FPLINUX_UI_GLYPH_ROW),
-	};
 	const struct fplinux_ui_command leave = {
 		.id = COMMAND_LEAVE,
 		.type = FPLINUX_UI_COMMAND_SCREEN,
 		.label = _("Leave"),
-		.priority = 0,
+		.direct = true,
 		.icon = fplinux_ui_glyph(app->ui, "exit", FPLINUX_UI_GLYPH_ROW),
 	};
 	const struct fplinux_ui_command cancel = {
@@ -1055,11 +1045,6 @@ static void confirm_leave(struct settings_app *app)
 	if (!alert)
 		return;
 	app->leave_alert = alert;
-	/*
-	 * OK keeps the changes on screen; discarding them takes the left soft
-	 * key, and the right one cancels the question.
-	 */
-	fplinux_ui_screen_add_command(alert, &stay);
 	fplinux_ui_screen_add_command(alert, &leave);
 	fplinux_ui_screen_add_command(alert, &cancel);
 	fplinux_ui_screen_set_listener(alert, leave_command, NULL, app);
@@ -1130,10 +1115,8 @@ static void open_date_time(struct settings_app *app)
 {
 	const struct fplinux_ui_command save = {
 		.id = COMMAND_SAVE,
-		.type = FPLINUX_UI_COMMAND_SCREEN,
+		.type = FPLINUX_UI_COMMAND_OK,
 		.label = _("Save"),
-		.priority = 0,
-		.icon = fplinux_ui_glyph(app->ui, "save", FPLINUX_UI_GLYPH_ROW),
 	};
 	struct fplinux_ui_screen *form = new_form(app, _("Date and time"));
 	time_t now = time(NULL);
@@ -1144,10 +1127,11 @@ static void open_date_time(struct settings_app *app)
 						     FPLINUX_UI_DATE, now);
 	app->time_item = fplinux_ui_form_append_date(form, _("Time (UTC)"),
 						     FPLINUX_UI_TIME, now);
+	app->date_save_item =
+		fplinux_ui_form_append_value(form, save.label, NULL);
+	fplinux_ui_form_add_item_command(form, app->date_save_item, &save);
 	app->current_time_item = fplinux_ui_form_append_string(form, NULL, "");
 	app->date_show_current = false;
-	fplinux_ui_screen_add_command(form, &save);
-	add_back_command(app, form);
 	fplinux_ui_screen_set_listener(form, date_time_command,
 				       date_time_changed, app);
 	app->date_edited = false;
@@ -1155,6 +1139,7 @@ static void open_date_time(struct settings_app *app)
 	app->date_pending = false;
 	app->sent_time[0] = '\0';
 	app->date_form = form;
+	date_commands(app);
 	fplinux_ui_push(app->ui, form);
 	schedule_clock(app);
 }
@@ -2072,7 +2057,9 @@ static void handle_event(struct fplinux_ui *ui,
 			if (message->applied) {
 				app->volume_previewing = false;
 				close_screen(app, &app->volume_form);
-			}
+			} else if (app->volume_form)
+				fplinux_ui_screen_set_header_status(
+					app->volume_form, NULL, NULL);
 		}
 		if (message->type == FPLINUX_UI_SESSION_ERROR &&
 		    message->value[0])

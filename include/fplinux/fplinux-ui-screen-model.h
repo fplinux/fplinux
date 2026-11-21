@@ -23,6 +23,7 @@ enum fplinux_ui_command_role {
 struct fplinux_ui_command_entry {
 	enum fplinux_ui_command_role role;
 	int priority;
+	bool direct;
 };
 
 /* Command indices for the three keys and the options menu. */
@@ -38,8 +39,8 @@ struct fplinux_ui_command_keys {
 /*
  * Assigns commands by priority, then by their order: the right soft key gets
  * the first BACK-role command; OK the first OK-role command unless the
- * focused element acts on OK; the left soft key the single remaining command,
- * or "Options" for several or for any HELP command. When Clear uses the right
+ * focused element acts on OK; the left soft key gets a single explicitly
+ * direct extra command or opens "Options". When Clear uses the right
  * soft key, the displaced BACK-role command stays in the remaining commands
  * and forces Options even when it is the only one, so leaving never erases text.
  * menu receives the options menu's command indices and must hold count.
@@ -50,16 +51,6 @@ void fplinux_ui_command_keys_assign(
 	const struct fplinux_ui_command_entry *commands, size_t count,
 	bool element_acts, bool right_taken,
 	struct fplinux_ui_command_keys *keys, size_t *menu);
-
-/*
- * The collapse rule, for a left legend that does not fit beside the centre
- * and right legends: the command of keys->left becomes the first entry of
- * the options menu and the left soft key shows "Options". menu holds the
- * order from fplinux_ui_command_keys_assign() and room for one more. Nothing
- * changes when keys->left is FPLINUX_UI_COMMAND_NONE.
- */
-void fplinux_ui_command_keys_collapse(struct fplinux_ui_command_keys *keys,
-				      size_t *menu);
 
 /*
  * Rows of lists and virtual lists, items of forms and marks after an

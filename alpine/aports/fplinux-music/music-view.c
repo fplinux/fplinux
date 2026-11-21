@@ -157,8 +157,7 @@ void music_view_update(struct music_view *view, const char *title,
 {
 	set_text(view->title, empty ? _("Choose your music") : title);
 	set_text(view->artist, artist);
-	set_text(view->state,
-		 empty ? _("Open a file or folder in Options") : state);
+	set_text(view->state, empty ? _("Choose a file or folder") : state);
 	char position[32], duration[32], text[80];
 	format_time(position, sizeof(position), position_ms);
 	if (duration_known)

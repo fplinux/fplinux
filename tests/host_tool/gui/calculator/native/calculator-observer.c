@@ -16,8 +16,9 @@
 
 void __real_lv_label_set_text(lv_obj_t *label, const char *text);
 
-static void collect_header(lv_obj_t *object,
-			   struct calculator_number_observation *observation)
+static void collect_visible_labels(lv_obj_t *object,
+				   struct calculator_number_observation *header,
+				   struct calculator_number_observation *prompt)
 {
 	if (!lv_obj_is_visible(object))
 		return;
@@ -26,8 +27,8 @@ static void collect_header(lv_obj_t *object,
 
 		if (!strcmp(text, "Calculator") ||
 		    !strcmp(text, "Калькулятор")) {
-			snprintf(observation->title, sizeof(observation->title),
-				 "%s", text);
+			snprintf(header->title, sizeof(header->title), "%s",
+				 text);
 		} else if (!strcmp(text, "Unsaved") ||
 			   !strcmp(text, "Не сохранено") ||
 			   !strcmp(text, "*")) {
@@ -37,22 +38,43 @@ static void collect_header(lv_obj_t *object,
 			lv_text_get_size(&size, text,
 					 lv_obj_get_style_text_font(object, 0),
 					 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
-			snprintf(observation->text, sizeof(observation->text),
-				 "%s", text);
-			observation->width = lv_obj_get_width(object);
-			observation->height = lv_obj_get_height(object);
-			observation->text_width = size.x;
-			observation->text_height = size.y;
-			observation->left = lv_obj_get_x(object);
-			observation->top = lv_obj_get_y(object);
-			observation->parent_width = lv_obj_get_width(parent);
-			observation->parent_height = lv_obj_get_height(parent);
+			snprintf(header->text, sizeof(header->text), "%s",
+				 text);
+			header->width = lv_obj_get_width(object);
+			header->height = lv_obj_get_height(object);
+			header->text_width = size.x;
+			header->text_height = size.y;
+			header->left = lv_obj_get_x(object);
+			header->top = lv_obj_get_y(object);
+			header->parent_width = lv_obj_get_width(parent);
+			header->parent_height = lv_obj_get_height(parent);
+		} else if (!strcmp(text, "Calculation not saved") ||
+			   !strcmp(text, "Расчёт не сохранён") ||
+			   !strcmp(text, "Saving not confirmed") ||
+			   !strcmp(text, "Сохранение не подтверждено")) {
+			snprintf(prompt->title, sizeof(prompt->title), "%s",
+				 text);
+		} else if (!strcmp(text, "Not enough storage space") ||
+			   !strcmp(text, "Недостаточно места для сохранения") ||
+			   !strcmp(text, "Storage input/output error") ||
+			   !strcmp(text, "Ошибка ввода-вывода хранилища")) {
+			snprintf(prompt->text, sizeof(prompt->text), "%s",
+				 text);
+		} else if (!strcmp(text, "Retry") ||
+			   !strcmp(text, "Повторить")) {
+			prompt->retry_visible = true;
+		} else if (!strcmp(text, "Discard changes") ||
+			   !strcmp(text, "Не сохранять") ||
+			   !strcmp(text, "Close anyway") ||
+			   !strcmp(text, "Всё равно закрыть")) {
+			snprintf(prompt->detail, sizeof(prompt->detail), "%s",
+				 text);
 		}
 	}
 	for (uint32_t index = 0; index < lv_obj_get_child_count(object);
 	     ++index)
-		collect_header(lv_obj_get_child(object, (int32_t)index),
-			       observation);
+		collect_visible_labels(lv_obj_get_child(object, (int32_t)index),
+				       header, prompt);
 }
 
 void __real_lv_display_flush_ready(lv_display_t *display);
@@ -60,17 +82,27 @@ void __real_lv_display_flush_ready(lv_display_t *display);
 void __wrap_lv_display_flush_ready(lv_display_t *display)
 {
 	const char *descriptor = getenv("FPLINUX_CALCULATOR_OBSERVER_FD");
-	struct calculator_number_observation observation = {
+	struct calculator_number_observation header = {
 		.kind = CALCULATOR_HEADER,
+	};
+	struct calculator_number_observation prompt = {
+		.kind = CALCULATOR_SAVE_PROMPT,
 	};
 
 	if (descriptor && lv_display_flush_is_last(display)) {
-		collect_header(lv_display_get_screen_active(display),
-			       &observation);
-		collect_header(lv_display_get_layer_top(display), &observation);
-		collect_header(lv_display_get_layer_sys(display), &observation);
-		assert(send(atoi(descriptor), &observation, sizeof(observation),
-			    MSG_NOSIGNAL) == (ssize_t)sizeof(observation));
+		int fd = atoi(descriptor);
+
+		collect_visible_labels(lv_display_get_screen_active(display),
+				       &header, &prompt);
+		collect_visible_labels(lv_display_get_layer_top(display),
+				       &header, &prompt);
+		collect_visible_labels(lv_display_get_layer_sys(display),
+				       &header, &prompt);
+		assert(send(fd, &header, sizeof(header), MSG_NOSIGNAL) ==
+		       (ssize_t)sizeof(header));
+		if (prompt.title[0])
+			assert(send(fd, &prompt, sizeof(prompt),
+				    MSG_NOSIGNAL) == (ssize_t)sizeof(prompt));
 	}
 	__real_lv_display_flush_ready(display);
 }

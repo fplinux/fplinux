@@ -72,8 +72,8 @@ def test_screen_commands_follow_their_items(screen_menu_consumer: Path) -> None:
     )
 
 
-@pytest.mark.parametrize("scenario", ["back-last", "synthetic-clear", "no-invented-back"])
-def test_options_orders_only_real_back_last_and_preserves_command_semantics(
+@pytest.mark.parametrize("scenario", ["priority", "synthetic-clear", "no-invented-back"])
+def test_options_preserves_command_priority_and_actions(
     screen_menu_consumer: Path, scenario: str
 ) -> None:
     """Visible actions retain IDs; unavailable glyphs do not remove working commands."""

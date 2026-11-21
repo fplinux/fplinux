@@ -265,12 +265,9 @@ static void add_command(struct fplinux_ui_screen *screen, int id,
 		.id = id,
 		.type = type,
 		.label = label,
+		.direct = id == PICKER_CHOOSE,
 	};
 
-	if (id == PICKER_CHOOSE) {
-		command.short_label = _("Here");
-		command.keep_visible = true;
-	}
 	fplinux_ui_screen_add_command(screen, &command);
 }
 
@@ -606,7 +603,6 @@ static void places_focused(struct fplinux_ui *ui,
 		command.id = PICKER_EJECT;
 		command.type = FPLINUX_UI_COMMAND_ITEM;
 		command.label = _("Safely eject");
-		command.short_label = _("Eject");
 	} else {
 		return;
 	}
@@ -795,7 +791,7 @@ static bool copy_options(struct fplinux_ui_file_picker *picker,
 	picker->home = strdup(options->home);
 	picker->title = strdup(options->title ? options->title : _("Files"));
 	picker->folder_action = strdup(
-		options->folder_action ? options->folder_action : _("Select"));
+		options->folder_action ? options->folder_action : _("Here"));
 	if (!picker->home || !picker->title || !picker->folder_action)
 		return false;
 	if (!options->extensions)

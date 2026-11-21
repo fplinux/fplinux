@@ -39,8 +39,8 @@ msgstr "Гр. --"
 msgid "Choose your music"
 msgstr "Выберите музыку"
 
-msgid "Open a file or folder in Options"
-msgstr "Откройте файл или папку через «Функции»"
+msgid "Choose a file or folder"
+msgstr "Выберите файл или папку"
 
 msgid "Memory card removed. Connect it and open the track again."
 msgstr "Карта памяти извлечена. Подключите её и откройте трек снова."
@@ -165,14 +165,14 @@ msgstr "Открыть"
 msgid "Pause"
 msgstr "Пауза"
 
-msgid "Repeat: track"
-msgstr "Повтор: трек"
+msgid "Repeat"
+msgstr "Повтор"
 
-msgid "Repeat: queue"
-msgstr "Повтор: очередь"
+msgid "Track"
+msgstr "Трек"
 
-msgid "Repeat: off"
-msgstr "Повтор: выкл."
+msgid "Off"
+msgstr "Выкл."
 
 msgid "Settings not saved"
 msgstr "Настройки не сохранены"

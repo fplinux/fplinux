@@ -1216,7 +1216,8 @@ bool fplinux_ui_screen_add_command(struct fplinux_ui_screen *instance,
 			assert(command->icon &&
 			       !strcmp(command->icon, "text-size"));
 	}
-	if (instance == &list_screen && command->type == FPLINUX_UI_COMMAND_OK)
+	if (instance == &list_screen && command->label &&
+	    !strcmp(command->label, "Done"))
 		instance->done_command = command->id;
 	if (instance == &list_screen &&
 	    command->type == FPLINUX_UI_COMMAND_BACK)

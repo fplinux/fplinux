@@ -8,9 +8,8 @@
  *
  *   right soft key  the first BACK, CANCEL, EXIT or STOP command by priority;
  *   OK              the focused element's own action, else the first OK;
- *   left soft key   the one remaining command, else Options, which opens the
- *                   options menu with the remaining actions by priority,
- *                   followed by any Back command.
+ *   left soft key   Options lists the remaining commands by priority.
+ *                   A sole command can use the key when marked direct.
  *
  * Most demos here are forms of read-only notes, so that OK has no element
  * action of its own and the notes can explain what the keys show.
@@ -93,9 +92,9 @@ static void open_types(struct apidemo *app, const struct apidemo_entry *entry)
 		  N_("The focused element's own action, otherwise the first "
 		     "OK command.") },
 		{ N_("Left soft key"),
-		  N_("The one remaining command, otherwise Options with all "
-		     "the others: here Cancel, Exit, Stop, Item, Screen and "
-		     "Help.") },
+		  N_("Options opens the remaining commands. A sole extra "
+		     "command needs direct to use the key itself. Help stays "
+		     "in Options.") },
 		{ N_("Labels"),
 		  N_("A NULL label shows the type's word in the system "
 		     "language. ITEM and SCREEN commands need their own.") },
@@ -431,7 +430,6 @@ static void added_command(struct fplinux_ui *ui, struct fplinux_ui_screen *form,
 
 			if (added.present[i])
 				continue;
-			/* Short, so that one fits on the left soft key. */
 			snprintf(label, sizeof(label), _("No. %d"), i + 1);
 			if (!fplinux_ui_screen_add_command(form, &command))
 				break;
@@ -455,9 +453,8 @@ static void open_added(struct apidemo *app, const struct apidemo_entry *entry)
 {
 	static const struct note notes[] = {
 		{ NULL,
-		  N_("OK adds a command and choosing one removes it. One "
-		     "command sits on the left soft key; two or more go to "
-		     "Options. The title counts them.") },
+		  N_("OK adds a command. Choose a command in Options to "
+		     "remove it. The title counts the remaining commands.") },
 	};
 	struct fplinux_ui_screen *form =
 		notes_form(app, entry, notes, APIDEMO_COUNT(notes));
@@ -678,6 +675,7 @@ static void open_canvas_menu(struct apidemo *app,
 		.id = COMMAND_OPTIONS,
 		.type = FPLINUX_UI_COMMAND_SCREEN,
 		.label = _("Options"),
+		.direct = true,
 		.icon = apidemo_glyph(app, "menu"),
 	};
 	struct fplinux_ui_screen *canvas =

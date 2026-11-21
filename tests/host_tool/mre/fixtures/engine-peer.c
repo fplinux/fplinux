@@ -5,6 +5,7 @@
 #include <assert.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -51,8 +52,8 @@ int main(int argc, char **argv)
 					 0);
 	assert(shared != MAP_FAILED);
 	record('S', program);
-	if (program == 'I' || program == 'S' || program == 'X' ||
-	    program == 'E') {
+	bool first_modal = strchr("ISXEDMR", program) != NULL;
+	if (first_modal) {
 		puts("DISPLAY\t240\t320");
 		fflush(stdout);
 		wait_file(getenv("FPLINUX_MRE_ENGINE_RELEASE"));
@@ -64,7 +65,9 @@ int main(int argc, char **argv)
 			memcpy(shared->editor_data, "2+3", 4);
 			shared->editor_bytes = 3;
 			shared->editor_max_shorts = program == 'X' ? -1 : 32;
-			shared->editor_method = 4;
+			shared->editor_method = program == 'R' ? 0 :
+						program == 'M' ? 1 :
+								 4;
 		}
 		__atomic_thread_fence(__ATOMIC_RELEASE);
 		puts(program == 'S' ? "SELECTOR" : "INPUT");
@@ -79,12 +82,20 @@ int main(int argc, char **argv)
 		}
 		while (fgets(line, sizeof(line), stdin)) {
 			if (!strcmp(line, "INPUT_DONE\n")) {
-				assert(shared->editor_bytes == 3 &&
-				       !memcmp(shared->editor_data, "2+3", 4));
+				const char *expected =
+					program == 'D' ? "" :
+					program == 'M' ? "2+3\n" :
+							 "2+3";
+
+				assert(shared->editor_bytes ==
+					       strlen(expected) &&
+				       !strcmp((const char *)shared->editor_data,
+					       expected));
 				record('E', program);
 				break;
 			}
-			if (!strcmp(line, "SELECT_CANCEL\n")) {
+			if (!strcmp(line, "SELECT_CANCEL\n") ||
+			    !strcmp(line, "INPUT_CANCEL\n")) {
 				record('C', program);
 				break;
 			}
@@ -97,11 +108,10 @@ int main(int argc, char **argv)
 		shared->pixels[i] = program == 'A' ? 0xf800 : 0x001f;
 	shared->frame_sequence = 1;
 	__atomic_thread_fence(__ATOMIC_RELEASE);
-	puts(program == 'I' || program == 'S' || program == 'X' ?
-		     "FRAME\t1" :
+	puts(first_modal ? "FRAME\t1" :
 	     program == 'T' ?
-		     "DISPLAY\t240\t320\nPOINTER_AVAILABLE\t1\nFRAME\t1" :
-		     "DISPLAY\t240\t320\nFRAME\t1");
+			   "DISPLAY\t240\t320\nPOINTER_AVAILABLE\t1\nFRAME\t1" :
+			   "DISPLAY\t240\t320\nFRAME\t1");
 	fflush(stdout);
 	/* Fails once its first frame is acknowledged. */
 	if (program == 'F') {

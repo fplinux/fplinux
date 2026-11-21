@@ -333,9 +333,6 @@ msgstr "Меняйте доступные действия на экране"
 msgid "Change labels and explanatory text"
 msgstr "Меняйте подписи и пояснения"
 
-msgid "Change legends"
-msgstr "Изменить подписи"
-
 msgid "Change legends and toggle full screen"
 msgstr "Меняйте подписи и полноэкранный режим"
 
@@ -1046,9 +1043,6 @@ msgstr "Нет номера"
 msgid "No save attempted"
 msgstr "Сохранение не выполнялось"
 
-msgid "No status or soft-key bar here, so the canvas draws its own. Options > Normal view brings the system bars back, and Back leaves the demo between them."
-msgstr "Здесь нет строки состояния и панели софт-клавиш, поэтому холст рисует свою панель. «Опции» > «Обычный вид» возвращает системные панели, а «Назад» выходит из примера, тоже между ними."
-
 msgid "No stream"
 msgstr "Нет потока"
 
@@ -1086,8 +1080,8 @@ msgstr "Числа"
 msgid "OK"
 msgstr "OK"
 
-msgid "OK adds a command and choosing one removes it. One command sits on the left soft key; two or more go to Options. The title counts them."
-msgstr "OK добавляет команду, а выбор команды её убирает. Одна команда стоит на левой софт-клавише, две и больше уходят в «Опции». Заголовок их считает."
+msgid "OK adds a command. Choose a command in Options to remove it. The title counts the remaining commands."
+msgstr "OK добавляет команду. Выберите команду в «Опциях», чтобы убрать её. В заголовке указано, сколько команд осталось."
 
 msgid "OK pushes a new screen on top. Replace swaps this screen for a new one. Pop deletes the top screen, as Back does here; from an application's first screen Back leaves the application instead."
 msgstr "OK кладёт новый экран сверху. «Заменить» меняет этот экран на новый. «Убрать» удаляет верхний экран, как здесь «Назад»; на первом экране приложения «Назад» вместо этого выходит из приложения."
@@ -1218,11 +1212,14 @@ msgstr "Подготовка…"
 msgid "Press a key. Only Back has a command."
 msgstr "Нажмите клавишу. Команда есть только у «Назад»."
 
-msgid "Restore legends"
-msgstr "Вернуть подписи"
+msgid "Restore"
+msgstr "Вернуть"
 
-msgid "Toggle full screen shows this example's own legend bar in place of the system bar, with the same keys. Change legends updates OK's legend; Back leaves full screen, then returns."
-msgstr "«Переключить полный экран» показывает вместо системной панели собственную панель примера с теми же клавишами. «Изменить подписи» меняет подпись OK, «Назад» сначала выходит из полного экрана, затем возвращает в каталог."
+msgid "Options > Toggle full screen uses the same commands in both views. Change and Restore switch the centre label. Back leaves full screen, then returns to the catalogue."
+msgstr "«Опции» > «Переключить полный экран» сохраняет назначение клавиш. «Сменить» и «Вернуть» меняют подпись по центру. «Назад» сначала выходит из полного экрана, затем возвращает в каталог."
+
+msgid "The status bar is hidden. Options > Normal view restores it, and Back leaves the demo."
+msgstr "Строка состояния скрыта. «Опции» > «Обычный вид» возвращает её. «Назад» закрывает пример."
 
 msgid "Priorities and ties"
 msgstr "Приоритеты"
@@ -1606,8 +1603,8 @@ msgstr "Обработчик получил id %d, тип %s."
 msgid "The listener received id %d."
 msgstr "Обработчик получил id %d."
 
-msgid "The one remaining command, otherwise Options with all the others: here Cancel, Exit, Stop, Item, Screen and Help."
-msgstr "Единственная оставшаяся команда, иначе «Опции» со всеми остальными: здесь «Отмена», «Выход», «Стоп», «Элемент», «Экран» и «Справка»."
+msgid "Options opens the remaining commands. A sole extra command needs direct to use the key itself. Help stays in Options."
+msgstr "«Опции» открывают список дополнительных команд. Если команда одна, флаг direct назначает её на клавишу. «Справка» всегда в «Опциях»."
 
 msgid "The operation completed."
 msgstr "Операция завершена."

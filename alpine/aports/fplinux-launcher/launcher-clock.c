@@ -232,7 +232,7 @@ void fplinux_launcher_clock_render(struct fplinux_launcher_clock *clock)
 		.id = CLOCK_COMMAND_SNOOZE,
 		.type = FPLINUX_UI_COMMAND_SCREEN,
 		.label = _("Snooze"),
-		.keep_visible = true,
+		.direct = true,
 	};
 	bool ready;
 	char text[512];

@@ -375,7 +375,7 @@ static void expect_choice(struct capture *capture, size_t row, size_t selection)
 static void start_run(struct capture *capture)
 {
 	focus_row(capture, 0);
-	wait_action(capture, false, word(capture, "Start", "Запустить"));
+	wait_action(capture, false, word(capture, "Start", "Старт"));
 	press(capture, KEY_ENTER);
 }
 
@@ -429,8 +429,7 @@ static void expect_result(struct capture *capture, const char *status)
 		for (size_t index = 0;
 		     index < sizeof(metrics) / sizeof(metrics[0]); ++index)
 			assert(has_label(capture, metrics[index]));
-	assert(!strcmp(capture->right,
-		       word(capture, "Settings", "К настройкам")));
+	assert(!strcmp(capture->right, word(capture, "Back", "Назад")));
 	assert(!capture->kept_on);
 }
 
@@ -624,6 +623,7 @@ static void close_and_reap(struct capture *capture, const char *socket_path)
 struct viewport_geometry {
 	int width;
 	int height;
+	int fullscreen_height;
 	int standard_height;
 	int standard_y;
 };
@@ -633,9 +633,9 @@ expected_geometry(const struct capture *capture)
 {
 	/* Standard canvas examples include the ARMADA title band. */
 	static const struct viewport_geometry examples[] = {
-		{ 128, 128, 71, 25 },  { 128, 160, 104, 22 },
-		{ 176, 220, 151, 26 }, { 240, 320, 240, 28 },
-		{ 320, 240, 171, 28 },
+		{ 128, 128, 112, 71, 25 },  { 128, 160, 142, 104, 22 },
+		{ 176, 220, 196, 151, 26 }, { 240, 320, 288, 240, 28 },
+		{ 320, 240, 218, 171, 28 },
 	};
 
 	for (size_t index = 0; index < sizeof(examples) / sizeof(examples[0]);
@@ -649,9 +649,9 @@ expected_geometry(const struct capture *capture)
 static void assert_viewport(struct capture *capture, bool fullscreen)
 {
 	const struct viewport_geometry *expected = expected_geometry(capture);
-	unsigned int height = (unsigned int)(fullscreen ?
-						     expected->height :
-						     expected->standard_height);
+	unsigned int height =
+		(unsigned int)(fullscreen ? expected->fullscreen_height :
+					    expected->standard_height);
 
 	assert(capture->observed.canvas);
 	assert(capture->observed.fullscreen == fullscreen);
@@ -662,6 +662,8 @@ static void assert_viewport(struct capture *capture, bool fullscreen)
 	assert(capture->observed.frame_x == 0);
 	assert(capture->observed.frame_y ==
 	       (fullscreen ? 0 : expected->standard_y));
+	if (fullscreen)
+		assert(has_label(capture, word(capture, "Stop", "Стоп")));
 }
 
 static void setup_geometry(struct capture *capture)
@@ -678,6 +680,13 @@ static void setup_geometry(struct capture *capture)
 	expect_choice(capture, 1, 0);
 	expect_choice(capture, 2, 1);
 	expect_choice(capture, 3, 0);
+	choose(capture, 1, 1);
+	expect_choice(capture, 1, 1);
+	assert(!strcmp(capture->left, "Options"));
+	press(capture, KEY_F13);
+	wait_action(capture, false, "Select");
+	press(capture, KEY_ENTER);
+	expect_choice(capture, 1, 0);
 	advance(capture, 1000000);
 	assert(capture->observed.created == 0 &&
 	       capture->observed.rendered == 0);
@@ -699,11 +708,11 @@ static void setup_geometry(struct capture *capture)
 	assert_viewport(capture, true);
 	assert(capture->observed.mode == 1 &&
 	       capture->observed.actual_mode == 1);
-	assert(!has_label(capture, "Stop") && !capture->left[0]);
+	assert(!capture->left[0]);
 	assert(!strstr(capture->observed.labels, "Running ·"));
 	stop_run(capture);
 	expect_resolution(capture, capture->screen_width,
-			  capture->screen_height);
+			  expected_geometry(capture)->fullscreen_height);
 	assert(capture->light_applies == 0 && capture->vibrations == 0);
 	assert(capture->observed.destroyed == 1);
 	press(capture, KEY_F14);
@@ -764,7 +773,7 @@ static void measured_stop(struct capture *capture)
 	assert(strstr(capture->observed.labels, "Active time\n1.001 s\n"));
 	assert(strstr(capture->observed.labels, "Average render\n0.500 ms\n"));
 	assert(strstr(capture->observed.labels, "Longest render\n0.750 ms\n"));
-	expect_resolution(capture, 128, 128);
+	expect_resolution(capture, 128, 112);
 	assert(strstr(capture->observed.labels,
 		      "Model\nComponent test model\n"));
 	assert(strstr(capture->observed.labels,
@@ -842,7 +851,7 @@ static void run_cycles(struct capture *capture, const char *scenario)
 		assert(capture->observed.canvas && capture->kept_on);
 		stop_run(capture);
 	}
-	expect_resolution(capture, 128, 160);
+	expect_resolution(capture, 128, 142);
 	duration = strstr(capture->observed.labels, "Active time\n");
 	assert(duration &&
 	       sscanf(duration, "Active time\n%lf s", &actual_seconds) == 1);
@@ -884,7 +893,7 @@ static void interrupted(struct capture *capture, const char *scenario)
 	lifecycle(capture, true);
 	activate(capture, false);
 	expect_result(capture, "Interrupted");
-	expect_resolution(capture, 176, 220);
+	expect_resolution(capture, 176, 196);
 	measurement = strstr(capture->observed.labels, "Frames\n");
 	assert(measurement &&
 	       sscanf(measurement, "Frames\n%llu", &frames) == 1 && frames > 0);

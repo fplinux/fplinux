@@ -13,6 +13,12 @@ import pytest
 from tests import ROOT
 from tests.c_harness import c_build_directory
 from tests.host_tool.gui.support.rgb565_png import convert
+from tests.host_tool.media.decoder_fixtures import (
+    media_decoder_args as media_decoder_args,  # noqa: PLC0414 -- pytest fixture dependency.
+)
+from tests.host_tool.media.decoder_fixtures import (
+    native_mpg123 as native_mpg123,  # noqa: PLC0414 -- pytest fixture dependency.
+)
 from tests.process import run_process
 
 if TYPE_CHECKING:
@@ -31,6 +37,62 @@ def music_view(tmp_path_factory: pytest.TempPathFactory, ui_host_inputs: Path) -
             check=True,
         )
         yield directory
+
+
+@pytest.fixture(scope="module")
+def music_app(
+    tmp_path_factory: pytest.TempPathFactory, ui_host_inputs: Path, media_decoder_args: list[str]
+) -> Iterator[Path]:
+    with c_build_directory(tmp_path_factory, "music-app") as directory:
+        # The shared UI build already links the production UTF-8 routines.
+        utf8 = str(ROOT / "lib/fplinux/fplinux-utf8.c")
+        run_process(
+            [
+                "sh",
+                str(SCREENS / "build-view.sh"),
+                str(directory),
+                str(ui_host_inputs),
+                *(argument for argument in media_decoder_args if argument != utf8),
+            ],
+            name="build Music and its native session peer",
+            timeout=180,
+            check=True,
+        )
+        yield directory
+
+
+@pytest.mark.parametrize("size", [(128, 128), (128, 160), (176, 220), (240, 320), (320, 240)])
+@pytest.mark.parametrize("locale", ["en", "ru"])
+def test_music_options_open_repeat_choices_and_save_selected_mode(
+    music_app: Path, size: tuple[int, int], locale: str, tmp_path: Path
+) -> None:
+    width, height = size
+    state = tmp_path / "state"
+    run_process(
+        [
+            str(music_app / "music-view-screens"),
+            str(music_app / "music"),
+            str(tmp_path / "session.sock"),
+            "-",
+            str(width),
+            str(height),
+            "light",
+            "repeat",
+            locale,
+            str(SCREENS.parent.parent / "screens/keypad.xkb"),
+        ],
+        name=f"select queue repeat in Music at {width}x{height} ({locale})",
+        env={
+            "HOME": str(tmp_path),
+            "XDG_STATE_HOME": str(state),
+            "FPLINUX_MUSIC_TEST_LANGUAGES": str(ROOT / "alpine/aports/fplinux-language"),
+            "FPLINUX_MUSIC_TEST_LOCALE_DIR": str(music_app / "locale"),
+        },
+        timeout=15,
+        check=True,
+    )
+    preferences = state / "fplinux/org.fplinux.music/preferences"
+    assert "repeat=1" in preferences.read_text(encoding="utf-8").splitlines()
 
 
 @pytest.mark.parametrize("size", [(128, 128), (128, 160), (176, 220), (240, 320), (320, 240)])

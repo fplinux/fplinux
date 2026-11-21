@@ -143,8 +143,6 @@ void showcase_show_result(struct showcase_app *app)
 	const struct fplinux_ui_command settings = {
 		.id = SHOWCASE_SETTINGS,
 		.type = FPLINUX_UI_COMMAND_BACK,
-		.label = _("Settings"),
-		.keep_visible = true,
 	};
 
 	if (!app->result.available || app->closing || app->results)

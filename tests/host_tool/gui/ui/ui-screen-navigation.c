@@ -20,6 +20,7 @@ struct navigation_state {
 	size_t chosen;
 	unsigned int changes;
 	unsigned int results;
+	int command;
 	uint32_t request;
 	bool choices_visible;
 	bool chooser_visible;
@@ -77,6 +78,17 @@ static void navigation_changed(struct fplinux_ui *ui,
 	(void)ui;
 	assert(form == application->form && index == application->choice);
 	++application->state.changes;
+}
+
+static void navigation_command_fired(struct fplinux_ui *ui,
+				     struct fplinux_ui_screen *screen, int id,
+				     void *context)
+{
+	struct navigation_application *application = context;
+
+	(void)ui;
+	assert(screen == application->base);
+	application->state.command = id;
 }
 
 static bool navigation_row(struct fplinux_ui *ui,
@@ -142,27 +154,26 @@ static void setup_navigation(struct fplinux_ui *ui,
 	if (!strcmp(application->scenario, "stack-openwith") ||
 	    !strcmp(application->scenario, "stack-canvas"))
 		return;
-	if (!strcmp(application->scenario, "stack-short-label")) {
+	if (!strcmp(application->scenario, "stack-single-option")) {
 		char label[sizeof(full_command)];
-		char compact[] = "Here";
 		struct fplinux_ui_command command = {
 			.id = 71,
 			.type = FPLINUX_UI_COMMAND_ITEM,
 			.label = label,
-			.short_label = compact,
 		};
 		const struct fplinux_ui_command back = {
 			.id = 72,
 			.type = FPLINUX_UI_COMMAND_BACK,
-			.label = "Return to the previous folder",
-			.short_label = "Back",
 		};
 
 		strcpy(label, full_command);
 		assert(fplinux_ui_screen_add_command(application->base,
 						     &command));
 		assert(fplinux_ui_screen_add_command(application->base, &back));
-		label[0] = compact[0] = 'X';
+		fplinux_ui_screen_set_listener(application->base,
+					       navigation_command_fired, NULL,
+					       application);
+		label[0] = 'X';
 		return;
 	}
 	application->form = fplinux_ui_form_new(ui, "Alarm");
@@ -231,13 +242,6 @@ static void navigation_input(struct fplinux_ui *ui, int fd, short events,
 			state->request = request;
 		else
 			assert(errno == EBUSY);
-	} else if (command == 'H') {
-		const struct fplinux_ui_command help = {
-			.id = 73,
-			.type = FPLINUX_UI_COMMAND_HELP,
-		};
-
-		assert(fplinux_ui_screen_add_command(application->base, &help));
 	} else if (command == 'M') {
 		static const struct fplinux_ui_menu_item item = {
 			.action = 1,
@@ -419,23 +423,29 @@ void fplinux_ui_test_navigation_check(struct fplinux_ui_frame_peer *peer,
 		check_document_choices(peer, session, control);
 		return;
 	}
-	if (!strcmp(scenario, "stack-short-label")) {
+	if (!strcmp(scenario, "stack-single-option")) {
 		struct fplinux_ui_session_message legends;
 		uint64_t deadline = fplinux_ui_frame_now_ms() + 3000;
 
 		do {
 			legends = fplinux_ui_frame_wait_message(peer, session);
 			assert(legends.type == FPLINUX_UI_SESSION_SOFTKEYS);
-		} while (strcmp(legends.left, "Here") ||
+		} while (strcmp(legends.left, "Options") ||
 			 strcmp(legends.right, "Back"));
 		assert(!legends.centre[0] && !strcmp(legends.right, "Back"));
-		navigation_command(peer, control, 'H');
 		navigation_key(peer, KEY_COMPOSE);
 
 		do {
 			assert(fplinux_ui_frame_now_ms() < deadline);
 			state = navigation_command(peer, control, 'Q');
 		} while (!state.menu_open || !state.full_command_visible);
+		assert(state.command == 0);
+		navigation_key(peer, KEY_ENTER);
+		do {
+			assert(fplinux_ui_frame_now_ms() < deadline);
+			state = navigation_command(peer, control, 'Q');
+		} while (state.menu_open || !state.command);
+		assert(state.command == 71);
 		return;
 	}
 	if (!strcmp(scenario, "stack-canvas")) {

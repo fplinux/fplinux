@@ -4,7 +4,6 @@
 #include "clock-presentation.h"
 #include "fplinux-cli.h"
 
-#include <fplinux/fplinux-gettext.h>
 #include <fplinux/fplinux-ui-menu.h>
 #include <fplinux/fplinux-ui-locale.h>
 #include <fplinux/fplinux-ui-screen.h>
@@ -16,7 +15,6 @@
 #define APP_ID "org.fplinux.clock"
 #define _(text) gettext(text)
 #define N_(text) text
-#define NC_(context, text) context "\004" text
 #define COUNT(a) (sizeof(a) / sizeof((a)[0]))
 #define VIEW_LIMIT 8
 
@@ -64,7 +62,6 @@ enum command_id {
 	CMD_MISSED,
 	CMD_HELP,
 	CMD_CONFIRM,
-	CMD_STAY,
 	CMD_CLOSE,
 	CMD_RETRY,
 	CMD_CANCEL_SNOOZE,
@@ -182,41 +179,18 @@ static bool mutation_pending(const struct clock_app *app)
 	       app->client.request.op != CLOCK_REQUEST_SAVE;
 }
 
-static const char *command_short_label(int id, const char *label)
-{
-	switch (id) {
-	case CMD_SAVE:
-		if (strcmp(label, _("Retry")))
-			return _("Done");
-		return fplinux_gettext_context(NC_("short command", "Retry"));
-	case CMD_EDIT:
-		return fplinux_gettext_context(NC_("short command", "Edit"));
-	case CMD_RESUME:
-		return fplinux_gettext_context(NC_("short command", "Resume"));
-	case CMD_RETRY:
-		return fplinux_gettext_context(NC_("short command", "Retry"));
-	case CMD_RESTART:
-		return _("Restart");
-	case CMD_ADD:
-		return _("Add");
-	default:
-		return NULL;
-	}
-}
-
 static void add_command(struct fplinux_ui *ui, struct clock_screen *view,
 			int id, enum fplinux_ui_command_type type,
 			const char *label, const char *glyph, int priority,
-			bool keep_visible)
+			bool direct)
 {
 	const struct fplinux_ui_command value = {
 		.id = id,
 		.type = type,
 		.label = label,
-		.short_label = command_short_label(id, label),
 		.icon = fplinux_ui_glyph(ui, glyph, FPLINUX_UI_GLYPH_ROW),
 		.priority = priority,
-		.keep_visible = keep_visible,
+		.direct = direct,
 	};
 
 	fplinux_ui_screen_add_command(view->screen, &value);
@@ -229,21 +203,10 @@ static void item_command(struct fplinux_ui *ui, struct clock_screen *view,
 		.id = id,
 		.type = FPLINUX_UI_COMMAND_OK,
 		.label = _("Edit"),
-		.short_label =
-			fplinux_gettext_context(NC_("short command", "Edit")),
 		.icon = fplinux_ui_glyph(ui, "edit", FPLINUX_UI_GLYPH_ROW),
 	};
 
 	fplinux_ui_form_add_item_command(view->screen, item, &value);
-}
-
-static void editor_commands(struct fplinux_ui *ui, struct clock_screen *view,
-			    const char *save, const char *glyph)
-{
-	add_command(ui, view, CMD_SAVE, FPLINUX_UI_COMMAND_SCREEN, save, glyph,
-		    0, true);
-	add_command(ui, view, CMD_BACK, FPLINUX_UI_COMMAND_CANCEL, _("Cancel"),
-		    "cancel", 0, true);
 }
 
 static void notice(struct clock_app *app, const char *title, const char *text)
@@ -274,33 +237,22 @@ static void confirm(struct clock_app *app, const char *text,
 {
 	const struct fplinux_ui_command yes = {
 		.id = CMD_CONFIRM,
-		.type = FPLINUX_UI_COMMAND_SCREEN,
+		.type = action == CONFIRM_LEAVE ? FPLINUX_UI_COMMAND_SCREEN :
+						  FPLINUX_UI_COMMAND_OK,
 		.label = action == CONFIRM_LEAVE ? _("Leave") :
 			 action == CONFIRM_RETRY ? _("Retry") :
 						   _("Confirm"),
-		.short_label = action == CONFIRM_RETRY ?
-				       fplinux_gettext_context(
-					       NC_("short command", "Retry")) :
-				       NULL,
-		.keep_visible = true,
+		.direct = action == CONFIRM_LEAVE,
 		.icon = fplinux_ui_glyph(app->ui,
 					 action == CONFIRM_LEAVE ? "exit" :
 					 action == CONFIRM_RETRY ? "refresh" :
 								   "check",
 					 FPLINUX_UI_GLYPH_ROW),
 	};
-	const struct fplinux_ui_command stay = {
-		.id = CMD_STAY,
-		.type = FPLINUX_UI_COMMAND_OK,
-		.label = action == CONFIRM_LEAVE ? _("Stay") : _("Confirm"),
-		.icon = fplinux_ui_glyph(
-			app->ui, action == CONFIRM_LEAVE ? "cancel" : "check",
-			FPLINUX_UI_GLYPH_ROW),
-	};
 	const struct fplinux_ui_command cancel = {
 		.id = CMD_CLOSE,
 		.type = FPLINUX_UI_COMMAND_CANCEL,
-		.label = _("Cancel"),
+		.label = action == CONFIRM_LEAVE ? _("Stay") : _("Cancel"),
 		.icon = fplinux_ui_glyph(app->ui, "cancel",
 					 FPLINUX_UI_GLYPH_ROW),
 	};
@@ -321,8 +273,6 @@ static void confirm(struct clock_app *app, const char *text,
 		return;
 	fplinux_ui_screen_set_listener(app->alert, command, NULL, app);
 	fplinux_ui_screen_add_command(app->alert, &yes);
-	if (action == CONFIRM_LEAVE)
-		fplinux_ui_screen_add_command(app->alert, &stay);
 	fplinux_ui_screen_add_command(app->alert, &cancel);
 	fplinux_ui_push(app->ui, app->alert);
 	schedule_poll(app);
@@ -694,6 +644,27 @@ static void alarm_summary(struct clock_app *app, char *text, size_t capacity)
 	snprintf(text, capacity, "%s, %s", day, time);
 }
 
+static void editor_action_refresh(struct clock_app *app,
+				  struct clock_screen *view, size_t item,
+				  const char *label)
+{
+	bool saving = app->client.pending &&
+		      app->client.request.op != CLOCK_REQUEST_SNAPSHOT &&
+		      !app->waiting_retry;
+	const struct fplinux_ui_command save = {
+		.id = CMD_SAVE,
+		.type = FPLINUX_UI_COMMAND_OK,
+		.label = app->waiting_retry || app->save_failed ? _("Retry") :
+								  label,
+	};
+
+	if (!saving) {
+		fplinux_ui_form_set_string(view->screen, item, save.label);
+		fplinux_ui_form_add_item_command(view->screen, item, &save);
+	}
+	fplinux_ui_form_set_hidden(view->screen, item, saving);
+}
+
 static void alarm_form_refresh(struct clock_app *app, struct clock_screen *view,
 			       bool rebuild)
 {
@@ -729,6 +700,9 @@ static void alarm_form_refresh(struct clock_app *app, struct clock_screen *view,
 			states, COUNT(states));
 		fplinux_ui_form_set_choice(view->screen, view->items[6],
 					   app->alarm.spec.enabled ? 1 : 0);
+		string_item(view, 7, NULL, _("Save"));
+		fplinux_ui_form_set_appearance(view->screen, view->items[7],
+					       FPLINUX_UI_APPEARANCE_BUTTON);
 	} else {
 		fplinux_ui_form_set_value_text(view->screen, view->items[1],
 					       repeat);
@@ -741,18 +715,7 @@ static void alarm_form_refresh(struct clock_app *app, struct clock_screen *view,
 		fplinux_ui_form_set_string(view->screen, view->items[5],
 					   app->feedback);
 	}
-	if (app->client.pending &&
-	    app->client.request.op != CLOCK_REQUEST_SNAPSHOT &&
-	    !app->waiting_retry)
-		fplinux_ui_screen_remove_command(view->screen, CMD_SAVE);
-	else
-		add_command(app->ui, view, CMD_SAVE, FPLINUX_UI_COMMAND_SCREEN,
-			    app->waiting_retry || app->save_failed ?
-				    _("Retry") :
-				    _("Save"),
-			    app->waiting_retry || app->save_failed ? "refresh" :
-								     "save",
-			    0, true);
+	editor_action_refresh(app, view, view->items[7], _("Save"));
 }
 
 static void list_update(struct clock_screen *view, size_t count,
@@ -1131,8 +1094,8 @@ static void timer_commands_refresh(struct fplinux_ui *ui,
 						    "play",
 		    0, false);
 	if (state == CLOCK_TIMER_RUNNING)
-		add_command(ui, view, CMD_STOP, FPLINUX_UI_COMMAND_SCREEN,
-			    _("Stop"), "stop", 0, true);
+		add_command(ui, view, CMD_STOP, FPLINUX_UI_COMMAND_STOP,
+			    _("Stop"), "stop", -1, false);
 	else {
 		add_command(ui, view, CMD_EDIT, FPLINUX_UI_COMMAND_SCREEN,
 			    _("Edit"), "edit", 0, state != CLOCK_TIMER_PAUSED);
@@ -1245,7 +1208,8 @@ static void refresh_current(struct clock_app *app)
 			app->retrying ? _("Trying again…") : _("Saving…") :
 			"",
 		"…");
-	if (app->waiting_retry && view->kind != VIEW_ALARM_EDIT)
+	if (app->waiting_retry && view->kind != VIEW_ALARM_EDIT &&
+	    view->kind != VIEW_TIMER_EDIT)
 		add_command(app->ui, view, CMD_RETRY, FPLINUX_UI_COMMAND_SCREEN,
 			    _("Retry"), "refresh", -1, true);
 	else if (app->client.received &&
@@ -1289,22 +1253,11 @@ static void refresh_current(struct clock_app *app)
 					_("Could not confirm the change. Retry?") :
 				app->retrying ? _("Trying again…") :
 						_("Saving…"));
-			if (app->waiting_retry)
-				add_command(app->ui, view, CMD_SAVE,
-					    FPLINUX_UI_COMMAND_SCREEN,
-					    _("Retry"), "refresh", 0, true);
-			else
-				fplinux_ui_screen_remove_command(view->screen,
-								 CMD_SAVE);
 		} else {
 			fplinux_ui_form_set_string(view->screen, view->items[1],
 						   app->feedback);
-			add_command(app->ui, view, CMD_SAVE,
-				    FPLINUX_UI_COMMAND_SCREEN,
-				    app->save_failed ? _("Retry") : _("Done"),
-				    app->save_failed ? "refresh" : "check", 0,
-				    true);
 		}
+		editor_action_refresh(app, view, view->items[2], _("Done"));
 		break;
 	case VIEW_TIMER:
 		duration(clock_model_timer_remaining(clock), false, time,
@@ -1537,7 +1490,7 @@ static void open_view(struct clock_app *app, enum view_kind kind,
 				    FPLINUX_UI_COMMAND_SCREEN,
 				    kind == VIEW_ALARMS ? _("New alarm") :
 							  _("Add UTC offset"),
-				    "add", -2, true);
+				    "add", -2, false);
 		break;
 	case VIEW_ALARM_EDIT:
 		view = new_view(app, kind, subject,
@@ -1546,7 +1499,8 @@ static void open_view(struct clock_app *app, enum view_kind kind,
 		if (!view)
 			return;
 		alarm_form_refresh(app, view, true);
-		editor_commands(app->ui, view, _("Save"), "save");
+		add_command(app->ui, view, CMD_BACK, FPLINUX_UI_COMMAND_CANCEL,
+			    _("Cancel"), "cancel", 0, false);
 		fplinux_ui_form_set_edit_listener(view->screen, edit_accepted,
 						  app);
 		break;
@@ -1560,7 +1514,7 @@ static void open_view(struct clock_app *app, enum view_kind kind,
 		add_command(app->ui, view, CMD_SAVE, FPLINUX_UI_COMMAND_OK,
 			    _("Done"), "check", 0, false);
 		add_command(app->ui, view, CMD_BACK, FPLINUX_UI_COMMAND_CANCEL,
-			    _("Cancel"), "cancel", 0, true);
+			    _("Cancel"), "cancel", 0, false);
 		fplinux_ui_form_set_focus(view->screen, view->items[0]);
 		break;
 	case VIEW_REPEAT:
@@ -1576,7 +1530,7 @@ static void open_view(struct clock_app *app, enum view_kind kind,
 					       repeat_name(masks[i]), NULL);
 		}
 		add_command(app->ui, view, CMD_BACK, FPLINUX_UI_COMMAND_CANCEL,
-			    _("Cancel"), "cancel", 0, true);
+			    _("Cancel"), "cancel", 0, false);
 		break;
 	case VIEW_DAYS:
 		view = new_view(app, kind, 0, _("Choose days"),
@@ -1590,7 +1544,10 @@ static void open_view(struct clock_app *app, enum view_kind kind,
 				view->screen, i,
 				(app->alarm.spec.repeat_days & (1U << i)) != 0);
 		}
-		editor_commands(app->ui, view, _("Done"), "check");
+		add_command(app->ui, view, CMD_SAVE, FPLINUX_UI_COMMAND_SCREEN,
+			    _("Done"), "check", 0, false);
+		add_command(app->ui, view, CMD_BACK, FPLINUX_UI_COMMAND_CANCEL,
+			    _("Back"), "back", 0, false);
 		break;
 	case VIEW_TIMER_EDIT:
 		app->feedback[0] = '\0';
@@ -1603,7 +1560,11 @@ static void open_view(struct clock_app *app, enum view_kind kind,
 			view->screen, _("Duration"),
 			clock->timer.duration_seconds);
 		string_item(view, 1, NULL, "");
-		editor_commands(app->ui, view, _("Done"), "check");
+		string_item(view, 2, NULL, _("Done"));
+		fplinux_ui_form_set_appearance(view->screen, view->items[2],
+					       FPLINUX_UI_APPEARANCE_BUTTON);
+		add_command(app->ui, view, CMD_BACK, FPLINUX_UI_COMMAND_CANCEL,
+			    _("Cancel"), "cancel", 0, false);
 		break;
 	case VIEW_OFFSET_CHOICE: {
 		const struct clock_world_entry *entry =
@@ -1630,7 +1591,7 @@ static void open_view(struct clock_app *app, enum view_kind kind,
 		}
 		fplinux_ui_list_set_focused(view->screen, focus);
 		add_command(app->ui, view, CMD_BACK, FPLINUX_UI_COMMAND_CANCEL,
-			    _("Cancel"), "cancel", 0, true);
+			    _("Cancel"), "cancel", 0, false);
 		break;
 	}
 	case VIEW_OFFSET: {
@@ -1701,7 +1662,7 @@ static void open_view(struct clock_app *app, enum view_kind kind,
 						    clock->snooze_minutes - 1);
 		}
 		add_command(app->ui, view, CMD_BACK, FPLINUX_UI_COMMAND_CANCEL,
-			    _("Cancel"), "cancel", 0, true);
+			    _("Cancel"), "cancel", 0, false);
 		break;
 	case VIEW_HELP:
 		view = new_view(app, kind, 0, _("Clock help"), -1, false);

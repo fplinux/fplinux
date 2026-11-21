@@ -709,16 +709,13 @@ static void open_reader(struct apidemo *app, const struct apidemo_entry *entry)
  * manager resizes the surface, the runtime lays out its screens again and
  * the application hears FPLINUX_UI_EVENT_RESIZE (mode_resize()), then
  * lays out the canvas from fplinux_ui_screen_get_content_size(). On the
- * whole display nothing draws the legends, as on a MIDP full-screen
- * Canvas, so the canvas draws its own soft-key bar there.
+ * whole display the canvas opts into the standard bar for its commands.
  */
 static struct {
 	struct apidemo *app;
 	struct fplinux_ui_screen *canvas;
 	lv_obj_t *scroll;
 	lv_obj_t *label;
-	/* The canvas's own soft-key bar, shown on the whole display. */
-	lv_obj_t *bar;
 	/* The mode that the switch's legend was made for. */
 	bool fullscreen;
 } mode;
@@ -738,11 +735,10 @@ static void label_switch(bool fullscreen)
 	fplinux_ui_screen_add_command(mode.canvas, &command);
 }
 
-/* The readout and the bar for the current size and mode. */
+/* The readout for the current size and mode. */
 static void layout_mode(void)
 {
 	struct apidemo *app = mode.app;
-	int32_t bar = app->metrics->softkey_height;
 	bool fullscreen = fplinux_ui_is_fullscreen(app->ui);
 	int width;
 	int height;
@@ -753,11 +749,7 @@ static void layout_mode(void)
 		apidemo_error(app, "fplinux_ui_screen_get_content_size");
 		return;
 	}
-	lv_obj_set_size(mode.scroll, width, fullscreen ? height - bar : height);
-	lv_obj_set_hidden(mode.bar, !fullscreen);
-	if (!fplinux_ui_softkey_bar_set(app->ui, mode.bar, _("Options"), "",
-					_("Back")))
-		perror("fplinux_ui_softkey_bar_set");
+	lv_obj_set_size(mode.scroll, width, height);
 	if (fullscreen != mode.fullscreen)
 		label_switch(fullscreen);
 	/* TRANSLATORS: %1$d × %2$d is the surface and %4$d × %5$d the
@@ -767,10 +759,8 @@ static void layout_mode(void)
 		   "Content area: %4$d × %5$d\u00a0px\n\n%6$s"),
 		 fplinux_ui_width(app->ui), fplinux_ui_height(app->ui),
 		 fullscreen ? _("Yes") : _("No"), width, height,
-		 fullscreen ? _("No status or soft-key bar here, so the "
-				"canvas draws its own. Options > Normal view "
-				"brings the system bars back, and Back leaves "
-				"the demo between them.") :
+		 fullscreen ? _("The status bar is hidden. Options > Normal "
+				"view restores it, and Back leaves the demo.") :
 			      _("Options > Full screen asks for the whole "
 				"display: the surface grows over the system "
 				"bars and FPLINUX_UI_EVENT_RESIZE brings its "
@@ -863,7 +853,6 @@ static void mode_deleted(lv_event_t *event)
 	mode.canvas = NULL;
 	mode.scroll = NULL;
 	mode.label = NULL;
-	mode.bar = NULL;
 }
 
 /* The category's FPLINUX_UI_EVENT_RESIZE hook. */
@@ -897,16 +886,7 @@ static void open_mode(struct apidemo *app, const struct apidemo_entry *entry)
 	mode.canvas = canvas;
 	mode.label = scrolling_label(app, area, &mode.scroll);
 	lv_obj_add_event_cb(mode.scroll, mode_deleted, LV_EVENT_DELETE, NULL);
-	mode.bar = fplinux_ui_softkey_bar_create(app->ui, area);
-	if (!mode.bar) {
-		int saved = errno;
-
-		fplinux_ui_push(app->ui, canvas);
-		fplinux_ui_pop(app->ui);
-		errno = saved;
-		apidemo_error(app, "fplinux_ui_softkey_bar_create");
-		return;
-	}
+	fplinux_ui_canvas_set_fullscreen_bar(canvas, true);
 	apidemo_add_back(canvas);
 	fplinux_ui_screen_add_command(canvas, &sizes_command);
 	/* The opposite of the current mode: layout_mode() adds the switch. */

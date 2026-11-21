@@ -87,21 +87,27 @@ def test_calculator_rejects_arguments_before_preferences_and_ui(
     assert not state.exists()
 
 
+@pytest.mark.parametrize("screen", [(128, 128), (128, 160), (176, 220), (240, 320), (320, 240)])
+@pytest.mark.parametrize("locale", ["en", "ru"])
 def test_actual_calculator_storage_failure_retains_draft_and_honors_close_choices(
-    calculator_native: Path, tmp_path: Path
+    calculator_native: Path, tmp_path: Path, screen: tuple[int, int], locale: str
 ) -> None:
     result = run_process(
         [
             str(calculator_native / "calculator-screens"),
-            "240",
-            "320",
+            *map(str, screen),
             str(calculator_native / "calculator"),
             str(SCREENS / "calculator-keyboard.xkb"),
             str(tmp_path / "session.sock"),
             str(tmp_path),
             "storage-failure",
+            locale,
         ],
         name="actual Calculator draft and close decisions after a failed write",
+        env={
+            "FPLINUX_UI_LOCALE_DIRECTORY": str(calculator_native / "locale"),
+            "FPLINUX_CALCULATOR_LANGUAGE_DIRECTORY": str(ROOT / "alpine/aports/fplinux-language"),
+        },
         timeout=30,
     )
     assert result.returncode == 0, result.stdout + result.stderr
@@ -179,21 +185,27 @@ def test_open_preserves_the_live_calculation_and_resume_keeps_options(
     )
 
 
+@pytest.mark.parametrize("screen", [(128, 128), (128, 160), (176, 220), (240, 320), (320, 240)])
+@pytest.mark.parametrize("locale", ["en", "ru"])
 def test_actual_calculator_unconfirmed_save_closes_without_claiming_a_rollback(
-    calculator_native: Path, tmp_path: Path
+    calculator_native: Path, tmp_path: Path, screen: tuple[int, int], locale: str
 ) -> None:
     result = run_process(
         [
             str(calculator_native / "calculator-screens"),
-            "240",
-            "320",
+            *map(str, screen),
             str(calculator_native / "calculator"),
             str(SCREENS / "calculator-keyboard.xkb"),
             str(tmp_path / "session.sock"),
             str(tmp_path),
             "storage-sync-failure",
+            locale,
         ],
         name="actual Calculator keeps published state after unconfirmed save",
+        env={
+            "FPLINUX_UI_LOCALE_DIRECTORY": str(calculator_native / "locale"),
+            "FPLINUX_CALCULATOR_LANGUAGE_DIRECTORY": str(ROOT / "alpine/aports/fplinux-language"),
+        },
         timeout=30,
     )
     assert result.returncode == 0, result.stdout + result.stderr

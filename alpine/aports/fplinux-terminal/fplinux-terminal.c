@@ -579,7 +579,7 @@ static void open_modifiers(struct gui_terminal *app)
 			app->terminal.modifier &
 				fplinux_terminal_modifier_masks[index]);
 	}
-	add_command(app->ui, list, COMMAND_DONE, FPLINUX_UI_COMMAND_OK,
+	add_command(app->ui, list, COMMAND_DONE, FPLINUX_UI_COMMAND_SCREEN,
 		    _("Done"), "check", 0);
 	add_command(app->ui, list, COMMAND_SCREEN_BACK, FPLINUX_UI_COMMAND_BACK,
 		    NULL, "back", 1);

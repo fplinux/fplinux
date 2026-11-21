@@ -665,7 +665,6 @@ static void assign(const struct fake_screen *s, struct keys *keys)
 	size_t order[64];
 	size_t count = s->command_count < 64 ? s->command_count : 64;
 	bool acts = element_action(s) != NULL;
-	bool help = false;
 
 	*keys = (struct keys){ SIZE_MAX, SIZE_MAX, SIZE_MAX, { 0 }, 0 };
 	by_priority(s, order);
@@ -680,10 +679,10 @@ static void assign(const struct fake_screen *s, struct keys *keys)
 		else
 			keys->menu[keys->menu_count++] = order[i];
 	}
-	for (size_t i = 0; i < keys->menu_count; ++i)
-		help = help || s->commands[keys->menu[i]].command.type ==
-				       FPLINUX_UI_COMMAND_HELP;
-	if (keys->menu_count == 1 && !help) {
+	if (keys->menu_count == 1 &&
+	    s->commands[keys->menu[0]].command.direct &&
+	    s->commands[keys->menu[0]].command.type !=
+		    FPLINUX_UI_COMMAND_HELP) {
 		keys->left = keys->menu[0];
 		keys->menu_count = 0;
 	}
@@ -811,6 +810,18 @@ static void press_ok(void)
 	}
 }
 
+static void press_left(void)
+{
+	struct fake_screen *s = top;
+	struct keys keys;
+
+	if (!s)
+		return;
+	assign(s, &keys);
+	if (keys.left != SIZE_MAX)
+		fire(s, s->commands[keys.left].command.id);
+}
+
 /* A wait step polls every WAIT_POLL_MS, at most WAIT_POLLS times. */
 #define WAIT_POLL_MS 50
 #define WAIT_POLLS 400
@@ -885,6 +896,8 @@ void lf_trace_run_step(void)
 		press_label(step + 4);
 	} else if (!strcmp(step, "ok")) {
 		press_ok();
+	} else if (!strcmp(step, "left")) {
+		press_left();
 	} else if (!strncmp(step, "focus:", 6)) {
 		if (top && top->kind == FAKE_LIST)
 			list_set_focused((struct fplinux_ui_screen *)top,

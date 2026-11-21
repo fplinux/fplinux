@@ -89,6 +89,7 @@ struct fplinux_ui_screen {
 	bool title_active;
 	lv_obj_t *header_status;
 	lv_obj_t *content;
+	bool canvas_fullscreen_bar;
 
 	struct fplinux_ui_listview *list;
 	enum fplinux_ui_list_kind list_kind;

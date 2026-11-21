@@ -15,9 +15,6 @@ msgstr "Заметки"
 msgid "Save"
 msgstr "Сохранить"
 
-msgid "Done"
-msgstr "Готово"
-
 msgid "Unsaved"
 msgstr "Не сохранено"
 
@@ -29,10 +26,6 @@ msgstr "Сохранение не подтверждено"
 
 msgid "Retry"
 msgstr "Повторить"
-
-msgctxt "short command"
-msgid "Retry"
-msgstr "Повтор"
 
 msgid "Stay"
 msgstr "Остаться"

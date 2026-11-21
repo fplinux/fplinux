@@ -199,27 +199,13 @@ static void wait_legends(struct fplinux_ui_frame_peer *peer, int session,
 		    !strcmp(received_legends[1], legend(centre)) &&
 		    !strcmp(received_legends[2], legend(right)))
 			return;
-		assert(fplinux_ui_frame_now_ms() < deadline);
+		if (fplinux_ui_frame_now_ms() >= deadline)
+			break;
 	}
-}
-
-static bool wait_modifier_legends(struct fplinux_ui_frame_peer *peer,
-				  int session, bool selected)
-{
-	uint64_t deadline = fplinux_ui_frame_now_ms() + 3000;
-
-	for (;;) {
-		bool options;
-
-		receive_legends(peer, session);
-		options = !strcmp(received_legends[0], legend("Options"));
-		if ((options || !strcmp(received_legends[0], legend("Done"))) &&
-		    !strcmp(received_legends[1],
-			    legend(selected ? "Unmark" : "Mark")) &&
-		    !strcmp(received_legends[2], legend("Back")))
-			return options;
-		assert(fplinux_ui_frame_now_ms() < deadline);
-	}
+	fprintf(stderr, "Terminal: legends [%s|%s|%s], expected [%s|%s|%s]\n",
+		received_legends[0], received_legends[1], received_legends[2],
+		legend(left), legend(centre), legend(right));
+	assert(!"terminal legends did not change");
 }
 
 static void save(struct fplinux_ui_frame_peer *peer, int observer,
@@ -495,20 +481,6 @@ static void open_option(struct fplinux_ui_frame_peer *peer, int session,
 	press(peer, observer, KEY_OK);
 }
 
-static void apply_modifiers(struct fplinux_ui_frame_peer *peer, int session,
-			    int observer, bool options)
-{
-	press(peer, observer, KEY_F13);
-	if (options) {
-		wait_legends(peer, session, "", "Select", "Back");
-		press(peer, observer, KEY_OK);
-	}
-	wait_legends(peer, session, "Options", "Enter", "Clear");
-	if (options)
-		printf("terminal-modifiers %dx%d %s: Done through Options\n",
-		       peer->width, peer->height, russian ? "ru" : "en");
-}
-
 static void expect_font_selection(size_t focused, size_t selected)
 {
 	assert(observation.list_count == 2);
@@ -549,31 +521,25 @@ static void capture_header(struct fplinux_ui_frame_peer *peer, int session,
 			   const char *prefix)
 {
 	struct pollfd input = { .fd = control, .events = POLLIN };
-	bool modifiers_in_options;
 
 	save_state(peer, observer, directory, prefix, "live");
 	/* Clear composition before arming one-shot modifiers. */
 	press(peer, observer, KEY_F14);
 	open_option(peer, session, observer, 0);
-	modifiers_in_options = wait_modifier_legends(peer, session, false);
-	if (modifiers_in_options) {
-		/* A narrow translated legend still exposes Done through Options. */
-		apply_modifiers(peer, session, observer, true);
-		open_option(peer, session, observer, 0);
-		modifiers_in_options =
-			wait_modifier_legends(peer, session, false);
-	}
+	wait_legends(peer, session, "Options", "Mark", "Back");
 	for (unsigned int index = 0; index < 3; ++index) {
 		press(peer, observer, KEY_OK);
-		modifiers_in_options =
-			wait_modifier_legends(peer, session, true);
+		wait_legends(peer, session, "Options", "Unmark", "Back");
 		if (index != 2) {
 			press(peer, observer, KEY_DOWN);
-			modifiers_in_options =
-				wait_modifier_legends(peer, session, false);
+			wait_legends(peer, session, "Options", "Mark", "Back");
 		}
 	}
-	apply_modifiers(peer, session, observer, modifiers_in_options);
+	press(peer, observer, KEY_F13);
+	wait_legends(peer, session, "", "Select", "Back");
+	assert(has_label(legend("Done")));
+	press(peer, observer, KEY_OK);
+	wait_legends(peer, session, "Options", "Enter", "Clear");
 	save_state(peer, observer, directory, prefix, "armed");
 	open_option(peer, session, observer, 2);
 	wait_legends(peer, session, "", "Send", "Back");
@@ -732,9 +698,9 @@ static void capture_showcase(struct fplinux_ui_frame_peer *peer, int session,
 	wait_legends(peer, session, "", "Select", "Back");
 	save(peer, observer, directory, "terminal-menu");
 	press(peer, observer, KEY_OK);
-	wait_legends(peer, session, "Done", "Mark", "Back");
+	wait_legends(peer, session, "Options", "Mark", "Back");
 	press(peer, observer, KEY_OK);
-	wait_legends(peer, session, "Done", "Unmark", "Back");
+	wait_legends(peer, session, "Options", "Unmark", "Back");
 	save(peer, observer, directory, "terminal-modifiers");
 	/* Back discards the unconfirmed mark and retains the pending h. */
 	press(peer, observer, KEY_F14);

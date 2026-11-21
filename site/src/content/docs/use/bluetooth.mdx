@@ -40,13 +40,13 @@ Pairings are kept while Bluetooth is off.
 
 ## Manage devices in Settings
 
-**Phone name** changes the name other devices see. **Visibility** offers **Hidden**, **2 minutes** and **Always visible**. A visible window also permits incoming pairing. Keep Bluetooth settings in the foreground while pairing or accepting an incoming file; leaving them releases the pairing agent and any search started there. It does not turn the radio off.
+**Phone name** changes the name other devices see. Enter the name, move to **Save** and press <Key>Centre</Key>. **Visibility** offers **Hidden**, **2 minutes** and **Always visible**. A visible window also permits incoming pairing. Keep Bluetooth settings in the foreground while pairing or accepting an incoming file; leaving them releases the pairing agent and any search started there. It does not turn the radio off.
 
 Timed visibility, pairing prompts and receive windows keep the display on while Bluetooth settings are visible. Ordinary accepted transfers can continue with the display off.
 
-Open **Nearby devices** to search. **Stop search** ends your search while keeping the discovered devices listed. **Paired devices** lists saved pairings. Select a device to see its address and state, with signal strength or battery level when available. You can pair, connect or disconnect, change its local name, toggle **Trusted**, and **Forget device**. Forgetting removes the pairing; pair again before reconnecting.
+Open **Nearby devices** to search. Press **Stop** to end the search and keep the discovered devices listed, or choose **Options → Back** to leave the list. Use **Options → Search** to start again. **Paired devices** lists saved pairings. Select a device to see its address and state, with signal strength or battery level when available. You can pair, connect or disconnect, change its local name, toggle **Trusted**, and **Forget device**. Forgetting removes the pairing; pair again before reconnecting.
 
-Follow the pairing request shown on the phone: enter a PIN or passkey, compare the code on both devices, or enter the displayed code on a keyboard. Reject a request you did not expect. **Services** shows the device's reported services; only connectable profiles have a Connect action. A listed service does not establish that the corresponding local transport or optional package is available.
+Follow the pairing request shown on the phone. When asked to enter a PIN or passkey, enter it, move to **Pair** and press <Key>Centre</Key>. Other prompts ask you to compare the code on both devices or enter the displayed code on a keyboard. Reject a request you did not expect. **Services** shows the device's reported services; only connectable profiles have a Connect action. A listed service does not establish that the corresponding local transport or optional package is available.
 
 The phone name, aliases, pairing and trust belong to BlueZ. They survive closing Settings. A RAM system loses them at power-off; a supported system card keeps them as described in [Storage lifetime](/fplinux/guides/microsd-system-card/#what-persists).
 
@@ -54,9 +54,9 @@ The phone name, aliases, pairing and trust belong to BlueZ. They survive closing
 
 For sending, choose **Send file**, select the recipient and choose one file. The shared file picker lists **My files** and available cards. You can also start from a device's details.
 
-For receiving, choose **Receive files**, select the sending device and a writable destination folder. Choose **Receive here**, then send a file from that device during the two-minute receive window. The phone asks before accepting the incoming file. If the destination name already exists, choose to keep both files or explicitly replace it.
+For receiving, choose **Receive files**, select the sending device and open a writable destination folder. Choose **Here**, then send a file from that device during the two-minute receive window. The phone asks before accepting the incoming file. If the name already exists, select **Keep both** or **Replace** and press <Key>Centre</Key>. **Cancel** ends the receive without changing the existing file.
 
-**File transfer** shows the actual state, transferred bytes and progress when the total is known. **Cancel transfer** stops the operation. An accepted transfer continues while Settings is in the background; closing Settings asks whether to cancel it. **Transfer history** keeps results for the current Settings session. A received file can be opened with an installed application that supports its format.
+**File transfer** shows the actual state, transferred bytes and progress when the total is known. Press **Stop** to end the transfer. **Options → Back** leaves the progress screen while the transfer continues. An accepted transfer continues while Settings is in the background; closing Settings asks whether to stop it. **Transfer history** keeps results for the current Settings session. A received file can be opened with an installed application that supports its format.
 
 ## Pair with a computer or another phone
 

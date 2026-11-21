@@ -148,9 +148,6 @@ msgstr "Отключение экрана"
 msgid "Settings"
 msgstr "Настройки"
 
-msgid "Stay"
-msgstr "Остаться"
-
 msgid "Changing this setting closes other apps. Unsaved changes may be lost."
 msgstr "Изменение этой настройки закроет другие приложения. Несохранённые изменения могут быть потеряны."
 
@@ -273,9 +270,6 @@ msgstr "Нет передачи"
 msgid "Search"
 msgstr "Поиск"
 
-msgid "Stop search"
-msgstr "Остановить поиск"
-
 msgid "Searching…"
 msgstr "Поиск…"
 
@@ -294,8 +288,8 @@ msgstr "Рядом нет устройств"
 msgid "No paired devices"
 msgstr "Нет сопряжённых устройств"
 
-msgid "Choose Search to find devices."
-msgstr "Чтобы найти устройства, выберите «Поиск»."
+msgid "Choose Options, then Search to find devices."
+msgstr "Чтобы найти устройства, откройте «Опции» и выберите «Поиск»."
 
 msgid "Turn Bluetooth on to search."
 msgstr "Для поиска включите Bluetooth."
@@ -515,9 +509,6 @@ msgstr "Принять от"
 msgid "Receive into"
 msgstr "Папка приёма"
 
-msgid "Receive here"
-msgstr "Принять сюда"
-
 msgid "Incoming file"
 msgstr "Входящий файл"
 
@@ -532,8 +523,8 @@ msgid "File exists"
 msgstr "Файл существует"
 
 #, c-format
-msgid "%s already exists. Keep both files or replace it?"
-msgstr "%s уже существует. Сохранить оба файла или заменить?"
+msgid "%s already exists."
+msgstr "%s уже существует."
 
 msgid "Keep both"
 msgstr "Сохранить оба"
@@ -582,9 +573,6 @@ msgstr "Ошибка"
 msgid "The file is visible. Saving was not confirmed."
 msgstr "Файл виден. Сохранение не подтверждено."
 
-msgid "Cancel transfer"
-msgstr "Отменить передачу"
-
 msgid "No file transfers in this session."
 msgstr "В этом сеансе ещё не было передач."
 
@@ -594,8 +582,5 @@ msgstr "Сведения о передаче"
 msgid "Open file"
 msgstr "Открыть файл"
 
-msgid "Cancel the current file transfer and close Settings?"
-msgstr "Отменить текущую передачу файлов и закрыть настройки?"
-
-msgid "Cancel and close"
-msgstr "Отменить и закрыть"
+msgid "Stop the current file transfer and close Settings?"
+msgstr "Остановить текущую передачу файлов и закрыть настройки?"

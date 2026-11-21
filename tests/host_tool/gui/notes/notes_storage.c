@@ -153,6 +153,49 @@ struct fplinux_ui_screen *fplinux_ui_alert_new(struct fplinux_ui *ui,
 	return NULL;
 }
 
+struct fplinux_ui_screen *fplinux_ui_form_new(struct fplinux_ui *ui,
+					      const char *title)
+{
+	(void)ui;
+	(void)title;
+	abort();
+}
+
+size_t fplinux_ui_form_append_string(struct fplinux_ui_screen *form,
+				     const char *label, const char *text)
+{
+	(void)form;
+	(void)label;
+	(void)text;
+	abort();
+}
+
+bool fplinux_ui_form_set_appearance(struct fplinux_ui_screen *form, size_t item,
+				    enum fplinux_ui_appearance appearance)
+{
+	(void)form;
+	(void)item;
+	(void)appearance;
+	abort();
+}
+
+bool fplinux_ui_form_add_item_command(struct fplinux_ui_screen *form,
+				      size_t item,
+				      const struct fplinux_ui_command *command)
+{
+	(void)form;
+	(void)item;
+	(void)command;
+	abort();
+}
+
+void fplinux_ui_form_set_focus(struct fplinux_ui_screen *form, size_t item)
+{
+	(void)form;
+	(void)item;
+	abort();
+}
+
 bool fplinux_ui_push(struct fplinux_ui *ui, struct fplinux_ui_screen *screen)
 {
 	assert(screen == ui->editor);

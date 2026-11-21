@@ -29,6 +29,7 @@ struct capture {
 	unsigned int alerts;
 	unsigned int feedback;
 	struct calculator_number_observation header;
+	struct calculator_number_observation save_prompt;
 	const char *expected_reason;
 };
 
@@ -92,6 +93,10 @@ static void wait_number(struct capture *capture, const char *expected)
 			++capture->alerts;
 			continue;
 		}
+		if (observation.kind == CALCULATOR_SAVE_PROMPT) {
+			capture->save_prompt = observation;
+			continue;
+		}
 		if (observation.kind == CALCULATOR_STATUS)
 			++capture->feedback;
 		assert(observation.text_width > 0 &&
@@ -119,27 +124,6 @@ static void wait_number(struct capture *capture, const char *expected)
 	}
 }
 
-static void wait_save_alert(struct capture *capture)
-{
-	struct calculator_number_observation observation;
-
-	for (;;) {
-		fplinux_ui_frame_wait_readable(&capture->peer,
-					       capture->observer);
-		assert(recv(capture->observer, &observation,
-			    sizeof(observation),
-			    0) == (ssize_t)sizeof(observation));
-		if (observation.kind == CALCULATOR_HEADER)
-			capture->header = observation;
-		if (observation.kind != CALCULATOR_ALERT)
-			continue;
-		++capture->alerts;
-		assert(!strcmp(observation.title, "Calculation not saved"));
-		assert(!strcmp(observation.text, "Not enough storage space"));
-		return;
-	}
-}
-
 static void collect_observations(struct capture *capture)
 {
 	struct calculator_number_observation observation;
@@ -152,6 +136,8 @@ static void collect_observations(struct capture *capture)
 			capture->header = observation;
 		if (observation.kind == CALCULATOR_ALERT)
 			++capture->alerts;
+		if (observation.kind == CALCULATOR_SAVE_PROMPT)
+			capture->save_prompt = observation;
 		if (observation.kind == CALCULATOR_STATUS)
 			++capture->feedback;
 	}
@@ -333,9 +319,10 @@ static void expect_saved(struct capture *capture, const char *keys,
 static void reset_from_options(struct capture *capture)
 {
 	press(capture, 1, KEY_F13, NULL);
-	wait_legends(capture, "", "Select", "Back");
+	wait_legends(capture, "", translated("Select", "Выбрать"),
+		     translated("Back", "Назад"));
 	press(capture, 1, KEY_OK, "0");
-	wait_legends(capture, "", "", "Back");
+	wait_legends(capture, "", "", translated("Back", "Назад"));
 }
 
 static void cancel_clear_holds(struct capture *capture)
@@ -414,6 +401,7 @@ static void start(struct capture *capture, char **argv, const char *initial,
 
 	assert(profile);
 	capture->alerts = 0;
+	capture->save_prompt = (struct calculator_number_observation){ 0 };
 	capture->listener = fplinux_ui_frame_listen_session(argv[5]);
 	capture->directory = argv[6];
 	capture->session_path = argv[5];
@@ -547,6 +535,37 @@ static void prepare_close(struct capture *capture, const char *expected)
 	wait_close_reply(capture, expected);
 }
 
+static void check_save_prompt(struct capture *capture, bool published,
+			      bool retry_focused)
+{
+	const struct calculator_number_observation *prompt =
+		&capture->save_prompt;
+	const char *title = published ?
+				    translated("Saving not confirmed",
+					       "Сохранение не подтверждено") :
+				    translated("Calculation not saved",
+					       "Расчёт не сохранён");
+	const char *error =
+		published ? translated("Storage input/output error",
+				       "Ошибка ввода-вывода хранилища") :
+			    translated("Not enough storage space",
+				       "Недостаточно места для сохранения");
+	const char *leave =
+		published ? translated("Close anyway", "Всё равно закрыть") :
+			    translated("Discard changes", "Не сохранять");
+
+	capture->save_prompt = (struct calculator_number_observation){ 0 };
+	redraw(capture);
+	collect_observations(capture);
+	assert(!strcmp(prompt->title, title));
+	if (retry_focused) {
+		assert(!strcmp(prompt->text, error));
+		assert(prompt->retry_visible);
+	} else {
+		assert(!strcmp(prompt->detail, leave));
+	}
+}
+
 static void storage_failure(struct capture *capture, char **argv)
 {
 	char failure_path[512];
@@ -554,7 +573,7 @@ static void storage_failure(struct capture *capture, char **argv)
 
 	assert(snprintf(failure_path, sizeof(failure_path), "%s/save-failure",
 			argv[6]) < (int)sizeof(failure_path));
-	start(capture, argv, "0", "", "", "Back");
+	start(capture, argv, "0", "", "", translated("Back", "Назад"));
 	press(capture, 1, KEY_NUMERIC_9, "9");
 	press(capture, 1, KEY_UP, NULL);
 	press(capture, 1, KEY_NUMERIC_0, "0");
@@ -563,7 +582,8 @@ static void storage_failure(struct capture *capture, char **argv)
 	expect_saved(capture, "", "9");
 	gate = fopen(failure_path, "wx");
 	assert(gate && !fclose(gate));
-	start(capture, argv, "9", "Back", "", "Reset");
+	start(capture, argv, "9", translated("Back", "Назад"), "",
+	      translated("Reset", "Сброс"));
 	press(capture, 1, KEY_NUMERIC_4, "4");
 	send_lifecycle(capture, FPLINUX_UI_SESSION_BACKGROUND);
 	visibility(capture, false);
@@ -572,25 +592,24 @@ static void storage_failure(struct capture *capture, char **argv)
 	/* Frame acknowledgements resume only once the application is visible. */
 	redraw(capture);
 	collect_observations(capture);
-	assert(capture->alerts == 0);
-	puts("calculator-storage: Home resumed without an alert");
+	assert(!capture->alerts && !capture->save_prompt.title[0]);
+	puts("calculator-storage: Home resumed without a save question");
 	press(capture, 1, KEY_NUMERIC_2, "42");
 	expect_saved(capture, "", "9");
 	prepare_close(capture, "wait");
-	wait_save_alert(capture);
-	/* The alert's legends follow its frame, after the close reply. */
-	wait_legends(capture, "Discard changes", "Retry", "Stay");
+	wait_legends(capture, "", "OK", translated("Stay", "Остаться"));
+	check_save_prompt(capture, false, true);
 	activate(capture, FPLINUX_UI_SESSION_ACTIVATION_OPEN);
 	activate(capture, FPLINUX_UI_SESSION_ACTIVATION_RESUME);
 	expect_saved(capture, "", "9");
 	press(capture, 1, KEY_F14, NULL);
 	wait_close_reply(capture, "cancel");
-	/* The alert's listener sends CANCEL before the base legends refresh. */
+	/* Stay cancels closing and returns to the draft. */
 	press(capture, 1, KEY_NUMERIC_3, "423");
 	prepare_close(capture, "wait");
-	wait_save_alert(capture);
+	check_save_prompt(capture, false, true);
 	press(capture, 1, KEY_OK, NULL);
-	wait_save_alert(capture);
+	check_save_prompt(capture, false, true);
 	expect_saved(capture, "", "9");
 	assert(unlink(failure_path) == 0);
 	fplinux_ui_frame_send_key(&capture->peer.keyboards[1], KEY_OK, true);
@@ -601,21 +620,26 @@ static void storage_failure(struct capture *capture, char **argv)
 
 	gate = fopen(failure_path, "wx");
 	assert(gate && !fclose(gate));
-	start(capture, argv, "423", "Options", "", "Clear");
+	start(capture, argv, "423", translated("Options", "Опции"), "",
+	      translated("Clear", "Стереть"));
 	reset_from_options(capture);
 	press(capture, 1, KEY_NUMERIC_7, "7");
 	prepare_close(capture, "wait");
-	wait_save_alert(capture);
-	fplinux_ui_frame_send_key(&capture->peer.keyboards[1], KEY_F13, true);
-	fplinux_ui_frame_send_key(&capture->peer.keyboards[1], KEY_F13, false);
-	wait_close_reply(capture, "ready");
-	/* Even a recovered writer must not save after the user's Discard. */
+	check_save_prompt(capture, false, true);
+	press(capture, 1, KEY_DOWN, NULL);
+	check_save_prompt(capture, false, false);
 	assert(unlink(failure_path) == 0);
+	/* A renewed close request preserves the decision and the focused row. */
+	prepare_close(capture, "wait");
+	fplinux_ui_frame_send_key(&capture->peer.keyboards[1], KEY_OK, true);
+	fplinux_ui_frame_send_key(&capture->peer.keyboards[1], KEY_OK, false);
+	wait_close_reply(capture, "ready");
 	visibility(capture, false);
 	send_lifecycle(capture, FPLINUX_UI_SESSION_BACKGROUND);
 	close_and_reap(capture);
 	expect_saved(capture, "", "423");
-	start(capture, argv, "423", "Options", "", "Clear");
+	start(capture, argv, "423", translated("Options", "Опции"), "",
+	      translated("Clear", "Стереть"));
 	close_and_reap(capture);
 	puts("calculator-storage: Home retained draft; Stay continued input; Retry saved; Discard reopened old state");
 }
@@ -653,11 +677,10 @@ static void header_status(struct capture *capture, char **argv)
 static void published_save_without_confirmation(struct capture *capture,
 						char **argv)
 {
-	struct calculator_number_observation observation;
 	char path[512];
 	FILE *gate;
 
-	start(capture, argv, "0", "", "", "Back");
+	start(capture, argv, "0", "", "", translated("Back", "Назад"));
 	press(capture, 1, KEY_NUMERIC_4, "4");
 	press(capture, 1, KEY_NUMERIC_2, "42");
 	assert(snprintf(path, sizeof(path), "%s/save-failure", argv[6]) <
@@ -665,25 +688,17 @@ static void published_save_without_confirmation(struct capture *capture,
 	gate = fopen(path, "wx");
 	assert(gate && fputs("s", gate) >= 0 && !fclose(gate));
 	prepare_close(capture, "wait");
-	for (;;) {
-		fplinux_ui_frame_wait_readable(&capture->peer,
-					       capture->observer);
-		assert(recv(capture->observer, &observation,
-			    sizeof(observation),
-			    0) == (ssize_t)sizeof(observation));
-		if (observation.kind == CALCULATOR_ALERT)
-			break;
-	}
-	assert(!strcmp(observation.title, "Saving not confirmed"));
-	/* The alert's legends follow its frame, after the close reply. */
-	wait_legends(capture, "Close anyway", "Retry", "Stay");
+	wait_legends(capture, "", "OK", translated("Stay", "Остаться"));
+	check_save_prompt(capture, true, true);
 	expect_saved(capture, "", "42");
 	press(capture, 1, KEY_F14, NULL);
 	wait_close_reply(capture, "cancel");
 	press(capture, 1, KEY_NUMERIC_3, "423");
 	prepare_close(capture, "wait");
-	fplinux_ui_frame_send_key(&capture->peer.keyboards[1], KEY_F13, true);
-	fplinux_ui_frame_send_key(&capture->peer.keyboards[1], KEY_F13, false);
+	press(capture, 1, KEY_DOWN, NULL);
+	check_save_prompt(capture, true, false);
+	fplinux_ui_frame_send_key(&capture->peer.keyboards[1], KEY_OK, true);
+	fplinux_ui_frame_send_key(&capture->peer.keyboards[1], KEY_OK, false);
 	wait_close_reply(capture, "ready");
 	assert(unlink(path) == 0);
 	close_and_reap(capture);
@@ -742,6 +757,9 @@ static void feedback_states(struct capture *capture, char **argv)
 	start(capture, argv, "1e308", translated("Options", "Опции"), "",
 	      translated("Clear", "Стереть"));
 	press(capture, 1, KEY_NUMERIC_9, "9");
+	wait_legends(capture, translated("Options", "Опции"),
+		     translated("Equals", "Равно"),
+		     translated("Clear", "Стереть"));
 	capture->expected_reason =
 		translated("Number too large", "Переполнение");
 	press(capture, 1, KEY_OK, translated("Error", "Ошибка"));
@@ -816,6 +834,15 @@ int main(int argc, char **argv)
 			argv[0]);
 		return 2;
 	}
+	if (argc >= 9) {
+		locale = argv[8];
+		assert(!strcmp(locale, "en") || !strcmp(locale, "ru"));
+	}
+	if (argc == 10) {
+		appearance = argv[9];
+		assert(!strcmp(appearance, "dark") ||
+		       !strcmp(appearance, "light"));
+	}
 	if (argc >= 8) {
 		if (!strcmp(argv[7], "activation"))
 			activation_preserves_calculation(&capture, argv);
@@ -823,20 +850,11 @@ int main(int argc, char **argv)
 			storage_failure(&capture, argv);
 		else if (!strcmp(argv[7], "storage-sync-failure"))
 			published_save_without_confirmation(&capture, argv);
+		else if (!strcmp(argv[7], "header-status"))
+			header_status(&capture, argv);
 		else {
-			assert((!strcmp(argv[7], "feedback") ||
-				!strcmp(argv[7], "header-status")) &&
-			       (argc == 9 || argc == 10));
-			locale = argv[8];
-			assert(!strcmp(locale, "en") || !strcmp(locale, "ru"));
-			if (argc == 10)
-				appearance = argv[9];
-			assert(!strcmp(appearance, "dark") ||
-			       !strcmp(appearance, "light"));
-			if (!strcmp(argv[7], "header-status"))
-				header_status(&capture, argv);
-			else
-				feedback_states(&capture, argv);
+			assert(!strcmp(argv[7], "feedback"));
+			feedback_states(&capture, argv);
 		}
 		return 0;
 	}

@@ -206,6 +206,7 @@ static void save_geometry(struct capture *capture, const char *name)
 	struct json_object *images = json_object_new_array();
 	struct json_object *menu = json_object_new_array();
 	struct json_object *canvas_objects = json_object_new_array();
+	struct json_object *legends = json_object_new_array();
 	char path[512];
 
 	json_object_object_add(root, "picker",
@@ -287,6 +288,16 @@ static void save_geometry(struct capture *capture, const char *name)
 		json_object_array_add(canvas_objects, entry);
 	}
 	json_object_object_add(root, "canvas_objects", canvas_objects);
+	for (int slot = 0; slot < 3; ++slot)
+		json_object_array_add(
+			legends,
+			json_object_new_string(capture->frame.legends[slot]));
+	json_object_object_add(root, "legends", legends);
+	json_object_object_add(root, "legend_bar",
+			       rectangle_json(capture->frame.legend_bar));
+	json_object_object_add(
+		root, "legends_fit",
+		json_object_new_boolean(capture->frame.legends_fit));
 	assert(snprintf(path, sizeof(path), "%s/%s.json", capture->directory,
 			name) < (int)sizeof(path));
 	assert(json_object_to_file_ext(path, root, JSON_C_TO_STRING_PRETTY) ==
@@ -799,9 +810,9 @@ static void fullscreen_canvas(struct capture *capture)
 		int normal_content;
 		int fullscreen_content;
 	} geometry[] = {
-		{ 128, 128, 96, 71, 103 },   { 128, 160, 126, 104, 138 },
-		{ 176, 220, 177, 151, 194 }, { 240, 320, 268, 240, 292 },
-		{ 320, 240, 199, 171, 212 },
+		{ 128, 128, 96, 71, 87 },    { 128, 160, 126, 104, 120 },
+		{ 176, 220, 177, 151, 170 }, { 240, 320, 268, 240, 260 },
+		{ 320, 240, 199, 171, 190 },
 	};
 	int width = dimension(capture->arguments[1]);
 	int height = dimension(capture->arguments[2]);
@@ -840,7 +851,8 @@ static void frames_and_errors(struct capture *capture)
 	close_and_reap(capture);
 
 	open_search(capture, "TONE", "Tone", APIDEMO_FORM);
-	send_press(capture, 1, KEY_F13);
+	press(capture, 1, KEY_F13);
+	send_press(capture, 1, KEY_OK);
 	wait_observation(capture, APIDEMO_LABEL, "ENOTSUP");
 	save_frame(capture, "apidemo-audio-unavailable");
 	press(capture, 1, KEY_F14);
@@ -895,6 +907,7 @@ static void popup_routes(struct capture *capture)
 	type_query(capture, "A");
 	press(capture, 1, KEY_F13);
 	save_frame(capture, "apidemo-text-options");
+	press(capture, 1, KEY_DOWN);
 	press(capture, 1, KEY_OK);
 	result = wait_observation(capture, APIDEMO_ALERT,
 				  word(capture, "Text", "Текст"));
@@ -902,9 +915,7 @@ static void popup_routes(struct capture *capture)
 		       word(capture, "1 character:\nA", "1 символ:\nA")));
 	press(capture, 1, KEY_F14);
 	press(capture, 1, KEY_F13);
-	press(capture, 1, KEY_DOWN);
-	press(capture, 1, KEY_DOWN);
-	/* The last Options row invokes the original screen's Back. */
+	/* Back has the first priority in the editor's Options. */
 	press(capture, 1, KEY_OK);
 	next_demo(capture, "TEXT EDITOR", "TEXT FIELDS",
 		  word(capture, "Text fields", "Поля ввода"), APIDEMO_FORM);
@@ -1173,20 +1184,15 @@ static void sketch_cursor(struct capture *capture)
 	puts("apidemo: Sketch Paint, move, return and Erase preserve the cursor frame");
 }
 
-/* The screen's mode command, on the left key or in Options. */
 static void preview_resize(struct capture *capture, bool fullscreen)
 {
 	unsigned int previous;
 
 	redraw(capture);
-	if (!strcmp(capture->left, word(capture, "Options", "Опции"))) {
-		press(capture, 1, KEY_F13);
-		previous = capture->peer.commits;
-		send_press(capture, 1, KEY_OK);
-	} else {
-		previous = capture->peer.commits;
-		send_press(capture, 1, KEY_F13);
-	}
+	assert(!strcmp(capture->left, word(capture, "Options", "Опции")));
+	press(capture, 1, KEY_F13);
+	previous = capture->peer.commits;
+	send_press(capture, 1, KEY_OK);
 	expect_mode_frame(capture, previous, fullscreen);
 }
 
@@ -1205,7 +1211,7 @@ static void back_from_fullscreen(struct capture *capture)
 
 static void softkey_preview(struct capture *capture)
 {
-	open_search(capture, "SOFTKEY_BAR_CREATE",
+	open_search(capture, "SET_FULLSCREEN_BAR",
 		    word(capture, "Soft-key preview",
 			 "Просмотр подписей клавиш"),
 		    APIDEMO_CANVAS);
@@ -1213,10 +1219,13 @@ static void softkey_preview(struct capture *capture)
 	for (int index = 0; index < 12; ++index)
 		send_press(capture, 1, KEY_DOWN);
 	save_frame(capture, "apidemo-preview-end");
-	/* Only the system bar's OK legend changes: no new frame is due. */
 	send_press(capture, 1, KEY_OK);
+	expect_legends(capture, word(capture, "Restore", "Вернуть"),
+		       word(capture, "Back", "Назад"));
 	save_frame(capture, "apidemo-preview-changed");
 	preview_resize(capture, true);
+	expect_legends(capture, word(capture, "Restore", "Вернуть"),
+		       word(capture, "Back", "Назад"));
 	save_frame(capture, "apidemo-preview-fullscreen");
 	preview_resize(capture, false);
 	save_frame(capture, "apidemo-preview-normal");

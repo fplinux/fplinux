@@ -18,7 +18,6 @@
 /* About as many cells across every screen; the rows fill the height. */
 #define CELLS_ACROSS 20
 #define _(text) gettext(text)
-#define NC_(context, text) context "\004" text
 
 enum command {
 	COMMAND_PLAY,
@@ -35,8 +34,6 @@ struct snake_app {
 	lv_obj_t *board;
 	lv_obj_t *score;
 	lv_obj_t *best;
-	/* Fullscreen Canvas keeps its bar below runtime-owned modal legends. */
-	lv_obj_t *softkey_bar;
 	lv_timer_t *timer;
 	int cell;
 	unsigned int previous_score;
@@ -157,18 +154,12 @@ static struct fplinux_ui_command play_command(const struct snake_app *app)
 		.id = COMMAND_PLAY,
 		.type = FPLINUX_UI_COMMAND_OK,
 		.label = play_label(app),
-		.short_label = app->snake.paused && app->played &&
-					       !app->snake.dead &&
-					       !app->snake.won ?
-				       fplinux_gettext_context(
-					       NC_("short command", "Resume")) :
-				       NULL,
 	};
 }
 
 static void refresh(struct snake_app *app)
 {
-	struct fplinux_ui_command play = play_command(app);
+	const struct fplinux_ui_command play = play_command(app);
 	bool playing = !app->snake.paused && !app->hidden && !app->closing;
 	char message[64];
 
@@ -184,9 +175,6 @@ static void refresh(struct snake_app *app)
 	snprintf(message, sizeof(message), _("Best %u"), app->snake.best);
 	lv_label_set_text(app->best, message);
 	fplinux_ui_screen_add_command(app->canvas, &play);
-	fplinux_ui_softkey_bar_set(
-		app->ui, app->softkey_bar, "",
-		play.short_label ? play.short_label : play.label, _("Back"));
 	lv_obj_invalidate(app->board);
 	if (playing)
 		lv_timer_resume(app->timer);
@@ -443,6 +431,7 @@ static bool create_view(struct snake_app *app)
 	app->canvas = fplinux_ui_canvas_new(app->ui, NULL);
 	if (!app->canvas)
 		return false;
+	fplinux_ui_canvas_set_fullscreen_bar(app->canvas, true);
 	fplinux_ui_screen_add_command(app->canvas, &back);
 	fplinux_ui_screen_set_listener(app->canvas, command, NULL, app);
 	fplinux_ui_screen_set_key_filter(app->canvas, shortcut_key, app);
@@ -451,7 +440,7 @@ static bool create_view(struct snake_app *app)
 	app->drawing = fplinux_ui_canvas_object(app->canvas);
 	lv_obj_update_layout(app->drawing);
 	width = lv_obj_get_width(app->drawing);
-	bottom = lv_obj_get_height(app->drawing) - metrics->softkey_height;
+	bottom = lv_obj_get_height(app->drawing);
 
 	app->cell = width / CELLS_ACROSS > 1 ? width / CELLS_ACROSS : 1;
 	fplinux_snake_start(&app->snake, fplinux_ui_now_ms(),
@@ -460,7 +449,6 @@ static bool create_view(struct snake_app *app)
 	board_width = (int)app->snake.columns * app->cell;
 	board_height = (int)app->snake.rows * app->cell;
 	create_bar(app, 0, top, LV_BORDER_SIDE_BOTTOM);
-	app->softkey_bar = fplinux_ui_softkey_bar_create(app->ui, app->drawing);
 
 	app->board = lv_obj_create(app->drawing);
 	lv_obj_remove_style_all(app->board);

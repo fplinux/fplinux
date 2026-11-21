@@ -468,7 +468,6 @@ void showcase_start(struct showcase_app *app,
 	const struct fplinux_ui_command stop = {
 		.id = SHOWCASE_STOP,
 		.type = FPLINUX_UI_COMMAND_STOP,
-		.keep_visible = true,
 	};
 
 	if (app->state != SHOWCASE_SETUP || app->closing)
@@ -483,6 +482,7 @@ void showcase_start(struct showcase_app *app,
 		app->ui, config->fullscreen ? NULL : "ARMADA");
 	if (!app->canvas)
 		goto failed;
+	fplinux_ui_canvas_set_fullscreen_bar(app->canvas, true);
 	app->frame =
 		fplinux_ui_frame_new(app->ui, 1, 1, FPLINUX_UI_FRAME_DIRECT);
 	if (!app->frame)

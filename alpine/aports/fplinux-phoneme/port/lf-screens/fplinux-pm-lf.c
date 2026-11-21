@@ -479,6 +479,9 @@ Java_javax_microedition_lcdui_LFNative_addCommand0(void)
 				command.type =
 					(enum fplinux_ui_command_type)type;
 			command.label = label;
+			/* LCDUI also binds a lone secondary command directly. */
+			command.direct = command.type !=
+					 FPLINUX_UI_COMMAND_HELP;
 			/* ITEM and SCREEN commands need a label. */
 			if (!label &&
 			    (command.type == FPLINUX_UI_COMMAND_ITEM ||

@@ -144,6 +144,9 @@ msgstr "Закрыть «%s»? Несохранённые изменения м�
 msgid "Cannot close the application. Try again."
 msgstr "Не удалось закрыть приложение. Попробуйте ещё раз."
 
+msgid "Quit"
+msgstr "Выйти"
+
 msgid "Cannot switch applications. Try again."
 msgstr "Не удалось переключить приложение. Попробуйте ещё раз."
 

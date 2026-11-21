@@ -47,11 +47,11 @@ Add `struct fplinux_ui_command` values with application-owned IDs, a command typ
 
 - The right soft key takes the first Back, Cancel, Exit or Stop action by priority.
 - Centre activates the focused control, such as a list row or editable field, then falls back to the screen's OK command.
-- Remaining actions use the left soft key or **Options**. Help goes into Options.
+- The left soft key opens **Options** for remaining actions, even if there is one. Set `direct` for an action that should use the left key when it is the only one left. Help always goes into Options.
 
-Lower priority numbers choose keys first; equal priorities retain insertion order. A command attached to the focused item wins a tie with a screen command. Inside Options, Back comes last; the other commands keep their priority order. Back appears there when another action occupies its key, such as Clear in a nonempty text field. A screen with Back already on a soft key does not need another Back row. Reusing an ID on the same screen replaces that command. Labels are copied; callback context remains yours.
+Lower priority numbers choose keys and order the items in Options. Equal priorities retain insertion order. A command attached to the focused item wins a tie with a screen command. When Clear uses the right key in a nonempty text field, the usual right-key command remains in Options. Set `keep_right_on_clear` to retain that command on the right and offer Clear separately. Reusing an ID on the same screen replaces that command. Labels are copied and callback context remains yours.
 
-An optional `short_label` gives a command a compact soft-key legend. The runtime first tries full labels, then the supplied short labels, then the ordinary Options assignment. Options keeps the full label. Both strings are copied; shortening does not change the command ID, priority or `keep_visible` behavior.
+Use one label that fits its key on supported profiles. When a form needs Save and Options, put Save on an actionable row. Keep extended choices in rows and reserve the right key for cancellation. A fullscreen Canvas can use `fplinux_ui_canvas_set_fullscreen_bar()` to display its assigned keys in the standard bar. The content-size accessor accounts for that bar.
 
 Use `fplinux_ui_list_set_select_label()` to name the centre action of an IMPLICIT or EXCLUSIVE List. Passing null restores the standard Select label. A MULTIPLE List keeps its Mark or Unmark action. The label does not disable input or change the selection policy; the application must handle any operation already in progress.
 

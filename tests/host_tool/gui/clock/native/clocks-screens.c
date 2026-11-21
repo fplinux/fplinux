@@ -518,15 +518,31 @@ static void focus_form_item(struct capture *capture, size_t item)
 	assert(capture->observed.focused_item == item);
 }
 
-static void add_alarm(struct capture *capture)
+static void select_first_option(struct capture *capture, const char *label)
 {
 	press(capture, 1, KEY_F13);
-	wait_label(capture, "New alarm");
+	wait_legends(capture, "", "Select", "Back");
+	wait_label(capture, label);
+	press(capture, 1, KEY_OK);
+}
+
+static void activate_editor_action(struct capture *capture, const char *label)
+{
 	redraw(capture);
-	if (!capture->observed.time_fields) {
-		press(capture, 1, KEY_OK);
-		wait_label(capture, "Time");
+	for (unsigned int step = 0; strcmp(capture->centre, label) && step < 8;
+	     ++step) {
+		press(capture, 1, KEY_DOWN);
+		redraw(capture);
 	}
+	wait_legends(capture, "", label, "Cancel");
+	wait_label(capture, label);
+	press(capture, 1, KEY_OK);
+}
+
+static void add_alarm(struct capture *capture)
+{
+	select_first_option(capture, "New alarm");
+	wait_label(capture, "Time");
 	redraw(capture);
 	assert(capture->observed.time_fields == 1);
 }
@@ -569,7 +585,12 @@ static void save_label(struct capture *capture)
 	     ++index)
 		press(capture, 0, letters[index]);
 	wait_label(capture, "wake");
-	wait_legends(capture, "Clear", "Done", "Cancel");
+	wait_legends(capture, "Options", "Done", "Clear");
+	press(capture, 1, KEY_F13);
+	wait_legends(capture, "", "Select", "Back");
+	wait_label(capture, "Cancel");
+	press(capture, 1, KEY_F14);
+	wait_legends(capture, "Options", "Done", "Clear");
 	press(capture, 1, KEY_OK);
 	wait_label(capture, "New alarm");
 }
@@ -644,7 +665,7 @@ static void alarm_editor(struct capture *capture)
 	assert(capture->observed.time_fields == 1);
 	assert(capture->observed.date_fields == 1);
 	assert(capture->observed.duration_fields == 0);
-	wait_legends(capture, "Save", "Edit", "Cancel");
+	wait_legends(capture, "", "Edit", "Cancel");
 	save_frame(capture, "clocks-alarm-edit");
 	press(capture, 1, KEY_OK);
 	repeat_key(capture, KEY_NUMERIC_0, 2);
@@ -656,7 +677,7 @@ static void alarm_editor(struct capture *capture)
 	press(capture, 1, KEY_NUMERIC_0);
 	press(capture, 1, KEY_NUMERIC_1);
 	press(capture, 1, KEY_OK);
-	press(capture, 1, KEY_F13);
+	activate_editor_action(capture, "Save");
 	wait_label(capture,
 		   "This time has passed. Choose another date or time.");
 	assert(!capture->has_request);
@@ -682,8 +703,8 @@ static void alarm_editor(struct capture *capture)
 	press(capture, 1, KEY_OK);
 	focus_form_item(capture, 4);
 	save_label(capture);
-	wait_legends(capture, "Save", "Edit", "Cancel");
-	press(capture, 1, KEY_F13);
+	wait_legends(capture, "", "Edit", "Cancel");
+	activate_editor_action(capture, "Save");
 	expect_request(capture, CLOCK_REQUEST_ALARM_ADD);
 	assert(capture->operation.alarm.schedule == CLOCK_ALARM_ONCE);
 	assert(capture->operation.alarm.once_utc == INT64_C(1709196300));
@@ -713,7 +734,7 @@ static void alarm_editor(struct capture *capture)
 	save_frame(capture, "clocks-error");
 	press(capture, 1, KEY_F14);
 	wait_label(capture, "New alarm");
-	press(capture, 1, KEY_F13);
+	activate_editor_action(capture, "Retry");
 	expect_request(capture, CLOCK_REQUEST_ALARM_ADD);
 	assert(capture->operation.alarm.once_utc == INT64_C(1709196300));
 	assert(!strcmp(capture->operation.alarm.label, "wake"));
@@ -728,7 +749,8 @@ static void alarm_editor(struct capture *capture)
 	pump_for(capture, 3500);
 	assert(capture->retransmissions == 1);
 	assert(capture->owner.alarm_count == 0);
-	press(capture, 1, KEY_F13);
+	wait_legends(capture, "", "Retry", "Cancel");
+	press(capture, 1, KEY_OK);
 	wait_retransmissions(capture, 2);
 	focus_form_item(capture, 0);
 	press(capture, 1, KEY_OK);
@@ -742,7 +764,7 @@ static void alarm_editor(struct capture *capture)
 	press(capture, 1, KEY_F14);
 	redraw(capture);
 	assert(!capture->observed.editing);
-	press(capture, 1, KEY_F13);
+	activate_editor_action(capture, "Save");
 	expect_request(capture, CLOCK_REQUEST_ALARM_EDIT);
 	assert(capture->operation.id == capture->owner.alarms[0].id);
 	assert(capture->operation.alarm.once_utc == INT64_C(1709196300));
@@ -805,13 +827,14 @@ static void timer_actions(struct capture *capture)
 	assert(capture->observed.duration_fields == 1);
 	assert(capture->observed.time_fields == 0);
 	assert(capture->observed.date_fields == 0);
-	press(capture, 1, KEY_F13);
+	activate_editor_action(capture, "Done");
 	wait_label(capture, "Enter a duration greater than zero.");
 	assert(!capture->has_request);
 	refresh_snapshot(capture);
 	assert(has_label(capture, "Enter a duration greater than zero."));
 	assert(capture->observed.duration_fields == 1);
 	assert(capture->observed.duration_seconds == 0);
+	focus_form_item(capture, 0);
 	press(capture, 1, KEY_OK);
 	press(capture, 1, KEY_NUMERIC_0);
 	press(capture, 1, KEY_NUMERIC_0);
@@ -823,7 +846,7 @@ static void timer_actions(struct capture *capture)
 	redraw(capture);
 	assert(capture->observed.duration_seconds == 90);
 	save_frame(capture, "clocks-duration");
-	press(capture, 1, KEY_F13);
+	activate_editor_action(capture, "Done");
 	expect_request(capture, CLOCK_REQUEST_TIMER_SET);
 	assert(capture->operation.seconds == 90);
 	apply_request(capture);
@@ -835,7 +858,7 @@ static void timer_actions(struct capture *capture)
 	apply_request(capture);
 	assert(capture->owner.timer.state == CLOCK_TIMER_RUNNING);
 	assert(capture->owner.timer.deadline_ms == 91000);
-	wait_legends(capture, "Stop", "Pause", "Back");
+	wait_legends(capture, "Options", "Pause", "Stop");
 	assert(clock_model_tick(&capture->owner, INT64_C(1704067210), 11500,
 				NULL) == CLOCK_OK);
 	press(capture, 1, KEY_OK);
@@ -850,7 +873,8 @@ static void timer_actions(struct capture *capture)
 	expect_request(capture, CLOCK_REQUEST_TIMER_RESUME);
 	apply_request(capture);
 	assert(capture->owner.timer.deadline_ms == 91000);
-	press(capture, 1, KEY_F13);
+	wait_legends(capture, "Options", "Pause", "Stop");
+	press(capture, 1, KEY_F14);
 	expect_request(capture, CLOCK_REQUEST_TIMER_STOP);
 	apply_request(capture);
 	wait_label(capture, "00:01:30");
@@ -869,6 +893,7 @@ static void timer_actions(struct capture *capture)
 static void enter_duration(struct capture *capture,
 			   const unsigned int digits[6])
 {
+	focus_form_item(capture, 0);
 	press(capture, 1, KEY_OK);
 	for (size_t index = 0; index < 6; ++index)
 		press(capture, 1, digits[index]);
@@ -893,7 +918,7 @@ static void timer_save_acknowledgment(struct capture *capture, bool changed)
 	wait_label(capture, "Timer duration");
 	enter_duration(capture, ninety);
 	assert(capture->observed.duration_seconds == 90);
-	press(capture, 1, KEY_F13);
+	activate_editor_action(capture, "Done");
 	expect_request(capture, CLOCK_REQUEST_TIMER_SET);
 	assert(capture->operation.seconds == 90);
 	if (changed) {
@@ -907,7 +932,7 @@ static void timer_save_acknowledgment(struct capture *capture, bool changed)
 		assert(capture->observed.duration_fields == 1);
 		assert(capture->observed.duration_seconds == 120);
 		assert(!capture->observed.editing);
-		press(capture, 1, KEY_F13);
+		activate_editor_action(capture, "Done");
 		expect_request(capture, CLOCK_REQUEST_TIMER_SET);
 		assert(capture->operation.seconds == 120);
 		apply_request(capture);
@@ -974,7 +999,7 @@ static void activation_protects_alarm_draft(struct capture *capture)
 	assert(capture->observed.editing);
 	activate(capture, FPLINUX_UI_SESSION_ACTIVATION_OPEN);
 	wait_label(capture, "Return to the start without saving?");
-	press(capture, 1, KEY_OK);
+	press(capture, 1, KEY_F14);
 	wait_label_absent(capture, "Return to the start without saving?");
 	assert(capture->observed.editing &&
 	       capture->observed.focused_item == 0);
@@ -991,7 +1016,8 @@ static void activation_protects_alarm_draft(struct capture *capture)
 	wait_label(capture, "Return to the start without saving?");
 	activate(capture, FPLINUX_UI_SESSION_ACTIVATION_OPEN);
 	activate(capture, FPLINUX_UI_SESSION_ACTIVATION_RESUME);
-	press(capture, 1, KEY_OK);
+	wait_legends(capture, "Leave", "", "Stay");
+	press(capture, 1, KEY_F14);
 	wait_label(capture, "New alarm");
 	wait_label_absent(capture, "Return to the start without saving?");
 	assert(capture->observed.time_value == INT64_C(1704096000));
@@ -1013,7 +1039,7 @@ static void activation_waits_for_alarm_reply(struct capture *capture,
 	add_alarm(capture);
 	wait_label(capture, "New alarm");
 	enter_alarm_hour(capture, KEY_NUMERIC_8);
-	press(capture, 1, KEY_F13);
+	activate_editor_action(capture, "Save");
 	expect_request(capture, CLOCK_REQUEST_ALARM_ADD);
 	request = capture->request;
 	activate(capture, FPLINUX_UI_SESSION_ACTIVATION_OPEN);
@@ -1032,7 +1058,7 @@ static void activation_waits_for_alarm_reply(struct capture *capture,
 		activate(capture, FPLINUX_UI_SESSION_ACTIVATION_OPEN);
 		wait_label(capture, "Change not saved");
 		press(capture, 1, KEY_F14);
-		wait_legends(capture, "Retry", "Edit", "Cancel");
+		wait_legends(capture, "", "Edit", "Cancel");
 		redraw(capture);
 		wait_label(capture, "New alarm");
 		assert(capture->observed.time_fields == 1);
@@ -1049,8 +1075,8 @@ static void activation_waits_for_alarm_reply(struct capture *capture,
 		if (changed) {
 			wait_label(capture,
 				   "Return to the start without saving?");
-			press(capture, 1, KEY_OK);
-			wait_legends(capture, "Save", "Edit", "Cancel");
+			press(capture, 1, KEY_F14);
+			wait_legends(capture, "", "Edit", "Cancel");
 			redraw(capture);
 			wait_label(capture, "Edit alarm");
 			assert(capture->observed.time_fields == 1);
@@ -1079,7 +1105,10 @@ paused_timer_edit_preserves_or_replaces_countdown(struct capture *capture)
 		wait_label(capture, "Edit");
 		press(capture, 1, KEY_OK);
 		wait_label(capture, "Timer duration");
-		press(capture, 1, cancel ? KEY_F14 : KEY_F13);
+		if (cancel)
+			press(capture, 1, KEY_F14);
+		else
+			activate_editor_action(capture, "Done");
 		wait_label(capture, "00:07:00");
 		assert(!capture->has_request);
 		assert(capture->owner.timer.state == CLOCK_TIMER_PAUSED);
@@ -1089,17 +1118,18 @@ paused_timer_edit_preserves_or_replaces_countdown(struct capture *capture)
 	press(capture, 1, KEY_OK);
 	wait_label(capture, "Timer duration");
 	enter_duration(capture, nine_minutes);
-	press(capture, 1, KEY_F13);
+	activate_editor_action(capture, "Done");
 	wait_label(capture,
 		   "Replace the current countdown with this duration?");
 	assert(!capture->has_request &&
 	       capture->owner.timer.remaining_ms == 420123);
 	press(capture, 1, KEY_F14);
 	wait_label(capture, "Timer duration");
-	press(capture, 1, KEY_F13);
+	activate_editor_action(capture, "Done");
 	wait_label(capture,
 		   "Replace the current countdown with this duration?");
-	press(capture, 1, KEY_F13);
+	wait_legends(capture, "", "Confirm", "Cancel");
+	press(capture, 1, KEY_OK);
 	expect_request(capture, CLOCK_REQUEST_TIMER_SET);
 	assert(capture->operation.seconds == 540);
 	apply_request(capture);
@@ -1148,7 +1178,7 @@ static void snoozed_alarm_and_disabled_draft(struct capture *capture,
 		press(capture, 1, KEY_RIGHT);
 		press(capture, 1, KEY_DOWN);
 		press(capture, 1, KEY_OK);
-		press(capture, 1, KEY_F13);
+		activate_editor_action(capture, "Save");
 		expect_request(capture, CLOCK_REQUEST_ALARM_EDIT);
 		assert(!capture->operation.alarm.enabled);
 		assert(capture->operation.alarm.once_utc == 1704067200);
@@ -1234,7 +1264,7 @@ static void published_add_retries_accepted_identity(struct capture *capture)
 	wait_label(capture, "Alarms");
 	add_alarm(capture);
 	wait_label(capture, "New alarm");
-	press(capture, 1, KEY_F13);
+	activate_editor_action(capture, "Save");
 	expect_request(capture, CLOCK_REQUEST_ALARM_ADD);
 	serial = capture->request.serial;
 	assert(clock_wire_request_apply(&capture->owner, &capture->operation) ==
@@ -1251,8 +1281,7 @@ static void published_add_retries_accepted_identity(struct capture *capture)
 	redraw(capture);
 	assert(capture->observed.time_fields == 1 &&
 	       capture->observed.time_value == INT64_C(1704092400));
-	wait_legends(capture, "Retry", "Edit", "Cancel");
-	press(capture, 1, KEY_F13);
+	activate_editor_action(capture, "Retry");
 	expect_request(capture, CLOCK_REQUEST_SAVE);
 	assert(capture->request.serial != serial);
 	assert(capture->owner.alarm_count == 1 &&
@@ -1265,7 +1294,7 @@ static void published_add_retries_accepted_identity(struct capture *capture)
 	wait_label(capture, "Edit alarm");
 	assert(capture->observed.time_value == INT64_C(1704096000));
 	assert(capture->owner.alarms[0].spec.once_utc == INT64_C(1704092400));
-	press(capture, 1, KEY_F13);
+	activate_editor_action(capture, "Save");
 	expect_request(capture, CLOCK_REQUEST_ALARM_EDIT);
 	assert(capture->operation.id == 1);
 	apply_request(capture);
@@ -1299,7 +1328,7 @@ background_durable_retains_accepted_revision(struct capture *capture)
 	wait_label(capture, "Alarms");
 	add_alarm(capture);
 	wait_label(capture, "New alarm");
-	press(capture, 1, KEY_F13);
+	activate_editor_action(capture, "Save");
 	expect_request(capture, CLOCK_REQUEST_ALARM_ADD);
 	assert(clock_wire_request_apply(&capture->owner, &capture->operation) ==
 	       CLOCK_OK);
@@ -1313,10 +1342,9 @@ background_durable_retains_accepted_revision(struct capture *capture)
 	press(capture, 1, KEY_F14);
 	wait_label(capture, "Edit alarm");
 	deliver_background_durable_snapshot(capture);
-	wait_legends(capture, "Save", "Edit", "Cancel");
 	assert(capture->observed.time_value == INT64_C(1704092400));
 	before = capture->owner;
-	press(capture, 1, KEY_F13);
+	activate_editor_action(capture, "Save");
 	expect_request(capture, CLOCK_REQUEST_SAVE);
 	apply_request(capture);
 	assert(!memcmp(&capture->owner, &before, sizeof(before)));
@@ -1325,7 +1353,7 @@ background_durable_retains_accepted_revision(struct capture *capture)
 	press(capture, 1, KEY_OK);
 	wait_label(capture, "Edit alarm");
 	enter_alarm_hour(capture, KEY_NUMERIC_8);
-	press(capture, 1, KEY_F13);
+	activate_editor_action(capture, "Save");
 	expect_request(capture, CLOCK_REQUEST_ALARM_EDIT);
 	assert(capture->operation.id == 1 &&
 	       capture->operation.alarm.once_utc == INT64_C(1704096000));
@@ -1342,9 +1370,9 @@ background_durable_retains_accepted_revision(struct capture *capture)
 	assert(capture->observed.time_value == INT64_C(1704099600));
 	press(capture, 1, KEY_F14);
 	wait_label(capture, "Leave without saving?");
-	press(capture, 1, KEY_OK);
+	press(capture, 1, KEY_F14);
 	wait_label(capture, "Edit alarm");
-	press(capture, 1, KEY_F13);
+	activate_editor_action(capture, "Save");
 	expect_request(capture, CLOCK_REQUEST_ALARM_EDIT);
 	assert(capture->operation.id == 1 &&
 	       capture->operation.alarm.once_utc == INT64_C(1704099600));
@@ -1389,7 +1417,7 @@ ordinary_close_keeps_or_discards_a_failed_draft(struct capture *capture)
 	add_alarm(capture);
 	wait_label(capture, "New alarm");
 	enter_alarm_hour(capture, KEY_NUMERIC_8);
-	press(capture, 1, KEY_F13);
+	activate_editor_action(capture, "Save");
 	expect_request(capture, CLOCK_REQUEST_ALARM_ADD);
 	reply(capture, &capture->request, CLOCK_STORAGE_ERROR);
 	capture->has_request = false;
@@ -1398,7 +1426,7 @@ ordinary_close_keeps_or_discards_a_failed_draft(struct capture *capture)
 	prepare_ordinary_close(capture);
 	activate(capture, FPLINUX_UI_SESSION_ACTIVATION_OPEN);
 	wait_label(capture, "Leave without saving?");
-	press(capture, 1, KEY_OK);
+	press(capture, 1, KEY_F14);
 	wait_close_response(capture, "cancel");
 	wait_label(capture, "New alarm");
 	redraw(capture);
@@ -1409,7 +1437,7 @@ ordinary_close_keeps_or_discards_a_failed_draft(struct capture *capture)
 			(long long)capture->observed.time_value);
 	assert(capture->observed.time_value == INT64_C(1704096000));
 	assert(capture->owner.alarm_count == 0);
-	press(capture, 1, KEY_F13);
+	activate_editor_action(capture, "Retry");
 	expect_request(capture, CLOCK_REQUEST_ALARM_ADD);
 	assert(capture->operation.alarm.once_utc == INT64_C(1704096000));
 	apply_request(capture);
@@ -1434,12 +1462,12 @@ static void close_stay_resumes_pending_alarm_retry(struct capture *capture)
 	wait_label(capture, "Alarms");
 	add_alarm(capture);
 	enter_alarm_hour(capture, KEY_NUMERIC_8);
-	press(capture, 1, KEY_F13);
+	activate_editor_action(capture, "Save");
 	expect_request(capture, CLOCK_REQUEST_ALARM_ADD);
 	serial = capture->request.serial;
 	assert(capture->operation.alarm.once_utc == INT64_C(1704096000));
 	prepare_ordinary_close(capture);
-	press(capture, 1, KEY_OK);
+	press(capture, 1, KEY_F14);
 	wait_close_response(capture, "cancel");
 	wait_label(capture, "New alarm");
 	assert(!capture->retransmissions);
@@ -1467,8 +1495,8 @@ static void timer_controls_and_snapshots_survive_directory_sync_failure(
 	press(capture, 1, KEY_OK);
 	expect_request(capture, CLOCK_REQUEST_TIMER_START);
 	apply_request(capture);
-	wait_legends(capture, "Stop", "Pause", "Back");
-	press(capture, 1, KEY_F14);
+	wait_legends(capture, "Options", "Pause", "Stop");
+	select_first_option(capture, "Back");
 	press(capture, 1, KEY_F13);
 	wait_label(capture, "Show clock");
 	press(capture, 1, KEY_DOWN);
@@ -1494,7 +1522,7 @@ static void timer_controls_and_snapshots_survive_directory_sync_failure(
 	wait_label(capture, "Alarms");
 	press(capture, 1, KEY_OK);
 	wait_label(capture, "Timer");
-	wait_legends(capture, "Stop", "Pause", "Back");
+	wait_legends(capture, "Options", "Pause", "Stop");
 	result = fplinux_session_clock_tick(capture->storage_owner,
 					    INT64_C(1704067201), 2000);
 	assert(result.status == CLOCK_OK && result.applied);
@@ -1509,7 +1537,7 @@ static void timer_controls_and_snapshots_survive_directory_sync_failure(
 		pump(capture);
 	assert(capture->snapshots > snapshots);
 	wait_label(capture, "00:01:29");
-	press(capture, 1, KEY_F13);
+	press(capture, 1, KEY_F14);
 	expect_request(capture, CLOCK_REQUEST_TIMER_STOP);
 	result = apply_received_request(capture);
 	assert(result.status == CLOCK_OK && result.applied);
@@ -1544,7 +1572,7 @@ static void saving_a_ringing_checkpoint_preserves_event_and_generation(
 	press(capture, 1, KEY_NUMERIC_0);
 	press(capture, 1, KEY_NUMERIC_1);
 	press(capture, 1, KEY_OK);
-	press(capture, 1, KEY_F13);
+	activate_editor_action(capture, "Save");
 	expect_request(capture, CLOCK_REQUEST_ALARM_ADD);
 	assert(capture->operation.alarm.once_utc == INT64_C(1704067260));
 	fail_directory_sync = true;
@@ -1567,7 +1595,7 @@ static void saving_a_ringing_checkpoint_preserves_event_and_generation(
 	assert(!capture->owner.alarms[0].spec.enabled);
 	press(capture, 1, KEY_F14);
 	wait_label(capture, "Edit alarm");
-	press(capture, 1, KEY_F13);
+	activate_editor_action(capture, "Retry");
 	expect_request(capture, CLOCK_REQUEST_SAVE);
 	fail_directory_sync = false;
 	result = apply_received_request(capture);
@@ -1600,7 +1628,7 @@ static void active_confirmation_keeps_original_revision(struct capture *capture,
 	press(capture, 1, KEY_OK);
 	wait_label(capture, "Edit alarm");
 	enter_alarm_hour(capture, KEY_NUMERIC_8);
-	press(capture, 1, KEY_F13);
+	activate_editor_action(capture, "Save");
 	expect_request(capture, CLOCK_REQUEST_ALARM_EDIT);
 	assert(capture->operation.id == 1 &&
 	       capture->operation.alarm.hour == 8);
@@ -1616,7 +1644,8 @@ static void active_confirmation_keeps_original_revision(struct capture *capture,
 	capture->has_request = false;
 	wait_label(capture,
 		   "This alarm is ringing. Stop it and apply the change?");
-	press(capture, 1, KEY_F13);
+	wait_legends(capture, "", "Confirm", "Cancel");
+	press(capture, 1, KEY_OK);
 	expect_request(capture, CLOCK_REQUEST_ALARM_EDIT);
 	assert(capture->operation.id == 1 &&
 	       capture->operation.alarm.hour == 8);
@@ -1627,7 +1656,7 @@ static void active_confirmation_keeps_original_revision(struct capture *capture,
 	if (changed) {
 		wait_label(capture, "Edit alarm");
 		assert(capture->observed.time_value == INT64_C(1704099600));
-		press(capture, 1, KEY_F13);
+		activate_editor_action(capture, "Save");
 		expect_request(capture, CLOCK_REQUEST_ALARM_EDIT);
 		assert(capture->operation.id == 1 &&
 		       capture->operation.alarm.hour == 9);
@@ -1684,8 +1713,8 @@ static void repeat_schedule(struct capture *capture)
 	repeat_key(capture, KEY_DOWN, 4);
 	press(capture, 1, KEY_OK);
 	wait_label(capture, "Choose days");
-	wait_legends(capture, "Done", "Mark", "Cancel");
-	press(capture, 1, KEY_F13);
+	wait_legends(capture, "Options", "Mark", "Back");
+	select_first_option(capture, "Done");
 	wait_label(capture, "Select at least one day.");
 	assert(!capture->has_request);
 	press(capture, 1, KEY_F14);
@@ -1697,13 +1726,13 @@ static void repeat_schedule(struct capture *capture)
 	repeat_key(capture, KEY_DOWN, 2);
 	press(capture, 1, KEY_OK);
 	save_frame(capture, "clocks-days");
-	press(capture, 1, KEY_F13);
+	select_first_option(capture, "Done");
 	wait_label(capture, "Edit alarm");
 	redraw(capture);
 	assert(capture->observed.date_fields == 0);
 	wait_label_absent(capture, "Date");
-	wait_legends(capture, "Save", "Edit", "Cancel");
-	press(capture, 1, KEY_F13);
+	wait_legends(capture, "", "Edit", "Cancel");
+	activate_editor_action(capture, "Save");
 	expect_request(capture, CLOCK_REQUEST_ALARM_EDIT);
 	assert(capture->operation.alarm.schedule == CLOCK_ALARM_WEEKLY);
 	assert(capture->operation.alarm.hour == 8);
@@ -1736,7 +1765,7 @@ static void repeat_schedule(struct capture *capture)
 	assert(capture->owner.alarms[0].spec.hour == 8);
 	press(capture, 1, KEY_F14);
 	wait_label(capture, "Leave without saving?");
-	wait_legends(capture, "Leave", "Stay", "Cancel");
+	wait_legends(capture, "Leave", "", "Stay");
 	press(capture, 1, KEY_F13);
 	wait_label(capture, "08:45");
 	assert(capture->owner.alarms[0].spec.repeat_days == 0x2a);
@@ -1970,12 +1999,7 @@ static void stopwatch_actions(struct capture *capture)
 static void choose_offset(struct capture *capture, unsigned int direction,
 			  size_t steps, int offset_minutes)
 {
-	press(capture, 1, KEY_F13);
-	redraw(capture);
-	if (!has_label(capture, "UTC offset")) {
-		wait_label(capture, "Add UTC offset");
-		press(capture, 1, KEY_OK);
-	}
+	select_first_option(capture, "Add UTC offset");
 	wait_label(capture, "UTC offset");
 	wait_label(capture, "UTC+00:00");
 	repeat_key(capture, direction, steps);
@@ -2036,9 +2060,11 @@ static void world_late_acknowledgments(struct capture *capture)
 	wait_label(capture, "World clock");
 	open_selected_offset(capture, "UTC+01:00", "01:00",
 			     "Monday, January 1");
-	press(capture, 1, KEY_F13);
+	wait_legends(capture, "Options", "Edit", "Back");
+	select_first_option(capture, "Delete");
 	wait_label(capture, "Delete this UTC offset?");
-	press(capture, 1, KEY_F13);
+	wait_legends(capture, "", "Confirm", "Cancel");
+	press(capture, 1, KEY_OK);
 	expect_request(capture, CLOCK_REQUEST_WORLD_DELETE);
 	assert(capture->operation.id == added_id);
 	retransmissions = capture->retransmissions;
@@ -2144,7 +2170,7 @@ static void world_view(struct capture *capture)
 	press(capture, 1, KEY_DOWN);
 	press(capture, 1, KEY_OK);
 	wait_label(capture, "World clock");
-	press(capture, 1, KEY_F13);
+	select_first_option(capture, "Add UTC offset");
 	wait_label(capture, "UTC offset");
 	wait_label(capture, "UTC+00:00");
 	save_frame(capture, "clocks-offset-picker");
@@ -2192,6 +2218,10 @@ static void world_view(struct capture *capture)
 	press(capture, 1, KEY_F14);
 	wait_label(capture, "UTC offset");
 	press(capture, 1, KEY_F14);
+	wait_legends(capture, "", "Select", "Back");
+	wait_label(capture, "Add UTC offset");
+	press(capture, 1, KEY_F14);
+	wait_legends(capture, "Options", "Select", "Back");
 	wait_label(capture, "World clock");
 	world_edit(capture, half_hour_id);
 	world_late_acknowledgments(capture);

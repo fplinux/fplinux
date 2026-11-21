@@ -89,7 +89,6 @@ struct music_app {
 	bool commands_ready;
 	bool command_playing;
 	bool command_has_file;
-	enum music_repeat command_repeat;
 	enum music_repeat repeat;
 	size_t selected;
 	int16_t samples[FPLINUX_MEDIA_BLOCK_FRAMES * 2U];
@@ -521,6 +520,38 @@ static void open_details(struct music_app *app)
 	fplinux_ui_navigate(app->ui, form);
 }
 
+static void repeat_changed(struct fplinux_ui *ui,
+			   struct fplinux_ui_screen *list, size_t index,
+			   void *context)
+{
+	struct music_app *app = context;
+
+	(void)list;
+	app->repeat = (enum music_repeat)index;
+	fplinux_ui_pop(ui);
+	save(app);
+	redraw(app);
+}
+
+static void open_repeat(struct music_app *app)
+{
+	struct fplinux_ui_screen *list = fplinux_ui_list_new(
+		app->ui, _("Repeat"), FPLINUX_UI_LIST_EXCLUSIVE);
+
+	if (!list)
+		return;
+	fplinux_ui_list_append(list, _("Off"), NULL);
+	fplinux_ui_list_append(list, _("Queue"), NULL);
+	fplinux_ui_list_append(list, _("Track"), NULL);
+	fplinux_ui_list_set_selected(list, app->repeat, true);
+	fplinux_ui_list_set_focused(list, app->repeat);
+	add_command(app, list, CMD_BACK, FPLINUX_UI_COMMAND_BACK, NULL, 0,
+		    NULL);
+	fplinux_ui_screen_set_listener(list, child_command, repeat_changed,
+				       app);
+	fplinux_ui_navigate(app->ui, list);
+}
+
 static void command(struct fplinux_ui *ui, struct fplinux_ui_screen *screen,
 		    int command_id, void *context)
 {
@@ -531,10 +562,7 @@ static void command(struct fplinux_ui *ui, struct fplinux_ui_screen *screen,
 		fplinux_ui_go_back(ui);
 		break;
 	case CMD_PLAY:
-		if (app->path[0])
-			toggle_play(app);
-		else
-			open_picker(app, false);
+		toggle_play(app);
 		break;
 	case CMD_STOP:
 		stopped(app);
@@ -550,8 +578,7 @@ static void command(struct fplinux_ui *ui, struct fplinux_ui_screen *screen,
 		open_queue(app);
 		break;
 	case CMD_REPEAT:
-		app->repeat = (app->repeat + 1) % 3;
-		save(app);
+		open_repeat(app);
 		break;
 	case CMD_DETAILS:
 		open_details(app);
@@ -667,23 +694,20 @@ static void redraw(struct music_app *app)
 	bool has_file = app->path[0] != '\0';
 	if (!app->commands_ready || app->command_playing != app->playing ||
 	    app->command_has_file != has_file) {
-		add_command(app, app->view.screen, CMD_PLAY,
-			    FPLINUX_UI_COMMAND_OK,
-			    !app->path[0] ? _("Open") :
-			    app->playing  ? _("Pause") :
-					    _("Play"),
-			    0, app->playing ? "pause" : "play");
+		add_command(app, app->view.screen, CMD_FILE,
+			    has_file ? FPLINUX_UI_COMMAND_SCREEN :
+				       FPLINUX_UI_COMMAND_OK,
+			    _("Open"), 1, "file");
+		if (has_file)
+			add_command(app, app->view.screen, CMD_PLAY,
+				    FPLINUX_UI_COMMAND_OK,
+				    app->playing ? _("Pause") : _("Play"), 0,
+				    app->playing ? "pause" : "play");
+		else
+			fplinux_ui_screen_remove_command(app->view.screen,
+							 CMD_PLAY);
 		app->command_playing = app->playing;
 		app->command_has_file = has_file;
-	}
-	const char *repeat =
-		app->repeat == MUSIC_REPEAT_ONE ? _("Repeat: track") :
-		app->repeat == MUSIC_REPEAT_ALL ? _("Repeat: queue") :
-						  _("Repeat: off");
-	if (!app->commands_ready || app->command_repeat != app->repeat) {
-		add_command(app, app->view.screen, CMD_REPEAT,
-			    FPLINUX_UI_COMMAND_SCREEN, repeat, 5, "refresh");
-		app->command_repeat = app->repeat;
 	}
 	app->commands_ready = true;
 }
@@ -1101,14 +1125,14 @@ int main(int argc, char **argv)
 	fplinux_ui_canvas_set_active_listener(app.view.screen, active, &app);
 	add_command(&app, app.view.screen, CMD_BACK, FPLINUX_UI_COMMAND_BACK,
 		    NULL, 0, NULL);
-	add_command(&app, app.view.screen, CMD_FILE, FPLINUX_UI_COMMAND_SCREEN,
-		    _("Open file"), 1, "file");
 	add_command(&app, app.view.screen, CMD_FOLDER,
 		    FPLINUX_UI_COMMAND_SCREEN, _("Open folder"), 2, "folder");
 	add_command(&app, app.view.screen, CMD_QUEUE, FPLINUX_UI_COMMAND_SCREEN,
 		    _("Queue"), 3, "list");
 	add_command(&app, app.view.screen, CMD_STOP, FPLINUX_UI_COMMAND_SCREEN,
 		    _("Stop"), 4, "stop");
+	add_command(&app, app.view.screen, CMD_REPEAT,
+		    FPLINUX_UI_COMMAND_SCREEN, _("Repeat"), 5, "refresh");
 	add_command(&app, app.view.screen, CMD_DETAILS,
 		    FPLINUX_UI_COMMAND_SCREEN, _("Details"), 6, "about");
 	if (!fplinux_ui_push(app.ui, app.view.screen))

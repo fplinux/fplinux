@@ -22,7 +22,7 @@ static const struct help_section sections[] = {
 	},
 	{
 		N_("Options"),
-		N_("Modifiers: Mark Ctrl, Alt or Shift and choose Done. They apply to the next key or letter and stay visible in the header until then. When space is tight, C, A and S stand for Ctrl, Alt and Shift.\n"
+		N_("Modifiers: Mark Ctrl, Alt or Shift and choose Options > Done. They apply to the next key or letter and stay visible in the header until then. When space is tight, C, A and S stand for Ctrl, Alt and Shift.\n"
 		   "Symbols and Special keys: type a symbol, Esc, Home, End, Delete, PageUp, PageDown or F1–F12. Special keys opens with Esc selected and shows armed modifiers in its header.\n"
 		   "Interrupt, End input and Search send exactly Ctrl+C, Ctrl+D and Ctrl+R, then clear unused modifiers. A pending letter is sent first with its modifiers.\n"
 		   "Font size: choose Compact (6×12) or Larger (8×16). The choice is saved."),
@@ -42,7 +42,7 @@ static const struct help_section sections[] = {
 	{
 		N_("Exit"),
 		N_("Options > Exit closes the terminal and its shell and returns to the app list. Save files first.\n"
-		   "The red key returns to Home and keeps the shell running. Reopen it from Tasks; Close app stops its programs.\n"
+		   "The red key returns to Home and keeps the shell running. Reopen it from Tasks. Quit in Tasks stops its programs.\n"
 		   "A successful shell exit closes Terminal. After an unsuccessful exit, read the final output or Scrollback, then choose Close."),
 	},
 };

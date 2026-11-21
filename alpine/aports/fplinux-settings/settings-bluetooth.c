@@ -38,7 +38,6 @@ enum command {
 	COMMAND_REPLACE,
 	COMMAND_OPEN,
 	COMMAND_CLOSE_TRANSFER,
-	COMMAND_STAY,
 	COMMAND_CONNECT_PROFILE,
 };
 
@@ -216,9 +215,6 @@ static void add_command(struct fplinux_settings_bluetooth *bluetooth,
 	};
 
 	switch (id) {
-	case COMMAND_SAVE:
-		glyph = "save";
-		break;
 	case COMMAND_SEARCH:
 		glyph = "search";
 		break;
@@ -232,12 +228,6 @@ static void add_command(struct fplinux_settings_bluetooth *bluetooth,
 	case COMMAND_FORGET:
 		glyph = "delete";
 		break;
-	case COMMAND_KEEP_BOTH:
-		glyph = "copy";
-		break;
-	case COMMAND_REPLACE:
-		glyph = "refresh";
-		break;
 	case COMMAND_OPEN:
 		glyph = "file";
 		break;
@@ -246,9 +236,6 @@ static void add_command(struct fplinux_settings_bluetooth *bluetooth,
 		break;
 	case COMMAND_CLOSE_TRANSFER:
 		glyph = "exit";
-		break;
-	case COMMAND_STAY:
-		glyph = "back";
 		break;
 	default:
 		break;
@@ -263,7 +250,21 @@ static void add_back(struct fplinux_settings_bluetooth *bluetooth,
 		     struct fplinux_ui_screen *screen)
 {
 	add_command(bluetooth, screen, COMMAND_BACK, FPLINUX_UI_COMMAND_BACK,
-		    NULL, 0);
+		    NULL, 1);
+}
+
+static bool add_action_row(struct fplinux_ui_screen *form, int id,
+			   const char *label)
+{
+	const struct fplinux_ui_command command = {
+		.id = id,
+		.type = FPLINUX_UI_COMMAND_OK,
+		.label = label,
+	};
+	size_t row = fplinux_ui_form_append_value(form, label, NULL);
+
+	return row != SIZE_MAX &&
+	       fplinux_ui_form_add_item_command(form, row, &command);
 }
 
 static void set_glyph(struct fplinux_settings_bluetooth *bluetooth,
@@ -719,8 +720,9 @@ static void devices_refresh(struct fplinux_settings_bluetooth *bluetooth)
 	if (!bluetooth->paired_only ||
 	    bluetooth->peer_selection != PEER_INSPECT)
 		add_command(bluetooth, bluetooth->devices, COMMAND_SEARCH,
-			    FPLINUX_UI_COMMAND_SCREEN,
-			    scanning ? _("Stop search") : _("Search"), 1);
+			    scanning ? FPLINUX_UI_COMMAND_STOP :
+				       FPLINUX_UI_COMMAND_SCREEN,
+			    scanning ? NULL : _("Search"), 0);
 	if (!bluetooth->row_count) {
 		fplinux_ui_list_append(
 			bluetooth->devices,
@@ -728,7 +730,7 @@ static void devices_refresh(struct fplinux_settings_bluetooth *bluetooth)
 			bluetooth->paired_only ? _("No paired devices") :
 						 _("No nearby devices"),
 			usable(bluetooth) ?
-				_("Choose Search to find devices.") :
+				_("Choose Options, then Search to find devices.") :
 				_("Turn Bluetooth on to search."));
 		bluetooth->devices_empty = true;
 	}
@@ -995,8 +997,7 @@ static void open_editor(struct fplinux_settings_bluetooth *bluetooth,
 					  FPLINUX_BLUEZ_NAME_BYTES - 1,
 					  FPLINUX_UI_TEXT_ANY);
 	add_back(bluetooth, bluetooth->editor);
-	add_command(bluetooth, bluetooth->editor, COMMAND_SAVE,
-		    FPLINUX_UI_COMMAND_OK, _("Save"), 0);
+	add_action_row(bluetooth->editor, COMMAND_SAVE, _("Save"));
 	fplinux_ui_screen_set_listener(bluetooth->editor, editor_command, NULL,
 				       bluetooth);
 	push_screen(bluetooth, bluetooth->editor);
@@ -1338,8 +1339,7 @@ static void agent_refresh(struct fplinux_settings_bluetooth *bluetooth)
 				FPLINUX_UI_TEXT_NUMERIC);
 		fplinux_ui_form_set_focus(bluetooth->agent,
 					  bluetooth->agent_code);
-		add_command(bluetooth, bluetooth->agent, COMMAND_ACCEPT,
-			    FPLINUX_UI_COMMAND_OK, _("Pair"), 0);
+		add_action_row(bluetooth->agent, COMMAND_ACCEPT, _("Pair"));
 	} else if (request->kind == FPLINUX_BLUEZ_AGENT_DISPLAY_PIN ||
 		   request->kind == FPLINUX_BLUEZ_AGENT_DISPLAY_PASSKEY) {
 		bluetooth->agent =
@@ -1573,6 +1573,14 @@ static void question_command(struct fplinux_ui *ui,
 	pthread_mutex_unlock(&bluetooth->mutex);
 }
 
+static void conflict_command(struct fplinux_ui *ui,
+			     struct fplinux_ui_screen *screen, int id,
+			     void *context)
+{
+	question_command(ui, screen, id, context);
+	fplinux_ui_pop(ui);
+}
+
 static void question_refresh(struct fplinux_settings_bluetooth *bluetooth,
 			     const struct transfer_snapshot *snapshot)
 {
@@ -1588,38 +1596,45 @@ static void question_refresh(struct fplinux_settings_bluetooth *bluetooth,
 		return;
 	close_screen(bluetooth, &bluetooth->question);
 	bluetooth->question_serial = snapshot->question_serial;
-	if (snapshot->question == TRANSFER_QUESTION_OFFER)
+	if (snapshot->question == TRANSFER_QUESTION_OFFER) {
 		snprintf(message, sizeof(message), _("Receive %s from %s?"),
 			 snapshot->filename, bluetooth->transfer_peer_name);
-	else
-		snprintf(message, sizeof(message),
-			 _("%s already exists. Keep both files or replace it?"),
-			 snapshot->filename);
-	bluetooth->question = fplinux_ui_alert_new(
-		bluetooth->ui, FPLINUX_UI_ALERT_CONFIRMATION,
-		snapshot->question == TRANSFER_QUESTION_OFFER ?
-			_("Incoming file") :
-			_("File exists"),
-		message, 0);
-	if (!bluetooth->question) {
-		question_command(bluetooth->ui, NULL, COMMAND_REJECT,
-				 bluetooth);
-		return;
-	}
-	add_command(bluetooth, bluetooth->question, COMMAND_REJECT,
-		    FPLINUX_UI_COMMAND_CANCEL, _("Reject"), 0);
-	if (snapshot->question == TRANSFER_QUESTION_OFFER)
+		bluetooth->question = fplinux_ui_alert_new(
+			bluetooth->ui, FPLINUX_UI_ALERT_CONFIRMATION,
+			_("Incoming file"), message, 0);
+		if (!bluetooth->question)
+			goto reject;
+		add_command(bluetooth, bluetooth->question, COMMAND_REJECT,
+			    FPLINUX_UI_COMMAND_CANCEL, _("Reject"), 0);
 		add_command(bluetooth, bluetooth->question, COMMAND_ACCEPT,
 			    FPLINUX_UI_COMMAND_OK, _("Receive"), 0);
-	else {
-		add_command(bluetooth, bluetooth->question, COMMAND_KEEP_BOTH,
-			    FPLINUX_UI_COMMAND_OK, _("Keep both"), 0);
-		add_command(bluetooth, bluetooth->question, COMMAND_REPLACE,
-			    FPLINUX_UI_COMMAND_SCREEN, _("Replace"), 1);
+		fplinux_ui_screen_set_listener(
+			bluetooth->question, question_command, NULL, bluetooth);
+	} else {
+		snprintf(message, sizeof(message), _("%s already exists."),
+			 snapshot->filename);
+		bluetooth->question =
+			fplinux_ui_form_new(bluetooth->ui, _("File exists"));
+		if (!bluetooth->question)
+			goto reject;
+		fplinux_ui_form_append_string(bluetooth->question, NULL,
+					      message);
+		if (!add_action_row(bluetooth->question, COMMAND_KEEP_BOTH,
+				    _("Keep both")) ||
+		    !add_action_row(bluetooth->question, COMMAND_REPLACE,
+				    _("Replace")))
+			goto reject;
+		add_command(bluetooth, bluetooth->question, COMMAND_CANCEL,
+			    FPLINUX_UI_COMMAND_CANCEL, NULL, 0);
+		fplinux_ui_screen_set_listener(
+			bluetooth->question, conflict_command, NULL, bluetooth);
 	}
-	fplinux_ui_screen_set_listener(bluetooth->question, question_command,
-				       NULL, bluetooth);
 	push_screen(bluetooth, bluetooth->question);
+	return;
+
+reject:
+	question_command(bluetooth->ui, bluetooth->question, COMMAND_REJECT,
+			 bluetooth);
 }
 
 static const char *transfer_state(enum fplinux_bluetooth_opp_state state)
@@ -1721,8 +1736,8 @@ static void transfer_refresh(struct fplinux_settings_bluetooth *bluetooth)
 						 COMMAND_OPEN);
 		if (bluetooth->transfer_running)
 			add_command(bluetooth, bluetooth->transfer,
-				    COMMAND_CANCEL, FPLINUX_UI_COMMAND_SCREEN,
-				    _("Cancel transfer"), 1);
+				    COMMAND_CANCEL, FPLINUX_UI_COMMAND_STOP,
+				    NULL, 0);
 		else if (bluetooth->receiving && snapshot.result.published)
 			add_command(bluetooth, bluetooth->transfer,
 				    COMMAND_OPEN, FPLINUX_UI_COMMAND_OK,
@@ -1920,7 +1935,6 @@ static void open_picker(struct fplinux_settings_bluetooth *bluetooth,
 				    FPLINUX_UI_FILE_PICKER_FILE,
 		.home = bluetooth->home,
 		.title = receiving ? _("Receive into") : _("Send file"),
-		.folder_action = _("Receive here"),
 		.writable = receiving,
 	};
 
@@ -2380,13 +2394,13 @@ enum fplinux_ui_close_response fplinux_settings_bluetooth_prepare_close(
 	bluetooth->confirm = fplinux_ui_alert_new(
 		bluetooth->ui, FPLINUX_UI_ALERT_CONFIRMATION,
 		_("File transfer"),
-		_("Cancel the current file transfer and close Settings?"), 0);
+		_("Stop the current file transfer and close Settings?"), 0);
 	if (!bluetooth->confirm)
 		return FPLINUX_UI_CLOSE_CANCEL;
-	add_command(bluetooth, bluetooth->confirm, COMMAND_STAY,
-		    FPLINUX_UI_COMMAND_CANCEL, _("Stay"), 0);
+	add_command(bluetooth, bluetooth->confirm, COMMAND_CANCEL,
+		    FPLINUX_UI_COMMAND_CANCEL, NULL, 0);
 	add_command(bluetooth, bluetooth->confirm, COMMAND_CLOSE_TRANSFER,
-		    FPLINUX_UI_COMMAND_OK, _("Cancel and close"), 0);
+		    FPLINUX_UI_COMMAND_OK, _("Close"), 0);
 	fplinux_ui_screen_set_listener(bluetooth->confirm,
 				       close_transfer_command, NULL, bluetooth);
 	bluetooth->close_question = true;

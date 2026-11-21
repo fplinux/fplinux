@@ -252,6 +252,7 @@ static void wait_input(struct fplinux_ui *ui, int fd, short events,
 			.id = MARK_COMMAND,
 			.type = FPLINUX_UI_COMMAND_SCREEN,
 			.label = "Mark",
+			.direct = true,
 		};
 
 		assert(fplinux_ui_screen_add_command(application->origin,

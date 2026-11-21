@@ -545,3 +545,46 @@ def test_actual_settings_bluetooth_file_pickers_and_worker_complete_and_cancel_t
     assert (files / "incoming.txt").read_bytes() == b"fixture"
     assert (tmp_path / "obex-cancel/cancelled").read_bytes() == b"cancelled\n"
     assert {path.name for path in files.iterdir()} == {"payload.txt", "incoming.txt"}
+
+
+@pytest.mark.parametrize(
+    ("choice", "published"),
+    [
+        ("keep-both", {"incoming.txt": b"original", "incoming (1).txt": b"fixture"}),
+        ("replace", {"incoming.txt": b"fixture"}),
+        ("cancel", {"incoming.txt": b"original"}),
+    ],
+)
+def test_actual_settings_bluetooth_conflict_publishes_only_the_chosen_files(
+    settings_native: Path, tmp_path: Path, choice: str, published: dict[str, bytes]
+) -> None:
+    """Choose a conflict row or Cancel with the real UI on the smallest profile."""
+    home = tmp_path / "home"
+    files = home / "Files"
+    files.mkdir(parents=True)
+    (files / "incoming.txt").write_bytes(b"original")
+    with private_bus() as bus:
+        result = run_process(
+            [
+                str(settings_native / "settings-screens"),
+                str(settings_native / "settings"),
+                str(ROOT / "tests/host_tool/gui/screens/keypad.xkb"),
+                str(tmp_path / "session.sock"),
+                str(tmp_path),
+                str(ROOT / "alpine/aports/fplinux-language"),
+                f"bluetooth-conflict-{choice}",
+            ],
+            name=f"choose {choice} for an existing Bluetooth destination",
+            env=bus.environment()
+            | {
+                "HOME": str(home),
+                "FPLINUX_SETTINGS_TEST_WIDTH": "128",
+                "FPLINUX_SETTINGS_TEST_HEIGHT": "128",
+                "FPLINUX_SETTINGS_TEST_LOCALE": "en",
+                "FPLINUX_SETTINGS_TEST_THEME": "dark",
+                "FPLINUX_SETTINGS_TEST_OBEX_SERVICE": str(settings_native / "bluetooth-service"),
+            },
+            timeout=30,
+        )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert {path.name: path.read_bytes() for path in files.iterdir()} == published

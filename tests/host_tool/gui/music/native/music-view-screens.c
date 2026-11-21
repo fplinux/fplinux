@@ -5,6 +5,7 @@
 #include "fplinux-ui-profile.h"
 
 #include <assert.h>
+#include <linux/input-event-codes.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -50,10 +51,53 @@ static void send_media_level(int session, unsigned int update)
 	assert(fplinux_ui_session_send(session, &message));
 }
 
+static void wait_legends(struct fplinux_ui_frame_peer *compositor, int session,
+			 const char *left, const char *centre,
+			 const char *right)
+{
+	struct fplinux_ui_session_message message;
+
+	do {
+		message = fplinux_ui_frame_wait_message(compositor, session);
+	} while (message.type != FPLINUX_UI_SESSION_SOFTKEYS ||
+		 strcmp(message.left, left) || strcmp(message.centre, centre) ||
+		 strcmp(message.right, right));
+}
+
+static void press(struct fplinux_ui_frame_peer *compositor, unsigned int code)
+{
+	fplinux_ui_frame_send_key(&compositor->keyboards[1], code, true);
+	fplinux_ui_frame_send_key(&compositor->keyboards[1], code, false);
+}
+
+static void exercise_repeat(struct fplinux_ui_frame_peer *compositor,
+			    int session, bool russian)
+{
+	const char *options = russian ? "Опции" : "Options";
+	const char *open = russian ? "Открыть" : "Open";
+	const char *select = russian ? "Выбрать" : "Select";
+	const char *back = russian ? "Назад" : "Back";
+
+	wait_legends(compositor, session, options, open, back);
+	assert(compositor->keyboards[1].keyboard);
+	fplinux_ui_frame_focus_keyboard(&compositor->keyboards[1]);
+	press(compositor, KEY_F13);
+	wait_legends(compositor, session, "", select, back);
+	/* Pass Open folder, Queue and Stop to reach Repeat. */
+	for (int item = 0; item < 3; ++item)
+		press(compositor, KEY_DOWN);
+	press(compositor, KEY_OK);
+	/* The Off row is selected initially. Choose Queue. */
+	press(compositor, KEY_DOWN);
+	press(compositor, KEY_OK);
+	wait_legends(compositor, session, options, open, back);
+}
+
 int main(int argc, char **argv)
 {
-	assert(argc == 9);
+	assert(argc == 9 || argc == 10);
 	alarm(10);
+	bool commands = argc == 10;
 	int width = atoi(argv[4]), height = atoi(argv[5]);
 	struct fplinux_ui_session_message config = {
 		.type = FPLINUX_UI_SESSION_CONFIG,
@@ -82,40 +126,49 @@ int main(int argc, char **argv)
 		close(listener);
 		close(wayland[0]);
 		fplinux_ui_frame_client_environment(wayland[1], argv[2]);
-		execl(argv[1], argv[1], argv[7], (char *)NULL);
+		if (commands)
+			execl(argv[1], argv[1], (char *)NULL);
+		else
+			execl(argv[1], argv[1], argv[7], (char *)NULL);
 		_exit(127);
 	}
 	close(wayland[1]);
 	fplinux_ui_frame_init(&compositor, wayland[0], width, surface_height,
-			      NULL);
+			      commands ? argv[9] : NULL);
 	compositor.release_frames = true;
 	int session = fplinux_ui_frame_accept_session(&compositor, listener);
 	struct fplinux_ui_session_message message =
 		fplinux_ui_frame_wait_message(&compositor, session);
 	assert(message.type == FPLINUX_UI_SESSION_HELLO);
 	assert(fplinux_ui_session_send(session, &config));
-	send_media_level(session, 0);
-	do {
-		message = fplinux_ui_frame_wait_message(&compositor, session);
-	} while (message.type != FPLINUX_UI_SESSION_READY);
-	assert(compositor.commits > 0 && compositor.width == width &&
-	       compositor.height == surface_height);
-	if (strcmp(argv[3], "-"))
-		assert(screen_frame_write(argv[3], compositor.pixels, width,
-					  compositor.height,
-					  (size_t)width * 2));
-	for (unsigned int update = 1; update < 5; ++update) {
-		unsigned int previous = compositor.commits;
+	if (commands) {
+		exercise_repeat(&compositor, session, !strcmp(argv[8], "ru"));
+	} else {
+		send_media_level(session, 0);
+		do {
+			message = fplinux_ui_frame_wait_message(&compositor,
+								session);
+		} while (message.type != FPLINUX_UI_SESSION_READY);
+		assert(compositor.commits > 0 && compositor.width == width &&
+		       compositor.height == surface_height);
+		if (strcmp(argv[3], "-"))
+			assert(screen_frame_write(argv[3], compositor.pixels,
+						  width, compositor.height,
+						  (size_t)width * 2));
+		for (unsigned int update = 1; update < 5; ++update) {
+			unsigned int previous = compositor.commits;
+			char expected[32];
 
-		send_media_level(session, update);
-		message = fplinux_ui_frame_wait_message(&compositor, session);
-		assert(message.type == FPLINUX_UI_SESSION_TITLE);
-		char expected[32];
-
-		snprintf(expected, sizeof(expected), "level-%u", update);
-		assert(!strcmp(message.title, expected));
-		while (compositor.commits == previous)
-			fplinux_ui_frame_pump(&compositor);
+			send_media_level(session, update);
+			message = fplinux_ui_frame_wait_message(&compositor,
+								session);
+			assert(message.type == FPLINUX_UI_SESSION_TITLE);
+			snprintf(expected, sizeof(expected), "level-%u",
+				 update);
+			assert(!strcmp(message.title, expected));
+			while (compositor.commits == previous)
+				fplinux_ui_frame_pump(&compositor);
+		}
 	}
 	message = (struct fplinux_ui_session_message){
 		.type = FPLINUX_UI_SESSION_CLOSE

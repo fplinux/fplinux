@@ -56,7 +56,7 @@ msgid "Help"
 msgstr "Справка"
 
 msgid "New line"
-msgstr "Перенос"
+msgstr "Строка"
 
 msgid "Insert"
 msgstr "Вставить"

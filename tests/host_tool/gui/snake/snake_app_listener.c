@@ -326,9 +326,11 @@ void fplinux_ui_screen_set_listener(struct fplinux_ui_screen *instance,
 bool fplinux_ui_screen_add_command(struct fplinux_ui_screen *instance,
 				   const struct fplinux_ui_command *command)
 {
-	if (command->type == FPLINUX_UI_COMMAND_OK)
+	if (command->type == FPLINUX_UI_COMMAND_OK) {
 		instance->play = command->id;
-	else {
+		assert(strlen(command->label) < sizeof(centre_key));
+		strcpy(centre_key, command->label);
+	} else {
 		assert(command->type == FPLINUX_UI_COMMAND_BACK);
 		instance->back = command->id;
 	}
@@ -405,22 +407,13 @@ uint64_t fplinux_ui_now_ms(void)
 	return 1;
 }
 
-lv_obj_t *fplinux_ui_softkey_bar_create(struct fplinux_ui *instance,
-					lv_obj_t *parent)
+void fplinux_ui_canvas_set_fullscreen_bar(struct fplinux_ui_screen *instance,
+					  bool enabled)
 {
-	assert(instance == &ui);
-	return lv_obj_create(parent);
-}
+	int bar_height = enabled ? metrics.softkey_height : 0;
 
-bool fplinux_ui_softkey_bar_set(struct fplinux_ui *instance, lv_obj_t *bar,
-				const char *left, const char *centre,
-				const char *right)
-{
-	assert(instance == &ui && bar);
-	assert(strcmp(left, "") == 0 && strcmp(right, "Back") == 0);
-	assert(strlen(centre) < sizeof(centre_key));
-	strcpy(centre_key, centre);
-	return true;
+	assert(instance == &canvas);
+	lv_obj_set_height(&screen, ui.height - bar_height);
 }
 
 static void send_event(enum fplinux_ui_event_type type, bool visible,

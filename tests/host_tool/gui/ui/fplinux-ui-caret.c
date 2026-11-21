@@ -1627,7 +1627,7 @@ static void test_command_glyphs(const char *scenario)
 	const struct fplinux_ui_command cancel = {
 		.id = 51,
 		.type = FPLINUX_UI_COMMAND_CANCEL,
-		.keep_visible = true,
+		.keep_right_on_clear = true,
 		.priority = -1,
 	};
 	struct fplinux_ui_screen *screen;

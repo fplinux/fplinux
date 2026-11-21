@@ -343,7 +343,10 @@ static void push_legend_canvas(struct fplinux_ui *ui, const char *item,
 			       enum fplinux_ui_command_type back)
 {
 	const struct fplinux_ui_command commands[] = {
-		{ .id = 1, .type = FPLINUX_UI_COMMAND_ITEM, .label = item },
+		{ .id = 1,
+		  .type = FPLINUX_UI_COMMAND_ITEM,
+		  .label = item,
+		  .direct = true },
 		{ .id = 2, .type = FPLINUX_UI_COMMAND_OK, .label = ok },
 		{ .id = 3, .type = back },
 	};
@@ -2121,7 +2124,8 @@ static void repeat_application_input(struct fplinux_ui *ui, int fd,
 			{ .id = 'O', .type = FPLINUX_UI_COMMAND_OK },
 			{ .id = 'M',
 			  .type = FPLINUX_UI_COMMAND_SCREEN,
-			  .label = "Menu" },
+			  .label = "Menu",
+			  .direct = true },
 		};
 
 		fplinux_ui_screen_set_key_filter(canvas, filter_canvas_key,

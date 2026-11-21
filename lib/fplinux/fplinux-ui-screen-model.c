@@ -35,7 +35,6 @@ void fplinux_ui_command_keys_assign(
 	size_t ok = element_acts ? FPLINUX_UI_COMMAND_NONE :
 				   first_with_role(commands, count,
 						   FPLINUX_UI_ROLE_OK);
-	bool help = false;
 	size_t remaining = 0;
 
 	*keys = (struct fplinux_ui_command_keys){
@@ -48,7 +47,6 @@ void fplinux_ui_command_keys_assign(
 
 		if ((!right_taken && i == right) || i == ok)
 			continue;
-		help = help || commands[i].role == FPLINUX_UI_ROLE_HELP;
 		at = remaining++;
 		/* Insertion in priority order; the lists are short. */
 		while (at && before(commands, i, menu[at - 1])) {
@@ -58,25 +56,14 @@ void fplinux_ui_command_keys_assign(
 		menu[at] = i;
 	}
 	/* Clear displaces Back into Options, never out of the command set. */
-	if (remaining == 1 && !help &&
+	if (remaining == 1 && commands[menu[0]].direct &&
+	    commands[menu[0]].role != FPLINUX_UI_ROLE_HELP &&
 	    !(right_taken && right != FPLINUX_UI_COMMAND_NONE)) {
 		keys->left = menu[0];
 	} else if (remaining) {
 		keys->options = true;
 		keys->menu_count = remaining;
 	}
-}
-
-void fplinux_ui_command_keys_collapse(struct fplinux_ui_command_keys *keys,
-				      size_t *menu)
-{
-	if (keys->left == FPLINUX_UI_COMMAND_NONE)
-		return;
-	memmove(menu + 1, menu, keys->menu_count * sizeof(*menu));
-	menu[0] = keys->left;
-	keys->left = FPLINUX_UI_COMMAND_NONE;
-	keys->options = true;
-	++keys->menu_count;
 }
 
 size_t fplinux_ui_index_inserted(size_t index, size_t at, size_t count)

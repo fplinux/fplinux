@@ -27,11 +27,8 @@ msgstr "Не могу показать экран приложения."
 msgid "Close"
 msgstr "Закрыть"
 
-msgid "Cancel"
-msgstr "Отмена"
-
 msgid "Clear"
-msgstr "Удалить"
+msgstr "Стереть"
 
 msgid "The text contains unsupported characters or is too long."
 msgstr "Текст содержит неподдерживаемые символы или слишком длинный."
@@ -39,8 +36,11 @@ msgstr "Текст содержит неподдерживаемые симво�
 msgid "Done"
 msgstr "Готово"
 
-msgid "Cancel input"
-msgstr "Отменить ввод"
+msgid "New line"
+msgstr "Строка"
+
+msgid "Insert"
+msgstr "Вставить"
 
 msgid "Select"
 msgstr "Выбрать"

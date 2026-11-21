@@ -97,8 +97,8 @@ static void update_commands(struct fplinux_launcher_tasks *tasks)
 	struct fplinux_ui_command close = {
 		.id = TASK_COMMAND_CLOSE,
 		.type = FPLINUX_UI_COMMAND_SCREEN,
-		.label = _("Close app"),
-		.short_label = _("Close"),
+		.label = _("Quit"),
+		.direct = true,
 		.priority = 1,
 		.icon = fplinux_ui_glyph(tasks->ui, "exit",
 					 FPLINUX_UI_GLYPH_ROW),

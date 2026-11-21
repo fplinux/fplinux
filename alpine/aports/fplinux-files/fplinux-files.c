@@ -24,7 +24,6 @@
 
 #define APP_ID "org.fplinux.files"
 #define _(text) gettext(text)
-#define NC_(context, text) context "\004" text
 
 enum command {
 	COMMAND_BACK = 1,
@@ -298,26 +297,6 @@ static const char *command_icon(int id)
 	}
 }
 
-static const char *command_short_label(int id)
-{
-	switch (id) {
-	case COMMAND_SAVE_NAME:
-		return _("Done");
-	case COMMAND_RETRY:
-		return fplinux_gettext_context(NC_("short command", "Retry"));
-	case COMMAND_OTHER_NAME:
-		return _("Name");
-	case COMMAND_CLOSE_STOP:
-		return _("Stop");
-	case COMMAND_CLOSE_CONTINUE:
-		return _("Resume");
-	case COMMAND_EJECT:
-		return _("Eject");
-	default:
-		return NULL;
-	}
-}
-
 static void add_command(struct files_app *app, struct fplinux_ui_screen *screen,
 			int id, enum fplinux_ui_command_type type,
 			const char *label, int priority)
@@ -327,8 +306,8 @@ static void add_command(struct files_app *app, struct fplinux_ui_screen *screen,
 		.id = id,
 		.type = type,
 		.label = label,
-		.short_label = command_short_label(id),
 		.priority = priority,
+		.direct = id == COMMAND_FIND || id == COMMAND_SAVE_NAME,
 		.icon = icon ? fplinux_ui_glyph(app->ui, icon,
 						FPLINUX_UI_GLYPH_ROW) :
 			       NULL,
@@ -346,7 +325,6 @@ static void add_item(struct files_app *app, struct fplinux_ui_screen *screen,
 		.id = id,
 		.type = type,
 		.label = label,
-		.short_label = command_short_label(id),
 		.priority = priority,
 		.icon = icon ? fplinux_ui_glyph(app->ui, icon,
 						FPLINUX_UI_GLYPH_ROW) :
@@ -1923,8 +1901,6 @@ static void folder_command(struct fplinux_ui *ui,
 			.home = app->home,
 			.title = id == COMMAND_MOVE ? _("Move to") :
 						      _("Copy to"),
-			.folder_action = id == COMMAND_MOVE ? _("Move here") :
-							      _("Copy here"),
 			.writable = true,
 		};
 
@@ -1989,9 +1965,9 @@ static enum fplinux_ui_close_response prepare_close(struct fplinux_ui *ui,
 	app->closing = true;
 	app->decision = screen;
 	add_command(app, screen, COMMAND_CLOSE_STOP, FPLINUX_UI_COMMAND_OK,
-		    _("Stop and close"), 0);
+		    _("Stop"), 0);
 	add_command(app, screen, COMMAND_CLOSE_CONTINUE,
-		    FPLINUX_UI_COMMAND_CANCEL, _("Continue"), 0);
+		    FPLINUX_UI_COMMAND_CANCEL, NULL, 0);
 	fplinux_ui_screen_set_listener(screen, close_command, NULL, app);
 	fplinux_ui_push(ui, screen);
 	return FPLINUX_UI_CLOSE_WAIT;

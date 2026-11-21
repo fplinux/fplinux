@@ -31,7 +31,7 @@ public class ScreensCheckMIDlet extends MIDlet implements CommandListener {
     private final Command open = new Command("Open", Command.ITEM, 1);
     private final Command done = new Command("Done", Command.OK, 1);
     private final Command back = new Command("Back", Command.BACK, 1);
-    private final Command again = new Command("Again", Command.SCREEN, 1);
+    private final Command again = new Command("Again", Command.CANCEL, 2);
     private final Command ok = new Command("OK", Command.OK, 1);
 
     private Display display;
@@ -110,6 +110,9 @@ public class ScreensCheckMIDlet extends MIDlet implements CommandListener {
                 /* The runtime has removed the alert; it is shown again. */
                 modal.setTitle("Info 2");
                 modal.setString("Second");
+                modal.removeCommand(again);
+                modal.removeCommand(back);
+                modal.addCommand(help);
             } else {
                 display.setCurrent(menu);
             }
@@ -138,6 +141,7 @@ public class ScreensCheckMIDlet extends MIDlet implements CommandListener {
             modal = new Alert("Info", "First", null, AlertType.CONFIRMATION);
             modal.addCommand(again);
             modal.addCommand(ok);
+            modal.addCommand(back);
             modal.setCommandListener(this);
             display.setCurrent(modal, menu);
         } else if (c == edit) {

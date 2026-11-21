@@ -160,22 +160,7 @@ msgid "Retry saving"
 msgstr "Повторить сохранение"
 
 msgid "Edit"
-msgstr "Изменить"
-
-msgctxt "short command"
-msgid "Edit"
 msgstr "Правка"
-
-msgctxt "short command"
-msgid "Resume"
-msgstr "Дальше"
-
-msgctxt "short command"
-msgid "Retry"
-msgstr "Повтор"
-
-msgid "Restart"
-msgstr "Заново"
 
 msgid "Add"
 msgstr "Добавить"
@@ -292,13 +277,13 @@ msgid "Pause"
 msgstr "Пауза"
 
 msgid "Resume"
-msgstr "Продолжить"
+msgstr "Дальше"
 
 msgid "Stop"
 msgstr "Стоп"
 
 msgid "Start over"
-msgstr "Начать заново"
+msgstr "Заново"
 
 msgid "Reset"
 msgstr "Сбросить"

@@ -331,7 +331,7 @@ def test_actual_softkey_preview_draws_its_bar_only_in_full_screen_and_back_leave
     theme: str,
     locale: str,
 ) -> None:
-    """The system bar alone shows the keys; in full screen the example's bar shows the same.
+    """One command assignment supplies the integrated and fullscreen legends.
 
     The hint's last line stays reachable above whichever bar there is. Back
     in the integrated screen returns to the results; Back in full screen
@@ -340,15 +340,13 @@ def test_actual_softkey_preview_draws_its_bar_only_in_full_screen_and_back_leave
     run_canvas_scenario(apidemo_native, tmp_path, screen, locale, theme, "softkey-preview")
     russian = locale == "ru"
     hint_text = (
-        "«Переключить полный экран» показывает вместо системной панели собственную "
-        "панель примера с теми же клавишами. «Изменить подписи» меняет подпись OK, "  # noqa: RUF001 -- Russian text with Latin key names.
+        "«Опции» > «Переключить полный экран» сохраняет назначение клавиш. "
+        "«Сменить» и «Вернуть» меняют подпись по центру. "
         "«Назад» сначала выходит из полного экрана, затем возвращает в каталог."
         if russian
-        else "Toggle full screen shows this example's own legend bar in place of the system "
-        "bar, with the same keys. Change legends updates OK's legend; Back leaves full "
-        "screen, then returns."
+        else "Options > Toggle full screen uses the same commands in both views. Change and "
+        "Restore switch the centre label. Back leaves full screen, then returns to the catalogue."
     )
-    full = (0, canvas[1], screen[0], screen[1] - canvas[1])
 
     def phase(name: str) -> dict[str, Any]:
         return cast(
@@ -379,25 +377,19 @@ def test_actual_softkey_preview_draws_its_bar_only_in_full_screen_and_back_leave
     assert all(item["text"] != hint_text for item in results["canvas_objects"])
 
     fullscreen = phase("fullscreen")
-    assert tuple(fullscreen["canvas"]) == full
+    full = fullscreen["canvas"]
+    assert full[:3] == [0, canvas[1], screen[0]]
+    bar_x, bar_top, bar_width, bar_height = fullscreen["legend_bar"]
+    assert (bar_x, bar_width) == (0, screen[0])
+    assert bar_top + bar_height == screen[1]
+    assert bar_top == full[1] + full[3]
     objects = fullscreen["canvas_objects"]
-    legends = [item for item in objects if item["parent"] >= 0 and item["text"] != hint_text]
-    bar = objects[legends[0]["parent"]]
-    _, bar_top, _, bar_height = bar["bounds"]
-    assert bar_top + bar_height == full[1] + full[3]
-    shown = [item["text"] for item in sorted(legends, key=lambda i: i["bounds"][0])]
-    # The mode command, OK (changed once: it now restores) and Back.
-    expected = (
-        ("Переключить полный экран", "Вернуть подписи", "Назад")
-        if russian
-        else ("Toggle full screen", "Restore legends", "Back")
+    assert fullscreen["legends"] == (
+        ["Опции", "Вернуть", "Назад"] if russian else ["Options", "Restore", "Back"]
     )
-    for text, whole in zip(shown, expected, strict=True):
-        assert text == whole or (
-            text.endswith("...") and len(text) > 3 and whole.startswith(text[:-3])
-        ), (text, whole)
+    assert fullscreen["legends_fit"]
     hint = next(item for item in objects if item["text"] == hint_text)
-    assert objects[hint["parent"]]["bounds"] == [full[0], full[1], full[2], full[3] - bar_height]
+    assert objects[hint["parent"]]["bounds"] == full
 
 
 @pytest.mark.parametrize(("screen", "surface", "canvas", "_cursor"), CANVAS_GEOMETRY)
@@ -669,9 +661,9 @@ def test_actual_apidemo_catalogue_and_returning_search_profiles(  # noqa: PLR091
         )
         assert_popup_geometry(tmp_path, picker, square_size)
         short_menu = (
-            (("Показать", "view"), ("Вставить пример", "add"), ("Назад", "back"))
+            (("Назад", "back"), ("Показать", "view"), ("Вставить пример", "add"))
             if locale == "ru"
-            else (("Show", "view"), ("Insert sample", "add"), ("Back", "back"))
+            else (("Back", "back"), ("Show", "view"), ("Insert sample", "add"))
         )
         long_menu = (
             (

@@ -2,11 +2,14 @@
 #ifndef FPLINUX_CALCULATOR_OBSERVER_H
 #define FPLINUX_CALCULATOR_OBSERVER_H
 
+#include <stdbool.h>
+
 enum calculator_observation_kind {
 	CALCULATOR_NUMBER,
 	CALCULATOR_ALERT,
 	CALCULATOR_STATUS,
 	CALCULATOR_HEADER,
+	CALCULATOR_SAVE_PROMPT,
 };
 
 struct calculator_number_observation {
@@ -14,6 +17,7 @@ struct calculator_number_observation {
 	char text[256];
 	char title[128];
 	char detail[128];
+	bool retry_visible;
 	int width;
 	int height;
 	int text_width;
