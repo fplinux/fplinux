@@ -5,10 +5,13 @@
 #include <assert.h>
 #include <dbus/dbus.h>
 #include <dirent.h>
+#include <errno.h>
+#include <limits.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/prctl.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -30,12 +33,23 @@ struct peer {
 };
 
 static const char *processes;
+static int net_namespace_error;
 
 DIR *__real_opendir(const char *path);
+int __real_stat(const char *path, struct stat *status);
 
 DIR *__wrap_opendir(const char *path)
 {
 	return __real_opendir(!strcmp(path, "/proc") ? processes : path);
+}
+
+int __wrap_stat(const char *path, struct stat *status)
+{
+	if (net_namespace_error && !strcmp(path, "/proc/self/ns/net")) {
+		errno = net_namespace_error;
+		return -1;
+	}
+	return __real_stat(path, status);
 }
 
 static const char *dictionary_string(DBusMessage *message, const char *key)
@@ -230,6 +244,7 @@ static void serve_peer(int ready)
 	};
 	DBusConnection *bus = dbus_bus_get_private(DBUS_BUS_SESSION, NULL);
 
+	assert(prctl(PR_SET_NAME, "wpa_supplicant", 0L, 0L, 0L) == 0);
 	assert(bus);
 	assert(dbus_bus_request_name(bus, SERVICE, 0, NULL) ==
 	       DBUS_REQUEST_NAME_REPLY_PRIMARY_OWNER);
@@ -312,13 +327,42 @@ static void check_station(const char *config)
 	fplinux_session_wifi_station_destroy(station);
 }
 
+static void check_station_without_netns(const char *config, pid_t peer)
+{
+	struct fplinux_session_wifi_station *station;
+	char owner_path[PATH_MAX], manual_path[PATH_MAX];
+
+	station = fplinux_session_wifi_station_create("testwlan", config);
+	assert(station);
+	assert(snprintf(owner_path, sizeof(owner_path), "%s/%ld", processes,
+			(long)peer) < (int)sizeof(owner_path));
+	assert(mkdir(owner_path, 0700) == 0);
+
+	net_namespace_error = EACCES;
+	assert(fplinux_session_wifi_station_acquire(station) ==
+	       FPLINUX_UI_WIFI_BUSY);
+
+	net_namespace_error = ENOENT;
+	assert(prctl(PR_SET_NAME, "hostapd", 0L, 0L, 0L) == 0);
+	assert(snprintf(manual_path, sizeof(manual_path), "%s/%ld", processes,
+			(long)getpid()) < (int)sizeof(manual_path));
+	assert(mkdir(manual_path, 0700) == 0);
+	assert(fplinux_session_wifi_station_acquire(station) ==
+	       FPLINUX_UI_WIFI_BUSY);
+	assert(rmdir(manual_path) == 0);
+
+	assert(fplinux_session_wifi_station_acquire(station) ==
+	       FPLINUX_UI_WIFI_APPLIED);
+	fplinux_session_wifi_station_destroy(station);
+}
+
 int main(int argc, char **argv)
 {
 	int ready[2], status;
 	pid_t peer;
 	char started;
 
-	assert(argc == 3);
+	assert(argc == 4);
 	processes = argv[2];
 	assert(setenv("DBUS_SYSTEM_BUS_ADDRESS",
 		      getenv("DBUS_SESSION_BUS_ADDRESS"), 1) == 0);
@@ -333,7 +377,12 @@ int main(int argc, char **argv)
 	close(ready[1]);
 	assert(read(ready[0], &started, 1) == 1 && started == '1');
 	close(ready[0]);
-	check_station(argv[1]);
+	if (!strcmp(argv[3], "no-netns")) {
+		check_station_without_netns(argv[1], peer);
+	} else {
+		assert(!strcmp(argv[3], "cancel"));
+		check_station(argv[1]);
+	}
 	assert(kill(peer, SIGTERM) == 0);
 	assert(waitpid(peer, &status, 0) == peer);
 	assert(WIFSIGNALED(status) && WTERMSIG(status) == SIGTERM);

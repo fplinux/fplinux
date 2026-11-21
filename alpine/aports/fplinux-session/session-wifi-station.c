@@ -793,6 +793,7 @@ static bool has_manual_manager(struct fplinux_session_wifi_station *station)
 	struct dirent *entry;
 	struct stat own_namespace;
 	DIR *processes;
+	bool has_net_namespace;
 	bool found = false;
 
 	reply = bus_name_call(station, "GetConnectionUnixProcessID",
@@ -802,7 +803,11 @@ static bool has_manual_manager(struct fplinux_session_wifi_station *station)
 				      DBUS_TYPE_INVALID);
 		dbus_message_unref(reply);
 	}
-	if (stat("/proc/self/ns/net", &own_namespace) < 0)
+	has_net_namespace = stat("/proc/self/ns/net", &own_namespace) == 0;
+	/* A kernel without network namespaces still exposes the directory. */
+	if (!has_net_namespace &&
+	    (errno != ENOENT || stat("/proc/self/ns", &own_namespace) < 0 ||
+	     !S_ISDIR(own_namespace.st_mode)))
 		return true;
 	processes = opendir("/proc");
 	if (!processes)
@@ -827,6 +832,8 @@ static bool has_manual_manager(struct fplinux_session_wifi_station *station)
 		fclose(comm);
 		if (!found)
 			continue;
+		if (!has_net_namespace)
+			break;
 		snprintf(path, sizeof(path), "/proc/%s/ns/net", entry->d_name);
 		found = stat(path, &peer_namespace) == 0 &&
 			own_namespace.st_dev == peer_namespace.st_dev &&
