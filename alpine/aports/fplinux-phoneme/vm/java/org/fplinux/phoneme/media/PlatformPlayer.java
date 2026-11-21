@@ -15,6 +15,7 @@ import javax.microedition.media.control.VolumeControl;
 /** MIDP Player state and listeners stay on Java threads. */
 public final class PlatformPlayer implements Player {
     private static final int SOURCE_LIMIT = 2 * 1024 * 1024;
+    // Format and event IDs exchanged with the native media port.
     private static final int AUTO = 0;
     private static final int WAV = 1;
     private static final int MP3 = 2;
@@ -22,12 +23,6 @@ public final class PlatformPlayer implements Player {
     private static final int SEQUENCE = 4;
     private static final int TONE = 5;
     private static final int AMR_NB = 6;
-    private static final int PREFETCH = 1;
-    private static final int START = 2;
-    private static final int PAUSE = 3;
-    private static final int RELEASE = 4;
-    private static final int SEEK = 5;
-    private static final int GAIN = 6;
     private static final int END_EVENT = 1;
     private static final int ERROR_EVENT = 2;
     private static final int START_EVENT = 3;
@@ -117,36 +112,44 @@ public final class PlatformPlayer implements Player {
         }
     }
 
+    private static final class MediaEvent {
+        int handle;
+        int type;
+        long timeUs;
+        int error;
+        long playbackId;
+    }
+
     private static void dispatchEvents() {
-        long[] event = new long[5];
+        MediaEvent event = new MediaEvent();
+        initEvent0(event);
         while (nextEvent0(event)) {
             PlatformPlayer player = null;
             synchronized (players) {
                 for (int i = 0; i < players.size(); i++) {
                     PlatformPlayer candidate =
                         (PlatformPlayer)players.elementAt(i);
-                    if (candidate.handle == (int)event[0] ||
-                        candidate.clientId == (int)event[0]) {
+                    if (candidate.handle == event.handle ||
+                        candidate.clientId == event.handle) {
                         player = candidate;
                         break;
                     }
                 }
             }
             if (player != null) {
-                player.event((int)event[0], (int)event[1], event[2],
-                    (int)event[3], event[4]);
+                player.event(event);
             }
         }
     }
 
-    private void event(int eventHandle, int eventType, long time, int error,
-                       long eventPlayback) {
+    private void event(MediaEvent event) {
+        int eventType = event.type;
         String name;
-        Object data = new Long(time);
+        Object data = new Long(event.timeUs);
         boolean repeat = false;
         boolean closeTone = false;
         synchronized (this) {
-            if (eventHandle != handle && eventHandle != clientId) {
+            if (event.handle != handle && event.handle != clientId) {
                 return;
             }
             if (state == CLOSED && eventType != CLOSE_EVENT) {
@@ -154,7 +157,7 @@ public final class PlatformPlayer implements Player {
             }
             // The broker may have queued completion before a later START.
             if ((eventType == END_EVENT || eventType == ERROR_EVENT) &&
-                eventPlayback != playback) {
+                event.playbackId != playback) {
                 return;
             }
             if (eventType == END_EVENT) {
@@ -177,9 +180,9 @@ public final class PlatformPlayer implements Player {
                 state = CLOSED;
                 loopActive = false;
                 destroy0(handle);
-                post0(handle, CLOSE_EVENT, 0);
+                postClosed0(handle);
                 name = PlayerListener.ERROR;
-                data = "Audio error " + error;
+                data = "Audio error " + event.error;
             } else if (eventType == START_EVENT) {
                 name = PlayerListener.STARTED;
             } else if (eventType == STOP_EVENT) {
@@ -212,12 +215,12 @@ public final class PlatformPlayer implements Player {
             synchronized (this) {
                 // A listener may stop, close or restart the player itself.
                 if (state == PREFETCHED && restartAllowed &&
-                    playback == eventPlayback) {
+                    playback == event.playbackId) {
                     try {
-                        playback = command0(handle, START, 0);
+                        playback = start0(handle);
                         state = STARTED;
                     } catch (MediaException failure) {
-                        post0(handle, ERROR_EVENT, 0);
+                        postError0(handle);
                     }
                 }
             }
@@ -273,7 +276,7 @@ public final class PlatformPlayer implements Player {
             synchronized (players) {
                 players.addElement(this);
             }
-            int actual = (int)query0(handle, 2);
+            int actual = format0(handle);
             if (actual == WAV) {
                 type = "audio/x-wav";
             } else if (actual == MIDI) {
@@ -345,9 +348,9 @@ public final class PlatformPlayer implements Player {
                 }
                 input = null;
                 state = REALIZED;
-                long duration = query0(handle, 1);
+                long duration = duration0(handle);
                 if (duration != TIME_UNKNOWN) {
-                    post0(handle, DURATION_EVENT, duration);
+                    postDuration0(handle, duration);
                 }
             }
         } catch (IOException failure) {
@@ -370,8 +373,8 @@ public final class PlatformPlayer implements Player {
                 return;
             }
             if (handle != 0) {
-                command0(handle, PREFETCH, 0);
-                command0(handle, GAIN, muted ? 0 : level);
+                prefetch0(handle);
+                setGain0(handle, muted ? 0 : level);
             }
             state = PREFETCHED;
         }
@@ -387,7 +390,7 @@ public final class PlatformPlayer implements Player {
             if (handle == 0) {
                 throw new MediaException("Tone sequence is not set");
             }
-            playback = command0(handle, START, 0);
+            playback = start0(handle);
             if (!loopActive) {
                 loopsLeft = loopCount;
             }
@@ -402,7 +405,7 @@ public final class PlatformPlayer implements Player {
         if (state != STARTED) {
             return;
         }
-        command0(handle, PAUSE, 0);
+        pause0(handle);
         state = PREFETCHED;
     }
 
@@ -418,10 +421,10 @@ public final class PlatformPlayer implements Player {
         try {
             stop();
             if (handle != 0) {
-                command0(handle, RELEASE, 0);
+                release0(handle);
             }
         } catch (MediaException failure) {
-            post0(handle, ERROR_EVENT, 0);
+            postError0(handle);
         }
         state = REALIZED;
     }
@@ -436,12 +439,12 @@ public final class PlatformPlayer implements Player {
         loopActive = false;
         if (handle != 0) {
             destroy0(handle);
-            post0(handle, CLOSE_EVENT, 0);
+            postClosed0(handle);
         } else {
             synchronized (players) {
                 players.addElement(this);
             }
-            post0(clientId, CLOSE_EVENT, 0);
+            postClosed0(clientId);
         }
     }
 
@@ -477,18 +480,18 @@ public final class PlatformPlayer implements Player {
         if (handle == 0) {
             return 0;
         }
-        return command0(handle, SEEK, time < 0 ? 0 : time);
+        return seek0(handle, time < 0 ? 0 : time);
     }
 
     public synchronized long getMediaTime() {
         checkOpen();
-        return handle == 0 ? 0 : query0(handle, 0);
+        return handle == 0 ? 0 : mediaTime0(handle);
     }
 
     public synchronized long getDuration() {
         checkOpen();
         return handle == 0 ? (format == SEQUENCE ? 0 : TIME_UNKNOWN) :
-            query0(handle, 1);
+            duration0(handle);
     }
 
     public synchronized int getState() {
@@ -571,14 +574,14 @@ public final class PlatformPlayer implements Player {
                 int clamped = Math.max(0, Math.min(100, requested));
                 if (handle != 0) {
                     try {
-                        command0(handle, GAIN, muted ? 0 : clamped);
+                        setGain0(handle, muted ? 0 : clamped);
                     } catch (MediaException failure) {
                         throw new IllegalStateException(failure.toString());
                     }
                 }
                 level = clamped;
                 if (handle != 0) {
-                    post0(handle, VOLUME_EVENT, 0);
+                    postVolume0(handle);
                 }
                 return level;
             }
@@ -596,14 +599,14 @@ public final class PlatformPlayer implements Player {
                 checkOpen();
                 if (handle != 0) {
                     try {
-                        command0(handle, GAIN, requested ? 0 : level);
+                        setGain0(handle, requested ? 0 : level);
                     } catch (MediaException failure) {
                         throw new IllegalStateException(failure.toString());
                     }
                 }
                 muted = requested;
                 if (handle != 0) {
-                    post0(handle, VOLUME_EVENT, 0);
+                    postVolume0(handle);
                 }
             }
         }
@@ -645,7 +648,7 @@ public final class PlatformPlayer implements Player {
                     } else {
                         destroy0(previous);
                     }
-                    post0(handle, DURATION_EVENT, query0(handle, 1));
+                    postDuration0(handle, duration0(handle));
                 } catch (MediaException failure) {
                     throw new IllegalArgumentException(failure.toString());
                 }
@@ -671,10 +674,20 @@ public final class PlatformPlayer implements Player {
     private static native int create0(int format, byte[] bytes, int note,
                                       int duration) throws MediaException;
     private static native void await0(int handle) throws MediaException;
-    private static native long command0(int handle, int command, long value)
-            throws MediaException;
-    private static native long query0(int handle, int field);
+    private static native void prefetch0(int handle) throws MediaException;
+    private static native long start0(int handle) throws MediaException;
+    private static native void pause0(int handle) throws MediaException;
+    private static native void release0(int handle) throws MediaException;
+    private static native long seek0(int handle, long timeUs) throws MediaException;
+    private static native void setGain0(int handle, int gain) throws MediaException;
+    private static native long mediaTime0(int handle);
+    private static native long duration0(int handle);
+    private static native int format0(int handle);
     private static native void destroy0(int handle);
-    private static native void post0(int handle, int type, long time);
-    private static native boolean nextEvent0(long[] event);
+    private static native void postClosed0(int handle);
+    private static native void postError0(int handle);
+    private static native void postVolume0(int handle);
+    private static native void postDuration0(int handle, long durationUs);
+    private static native void initEvent0(MediaEvent event);
+    private static native boolean nextEvent0(MediaEvent event);
 }

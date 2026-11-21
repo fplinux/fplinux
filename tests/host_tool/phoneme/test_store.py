@@ -64,7 +64,9 @@ def write_suite(
 def open_store(tool: Path, root: Path, jar: Path) -> Path:
     result = run_process([str(tool), str(root), str(jar)], name="open suite storage", timeout=10)
     assert result.returncode == 0, result.stdout + result.stderr
-    return Path(result.stdout.strip())
+    prefs_key, path = result.stdout.splitlines()
+    assert Path(path) == root / "rms" / prefs_key
+    return Path(path)
 
 
 def test_suite_update_and_move_reuse_store_but_other_identities_do_not(
@@ -75,6 +77,7 @@ def test_suite_update_and_move_reuse_store_but_other_identities_do_not(
     jar = tmp_path / "first.jar"
     write_suite(jar)
     original = open_store(store_tool, root, jar)
+    assert original.name == "e27cfd61a9bf6c0b5769b7d3faf2d35f639b070136294eeeebb3aaa69a07e2b6"
     (original / "record").write_bytes(b"saved\x00data")
     assert original.stat().st_mode & 0o777 == 0o700
 

@@ -23,23 +23,54 @@
 
 _Static_assert(MEDIA_EVENT_RESERVE < MEDIA_EVENTS, "media completion reserve");
 
+/* Format and event IDs used by PlatformPlayer. */
+enum java_media_format {
+	JAVA_MEDIA_AUTO = 0,
+	JAVA_MEDIA_WAV = 1,
+	JAVA_MEDIA_MP3 = 2,
+	JAVA_MEDIA_MIDI = 3,
+	JAVA_MEDIA_SEQUENCE = 4,
+	JAVA_MEDIA_TONE = 5,
+	JAVA_MEDIA_AMR_NB = 6,
+	JAVA_MEDIA_FORMAT_COUNT,
+};
+
+static const enum fplinux_runtime_media_format
+	runtime_formats[JAVA_MEDIA_FORMAT_COUNT] = {
+		[JAVA_MEDIA_AUTO] = FPLINUX_RUNTIME_MEDIA_AUTO,
+		[JAVA_MEDIA_WAV] = FPLINUX_RUNTIME_MEDIA_WAV,
+		[JAVA_MEDIA_MP3] = FPLINUX_RUNTIME_MEDIA_MP3,
+		[JAVA_MEDIA_MIDI] = FPLINUX_RUNTIME_MEDIA_MIDI,
+		[JAVA_MEDIA_SEQUENCE] = FPLINUX_RUNTIME_MEDIA_TONE_SEQUENCE,
+		[JAVA_MEDIA_TONE] = FPLINUX_RUNTIME_MEDIA_TONE,
+		[JAVA_MEDIA_AMR_NB] = FPLINUX_RUNTIME_MEDIA_AMR_NB,
+	};
+
 enum java_media_event {
 	JAVA_MEDIA_END = 1,
-	JAVA_MEDIA_ERROR,
-	JAVA_MEDIA_STARTED,
-	JAVA_MEDIA_STOPPED,
-	JAVA_MEDIA_CLOSED,
-	JAVA_MEDIA_VOLUME,
-	JAVA_MEDIA_DURATION,
+	JAVA_MEDIA_ERROR = 2,
+	JAVA_MEDIA_STARTED = 3,
+	JAVA_MEDIA_STOPPED = 4,
+	JAVA_MEDIA_CLOSED = 5,
+	JAVA_MEDIA_VOLUME = 6,
+	JAVA_MEDIA_DURATION = 7,
 };
 
 struct media_event {
-	uint32_t handle;
-	int type;
-	uint64_t time;
+	int32_t handle; /* Broker handle or an unrealized player's client ID. */
+	enum java_media_event type;
+	int64_t time_us;
 	int error;
 	uint32_t playback;
 };
+
+static struct {
+	jfieldID handle;
+	jfieldID type;
+	jfieldID time_us;
+	jfieldID error;
+	jfieldID playback;
+} event_fields;
 
 struct media_result {
 	uint32_t handle;
@@ -97,13 +128,13 @@ static bool queue_event(struct media_event event)
 }
 
 static void
-queue_playback_event(struct media_result *result, int type,
+queue_playback_event(struct media_result *result, enum java_media_event type,
 		     const struct fplinux_runtime_media_event *event)
 {
 	struct media_event queued = {
 		.handle = event->handle,
 		.type = type,
-		.time = event->info.position_us,
+		.time_us = event->info.position_us,
 		.error = event->error,
 		.playback = result->playback,
 	};
@@ -131,7 +162,7 @@ static void broker_event(const struct fplinux_runtime_media_event *event,
 				!queue_event((struct media_event){
 					.handle = event->handle,
 					.type = JAVA_MEDIA_DURATION,
-					.time = event->info.duration_us,
+					.time_us = event->info.duration_us,
 				});
 		result->duration_known = true;
 		result->duration_us = event->info.duration_us;
@@ -150,9 +181,10 @@ static void broker_event(const struct fplinux_runtime_media_event *event,
 			queue_playback_event(result, JAVA_MEDIA_STOPPED, event);
 		}
 	} else {
-		int type = event->type == FPLINUX_RUNTIME_MEDIA_END ?
-				   JAVA_MEDIA_END :
-				   JAVA_MEDIA_ERROR;
+		enum java_media_event type =
+			event->type == FPLINUX_RUNTIME_MEDIA_END ?
+				JAVA_MEDIA_END :
+				JAVA_MEDIA_ERROR;
 
 		queue_playback_event(result, type, event);
 	}
@@ -197,7 +229,7 @@ static void flush_pending_events(void)
 			queue_event((struct media_event){
 				.handle = result->handle,
 				.type = JAVA_MEDIA_DURATION,
-				.time = result->duration_us,
+				.time_us = result->duration_us,
 			});
 			result->duration_pending = false;
 		}
@@ -308,6 +340,10 @@ Java_org_fplinux_phoneme_media_PlatformPlayer_create0(void)
 		jsize count = 0;
 		struct media_result *result = NULL;
 
+		if (format < 0 || format >= JAVA_MEDIA_FORMAT_COUNT) {
+			throw_media(EINVAL);
+			KNI_ReturnInt(0);
+		}
 		KNI_StartHandles(1);
 		KNI_DeclareHandle(input);
 		KNI_GetParameterAsObject(2, input);
@@ -339,9 +375,8 @@ Java_org_fplinux_phoneme_media_PlatformPlayer_create0(void)
 			error = errno;
 		if (!error) {
 			handle = fplinux_runtime_media_create(
-				audio.broker,
-				(enum fplinux_runtime_media_format)format,
-				bytes, (size_t)count, (unsigned int)note,
+				audio.broker, runtime_formats[format], bytes,
+				(size_t)count, (unsigned int)note,
 				(uint64_t)duration);
 			if (!handle)
 				error = errno;
@@ -375,13 +410,11 @@ Java_org_fplinux_phoneme_media_PlatformPlayer_await0(void)
 	KNI_ReturnVoid();
 }
 
-KNIEXPORT KNI_RETURNTYPE_LONG
-Java_org_fplinux_phoneme_media_PlatformPlayer_command0(void)
+static uint64_t run_command(uint32_t handle,
+			    enum fplinux_runtime_media_command command,
+			    uint64_t value)
 {
 	MidpReentryData *reentry = (MidpReentryData *)SNI_GetReentryData(NULL);
-	uint32_t handle = (uint32_t)KNI_GetParameterAsInt(1);
-	int command = KNI_GetParameterAsInt(2);
-	uint64_t value = (uint64_t)KNI_GetParameterAsLong(3);
 	int error = 0;
 	uint64_t result = 0;
 
@@ -390,34 +423,102 @@ Java_org_fplinux_phoneme_media_PlatformPlayer_command0(void)
 	if (!reentry && audio.count >= MEDIA_EVENTS - MEDIA_EVENT_RESERVE)
 		error = EAGAIN;
 	if (!error && !reentry &&
-	    fplinux_runtime_media_command(
-		    audio.broker, handle,
-		    (enum fplinux_runtime_media_command)command, value) < 0)
+	    fplinux_runtime_media_command(audio.broker, handle, command,
+					  value) < 0)
 		error = errno;
 	if (!error && !wait_result(handle, &error, &result))
-		KNI_ReturnLong(0);
+		return 0;
 	if (error)
 		throw_media(error);
-	KNI_ReturnLong((jlong)result);
+	return result;
+}
+
+KNIEXPORT KNI_RETURNTYPE_VOID
+Java_org_fplinux_phoneme_media_PlatformPlayer_prefetch0(void)
+{
+	run_command((uint32_t)KNI_GetParameterAsInt(1),
+		    FPLINUX_RUNTIME_MEDIA_PREFETCH, 0);
+	KNI_ReturnVoid();
 }
 
 KNIEXPORT KNI_RETURNTYPE_LONG
-Java_org_fplinux_phoneme_media_PlatformPlayer_query0(void)
+Java_org_fplinux_phoneme_media_PlatformPlayer_start0(void)
+{
+	KNI_ReturnLong(run_command((uint32_t)KNI_GetParameterAsInt(1),
+				   FPLINUX_RUNTIME_MEDIA_START, 0));
+}
+
+KNIEXPORT KNI_RETURNTYPE_VOID
+Java_org_fplinux_phoneme_media_PlatformPlayer_pause0(void)
+{
+	run_command((uint32_t)KNI_GetParameterAsInt(1),
+		    FPLINUX_RUNTIME_MEDIA_PAUSE, 0);
+	KNI_ReturnVoid();
+}
+
+KNIEXPORT KNI_RETURNTYPE_VOID
+Java_org_fplinux_phoneme_media_PlatformPlayer_release0(void)
+{
+	run_command((uint32_t)KNI_GetParameterAsInt(1),
+		    FPLINUX_RUNTIME_MEDIA_RELEASE, 0);
+	KNI_ReturnVoid();
+}
+
+KNIEXPORT KNI_RETURNTYPE_LONG
+Java_org_fplinux_phoneme_media_PlatformPlayer_seek0(void)
+{
+	uint32_t handle = (uint32_t)KNI_GetParameterAsInt(1);
+	uint64_t time_us = (uint64_t)KNI_GetParameterAsLong(2);
+
+	KNI_ReturnLong(
+		run_command(handle, FPLINUX_RUNTIME_MEDIA_SEEK, time_us));
+}
+
+KNIEXPORT KNI_RETURNTYPE_VOID
+Java_org_fplinux_phoneme_media_PlatformPlayer_setGain0(void)
+{
+	uint32_t handle = (uint32_t)KNI_GetParameterAsInt(1);
+	int gain = KNI_GetParameterAsInt(2);
+
+	run_command(handle, FPLINUX_RUNTIME_MEDIA_GAIN, (uint64_t)gain);
+	KNI_ReturnVoid();
+}
+
+KNIEXPORT KNI_RETURNTYPE_LONG
+Java_org_fplinux_phoneme_media_PlatformPlayer_mediaTime0(void)
 {
 	struct fplinux_runtime_media_info info;
 	uint32_t handle = (uint32_t)KNI_GetParameterAsInt(1);
-	int field = KNI_GetParameterAsInt(2);
-	jlong value = -1;
 
-	if (fplinux_runtime_media_info(audio.broker, handle, &info)) {
-		if (field == 0)
-			value = (jlong)info.position_us;
-		else if (field == 1 && info.duration_known)
-			value = (jlong)info.duration_us;
-		else if (field == 2)
-			value = (jlong)info.format;
-	}
-	KNI_ReturnLong(value);
+	KNI_ReturnLong(fplinux_runtime_media_info(audio.broker, handle, &info) ?
+			       (jlong)info.position_us :
+			       -1);
+}
+
+KNIEXPORT KNI_RETURNTYPE_LONG
+Java_org_fplinux_phoneme_media_PlatformPlayer_duration0(void)
+{
+	struct fplinux_runtime_media_info info;
+	uint32_t handle = (uint32_t)KNI_GetParameterAsInt(1);
+
+	if (fplinux_runtime_media_info(audio.broker, handle, &info) &&
+	    info.duration_known)
+		KNI_ReturnLong((jlong)info.duration_us);
+	KNI_ReturnLong(-1);
+}
+
+KNIEXPORT KNI_RETURNTYPE_INT
+Java_org_fplinux_phoneme_media_PlatformPlayer_format0(void)
+{
+	struct fplinux_runtime_media_info info;
+	uint32_t handle = (uint32_t)KNI_GetParameterAsInt(1);
+
+	if (!fplinux_runtime_media_info(audio.broker, handle, &info))
+		KNI_ReturnInt(-1);
+	for (int i = 0; i < JAVA_MEDIA_FORMAT_COUNT; i++)
+		if (runtime_formats[i] == info.format)
+			KNI_ReturnInt(i);
+	KNI_ReturnInt(-1);
 }
 
 KNIEXPORT KNI_RETURNTYPE_VOID
@@ -434,7 +535,7 @@ Java_org_fplinux_phoneme_media_PlatformPlayer_destroy0(void)
 		struct media_event event =
 			audio.events[(audio.first + i) % MEDIA_EVENTS];
 
-		if (event.handle != handle)
+		if (event.handle != (int32_t)handle)
 			audio.events[(audio.first + kept++) % MEDIA_EVENTS] =
 				event;
 	}
@@ -452,13 +553,9 @@ Java_org_fplinux_phoneme_media_PlatformPlayer_destroy0(void)
 	KNI_ReturnVoid();
 }
 
-KNIEXPORT KNI_RETURNTYPE_VOID
-Java_org_fplinux_phoneme_media_PlatformPlayer_post0(void)
+static void post_event(int32_t handle, enum java_media_event type,
+		       int64_t time_us)
 {
-	uint32_t handle = (uint32_t)KNI_GetParameterAsInt(1);
-	int type = KNI_GetParameterAsInt(2);
-	uint64_t time = (uint64_t)KNI_GetParameterAsLong(3);
-
 	bool queued = false;
 
 	if (type == JAVA_MEDIA_VOLUME) {
@@ -474,18 +571,73 @@ Java_org_fplinux_phoneme_media_PlatformPlayer_post0(void)
 	}
 	if (!queued && (type == JAVA_MEDIA_CLOSED || type == JAVA_MEDIA_ERROR ||
 			audio.count < MEDIA_EVENTS - MEDIA_EVENT_RESERVE)) {
-		struct media_result *result = find_result(handle);
+		struct media_result *result = find_result((uint32_t)handle);
 
 		queued = queue_event((struct media_event){
 			.handle = handle,
 			.type = type,
-			.time = time,
+			.time_us = time_us,
 			.playback = result ? result->playback : 0,
 		});
 	}
 	if (!queued)
 		KNI_ThrowNew("java/lang/IllegalStateException",
 			     "Media event queue full");
+}
+
+KNIEXPORT KNI_RETURNTYPE_VOID
+Java_org_fplinux_phoneme_media_PlatformPlayer_postClosed0(void)
+{
+	post_event(KNI_GetParameterAsInt(1), JAVA_MEDIA_CLOSED, 0);
+	KNI_ReturnVoid();
+}
+
+KNIEXPORT KNI_RETURNTYPE_VOID
+Java_org_fplinux_phoneme_media_PlatformPlayer_postError0(void)
+{
+	post_event(KNI_GetParameterAsInt(1), JAVA_MEDIA_ERROR, 0);
+	KNI_ReturnVoid();
+}
+
+KNIEXPORT KNI_RETURNTYPE_VOID
+Java_org_fplinux_phoneme_media_PlatformPlayer_postVolume0(void)
+{
+	post_event(KNI_GetParameterAsInt(1), JAVA_MEDIA_VOLUME, 0);
+	KNI_ReturnVoid();
+}
+
+KNIEXPORT KNI_RETURNTYPE_VOID
+Java_org_fplinux_phoneme_media_PlatformPlayer_postDuration0(void)
+{
+	int32_t handle = KNI_GetParameterAsInt(1);
+	int64_t duration_us = KNI_GetParameterAsLong(2);
+
+	post_event(handle, JAVA_MEDIA_DURATION, duration_us);
+	KNI_ReturnVoid();
+}
+
+KNIEXPORT KNI_RETURNTYPE_VOID
+Java_org_fplinux_phoneme_media_PlatformPlayer_initEvent0(void)
+{
+	/* Class-mirror and field lookup stay outside the polling loop. */
+	KNI_StartHandles(2);
+	KNI_DeclareHandle(output);
+	KNI_DeclareHandle(cls);
+	KNI_GetParameterAsObject(1, output);
+	KNI_GetObjectClass(output, cls);
+	if (!KNI_IsNullHandle(cls)) {
+		event_fields.handle = KNI_GetFieldID(cls, "handle", "I");
+		event_fields.type = KNI_GetFieldID(cls, "type", "I");
+		event_fields.time_us = KNI_GetFieldID(cls, "timeUs", "J");
+		event_fields.error = KNI_GetFieldID(cls, "error", "I");
+		event_fields.playback = KNI_GetFieldID(cls, "playbackId", "J");
+	}
+	if (KNI_IsNullHandle(cls) || !event_fields.handle ||
+	    !event_fields.type || !event_fields.time_us ||
+	    !event_fields.error || !event_fields.playback)
+		KNI_ThrowNew("java/lang/IllegalStateException",
+			     "MediaEvent fields unavailable");
+	KNI_EndHandles();
 	KNI_ReturnVoid();
 }
 
@@ -501,19 +653,16 @@ Java_org_fplinux_phoneme_media_PlatformPlayer_nextEvent0(void)
 		KNI_StartHandles(1);
 		KNI_DeclareHandle(output);
 		KNI_GetParameterAsObject(1, output);
-		if (!KNI_IsNullHandle(output) &&
-		    KNI_GetArrayLength(output) >= 5) {
-			KNI_SetLongArrayElement(output, 0, (jlong)event.handle);
-			KNI_SetLongArrayElement(output, 1, (jlong)event.type);
-			KNI_SetLongArrayElement(output, 2, (jlong)event.time);
-			KNI_SetLongArrayElement(output, 3, (jlong)event.error);
-			KNI_SetLongArrayElement(output, 4,
-						(jlong)event.playback);
-			available = true;
-		}
+		KNI_SetIntField(output, event_fields.handle, event.handle);
+		KNI_SetIntField(output, event_fields.type, event.type);
+		KNI_SetLongField(output, event_fields.time_us, event.time_us);
+		KNI_SetIntField(output, event_fields.error, event.error);
+		KNI_SetLongField(output, event_fields.playback,
+				 (jlong)event.playback);
 		KNI_EndHandles();
 		audio.first = (audio.first + 1) % MEDIA_EVENTS;
 		audio.count--;
+		available = true;
 	} else if (!audio.stopped) {
 		if (midp_thread_wait(AMS_SIGNAL, MEDIA_EVENT_DESCRIPTOR, NULL) <
 		    0) {

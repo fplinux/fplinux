@@ -83,24 +83,24 @@ static int is_private_directory(int fd)
 	return 1;
 }
 
-char *fplinux_pm_store_open(const char *state_root,
-			    const struct fplinux_pm_suite *suite,
-			    const char *jar_path)
+bool fplinux_pm_store_open(const char *state_root,
+			   const struct fplinux_pm_suite *suite,
+			   const char *jar_path,
+			   struct fplinux_pm_store *output)
 {
-	char key[FPLINUX_PM_STORE_KEY_SIZE];
-	char *path = NULL;
+	struct fplinux_pm_store store;
 	int root, stores = -1, folder = -1, error;
 
 	if (!state_root || state_root[0] != '/') {
 		errno = EINVAL;
-		return NULL;
+		return false;
 	}
-	if (!fplinux_pm_store_key(suite, jar_path, key))
-		return NULL;
+	if (!fplinux_pm_store_key(suite, jar_path, store.prefs_key))
+		return false;
 	root = open(state_root,
 		    O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
 	if (root < 0)
-		return NULL;
+		return false;
 	if (!is_private_directory(root))
 		goto failed;
 	if (mkdirat(root, "rms", 0700) < 0 && errno != EEXIST)
@@ -111,20 +111,22 @@ char *fplinux_pm_store_open(const char *state_root,
 		goto failed;
 	if (!is_private_directory(stores))
 		goto failed;
-	if (mkdirat(stores, key, 0700) < 0 && errno != EEXIST)
+	if (mkdirat(stores, store.prefs_key, 0700) < 0 && errno != EEXIST)
 		goto failed;
-	folder = openat(stores, key,
+	folder = openat(stores, store.prefs_key,
 			O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
 	if (folder < 0)
 		goto failed;
 	if (!is_private_directory(folder))
 		goto failed;
-	if (asprintf(&path, "%s/rms/%s", state_root, key) < 0)
+	if (asprintf(&store.rms_path, "%s/rms/%s", state_root,
+		     store.prefs_key) < 0)
 		goto failed;
 	close(folder);
 	close(stores);
 	close(root);
-	return path;
+	*output = store;
+	return true;
 failed:
 	error = errno;
 	if (folder >= 0)
@@ -133,5 +135,5 @@ failed:
 		close(stores);
 	close(root);
 	errno = error;
-	return NULL;
+	return false;
 }

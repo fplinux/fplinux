@@ -686,17 +686,17 @@ static int choose_midlet(struct pm_app *app, size_t index)
 	set_busy(app, midlet->name);
 	error = check_midlet_class(app->suite.jar_path, midlet);
 	if (!error) {
-		const char *key;
+		struct fplinux_pm_store store;
 
 		free(app->storage);
-		app->storage = fplinux_pm_store_open(
-			app->state_root, &app->suite, app->suite.jar_path);
-		if (!app->storage)
+		app->storage = NULL;
+		if (!fplinux_pm_store_open(app->state_root, &app->suite,
+					   app->suite.jar_path, &store))
 			return errno ? errno : EIO;
-		key = strrchr(app->storage, '/');
+		app->storage = store.rms_path;
 		fplinux_ui_prefs_close(app->program_prefs);
 		app->program_prefs = fplinux_ui_program_prefs_open(
-			FPLINUX_PM_APP_ID, key + 1);
+			FPLINUX_PM_APP_ID, store.prefs_key);
 		app->program_prefs_error = app->program_prefs == NULL;
 		app->settings = app->defaults;
 		app->program_size = app->default_size;

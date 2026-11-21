@@ -6,10 +6,15 @@ import java.io.ByteArrayInputStream;
 import javax.microedition.media.Manager;
 import javax.microedition.media.MediaException;
 import javax.microedition.media.Player;
+import javax.microedition.media.PlayerListener;
 import javax.microedition.midlet.MIDlet;
 
-/** The actual native VM must reject playback without a UI audio provider. */
-public final class HeadlessMediaMIDlet extends MIDlet {
+/** Exercises the native media bridge without a UI audio provider. */
+public final class HeadlessMediaMIDlet extends MIDlet implements PlayerListener {
+    private Player closedPlayer;
+    private String closeEvent;
+    private Object closeData;
+
     protected void startApp() {
         Player player = null;
         try {
@@ -28,6 +33,7 @@ public final class HeadlessMediaMIDlet extends MIDlet {
             } catch (MediaException expected) {
             }
             nokiaSound();
+            closeBeforePreparation();
             System.out.println("PM-MEDIA headless failure honest");
         } catch (Throwable failure) {
             System.out.println("PM-MEDIA FAIL " + failure);
@@ -38,6 +44,32 @@ public final class HeadlessMediaMIDlet extends MIDlet {
             }
             notifyDestroyed();
         }
+    }
+
+    private void closeBeforePreparation() throws Exception {
+        Player unopened = Manager.createPlayer(
+            new ByteArrayInputStream(AudioMIDlet.wave()), "audio/x-wav");
+        unopened.addPlayerListener(this);
+        unopened.close();
+        synchronized (this) {
+            long deadline = System.currentTimeMillis() + 5000;
+            long remaining;
+            while (closedPlayer == null &&
+                   (remaining = deadline - System.currentTimeMillis()) > 0) {
+                wait(remaining);
+            }
+            AudioMIDlet.require(closedPlayer == unopened &&
+                                PlayerListener.CLOSED.equals(closeEvent) &&
+                                closeData == null,
+                                "Close event for an unrealized player");
+        }
+    }
+
+    public synchronized void playerUpdate(Player player, String event, Object data) {
+        closedPlayer = player;
+        closeEvent = event;
+        closeData = data;
+        notifyAll();
     }
 
     private void nokiaSound() {

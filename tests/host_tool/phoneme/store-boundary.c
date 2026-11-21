@@ -9,7 +9,7 @@
 int main(int argc, char **argv)
 {
 	struct fplinux_pm_suite suite = { 0 };
-	char *path;
+	struct fplinux_pm_store store;
 
 	if (argc != 3)
 		return 2;
@@ -17,14 +17,14 @@ int main(int argc, char **argv)
 		fputs("invalid suite\n", stderr);
 		return 2;
 	}
-	path = fplinux_pm_store_open(argv[1], &suite, argv[2]);
-	if (!path) {
+	if (!fplinux_pm_store_open(argv[1], &suite, argv[2], &store)) {
 		fprintf(stderr, "storage error %d\n", errno);
 		fplinux_pm_suite_cleanup(&suite);
 		return 1;
 	}
-	puts(path);
-	free(path);
+	puts(store.prefs_key);
+	puts(store.rms_path);
+	free(store.rms_path);
 	fplinux_pm_suite_cleanup(&suite);
 	return 0;
 }
