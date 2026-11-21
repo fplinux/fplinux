@@ -6,6 +6,7 @@ kind = "initramfs"
 
 [rootfs]
 packages = ["feature"]
+applications = []
 
 [bootstrap]
 kind = "linux"

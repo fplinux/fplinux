@@ -22,7 +22,7 @@ Keep `pkgrel=0` for project packages before the first release. Source changes in
 
 ## Selecting the package
 
-Choose the owner that actually needs the application. A phone's `[bundle].packages` builds an optional APK beside that phone's image. Platform bundle packages serve all targets of that platform. Rootfs package selection installs the package in the image instead. Do not select the same package as both an optional bundle APK and a rootfs package.
+Choose the owner that needs the application. A phone's `[bundle].packages` adds an APK to that phone's catalogue. Platform bundle packages serve all targets of that platform. A profile's `[rootfs].applications` lists applications installed on a new system and included in its catalogue. Use `[rootfs].packages` for mandatory system packages. Declare shared libraries as dependencies of their consumers and keep each application independently installable.
 
 For a local tutorial, add its name to the selected phone's existing `[bundle]` list, preserving the other entries. Also register its shared sources and local build dependencies. The selected package list supplies the bundle's APK inventory; do not maintain a second list of APK filenames in release metadata.
 

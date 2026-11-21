@@ -8,8 +8,10 @@ import ipaddress
 import json
 import shlex
 import subprocess
+import tarfile
 from base64 import b64encode
 from contextlib import nullcontext
+from io import BytesIO
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
@@ -23,7 +25,9 @@ from fplinux_cli.runtime.bundle import ValidatedBundle
 from fplinux_cli.runtime.ssh import commands
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
+    from typing import IO
 
 CID = "f" * 32
 TARGET = "inoi-240-modern-4g"
@@ -60,13 +64,14 @@ def bundle(tmp_path: Path) -> Path:
             "board.tar",
             "fit.itb",
             "apk-state.tar",
-            "apks/Packages.adb",
-            "apks/fplinux-build.rsa.pub",
-            "apks/fplinux-notes.apk",
         ),
         b"staged asset",
     )
     members["layout.json"] = json.dumps(layout).encode()
+    members["default-apps"] = b"fplinux-notes\n"
+    members["apks/Packages.adb"] = b"signed index"
+    members["apks/fplinux-build.rsa.pub"] = b"release public key"
+    members["apks/fplinux-notes.apk"] = b"notes package"
     records = {}
     for name, contents in members.items():
         (kit / name).parent.mkdir(exist_ok=True)
@@ -85,6 +90,7 @@ def bundle(tmp_path: Path) -> Path:
     "asset",
     [
         "board.tar",
+        "default-apps",
         "apk-state.tar",
         "apks/Packages.adb",
         "apks/fplinux-build.rsa.pub",
@@ -344,7 +350,7 @@ def test_card_install_rejects_before_sending_or_writing_to_the_card(
 
 
 @pytest.mark.parametrize("outcome", ["invalid-host-key", "interrupted", "verified"])
-def test_card_enrollment_uses_reader_pin_and_preserves_keys_once_writing_starts(
+def test_card_writer_streams_the_repository_and_preserves_the_bound_ssh_keys(
     bundle: Path, monkeypatch: pytest.MonkeyPatch, outcome: str
 ) -> None:
     messages: list[str] = []
@@ -377,7 +383,7 @@ def test_card_enrollment_uses_reader_pin_and_preserves_keys_once_writing_starts(
         return generated
 
     def remote(_session: object, command: str, **_kwargs: object) -> SimpleNamespace:
-        nonlocal credentials, remote_cleaned, writer_started
+        nonlocal remote_cleaned
         if command.startswith("mktemp "):
             return SimpleNamespace(returncode=0, stdout=f"{remote_staging}\n")
         if command.startswith("/usr/libexec/fplinux/preparation "):
@@ -385,54 +391,95 @@ def test_card_enrollment_uses_reader_pin_and_preserves_keys_once_writing_starts(
             return SimpleNamespace(returncode=0, stdout="")
         if command.startswith(f"sh {remote_staging}/"):
             arguments = shlex.split(command)
-            if arguments[2] == "prepare-access":
-                return SimpleNamespace(
-                    returncode=0,
-                    stdout="unavailable\n" if outcome == "invalid-host-key" else HOST_KEY + "\n",
-                )
-            writer_started = True
-            assert arguments[2:5] == ["/dev/mmcblk0", CID, remote_staging]
-            assert arguments[5:13] == ["1", "1", "2", "1", "a" * 64, "b" * 64, TARGET, RELEASE]
-            assert arguments[13:17] == [
-                hashlib.sha256(uploaded[f"{remote_staging}/{name}"]).hexdigest()
-                for name in ("board.tar", "personal.tar", "installed.sha256", "fit.itb")
-            ]
-            assert uploaded[f"{remote_staging}/card-slots.sh"]
-            assert arguments[-1] == HOST_KEY
-            device_id = uploaded[f"{remote_staging}/device-id"]
-            assert len(device_id) == 32
-            serial = hashlib.sha256(device_id).hexdigest()[:32]
-            usb = uploaded[f"{remote_staging}/usb-network"]
-            assert len(usb) == 256
-            network_fields = dict(
-                line.split("=") for line in usb.rstrip(b"\0").decode().splitlines()
+            assert arguments[2:] == ["prepare-access", remote_staging]
+            return SimpleNamespace(
+                returncode=0,
+                stdout="unavailable\n" if outcome == "invalid-host-key" else HOST_KEY + "\n",
             )
-            assert network_fields["usb_serial"] == serial
-            assert network_fields["transport"] == "ncm"
-            assert network_fields["netmask"] == "255.255.255.252"
-            assert not ipaddress.IPv4Address(network_fields["host_address"]).is_global
-            assert not network_fields["host_address"].startswith("10.")
-            assert uploaded[f"{remote_staging}/client-key"] == CLIENT_KEY
-            assert b"installer PC private key" not in uploaded.values()
-            credentials = store / "fplinux/cards" / TARGET / CID / serial
-            assert credentials.stat().st_mode & 0o777 == 0o700
-            assert (
-                credentials / "known_hosts"
-            ).read_text() == f"fplinux-{serial} ssh-ed25519 {HOST_KEY}\n"
-            assert (credentials / "id_ed25519").stat().st_mode & 0o777 == 0o600
-            config = (credentials / "ssh_config").read_text()
-            assert f'HostName "{network_fields["phone_address"]}"' in config
-            assert f'BindAddress "{network_fields["host_address"]}"' in config
-            assert 'StrictHostKeyChecking "yes"' in config
-            if outcome == "interrupted":
-                raise KeyboardInterrupt
-            return SimpleNamespace(returncode=0, stderr="")
         if command.startswith("rm -f "):
+            assert {
+                f"{remote_staging}/default-apps",
+                f"{remote_staging}/apks.sha256",
+                f"{remote_staging}/card-apk-world.sh",
+            }.issubset(shlex.split(command))
             remote_cleaned = True
             return SimpleNamespace(returncode=0)
         if "mmcblk" in command:
             return SimpleNamespace(returncode=0, stdout=f"/dev/mmcblk0 {CID} 8192\n")
         pytest.fail(f"unexpected remote action: {command}")
+
+    def send(
+        _session: object, command: str, write: Callable[[IO[bytes]], None]
+    ) -> SimpleNamespace:
+        nonlocal credentials, writer_started
+        writer_started = True
+        arguments = shlex.split(command)
+        assert arguments[:2] == ["sh", f"{remote_staging}/install-card.sh"]
+        assert arguments[2:5] == ["/dev/mmcblk0", CID, remote_staging]
+        assert arguments[5:13] == ["1", "1", "2", "1", "a" * 64, "b" * 64, TARGET, RELEASE]
+        assert arguments[13:-1] == [
+            hashlib.sha256(uploaded[f"{remote_staging}/{name}"]).hexdigest()
+            for name in (
+                "board.tar",
+                "personal.tar",
+                "installed.sha256",
+                "fit.itb",
+                "default-apps",
+                "apks.sha256",
+            )
+        ]
+        assert uploaded[f"{remote_staging}/card-slots.sh"]
+        assert uploaded[f"{remote_staging}/card-apk-world.sh"]
+        assert arguments[-1] == HOST_KEY
+        device_id = uploaded[f"{remote_staging}/device-id"]
+        assert len(device_id) == 32
+        serial = hashlib.sha256(device_id).hexdigest()[:32]
+        usb = uploaded[f"{remote_staging}/usb-network"]
+        assert len(usb) == 256
+        network_fields = dict(line.split("=") for line in usb.rstrip(b"\0").decode().splitlines())
+        assert network_fields["usb_serial"] == serial
+        assert network_fields["transport"] == "ncm"
+        assert network_fields["netmask"] == "255.255.255.252"
+        assert not ipaddress.IPv4Address(network_fields["host_address"]).is_global
+        assert not network_fields["host_address"].startswith("10.")
+        assert uploaded[f"{remote_staging}/client-key"] == CLIENT_KEY
+        assert b"installer PC private key" not in uploaded.values()
+        credentials = store / "fplinux/cards" / TARGET / CID / serial
+        assert credentials.stat().st_mode & 0o777 == 0o700
+        assert (
+            credentials / "known_hosts"
+        ).read_text() == f"fplinux-{serial} ssh-ed25519 {HOST_KEY}\n"
+        assert (credentials / "id_ed25519").stat().st_mode & 0o777 == 0o600
+        config = (credentials / "ssh_config").read_text()
+        assert f'HostName "{network_fields["phone_address"]}"' in config
+        assert f'BindAddress "{network_fields["host_address"]}"' in config
+        assert 'StrictHostKeyChecking "yes"' in config
+        if outcome == "interrupted":
+            raise KeyboardInterrupt
+
+        stream = BytesIO()
+        write(stream)
+        stream.seek(0)
+        repository = {
+            "Packages.adb": b"signed index",
+            "fplinux-build.rsa.pub": b"release public key",
+            "fplinux-notes.apk": b"notes package",
+        }
+        with tarfile.open(fileobj=stream, mode="r:") as archive:
+            assert set(archive.getnames()) == repository.keys()
+            for name, contents in repository.items():
+                source = archive.extractfile(name)
+                assert source is not None
+                with source:
+                    assert source.read() == contents
+        checksums = uploaded[f"{remote_staging}/apks.sha256"].decode("ascii")
+        assert set(checksums.splitlines()) == {
+            f"{hashlib.sha256(contents).hexdigest()}  {name}"
+            for name, contents in repository.items()
+        }
+        assert set(repository.values()).isdisjoint(uploaded.values())
+        assert uploaded[f"{remote_staging}/default-apps"] == b"fplinux-notes\n"
+        return SimpleNamespace(returncode=0, stderr="")
 
     log = SimpleNamespace(
         message=messages.append,
@@ -448,6 +495,7 @@ def test_card_enrollment_uses_reader_pin_and_preserves_keys_once_writing_starts(
 
     transport = SimpleNamespace(
         run_remote=remote,
+        send_remote=send,
         upload=upload,
     )
 

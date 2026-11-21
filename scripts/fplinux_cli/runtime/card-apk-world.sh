@@ -2,9 +2,10 @@
 # SPDX-License-Identifier: GPL-2.0-only
 
 set -eu
+operation=update
 
 fail() {
-	printf 'card update: %s\n' "$*" >&2
+	printf 'card %s: %s\n' "$operation" "$*" >&2
 	exit 1
 }
 
@@ -33,20 +34,28 @@ $expected
 EOF
 }
 
-[ "$#" = 4 ] || fail "usage: card-apk-world preflight|restore OLD_SLOT CANDIDATE_ROOT APK_DIRECTORY"
-case "$1" in
-preflight | restore) action=$1 ;;
+[ "$#" = 4 ] || fail "usage: card-apk-world install|preflight|restore SELECTION_SOURCE CANDIDATE_ROOT APK_DIRECTORY"
+action=$1
+case "$action" in
+install)
+	operation=install
+	added=$(LC_ALL=C awk '
+		!/^[a-zA-Z0-9][a-zA-Z0-9._+:-]*$/ { exit 1 }
+		{ print }
+	' "$2") || fail "invalid default APK selections"
+	;;
+preflight | restore)
+	old_slot=$2
+	added=$(awk '
+		FILENAME == ARGV[1] { base[$0] = 1; next }
+		NF && !($0 in base) { print }
+	' "$old_slot/base-world" "$old_slot/root/etc/apk/world") || fail "cannot read the active APK world"
+	[ -n "$added" ] || exit 0
+	;;
 *) fail "unknown APK selection action" ;;
 esac
-old_slot=$2
 candidate=$3
 apk_directory=$4
-
-added=$(awk '
-	FILENAME == ARGV[1] { base[$0] = 1; next }
-	NF && !($0 in base) { print }
-' "$old_slot/base-world" "$old_slot/root/etc/apk/world") || fail "cannot read the active APK world"
-[ -n "$added" ] || exit 0
 
 index=$apk_directory/Packages.adb
 release_key=$apk_directory/fplinux-build.rsa.pub
@@ -64,6 +73,7 @@ cp -- "$release_key" "$restore_keys/"
 # Only package installation needs chroot setup for lifecycle hooks.
 offline_apk --force-no-chroot --root "$candidate" --keys-dir "$restore_keys" verify "$index" ||
 	fail "cannot verify the release APK index"
+[ -n "$added" ] || exit 0
 
 # A local APK filename becomes an identity pin in world. The old digest must
 # still identify the installed package, and the new release supplies its build.
@@ -116,7 +126,7 @@ if [ "$action" = preflight ]; then
 	exit 0
 fi
 
-candidate_apk add -- "$@" || fail "cannot restore APK selection: $*"
+candidate_apk add -- "$@" || fail "cannot $action APK selection: $*"
 installed=$(offline_apk --force-no-chroot --root "$candidate" query --installed --summarize package -- '*') ||
-	fail "cannot read restored APK selections"
+	fail "cannot read APK selections after $action"
 require_selected_packages "$installed"

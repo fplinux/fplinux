@@ -10,7 +10,13 @@ from fplinux_cli.alpine.packages import PACKAGE_CACHE_DIRECTORY
 from fplinux_cli.alpine.recipes import alpine_rootfs_recipe
 from fplinux_cli.alpine.rootfs import shared_card_packages, shared_ram_packages
 from fplinux_cli.alpine.rootfs_state import layered_rootfs_recipe
-from fplinux_cli.alpine.selection import aport_build_order, bundle_packages, selected_packages
+from fplinux_cli.alpine.selection import (
+    aport_build_order,
+    bundle_packages,
+    selected_applications,
+    selected_base_packages,
+    selected_packages,
+)
 from fplinux_cli.alpine.signing import signing_key_identity
 from fplinux_cli.artifacts.release import current_release_context
 from fplinux_cli.device_data import inputs as firmware_inputs
@@ -68,12 +74,17 @@ def _current_rootfs_recipes(cache: Path) -> frozenset[str] | None:
                 if firmware_inputs.rootfs_receives_firmware(root_kind=root_kind)
                 else ()
             )
-            packages = selected_packages(platform, target_config)
+            packages = selected_base_packages(platform, target_config)
+            applications = selected_applications(target_config)
             ram_base_recipe = None
             base_packages = shared_ram_packages(platform, target_config)
             if root_kind == "initramfs" and base_packages is not None:
                 ram_base_recipe = alpine_rootfs_recipe(
-                    environment_recipe, signing_key, base_packages, release=release
+                    environment_recipe,
+                    signing_key,
+                    base_packages,
+                    release=release,
+                    applications=applications,
                 )
                 recipes.add(ram_base_recipe)
             card_base_packages = shared_card_packages(platform, target_config)
@@ -87,6 +98,16 @@ def _current_rootfs_recipes(cache: Path) -> frozenset[str] | None:
                         root_kind="external",
                     )
                 )
+                recipes.add(
+                    alpine_rootfs_recipe(
+                        environment_recipe,
+                        signing_key,
+                        packages,
+                        release=release,
+                        display_brightness=target_config.get("display_brightness"),
+                        root_kind="external",
+                    )
+                )
             firmware_selections = (firmware, ()) if firmware else ((),)
             for selected_firmware in firmware_selections:
                 recipe = alpine_rootfs_recipe(
@@ -94,6 +115,7 @@ def _current_rootfs_recipes(cache: Path) -> frozenset[str] | None:
                     signing_key,
                     packages,
                     release=release,
+                    applications=applications,
                     firmware_inputs=selected_firmware,
                     display_brightness=target_config.get("display_brightness"),
                     root_kind=root_kind,

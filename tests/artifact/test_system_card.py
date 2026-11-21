@@ -22,7 +22,8 @@ _OTHER_TARGET = "inoi-240-modern-4g"
 _RECIPE = "a" * 64
 _OS_RELEASE = b"NAME=FPLinux\nBUILD_ID=abcdef134578\n"
 _NOTE = b"persistent note with exact bytes\n"
-_WORLD = b"fplinux-session\nfplinux-clocks\n"
+_BASE_WORLD = b"fplinux-session\nfplinux-settings\n"
+_WORLD = _BASE_WORLD + b"fplinux-clocks\n"
 
 
 @pytest.fixture
@@ -41,6 +42,7 @@ def packaged_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     (source / "etc/os-release").write_bytes(_OS_RELEASE)
     (source / "etc/apk/arch").write_bytes(b"armv7\n")
     (source / "etc/apk/world").write_bytes(_WORLD)
+    (source / "etc/fplinux/base-world").write_bytes(_BASE_WORLD)
     (source / "etc/apk/keys/system.rsa.pub").write_bytes(b"distribution key bytes\n")
     (source / "etc/apk/keys/backup.txt").write_bytes(b"unrelated backup bytes\n")
     (source / "lib/apk/db/installed").write_bytes(b"P:fplinux-session\nV:1.0.0-r0\n\n")
@@ -120,7 +122,8 @@ def test_factory_pair_and_shared_tree_are_on_ext4(packaged_root: Path, tmp_path:
     assert _debugfs(image, "cat /system/target") == _TARGET + "\n"
     assert _debugfs(image, "cat /system/a/FPLINUX.ITB").encode() == first_fit
     assert _debugfs(image, "cat /system/a/root/etc/os-release").encode() == _OS_RELEASE
-    assert _debugfs(image, "cat /system/a/base-world").encode() == _WORLD
+    assert _debugfs(image, "cat /system/a/base-world").encode() == _BASE_WORLD
+    assert _debugfs(image, "cat /system/a/root/etc/apk/world").encode() == _WORLD
     assert _debugfs(image, "cat /system/a/root/etc/fplinux/brightness.conf") == "levels=1,2,3\n"
     assert not _debugfs(image, "cat /system/a/root/home/fplinux/note.txt")
     assert _debugfs(image, "cat /data/home/fplinux/note.txt").encode() == _NOTE

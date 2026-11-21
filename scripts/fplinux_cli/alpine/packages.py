@@ -6,7 +6,7 @@ from __future__ import annotations
 import json
 import tarfile
 from pathlib import Path, PurePosixPath
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from fplinux_cli.build.inputs import CACHE, require_file
 from fplinux_cli.build.process import run
@@ -17,8 +17,12 @@ from fplinux_cli.manifests.values import sha256_value
 from .lock import PACKAGE_ID, bundle_runtime_packages, runtime_package_names
 from .recipes import alpine_package_recipe
 
+if TYPE_CHECKING:
+    from collections.abc import Mapping
+
 PACKAGE_CACHE_DIRECTORY = "apks"
 PACKAGE_RECEIPT_NAME = ".fplinux-package-receipt.json"
+APK_INDEX_NAME = "Packages.adb"
 
 
 def _locked_alpine_artifact(
@@ -93,6 +97,28 @@ def _bundle_apk_outputs(
         }
     )
     return outputs
+
+
+def write_apk_index(
+    apks: Mapping[str, Path], output: Path, *, keys: Path, signing_key: Path
+) -> None:
+    """Sign an offline APK repository whose files are stored by package name."""
+    run(
+        [
+            "apk",
+            "mkndx",
+            "--network=no",
+            "--keys-dir",
+            str(keys),
+            "--sign-key",
+            str(signing_key),
+            "--pkgname-spec",
+            "${name}.apk",
+            "--output",
+            str(output),
+            *(str(path) for _, path in sorted(apks.items())),
+        ]
+    )
 
 
 def _cached_package_files(repository: Path, names: set[str]) -> list[Path] | None:

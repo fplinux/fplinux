@@ -57,6 +57,7 @@ def archive(tmp_path: Path) -> Path:
         if target == "jade":
             contents["card/layout.json"] = b"Selected card layout"
             contents["card/apk-state.tar"] = b"Selected APK state"
+            contents["card/default-apps"] = b"fplinux-notes\n"
             contents["card/apks/Packages.adb"] = b"Selected APK index"
             contents["card/apks/fplinux-build.rsa.pub"] = b"Selected APK public key"
         records = {
@@ -625,6 +626,7 @@ def test_card_inspect_materializes_ram_without_the_system_card_objects(archive: 
     install_bundle = Path(install_action["bundle"])
     assert (install_bundle / "build-manifest.json").read_bytes() == manifest
     assert (install_bundle / "card/layout.json").read_bytes() == b"Selected card layout"
+    assert (install_bundle / "card/default-apps").read_bytes() == b"fplinux-notes\n"
 
 
 def test_prepare_passes_phone_data_and_dump_options_to_the_selected_model(archive: Path) -> None:

@@ -542,6 +542,7 @@ def load_target(
         "base_packages": target_rootfs_packages,
         "packages": selected_profile["rootfs"]["packages"],
     }
+    config["applications"] = selected_profile["rootfs"]["applications"]
     config["profile"] = profile
     config["build_type"] = build_type
     platform_runtime = platform["runtime"]

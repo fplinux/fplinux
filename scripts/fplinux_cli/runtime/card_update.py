@@ -7,7 +7,6 @@ import re
 import shlex
 import stat
 import subprocess
-import tarfile
 import tempfile
 from contextlib import suppress
 from dataclasses import dataclass
@@ -16,8 +15,10 @@ from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from fplinux_cli.artifacts.card_kit import CARD_APK_INDEX, CARD_APK_KEY, CARD_APK_STATE
+from fplinux_cli.artifacts.card_kit import CARD_APK_PREFLIGHT, CARD_APK_STATE
 from fplinux_cli.common import fail, sha256_file
+
+from .card_media import write_card_archive
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -34,13 +35,12 @@ CARD_APK_WORLD = Path(__file__).with_name("card-apk-world.sh")
 CARD_SLOTS = Path(__file__).with_name("card-slots.sh")
 _REMOTE_WORK = re.compile(r"/tmp/fplinux-card-update\.[A-Za-z0-9]+")  # noqa: S108 -- remote mktemp.
 _BUILD_ID = re.compile(r"[a-f0-9]{12}")
-_PREFLIGHT_ASSETS = (CARD_APK_STATE, CARD_APK_INDEX, CARD_APK_KEY)
 _UPDATE_ASSETS = {
     "root.ext4.xz",
     "board.tar",
     "board.sha256",
     "fit.itb",
-    *_PREFLIGHT_ASSETS,
+    *CARD_APK_PREFLIGHT,
 }
 _APK_ASSET = re.compile(r"apks/[a-zA-Z0-9][a-zA-Z0-9._+-]{0,95}\.apk")
 _UNCERTAIN = (
@@ -69,16 +69,6 @@ def _decode_reader_result(output: str) -> _ReaderResult | None:
         return _ReaderResult(_ReaderOutcome(outcome), build_id)
     except ValueError:
         return None
-
-
-def _write_archive(assets: Mapping[str, Path], destination: IO[bytes]) -> None:
-    with tarfile.open(fileobj=destination, mode="w|", format=tarfile.USTAR_FORMAT) as archive:
-        for name, path in sorted(assets.items()):
-            with path.open("rb") as source:
-                member = tarfile.TarInfo(name)
-                member.size = path.stat().st_size
-                member.mode = 0o600
-                archive.addfile(member, source)
 
 
 def _reader_arguments(action: str, card: SdCard, layout: CardLayout, build_id: str) -> list[str]:
@@ -163,7 +153,7 @@ def update_card(
     assets: Mapping[str, Path],
     log: RunLog,
 ) -> None:
-    """Transfer a verified release payload directly to ext4, then publish its staged pair."""
+    """Admit the APK state in RAM, then stream the release payload directly to ext4."""
     if not _UPDATE_ASSETS.issubset(assets) or any(
         name not in _UPDATE_ASSETS and _APK_ASSET.fullmatch(name) is None for name in assets
     ):
@@ -201,14 +191,16 @@ def update_card(
         )
         preflight = work / "apk-preflight.tar"
         with preflight.open("wb") as stream:
-            _write_archive({Path(name).name: assets[name] for name in _PREFLIGHT_ASSETS}, stream)
-        payload = {name: path for name, path in assets.items() if name not in _PREFLIGHT_ASSETS}
+            write_card_archive(
+                {Path(name).name: assets[name] for name in CARD_APK_PREFLIGHT}, stream
+            )
+        payload = {name: path for name, path in assets.items() if name not in CARD_APK_PREFLIGHT}
         result = _run_reader(
             connection,
             arguments,
             log,
             files=(CARD_UPDATE_STAGE, CARD_APK_WORLD, manifest, preflight),
-            write=partial(_write_archive, payload),
+            write=partial(write_card_archive, payload),
         )
     if (
         result is None

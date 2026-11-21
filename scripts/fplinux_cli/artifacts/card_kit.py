@@ -18,15 +18,16 @@ if TYPE_CHECKING:
 CARD_APK_INDEX = "apks/Packages.adb"
 CARD_APK_KEY = "apks/fplinux-build.rsa.pub"
 CARD_APK_STATE = "apk-state.tar"
+CARD_APK_PREFLIGHT = (CARD_APK_STATE, CARD_APK_INDEX, CARD_APK_KEY)
+CARD_DEFAULT_APPS = "default-apps"
 CARD_MEMBERS = (
     "card/boot.xz",
     "card/root.ext4.xz",
     "card/board.tar",
     "card/fit.itb",
     "card/layout.json",
-    f"card/{CARD_APK_STATE}",
-    f"card/{CARD_APK_INDEX}",
-    f"card/{CARD_APK_KEY}",
+    f"card/{CARD_DEFAULT_APPS}",
+    *(f"card/{name}" for name in CARD_APK_PREFLIGHT),
 )
 FIT_AUDIO_CPIO_BYTES = 4096
 

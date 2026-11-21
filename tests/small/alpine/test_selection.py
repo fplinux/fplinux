@@ -147,6 +147,35 @@ class AlpineSelectionTests:
             )
         assert (selected) == ((*alpine_source.packages, third))
 
+    def test_catalogue_keeps_default_app_and_its_library_available_after_removal(
+        self, alpine_source: AlpineSourceContext
+    ) -> None:
+        """A selected application and its library stay outside the mandatory root."""
+        default_app, shared_library = alpine_source.packages
+        system = "fplinux-system"
+        optional_app = "fplinux-optional-app"
+        alpine_source.write(f"alpine/aports/{system}/APKBUILD", f"pkgname={system}\n".encode())
+        for application in (default_app, optional_app):
+            alpine_source.write(
+                f"alpine/aports/{application}/APKBUILD",
+                f'pkgname={application}\ndepends="{shared_library}"\n'.encode(),
+            )
+        platform = {"rootfs": {"packages": []}, "bundle": {"packages": [optional_app]}}
+        target = {
+            "rootfs": {"base_packages": [], "packages": []},
+            "applications": [default_app],
+            "bundle": {"packages": []},
+        }
+
+        with mock.patch.object(alpine_registration, "COMMON_PACKAGES", (system,)):
+            base = alpine_selection.selected_base_packages(platform, target, alpine_source.root)
+            first_boot = alpine_selection.selected_packages(platform, target, alpine_source.root)
+        catalogue = alpine_selection.bundle_packages(platform, target, base, alpine_source.root)
+
+        assert base == (system,)
+        assert first_boot == (default_app, system)
+        assert catalogue == (optional_app, default_app, shared_library)
+
     def test_build_order_prepares_transitive_libraries_before_consumers(self) -> None:
         """A library that consumes another local library sees it in the sysroot."""
         dependencies = {

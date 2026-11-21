@@ -76,7 +76,7 @@ def release_inputs(tmp_path: Path) -> ReleaseInputs:
     readme.write_text("phone instructions\n", encoding="utf-8")
     for name in ("alpine.lock.toml", "sources.lock.toml"):
         (root / name).write_bytes((ROOT / "tests/fixtures/alpine" / name).read_bytes())
-    for package in (*registration.COMMON_PACKAGES, "demo"):
+    for package in (*registration.COMMON_PACKAGES, "demo", "fplinux-font-terminus"):
         apkbuild = root / "alpine/aports" / package / "APKBUILD"
         apkbuild.parent.mkdir(parents=True)
         apkbuild.write_text(f"pkgname={package}\n", encoding="utf-8")
@@ -195,15 +195,17 @@ class ReleaseManifestPolicyTests:
             "assets.lock.toml",
             "apks/demo.apk",
             "apks/board-extra.apk",
+            "apks/Packages.adb",
+            "apks/fplinux-build.rsa.pub",
         ]
         assert release["runtime_files"] == release_inputs.release_manifest["runtime_files"]
         assert release["documents"] == ["release/EXTRA.txt"]
         assert no_optional_apks["bundle_files"] == source_manifest["bundle_files"]
 
-    def test_archive_manifest_includes_optional_runtime_apks_only_until_preinstalled(
+    def test_archive_manifest_retains_preinstalled_applications_and_runtime_apks(
         self, release_inputs: ReleaseInputs
     ) -> None:
-        """The archive carries the app's external closure when it is absent from the rootfs."""
+        """Installing a default app keeps its APK and dependencies in the archive."""
         source_manifest = {
             **release_inputs.release_manifest,
             "bundle_files": [
@@ -225,7 +227,7 @@ class ReleaseManifestPolicyTests:
         }
         profile = {
             **release_inputs.target_config,
-            "rootfs": {"base_packages": [], "packages": ["demo"]},
+            "applications": ["demo"],
         }
 
         with (
@@ -238,13 +240,15 @@ class ReleaseManifestPolicyTests:
             )
             installed = package_commands.load_release_manifest(release_inputs.target, profile)
 
-        assert optional["bundle_files"] == [
+        expected_bundle_files = [
             *source_manifest["bundle_files"],
             "apks/demo.apk",
             "apks/feature-runtime.apk",
+            "apks/Packages.adb",
+            "apks/fplinux-build.rsa.pub",
         ]
-        assert installed["bundle_files"] == source_manifest["bundle_files"]
         for manifest in (optional, installed):
+            assert manifest["bundle_files"] == expected_bundle_files
             assert manifest["runtime_files"] == source_manifest["runtime_files"]
             assert manifest["documents"] == source_manifest["documents"]
 

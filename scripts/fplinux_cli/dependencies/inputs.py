@@ -176,6 +176,7 @@ def _selected_declarations(
                 selected = {
                     **target,
                     "build_type": build_type,
+                    "applications": declaration["rootfs"].get("applications", []),
                     "rootfs": {
                         "base_packages": target["rootfs"]["packages"],
                         "packages": declaration["rootfs"]["packages"],
@@ -188,6 +189,7 @@ def _selected_declarations(
                 )
             profile_context[profile] = {
                 "packages": sorted(declaration["rootfs"]["packages"]),
+                "applications": sorted(declaration["rootfs"].get("applications", [])),
                 "bootstrap": declaration["bootstrap"]["kind"],
                 "uboot": declaration["uboot"]["kind"],
             }

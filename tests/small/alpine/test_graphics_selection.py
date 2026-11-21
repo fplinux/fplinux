@@ -33,30 +33,39 @@ def test_target_delivery_keeps_cpu_applications_and_selects_gpu_packages_only_fo
     """Real target compositions build GBM everywhere and full Mesa only for Qin."""
     config = targets.load_target(target, profile, build_type=build_type)
     platform = platforms.load_platform(config["platform"])
-    rootfs = selection.selected_packages(platform, config)
-    bundle = selection.bundle_packages(platform, config, rootfs)
-    order = selection.aport_build_order((*rootfs, *bundle))
+    base = selection.selected_base_packages(platform, config)
+    applications = selection.selected_applications(config)
+    bundle = selection.bundle_packages(platform, config, base)
+    order = selection.aport_build_order((*base, *bundle))
 
-    assert "fplinux-showcase" in rootfs
-    assert "fplinux-showcase" not in bundle
+    assert "fplinux-showcase" not in base
+    assert "fplinux-showcase" in applications
+    assert "fplinux-showcase" in bundle
     assert "fplinux-tyrquake" in bundle
+    assert "fplinux-tyrquake" not in (*base, *applications)
+    runtimes = {"fplinux-mre", "fplinux-phoneme"}
+    assert runtimes.isdisjoint(base)
+    assert runtimes <= set(bundle)
+    if profile == "default":
+        assert runtimes.isdisjoint(applications)
+    else:
+        assert runtimes <= set(applications)
     assert "fplinux-mesa-gbm" in order
     assert order.index("fplinux-mesa-gbm") < order.index("fplinux-libweston")
     assert order.index("fplinux-mesa-gbm") < order.index("fplinux-showcase")
     assert order.index("fplinux-mesa-gbm") < order.index("fplinux-tyrquake")
     if build_type == "debug":
-        assert "fplinux-debug-tools" in rootfs
+        assert "fplinux-debug-tools" in base
         assert order.index("fplinux-mesa-gbm") < order.index("fplinux-debug-tools")
 
     gpu_addons = {"fplinux-showcase-gpu", "fplinux-tyrquake-gpu"}
     if gpu_packages:
-        assert "fplinux-showcase-gpu" in rootfs
-        assert "fplinux-showcase-gpu" not in bundle
-        assert "fplinux-tyrquake-gpu" in bundle
-        assert {"fplinux-mesa", "fplinux-libweston-gl"} <= set(rootfs)
+        assert gpu_addons.isdisjoint((*base, *applications))
+        assert gpu_addons <= set(bundle)
+        assert {"fplinux-mesa", "fplinux-libweston-gl"} <= set(base)
         assert order.index("fplinux-mesa-gbm") < order.index("fplinux-mesa")
         assert order.index("fplinux-mesa") < order.index("fplinux-libweston-gl")
     else:
-        assert gpu_addons.isdisjoint((*rootfs, *bundle))
+        assert gpu_addons.isdisjoint((*base, *applications, *bundle))
         assert "fplinux-mesa" not in order
         assert "fplinux-libweston-gl" not in order

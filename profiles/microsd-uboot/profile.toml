@@ -13,6 +13,19 @@ packages = [
   "fplinux-resize2fs",
   "fplinux-soundfont",
 ]
+applications = [
+  "fplinux-calculator",
+  "fplinux-clocks",
+  "fplinux-example-apidemo",
+  "fplinux-files",
+  "fplinux-mre",
+  "fplinux-music",
+  "fplinux-notes",
+  "fplinux-phoneme",
+  "fplinux-showcase",
+  "fplinux-snake",
+  "fplinux-terminal",
+]
 
 [bootstrap]
 kind = "uboot-stage0"

@@ -87,10 +87,18 @@ class CardPackages:
     foreign: Path
     release_key: Path
 
-    def select(self, action: str, *, root: Path | None = None) -> CompletedProcess[str]:
-        """Run the deployed entry point against the active and staged slots."""
+    def select(
+        self, action: str, *, root: Path | None = None, source: Path | None = None
+    ) -> CompletedProcess[str]:
+        """Run the deployed entry point against an isolated candidate root."""
         return _run(
-            "sh", RESTORE, action, self.active, root or self.staged, self.admitted, check=False
+            "sh",
+            RESTORE,
+            action,
+            source or self.active,
+            root or self.staged,
+            self.admitted,
+            check=False,
         )
 
 
@@ -156,6 +164,67 @@ def card_packages(tmp_path: Path) -> CardPackages:
     return CardPackages(active, staged, admitted, previous, foreign, release_key)
 
 
+@pytest.mark.parametrize("defaults", ["", "fixture-app\nfixture-removed\n"], ids=["empty", "apps"])
+def test_factory_install_adds_only_explicit_defaults_to_world(
+    card_packages: CardPackages, tmp_path: Path, defaults: str
+) -> None:
+    default_apps = tmp_path / "default-apps"
+    default_apps.write_text(defaults, encoding="ascii")
+    candidate = card_packages.staged
+    base_world = candidate.parent / "base-world"
+    original_world = _world(candidate).read_bytes()
+    original_database = _installed(candidate).read_bytes()
+    assert base_world.read_bytes() == original_world
+
+    result = card_packages.select("install", source=default_apps)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert base_world.read_bytes() == original_world
+    assert set(_world(candidate).read_text(encoding="ascii").splitlines()) == {
+        *original_world.decode("ascii").splitlines(),
+        *defaults.splitlines(),
+    }
+    share = candidate / "usr/share/fixture"
+    if defaults:
+        for name in ("fixture-app", "fixture-runtime", "fixture-removed"):
+            assert (share / name).read_text(encoding="ascii") == "2.0-r0"
+        assert not (share / "fixture-unused").exists()
+        assert not (share / "fixture-alias").exists()
+    else:
+        assert _installed(candidate).read_bytes() == original_database
+
+
+@pytest.mark.parametrize(
+    ("defaults", "error"),
+    [
+        ("fixture-app>=1.0-r0\n", "invalid default APK selections"),
+        ("fixture-foreign\n", "fixture-foreign: no APK in the new release"),
+        ("", "cannot verify the release APK index"),
+    ],
+    ids=["constraint", "virtual-provider", "empty-untrusted-index"],
+)
+def test_factory_install_rejects_invalid_defaults_without_touching_the_candidate(
+    card_packages: CardPackages, tmp_path: Path, defaults: str, error: str
+) -> None:
+    default_apps = tmp_path / "default-apps"
+    default_apps.write_text(defaults, encoding="ascii")
+    candidate = card_packages.staged
+    if not defaults:
+        shutil.copyfile(
+            candidate / "etc/apk/keys/sysroot-test.rsa.pub",
+            card_packages.admitted / "fplinux-build.rsa.pub",
+        )
+    original_world = _world(candidate).read_bytes()
+    original_database = _installed(candidate).read_bytes()
+
+    result = card_packages.select("install", source=default_apps)
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert error in result.stderr
+    assert _world(candidate).read_bytes() == original_world
+    assert _installed(candidate).read_bytes() == original_database
+
+
 @pytest.mark.parametrize("selection", [None, "fixture-app>=1.0-r0"], ids=["local-apk", "range"])
 def test_restore_selection_dependencies_and_removal(
     card_packages: CardPackages, selection: str | None
@@ -200,7 +269,7 @@ def test_restore_selection_dependencies_and_removal(
 
 
 @pytest.mark.parametrize("conflicting", [False, True], ids=["compatible", "conflicting-base"])
-def test_preflight_resolves_local_apk_on_read_only_database(
+def test_preflight_solves_local_apk_without_changing_package_state(
     card_packages: CardPackages, tmp_path: Path, *, conflicting: bool
 ) -> None:
     active = card_packages.active / "root"
@@ -264,7 +333,7 @@ def test_preflight_resolves_local_apk_on_read_only_database(
         ("wrong-signing-key", "cannot verify the release APK index"),
     ],
 )
-def test_restore_rejects_unavailable_selections_without_installing(
+def test_package_selection_rejects_unavailable_packages_without_installing(
     card_packages: CardPackages, scenario: str, rejected: str, action: str
 ) -> None:
     active_root = card_packages.active / "root"
@@ -305,10 +374,10 @@ def test_restore_rejects_unavailable_selections_without_installing(
     staged_world = _world(card_packages.staged).read_bytes()
     staged_installed = _installed(card_packages.staged).read_bytes()
 
-    restored = card_packages.select(action)
+    result = card_packages.select(action)
 
-    assert restored.returncode != 0
-    assert rejected in restored.stderr
+    assert result.returncode != 0
+    assert rejected in result.stderr
     assert _world(active_root).read_bytes() == active_world
     assert _installed(active_root).read_bytes() == active_installed
     assert _world(card_packages.staged).read_bytes() == staged_world

@@ -103,6 +103,7 @@ def test_release_contains_the_complete_matrix_sources_and_dependency_transport(
             card_fixture, _ = bundle_fixture(record["target"], record["host"], card=True)
             for name in (
                 "card/apk-state.tar",
+                "card/default-apps",
                 "card/apks/Packages.adb",
                 "card/apks/fplinux-build.rsa.pub",
                 "card/apks/fplinux-notes.apk",

@@ -23,7 +23,7 @@ if [ "$#" -eq 2 ] && [ "$1" = prepare-access ]; then
 	exit 0
 fi
 
-[ "$#" -eq 16 ] || fail "Invalid release card writer arguments"
+[ "$#" -eq 18 ] || fail "Invalid release card writer arguments"
 device=$1
 cid=$2
 staging=$3
@@ -39,7 +39,9 @@ board_hash=${12}
 personal_hash=${13}
 checksums_hash=${14}
 fit_hash=${15}
-host_key_body=${16}
+defaults_hash=${16}
+apk_checksums_hash=${17}
+host_key_body=${18}
 
 case "$device" in
 /dev/mmcblk[0-9] | /dev/mmcblk[0-9][0-9]) ;;
@@ -110,7 +112,13 @@ stream_source=
 stream_sink=
 mounted=
 work=
+apk_work=
 card_writing=0
+
+remove_apk_repository() {
+	busybox rm -rf -- "${apk_work:?}" || return 1
+	apk_work=
+}
 
 cleanup() {
 	status=$?
@@ -122,6 +130,9 @@ cleanup() {
 			wait "$child" 2>/dev/null || :
 		fi
 	done
+	if [ -n "$apk_work" ]; then
+		remove_apk_repository || printf '%s\n' "Cannot remove the temporary APK repository" >&2
+	fi
 	if [ "$card_writing" -eq 1 ]; then
 		busybox sync || printf '%s\n' "Cannot sync the SD card" >&2
 	fi
@@ -168,7 +179,7 @@ check_stream_digest() {
 
 mount_root() {
 	mounted=$work/mount
-	busybox mount -t ext4 -o "$1,nosuid,nodev,noexec" "$root_partition" "$mounted" ||
+	busybox mount -t ext4 -o "$1,nosuid,nodev" "$root_partition" "$mounted" ||
 		fail "Cannot mount the system card partition"
 }
 
@@ -208,6 +219,18 @@ verify_card_access() {
 	done
 }
 
+install_default_apps() {
+	apk_work=$(busybox mktemp -d "$mounted/system/.install-apks.XXXXXXXX") ||
+		fail "Cannot stage the release APKs on the SD card"
+	busybox tar -xf - -C "$apk_work" || fail "The release APK transfer was interrupted"
+	(
+		cd "$apk_work"
+		busybox sha256sum -cs "$staging/apks.sha256"
+	) || fail "The transferred release APKs failed verification"
+	sh "$staging/card-apk-world.sh" install "$staging/default-apps" "$slot_root" "$apk_work"
+	remove_apk_repository || fail "Cannot remove the temporary APK repository"
+}
+
 exec 9>/run/fplinux-card-install.lock
 busybox flock -n 9 || fail "Another system card installation is running in this reader"
 check_card
@@ -223,6 +246,8 @@ check_digest "$staging/board.tar" "$board_hash" || fail "The board archive faile
 check_digest "$staging/personal.tar" "$personal_hash" || fail "The personal archive failed verification"
 check_digest "$staging/installed.sha256" "$checksums_hash" || fail "The installed file checksums failed verification"
 check_digest "$staging/fit.itb" "$fit_hash" || fail "The personalized FIT failed verification"
+check_digest "$staging/default-apps" "$defaults_hash" || fail "The default APK selections failed verification"
+check_digest "$staging/apks.sha256" "$apk_checksums_hash" || fail "The release APK checksums failed verification"
 [ "$(wc -c <"$staging/device-id")" -eq 32 ] &&
 	[ "$(wc -c <"$staging/usb-network")" -eq 256 ] &&
 	[ "$(wc -c <"$staging/client-key")" -eq 68 ] || fail "Invalid system card access files"
@@ -258,7 +283,7 @@ card_progress card-verifying "$((root_start + root_mib))"
 
 busybox blockdev --rereadpt "$device" || fail "Cannot reread the SD card partition table"
 check_partitions
-mount_root rw
+mount_root rw,noexec
 slot_root=$mounted/system/a/root
 slot_fit=$mounted/system/a/FPLINUX.ITB
 access_dir=$mounted/data/etc/fplinux/card-access
@@ -287,7 +312,7 @@ busybox sync
 unmount_partition
 check_partitions
 busybox blockdev --flushbufs "$root_partition" || fail "Cannot flush the SD card root filesystem"
-mount_root ro,noload
+mount_root ro,noload,noexec
 verify_installed_files || fail "The SD card root files or firmware permissions do not match"
 verify_card_access || fail "The SD card SSH access files or permissions do not match"
 check_digest "$slot_fit" "$fit_hash" || fail "The SD card FIT does not match the phone's FIT"
@@ -295,7 +320,9 @@ busybox cmp -s "$base_world" "$world" || fail "The system card base package sele
 unmount_partition
 
 check_partitions
+# APK lifecycle hooks run inside the verified root before the slot is selected.
 mount_root rw
+install_default_apps
 sh "$staging/card-slots.sh" "$mounted" "$target" initialize "$build_id"
 unmount_partition
 check_card

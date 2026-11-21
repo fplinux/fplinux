@@ -156,12 +156,17 @@ class NewTargetTests:
             for relative in release["bundle_files"]
             if relative.startswith("apks/") and relative.endswith(".apk")
         }
-        assert release_apks == declared_apks | {
+        required_app_files = {
+            "apks/fplinux-files.apk",
             "apks/fplinux-font-terminus-8x16.apk",
+            "apks/fplinux-midi.apk",
+            "apks/fplinux-music.apk",
             "apks/fplinux-runtime-media.apk",
         }
+        assert declared_apks | required_app_files <= release_apks
         assert "apks/fplinux-soundfont.apk" in release_apks
-        assert "apks/fplinux-midi.apk" not in release_apks
+        assert "apks/Packages.adb" in release["bundle_files"]
+        assert "apks/fplinux-build.rsa.pub" in release["bundle_files"]
         assert "fplinux-soundfont-lite" in rootfs_packages
         assert "fplinux-font-terminus-6x12" in rootfs_packages
         assert "apks/fplinux-font-terminus-6x12.apk" not in release_apks

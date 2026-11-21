@@ -81,6 +81,7 @@ package() {
 gpu() {
 	pkgdesc="GPU scene resources for the FPLinux ARMADA showcase"
 	depends="$pkgname=$pkgver-r$pkgrel fplinux-mesa"
+	install_if="$pkgname=$pkgver-r$pkgrel fplinux-qin1splus-config"
 	amove usr/share/fplinux/armada/armada-scene.vert \
 		usr/share/fplinux/armada/armada-scene.frag
 }

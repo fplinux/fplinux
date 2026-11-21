@@ -62,13 +62,13 @@ packages = [
   "fplinux-libweston-gl",
   "fplinux-mesa",
   "fplinux-qin1splus-config",
-  "fplinux-showcase-gpu",
 ]
 
 [bundle]
 packages = [
   "fplinux-ffmpeg",
   "fplinux-present",
+  "fplinux-showcase-gpu",
   "fplinux-tyrquake",
   "fplinux-tyrquake-gpu",
 ]

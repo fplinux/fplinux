@@ -8,6 +8,7 @@ from graphlib import TopologicalSorter
 from typing import TYPE_CHECKING
 
 from fplinux_cli.common import ROOT, fail
+from fplinux_cli.manifests.values import package_array
 
 from . import registration
 from .lock import _package_id
@@ -80,12 +81,12 @@ def _canonical_packages(packages: Sequence[str], root: Path) -> tuple[str, ...]:
     return result
 
 
-def selected_packages(
+def selected_base_packages(
     platform_config: Mapping[str, object],
     target_config: Mapping[str, object],
     root: Path = ROOT,
 ) -> tuple[str, ...]:
-    """Resolve common, platform and target packages plus one selected profile delta."""
+    """Resolve the mandatory common, platform, target and profile packages."""
     owners: dict[str, str] = {}
     for owner, packages in (
         ("common", registration.COMMON_PACKAGES),
@@ -124,7 +125,29 @@ def selected_packages(
     return _canonical_packages(tuple(owners), root)
 
 
-def _local_runtime_closure(packages: Sequence[str], root: Path) -> set[str]:
+def selected_applications(
+    target_config: Mapping[str, object], root: Path = ROOT
+) -> tuple[str, ...]:
+    """Resolve the selected profile's initial application world entries."""
+    applications = package_array(target_config.get("applications", []), "profile applications")
+    return _canonical_packages(applications, root)
+
+
+def selected_packages(
+    platform_config: Mapping[str, object],
+    target_config: Mapping[str, object],
+    root: Path = ROOT,
+) -> tuple[str, ...]:
+    """Resolve all mandatory and initial application world entries."""
+    base = selected_base_packages(platform_config, target_config, root)
+    applications = selected_applications(target_config, root)
+    overlap = set(base) & set(applications)
+    if overlap:
+        fail("applications duplicate mandatory rootfs packages: " + ", ".join(sorted(overlap)))
+    return tuple(sorted((*base, *applications)))
+
+
+def local_runtime_closure(packages: Sequence[str], root: Path = ROOT) -> set[str]:
     """Follow main-package runtime dependencies backed by current local aports."""
     from .sources import aport_runtime_dependencies  # noqa: PLC0415 -- resolves producers here.
 
@@ -150,7 +173,7 @@ def bundle_packages(
     rootfs_packages: Sequence[str],
     root: Path = ROOT,
 ) -> tuple[str, ...]:
-    """Resolve optional APKs and their declared local runtime dependencies."""
+    """Resolve application and optional APKs with their local dependencies outside the base."""
     owners: dict[str, str] = {}
     for owner, packages in (
         ("platform", _declared_packages(platform_config, "platform", "bundle")),
@@ -167,15 +190,17 @@ def bundle_packages(
     for package in profile_packages & set(rootfs_packages):
         if owners.get(package) == "platform":
             del owners[package]
-    result = _canonical_packages(tuple(owners), root)
-    rootfs = _local_runtime_closure(rootfs_packages, root)
+    applications = set(selected_applications(target_config, root))
+    result = _canonical_packages(tuple(owners.keys() | applications), root)
+    base_packages = set(rootfs_packages) - applications
+    rootfs = local_runtime_closure(tuple(base_packages), root)
     overlap = set(result) & rootfs
     if overlap:
         fail(
             "packages cannot be both rootfs-selected and bundle-published: "
             + ", ".join(sorted(overlap))
         )
-    return _canonical_packages(tuple(_local_runtime_closure(result, root) - rootfs), root)
+    return _canonical_packages(tuple(local_runtime_closure(result, root) - rootfs), root)
 
 
 def shared_aport_sources(package: str, root: Path = ROOT) -> tuple[Path, ...]:

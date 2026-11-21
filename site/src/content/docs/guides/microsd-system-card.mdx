@@ -26,7 +26,7 @@ The Qin ZIP starts FPLinux in RAM. For a Qin system card, use the [manual image 
 
 Leave the microSD card in the powered-off phone. Open `Run.cmd` on Windows or `sh Run.sh` on Linux from the extracted [Release ZIP](/fplinux/guides/standalone-archive/). Choose your phone and **Install on microSD**. Connect only when prompted. The launcher displays the card it found and asks before erasing it.
 
-FPLinux prepares the phone data on the PC and reuses a compatible saved backup. The installer writes the system and your phone's data from the same RAM session and reads the written files back for verification. Wait for the success message and power off the phone before booting the card. This operation erases the entire selected microSD.
+FPLinux prepares the phone data on the PC and reuses a compatible saved backup. The installer writes the system and your phone's data from the same RAM session and reads the written files back for verification. It installs the [initial applications](/fplinux/guides/packages/) from the release's signed catalogue before making the card bootable. Wait for the success message and power off the phone before booting the card. This operation erases the entire selected microSD.
 
 The installer also sets up SSH for your user account on the installing PC. Save the connection command it prints. The private client key and the card's SSH host key pin are saved together with `ssh_config` under `$XDG_DATA_HOME/fplinux/cards/` on Linux (`~/.local/share/fplinux/cards/` by default) or `%LOCALAPPDATA%\FPLinux\cards\` on Windows. Each installation has its own directory under the target ID and card CID. The files stay available after you close the launcher or reboot the computer.
 
@@ -52,7 +52,7 @@ Use `./fplinux card inspect inoi-240-modern-4g` to discover the card before pass
 
 ## Update or roll back from the PC
 
-Boot a freshly installed card once and wait for the graphical session to become ready. For an update, power off the phone with the card fitted and open the extracted ZIP for the new release. Choose your model and **Update microSD**. Connect when prompted and confirm the displayed CID. The update keeps your files, SSH access and supported additional APK selections.
+Boot a freshly installed card once and wait for the graphical session to become ready. For an update, power off the phone with the card fitted and open the extracted ZIP for the new release. Choose your model and **Update microSD**. Connect when prompted and confirm the displayed CID. The update keeps your files, SSH access and application choices. Applications you removed stay removed. New applications in the initial selection are available in the [APK catalogue](/fplinux/guides/packages/). If a selected package cannot be installed from the new release, the update stops before writing to the card.
 
 Before writing to the card, the reader checks that the new release can restore your additional APK selections. It names the selections that prevent the update.
 

@@ -83,17 +83,19 @@ class RootfsPruneTests:
             "platform-b": second_packages,
         }
 
-        def rootfs_recipe(
+        def rootfs_recipe(  # noqa: PLR0913 -- match the rootfs recipe's significant inputs.
             _environment_recipe: str,
             _signing_key: str,
             packages: tuple[str, ...],
             *,
             release: ReleaseContext,
+            applications: tuple[str, ...],
             firmware_inputs: tuple[firmware_inputs.FirmwareInput, ...],
             display_brightness: dict[str, object] | None,
             root_kind: str,
         ) -> str:
             assert release == current_release_context()
+            assert not applications
             assert (root_kind) == ("initramfs")
             assert (firmware_inputs) == (())
             assert (display_brightness) == (
@@ -121,7 +123,7 @@ class RootfsPruneTests:
             ),
             mock.patch.object(
                 prune_alpine,
-                "selected_packages",
+                "selected_base_packages",
                 side_effect=lambda _platform, target: package_selections[target["platform"]],
             ),
             mock.patch.object(
@@ -166,7 +168,7 @@ class RootfsPruneTests:
                 },
             ),
             mock.patch.object(prune_alpine, "load_platform", return_value={}),
-            mock.patch.object(prune_alpine, "selected_packages", return_value=()),
+            mock.patch.object(prune_alpine, "selected_base_packages", return_value=()),
             mock.patch.object(prune_alpine, "alpine_rootfs_recipe", return_value="0" * 64),
             mock.patch.object(prune_alpine, "environment_recipe_digest", return_value="a" * 64),
         ):
@@ -217,7 +219,7 @@ class RootfsPruneTests:
             patch_prune_discovery("discover_profiles", return_value=("default",)),
             mock.patch.object(prune_alpine, "load_target", return_value=target_config),
             mock.patch.object(prune_alpine, "load_platform", return_value={}),
-            mock.patch.object(prune_alpine, "selected_packages", return_value=()),
+            mock.patch.object(prune_alpine, "selected_base_packages", return_value=()),
             mock.patch.object(prune_alpine, "alpine_rootfs_recipe", return_value="0" * 64),
             mock.patch.object(
                 prune_alpine,
@@ -287,17 +289,19 @@ class RootfsPruneTests:
         ) -> tuple[str, ...]:
             return ("package-host",) if config["profile"] == "host" else ("package-base",)
 
-        def rootfs_recipe(
+        def rootfs_recipe(  # noqa: PLR0913 -- match the rootfs recipe's significant inputs.
             _image: str,
             _key: str,
             packages: tuple[str, ...],
             *,
             release: ReleaseContext,
+            applications: tuple[str, ...],
             firmware_inputs: tuple[firmware_inputs.FirmwareInput, ...],
             display_brightness: dict[str, object] | None,
             root_kind: str,
         ) -> str:
             assert release == current_release_context()
+            assert not applications
             assert (display_brightness) is None
             assert (root_kind) == ("external" if packages == ("package-host",) else "initramfs")
             recipes: dict[tuple[str, ...], str] = {
@@ -320,7 +324,7 @@ class RootfsPruneTests:
             mock.patch.object(prune_alpine, "load_platform", return_value={}),
             mock.patch.object(
                 prune_alpine,
-                "selected_packages",
+                "selected_base_packages",
                 side_effect=selected_packages,
             ),
             mock.patch.object(prune_alpine, "alpine_rootfs_recipe", side_effect=rootfs_recipe),
@@ -365,7 +369,7 @@ class RootfsPruneTests:
             mock.patch.object(prune_alpine, "load_platform", return_value={}),
             mock.patch.object(
                 prune_alpine,
-                "selected_packages",
+                "selected_base_packages",
                 return_value=("package",),
             ),
             mock.patch.object(prune_alpine, "alpine_rootfs_recipe", return_value=current),
@@ -451,7 +455,7 @@ class RootfsPruneTests:
                 },
             ),
             mock.patch.object(prune_alpine, "load_platform", return_value={}),
-            mock.patch.object(prune_alpine, "selected_packages", return_value=()),
+            mock.patch.object(prune_alpine, "selected_base_packages", return_value=()),
             mock.patch.object(prune_alpine, "environment_recipe_digest", return_value="a" * 64),
         ):
             removed = prune_operations.discard_obsolete_rootfs(cache)
@@ -490,7 +494,7 @@ class RootfsPruneTests:
                 },
             ),
             mock.patch.object(prune_alpine, "load_platform", return_value={}),
-            mock.patch.object(prune_alpine, "selected_packages", return_value=()),
+            mock.patch.object(prune_alpine, "selected_base_packages", return_value=()),
             mock.patch.object(prune_alpine, "alpine_rootfs_recipe", return_value="8" * 64),
             mock.patch.object(prune_alpine, "environment_recipe_digest", return_value="a" * 64),
         ):

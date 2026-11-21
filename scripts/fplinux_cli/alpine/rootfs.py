@@ -25,11 +25,13 @@ from . import lock as alpine_lock
 from . import rootfs_state
 from .aports import _build_alpine_composition_repository, _build_fplinux_apks
 from .packages import (
+    APK_INDEX_NAME,
     _alpine_group_packages,
     _alpine_runtime_packages,
     _bundle_apk_outputs,
     _cached_aport_packages,
     _prepare_alpine_sysroot,
+    write_apk_index,
 )
 from .recipes import alpine_rootfs_recipe
 from .rootfs_files import (
@@ -40,8 +42,14 @@ from .rootfs_files import (
     _write_ramroot_initramfs,
     _write_rootfs_cpio,
 )
-from .rootfs_verify import _require_cached_bundle_packages_installable, _verify_alpine_rootfs
-from .selection import aport_build_order, selected_packages
+from .rootfs_verify import (
+    _require_alpine_world,
+    _require_bundle_package_absent,
+    _require_bundle_packages_installable,
+    _require_cached_bundle_packages_installable,
+    _verify_alpine_rootfs,
+)
+from .selection import aport_build_order, local_runtime_closure, selected_base_packages
 from .signing import _ensure_apk_signing_key
 
 if TYPE_CHECKING:
@@ -158,7 +166,7 @@ def shared_ram_packages(
     """Select the common and platform packages for every UMS9117 RAM root."""
     if target.get("platform") != "ums9117":
         return None
-    return selected_packages(
+    return selected_base_packages(
         platform,
         {
             "build_type": target.get("build_type"),
@@ -173,7 +181,7 @@ def shared_card_packages(
     """Select the packages shared by the UMS9117 microSD system cards."""
     if target.get("platform") != "ums9117" or target.get("profile") != "microsd-uboot":
         return None
-    return selected_packages(
+    return selected_base_packages(
         platform,
         {
             "build_type": target["build_type"],
@@ -182,11 +190,43 @@ def shared_card_packages(
     )
 
 
+def build_apk_catalogue(rootfs: Path, apks: Mapping[str, Path], output: Path) -> dict[str, Path]:
+    """Build the signed offline index and include its public key in the release."""
+    if not apks:
+        return {}
+    private_key, public_key, _identity = _ensure_apk_signing_key()
+    output.mkdir(parents=True, exist_ok=True)
+    index = output / APK_INDEX_NAME
+    with tempfile.TemporaryDirectory(dir=output, prefix=".index.") as name:
+        work = Path(name)
+        process_build.run(
+            [
+                "cpio",
+                "--extract",
+                "--quiet",
+                "--make-directories",
+                "--no-preserve-owner",
+                "--file",
+                str(rootfs),
+                "--directory",
+                str(work),
+                "etc/apk/keys/*",
+            ]
+        )
+        keys = work / "etc/apk/keys"
+        shutil.copyfile(public_key, keys / public_key.name)
+        staged_index = work / APK_INDEX_NAME
+        write_apk_index(apks, staged_index, keys=keys, signing_key=private_key)
+        staged_index.replace(index)
+    return {f"apks/{index.name}": index, f"apks/{public_key.name}": public_key}
+
+
 def build_rootfs(  # noqa: PLR0913 -- rootfs content and optional image output stay explicit.
     jobs: int,
     packages: tuple[str, ...],
     bundle_packages: tuple[str, ...] = (),
     *,
+    applications: tuple[str, ...] = (),
     firmware: Sequence[firmware_inputs.FirmwareInput] = (),
     display_brightness: dict[str, Any] | None = None,
     root_kind: Literal["initramfs", "external"] = "initramfs",
@@ -201,25 +241,33 @@ def build_rootfs(  # noqa: PLR0913 -- rootfs content and optional image output s
     ram_base_recipe = None
     ram_base_initramfs = None
     if ram_base_packages is not None:
-        _, ram_base_output, ram_base_recipe, _ = build_rootfs(jobs, ram_base_packages)
+        _, ram_base_output, ram_base_recipe, _ = build_rootfs(
+            jobs, ram_base_packages, applications=applications
+        )
         ram_base_initramfs = require_file(ram_base_output / rootfs_state.INITRAMFS_NAME)
     recipe = alpine_rootfs_recipe(
         environment_recipe,
         signing_key_identity,
         packages,
         release=release,
+        applications=applications,
         firmware_inputs=firmware,
         display_brightness=display_brightness,
         root_kind=root_kind,
     )
     recipe = rootfs_state.layered_rootfs_recipe(recipe, ram_base_recipe)
+    overlap = set(packages) & set(applications)
+    if overlap:
+        fail("applications duplicate mandatory rootfs packages: " + ", ".join(sorted(overlap)))
     overlap = set(packages) & set(bundle_packages)
     if overlap:
         fail(
             "packages cannot be both rootfs-selected and bundle-published: "
             + ", ".join(sorted(overlap))
         )
-    build_packages = aport_build_order((*packages, *bundle_packages))
+    installed_packages = (*packages, *applications)
+    runtime_names = tuple(sorted(set(packages) | local_runtime_closure(applications)))
+    build_packages = aport_build_order((*runtime_names, *bundle_packages))
     rootfs_directory = _ensure_rootfs_directory(CACHE)
     output = rootfs_state.rootfs_output(CACHE, recipe)
     ext4_root: Any | None = None
@@ -280,7 +328,7 @@ def build_rootfs(  # noqa: PLR0913 -- rootfs content and optional image output s
         minirootfs = acquire_source(ROOT, minirootfs_record["source_id"], CACHE)
         if minirootfs.stat().st_size != minirootfs_record.get("bytes"):
             fail("locked Alpine minirootfs size does not match its downloaded bytes")
-        runtime_packages = _alpine_runtime_packages(lock, records, packages)
+        runtime_packages = _alpine_runtime_packages(lock, records, runtime_names)
         sysroot_packages = _alpine_group_packages(lock, records, "sysroot")
 
         staging = Path(tempfile.mkdtemp(dir=output.parent, prefix=f".{recipe[:16]}-"))
@@ -355,17 +403,60 @@ def build_rootfs(  # noqa: PLR0913 -- rootfs content and optional image output s
                 )
             )
 
+            world = _require_alpine_world(root, packages)
+            base_world = root / "etc/fplinux/base-world"
+            base_world.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(world, base_world)
+            base_world.chmod(0o644)
+            for package in sorted(set(applications) | set(bundle_packages)):
+                _require_bundle_package_absent(root, package)
+            _require_bundle_packages_installable(root, tuple(bundle_outputs.values()))
+            if applications and bundle_outputs:
+                missing = set(applications) - bundle_outputs.keys()
+                if missing:
+                    fail(
+                        "Alpine catalogue omits default applications: "
+                        + ", ".join(sorted(missing))
+                    )
+                catalogue_index = package_work / APK_INDEX_NAME
+                write_apk_index(
+                    bundle_outputs, catalogue_index, keys=composition_keys, signing_key=private_key
+                )
+                for application in applications:
+                    other_apps = (f"!{name}" for name in applications if name != application)
+                    process_build.run(
+                        _rootfs_apk_command(
+                            lock,
+                            root,
+                            composition_keys,
+                            catalogue_index,
+                            "--simulate",
+                            "add",
+                            "--",
+                            application,
+                            *other_apps,
+                        )
+                    )
+            if applications:
+                process_build.run(
+                    _rootfs_install_command(
+                        lock,
+                        root,
+                        composition_keys,
+                        composition_repository,
+                        applications,
+                    )
+                )
+
             firmware_inputs.install_firmware_inputs(root, firmware)
             _install_default_soundfont(root, root_kind=root_kind)
             _install_display_brightness(root, display_brightness)
             _stamp_release(root, release)
             _verify_alpine_rootfs(
                 root,
-                packages,
-                bundle_packages,
-                firmware,
-                runtime_packages=alpine_lock.runtime_package_names(lock, packages),
-                bundle_apks=tuple(bundle_outputs.values()),
+                installed_packages,
+                firmware=firmware,
+                runtime_packages=alpine_lock.runtime_package_names(lock, runtime_names),
                 display_brightness=display_brightness,
             )
             _normalize_rootfs(root)

@@ -18,7 +18,8 @@ from typing import TYPE_CHECKING, Any
 from fplinux_cli.artifacts.card_kit import (
     CARD_APK_INDEX,
     CARD_APK_KEY,
-    CARD_APK_STATE,
+    CARD_APK_PREFLIGHT,
+    CARD_DEFAULT_APPS,
     CARD_MEMBERS,
     CardKitError,
     card_package_members,
@@ -28,7 +29,7 @@ from fplinux_cli.common import fail, sha256_file
 
 from .bundle import require_file
 from .card_access import CARD_CID, prepare_card_access
-from .card_media import prepare_card_media, prepare_card_update_media
+from .card_media import prepare_card_media, prepare_card_update_media, write_card_archive
 from .operations import card_selection_error
 from .phone_data import preparation_progress
 from .state import private_directory
@@ -161,26 +162,42 @@ def _writer_arguments(layout: CardLayout) -> tuple[str, ...]:
 def _write_card(  # noqa: PLR0913 -- admitted inputs and selected transport stay explicit.
     connection: tuple[Any, dict[str, Any]],
     card: SdCard,
-    card_dir: Path,
+    bundle: Path,
     *,
     layout: CardLayout,
     firmware: dict[str, tuple[FirmwareInput, ...]],
     log: RunLog,
 ) -> None:
     transport, session = connection
+    card_dir = bundle / "card"
+    defaults = card_dir / CARD_DEFAULT_APPS
+    members = (f"card/{CARD_APK_INDEX}", f"card/{CARD_APK_KEY}")
+    repository = {
+        Path(name).name: bundle / name
+        for name in (*members, *card_package_members(_manifest(bundle)["files"]))
+    }
     with tempfile.TemporaryDirectory(prefix="card-", dir=log.path.parent) as temp:
         local = private_directory(Path(temp))
         try:
             generated = prepare_card_media(card_dir, local, layout, firmware)
         except CardKitError as error:
             fail(str(error))
+        apk_checksums = local / "apks.sha256"
+        apk_checksums.write_text(
+            "".join(f"{sha256_file(path)}  {name}\n" for name, path in sorted(repository.items())),
+            encoding="ascii",
+            newline="\n",
+        )
         paths = (
             card_dir / "boot.xz",
             card_dir / "root.ext4.xz",
             card_dir / "board.tar",
             *generated,
+            defaults,
+            apk_checksums,
             _CARD_WRITER,
             _CARD_WRITER.with_name("card-slots.sh"),
+            _CARD_WRITER.with_name("card-apk-world.sh"),
         )
         result = transport.run_remote(
             session, "mktemp -d /tmp/fplinux-card.XXXXXXXX", capture_output=True, shared=True
@@ -216,13 +233,17 @@ def _write_card(  # noqa: PLR0913 -- admitted inputs and selected transport stay
                         *_writer_arguments(layout),
                         sha256_file(card_dir / "board.tar"),
                         *(sha256_file(path) for path in generated),
+                        sha256_file(defaults),
+                        sha256_file(apk_checksums),
                         host_key,
                     ]
                 )
                 log.message("Writing and reading back the SD card. Keep USB connected.")
                 writer_pending = True
                 access.write_started = True
-                result = transport.run_remote(session, command, capture_output=True, shared=True)
+                result = transport.send_remote(
+                    session, command, partial(write_card_archive, repository)
+                )
                 writer_pending = result.returncode == 255 or result.returncode < 0
                 log.record(result.stderr.strip())
                 if result.returncode:
@@ -270,7 +291,7 @@ def _install_card(  # noqa: PLR0913 -- the kit and consent inputs stay explicit.
     firmware: dict[str, tuple[FirmwareInput, ...]],
     log: RunLog,
     *,
-    card_dir: Path,
+    bundle: Path,
     layout: CardLayout,
     erase_card: str | None,
     confirm: Callable[[SdCard], bool] | None,
@@ -280,7 +301,7 @@ def _install_card(  # noqa: PLR0913 -- the kit and consent inputs stay explicit.
     if card.bytes < layout.capacity_bytes:
         fail("The selected SD card is too small")
     with preparation_progress(connection, log, initial="card-sending"):
-        _write_card(connection, card, card_dir, layout=layout, firmware=firmware, log=log)
+        _write_card(connection, card, bundle, layout=layout, firmware=firmware, log=log)
 
 
 def _change_card(  # noqa: PLR0913 -- selected assets, consent and transport stay independent.
@@ -321,9 +342,7 @@ def _change_card(  # noqa: PLR0913 -- selected assets, consent and transport sta
                 "board.tar": card_dir / "board.tar",
                 checksums.name: checksums,
                 fit.name: fit,
-                CARD_APK_INDEX: card_dir / CARD_APK_INDEX,
-                CARD_APK_KEY: card_dir / CARD_APK_KEY,
-                CARD_APK_STATE: card_dir / CARD_APK_STATE,
+                **{name: card_dir / name for name in CARD_APK_PREFLIGHT},
                 **{name.removeprefix("card/"): bundle / name for name in apk_members},
             },
             log=log,
@@ -371,7 +390,7 @@ def run_card(  # noqa: PLR0913 -- input selection, session and consent are indep
     if action == "install":
         write = partial(
             _install_card,
-            card_dir=assets / "card",
+            bundle=assets,
             layout=layout,
             erase_card=erase_card,
             confirm=confirm,

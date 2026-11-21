@@ -16,6 +16,7 @@ from .selection import (
     _canonical_packages,
     aport_build_order,
     aport_producer,
+    local_runtime_closure,
     selected_aport_graph,
     shared_aport_sources,
 )
@@ -75,6 +76,7 @@ def alpine_rootfs_recipe(  # noqa: PLR0913 -- each selected rootfs input is caus
     root: Path = ROOT,
     *,
     release: ReleaseContext,
+    applications: Sequence[str] = (),
     firmware_inputs: Sequence[FirmwareInput] = (),
     display_brightness: dict[str, Any] | None = None,
     root_kind: str = "initramfs",
@@ -84,14 +86,17 @@ def alpine_rootfs_recipe(  # noqa: PLR0913 -- each selected rootfs input is caus
         fail("Alpine root kind must be initramfs or external")
     _sha256(environment_recipe, "environment recipe")
     _sha256(signing_key_sha256, "package signing public key")
-    selected = _canonical_packages(packages, root)
+    base = _canonical_packages(packages, root)
+    applications = _canonical_packages(applications, root)
+    selected = tuple(sorted(set(base) | local_runtime_closure(applications, root)))
     build_packages = _canonical_packages(aport_build_order(selected), root)
     payload = {
         "environment_recipe": environment_recipe,
         "release_id": release.release_id,
         "release_version": release.release_version,
         "package_signing_key": signing_key_sha256,
-        "packages": list(selected),
+        "packages": list(base),
+        "applications": list(applications),
         "registration": selected_aport_graph(selected),
         "lock": _source_file(root / "alpine.lock.toml", root),
         "minirootfs": asdict(

@@ -50,7 +50,7 @@ def _alpine_package_installed(root: Path, package: str) -> bool:
 
 def _require_bundle_package_absent(root: Path, package: str) -> None:
     if _alpine_package_installed(root, package):
-        fail(f"bundle Alpine package was installed in the standard rootfs: {package}")
+        fail(f"bundle Alpine package was installed in the mandatory rootfs: {package}")
 
 
 def _require_bundle_packages_installable(root: Path, bundle_apks: Sequence[Path]) -> None:
@@ -117,14 +117,23 @@ def _require_openrc_service(root: Path, runlevel: str, service: str) -> None:
         fail(f"Alpine rootfs {runlevel} runlevel is missing {service}")
 
 
-def _verify_alpine_rootfs(  # noqa: PLR0913 -- verify each independently selected rootfs input.
+def _require_alpine_world(root: Path, packages: Sequence[str]) -> Path:
+    path = require_file(root / "etc/apk/world")
+    world = path.read_text(encoding="utf-8").splitlines()
+    if any("><Q" in entry for entry in world):
+        fail("Alpine world must not contain checksum-pinned non-repository packages")
+    selected_world = {entry for entry in world if entry.startswith("fplinux-")}
+    if selected_world != set(packages):
+        fail("Alpine world does not contain the exact selected FPLinux package set")
+    return path
+
+
+def _verify_alpine_rootfs(
     root: Path,
     packages: tuple[str, ...],
-    bundle_packages: tuple[str, ...] = (),
-    firmware: Sequence[firmware_inputs.FirmwareInput] = (),
     *,
+    firmware: Sequence[firmware_inputs.FirmwareInput] = (),
     runtime_packages: Sequence[str] = (),
-    bundle_apks: Sequence[Path] = (),
     display_brightness: dict[str, Any] | None = None,
 ) -> None:
     init = root / "init"
@@ -247,15 +256,7 @@ def _verify_alpine_rootfs(  # noqa: PLR0913 -- verify each independently selecte
     if "tmpfs\t/tmp\ttmpfs\trw,nosuid,nodev,mode=1777\t0 0" not in fstab:
         fail("Alpine fstab must mount /tmp as tmpfs")
 
-    world = require_file(root / "etc/apk/world").read_text(encoding="utf-8").splitlines()
-    if any("><Q" in entry for entry in world):
-        fail("Alpine world must not contain checksum-pinned non-repository packages")
-    selected_world = {entry for entry in world if entry.startswith("fplinux-")}
-    if selected_world != set(packages):
-        fail("Alpine world does not contain the exact selected FPLinux package set")
-    for package in bundle_packages:
-        _require_bundle_package_absent(root, package)
-    _require_bundle_packages_installable(root, bundle_apks)
+    _require_alpine_world(root, packages)
 
     inittab = require_file(root / "etc/inittab").read_text(encoding="utf-8")
     if "ttyGS" in inittab or "getty" in inittab:

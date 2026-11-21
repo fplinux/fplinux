@@ -84,7 +84,7 @@ def test_universal_archive_rejects_a_nonexecutable_native_runtime(assets: Path) 
         inspect_archive(runtime)
 
 
-@pytest.mark.parametrize("member", ["card/layout.json", "card/apk-state.tar"])
+@pytest.mark.parametrize("member", ["card/layout.json", "card/apk-state.tar", "card/default-apps"])
 def test_runtime_archive_rejects_an_incomplete_card_kit(assets: Path, member: str) -> None:
     runtime = assets / f"FPLinux-linux-x64-{RELEASE_ID}.zip"
     files, modes = read_zip(runtime)

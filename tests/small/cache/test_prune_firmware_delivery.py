@@ -75,7 +75,7 @@ def test_prune_retains_qin_system_root_variants_and_expires_changed_inputs(
         mock.patch.object(prune_alpine, "discover_profiles", return_value=("default",)),
         mock.patch.object(prune_alpine, "load_target", return_value=target),
         mock.patch.object(prune_alpine, "load_platform", return_value={}),
-        mock.patch.object(prune_alpine, "selected_packages", return_value=()),
+        mock.patch.object(prune_alpine, "selected_base_packages", return_value=()),
         mock.patch.object(prune_alpine, "current_release_context", return_value=release_context),
         mock.patch.object(prune_alpine, "alpine_rootfs_recipe", new=rootfs_recipe),
         mock.patch.object(prune_alpine, "environment_recipe_digest", return_value="a" * 64),

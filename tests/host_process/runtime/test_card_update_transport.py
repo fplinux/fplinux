@@ -155,7 +155,8 @@ def test_update_uploads_apk_preflight_then_streams_the_payload_once(
         for name, original in preflight.items():
             stream = archive.extractfile(name)
             assert stream is not None
-            assert stream.read() == payload[original].read_bytes()
+            with stream:
+                assert stream.read() == payload[original].read_bytes()
     bulk = set(payload) - set(preflight.values())
     received = remote / "received"
     assert set((remote / "bulk").read_text(encoding="ascii").splitlines()) == bulk

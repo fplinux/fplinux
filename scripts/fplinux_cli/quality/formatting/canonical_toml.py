@@ -205,7 +205,7 @@ _PROFILE_ORDER = {
     "": ("name", "linux", "rootfs", "bootstrap", "uboot", "fit", "layout", "storage", "runtime"),
     "linux": ("root",),
     "linux.root": ("kind", "filesystem", "wait_seconds"),
-    "rootfs": ("packages",),
+    "rootfs": ("packages", "applications"),
     "bootstrap": ("kind",),
     "uboot": ("kind",),
     "fit": ("kind", "filename"),
@@ -521,6 +521,8 @@ def _normalize_value(
             "rootfs.packages",
             "bundle.packages",
         }:
+            return _sort_package_array(value)
+        if order is _PROFILE_ORDER and path == "rootfs.applications":
             return _sort_package_array(value)
         for index, item in enumerate(value):
             if isinstance(item, (InlineTable, Array)):

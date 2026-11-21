@@ -8,10 +8,19 @@ import os
 
 from fplinux_cli import common
 from fplinux_cli.alpine.lock import bundle_runtime_packages, load_alpine_lock
-from fplinux_cli.alpine.rootfs import build_rootfs, shared_card_packages, shared_ram_packages
+from fplinux_cli.alpine.rootfs import (
+    build_apk_catalogue,
+    build_rootfs,
+    shared_card_packages,
+    shared_ram_packages,
+)
 from fplinux_cli.alpine.rootfs_files import write_card_initramfs
 from fplinux_cli.alpine.rootfs_state import EXT4_IMAGE_DIRECTORY
-from fplinux_cli.alpine.selection import bundle_packages, selected_packages
+from fplinux_cli.alpine.selection import (
+    bundle_packages,
+    selected_applications,
+    selected_base_packages,
+)
 from fplinux_cli.artifacts.bundles import bundle_slot
 from fplinux_cli.artifacts.release import current_release_context
 from fplinux_cli.build import assets as assets_build
@@ -59,7 +68,8 @@ def main() -> None:
     with process_build.report_stage(reporter, "configuration"):
         target_config = load_target(args.target, args.profile, build_type=args.build_type)
         platform = load_platform(target_config["platform"])
-        rootfs_packages = selected_packages(platform, target_config)
+        rootfs_packages = selected_base_packages(platform, target_config)
+        applications = selected_applications(target_config)
         selected_bundle_packages = bundle_packages(platform, target_config, rootfs_packages)
         bundle_apk_packages = (
             *selected_bundle_packages,
@@ -115,6 +125,7 @@ def main() -> None:
 
     card_rootfs = None
     card_recipe = None
+    card_board_rootfs = None
     ext4_artifact = None
     early_firmware = None
     fit_ramdisk = None
@@ -124,6 +135,7 @@ def main() -> None:
                 args.jobs,
                 rootfs_packages,
                 selected_bundle_packages,
+                applications=applications,
                 firmware=firmware,
                 display_brightness=target_config.get("display_brightness"),
                 root_kind="external",
@@ -135,10 +147,12 @@ def main() -> None:
                 args.jobs,
                 rootfs_packages,
                 selected_bundle_packages,
+                applications=applications,
                 firmware=firmware,
                 display_brightness=target_config.get("display_brightness"),
                 ram_base_packages=shared_ram_packages(platform, target_config),
             )
+        apk_catalogue = build_apk_catalogue(rootfs, bundle_apk_outputs, work / "apks")
         if not slotted_card:
             ext4_artifact = storage_build.profile_ext4_artifact(
                 target_config,
@@ -149,6 +163,12 @@ def main() -> None:
         if card_packages is not None:
             card_rootfs, _, card_recipe, _ = build_rootfs(
                 args.jobs, card_packages, root_kind="external"
+            )
+            card_board_rootfs, _, _, _ = build_rootfs(
+                args.jobs,
+                rootfs_packages,
+                display_brightness=target_config.get("display_brightness"),
+                root_kind="external",
             )
         if external_root:
             early_payload = create_device_data_initramfs(
@@ -257,12 +277,13 @@ def main() -> None:
         target_config,
         sd_image_artifact,
     )
+    boot_files.update(apk_catalogue)
     if card_rootfs is not None:
         from fplinux_cli.build.storage import card as card_build  # noqa: PLC0415
 
         with process_build.report_stage(reporter, "card-install-assets"):
-            if card_recipe is None:
-                fail("release card requires the shared root filesystem receipt")
+            if card_recipe is None or card_board_rootfs is None:
+                fail("release card requires the shared and board system roots")
             card_ext4 = card_build.build_partition(
                 args.target,
                 target_config["image"],
@@ -276,13 +297,15 @@ def main() -> None:
                     args.target,
                     target_config,
                     work / "card",
-                    board_rootfs=rootfs,
+                    board_rootfs=card_board_rootfs,
                     shared_rootfs=card_rootfs,
                     shared_ext4=card_ext4,
                     fit=fit_artifact,
                     ramdisk=fit_ramdisk,
                     cold_boot=bootstrap.cold_sd,
                     bundle_apks=bundle_apk_outputs,
+                    apk_catalogue=apk_catalogue,
+                    applications=applications,
                 )
             )
     with process_build.report_stage(reporter, "assets"):

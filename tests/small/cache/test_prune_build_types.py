@@ -10,8 +10,14 @@ from typing import TYPE_CHECKING
 import pytest
 from fplinux_cli.alpine import packages, rootfs, rootfs_state, signing
 from fplinux_cli.alpine.recipes import alpine_package_recipe, alpine_rootfs_recipe
-from fplinux_cli.alpine.selection import aport_build_order, selected_packages
+from fplinux_cli.alpine.selection import (
+    aport_build_order,
+    local_runtime_closure,
+    selected_applications,
+    selected_base_packages,
+)
 from fplinux_cli.artifacts.release import current_release_context
+from fplinux_cli.cache.prune import alpine as prune_alpine
 from fplinux_cli.cache.prune.operations import (
     apply_prune,
     discard_obsolete_apks,
@@ -72,23 +78,33 @@ def test_cleanup_retains_release_and_debug_rootfs_layers_and_apks(
     publish_environment_state(cache, EnvironmentState(source_recipe, "a" * 64, "b" * 64))
     environment_recipe = environment_artifact_recipe_digest(source_recipe, "b" * 64)
     release = current_release_context()
+    monkeypatch.setattr(prune_alpine, "current_release_context", lambda: release)
+    monkeypatch.setattr(rootfs, "current_release_context", lambda: release)
     platform = load_platform("ums9117")
     retained: dict[str, Path] = {}
     packages_by_build_type: dict[str, tuple[str, ...]] = {}
+    applications_by_build_type: dict[str, tuple[str, ...]] = {}
     for build_type in ("release", "debug"):
         target = load_target("nokia-ta1618", build_type=build_type)
+        applications = selected_applications(target)
         base_packages = rootfs.shared_ram_packages(platform, target)
         assert base_packages is not None
         packages_by_build_type[build_type] = base_packages
+        applications_by_build_type[build_type] = applications
         base_recipe = alpine_rootfs_recipe(
-            environment_recipe, signing_key, base_packages, release=release
+            environment_recipe,
+            signing_key,
+            base_packages,
+            release=release,
+            applications=applications,
         )
         retained[f"{build_type} shared RAM rootfs"] = _publish_rootfs(cache, base_recipe)
         recipe = alpine_rootfs_recipe(
             environment_recipe,
             signing_key,
-            selected_packages(platform, target),
+            selected_base_packages(platform, target),
             release=release,
+            applications=applications,
             display_brightness=target.get("display_brightness"),
         )
         retained[f"{build_type} board RAM rootfs"] = _publish_rootfs(
@@ -105,9 +121,20 @@ def test_cleanup_retains_release_and_debug_rootfs_layers_and_apks(
             root_kind="external",
         )
         retained[f"{build_type} shared microSD rootfs"] = _publish_rootfs(cache, card_recipe)
+        board_recipe = alpine_rootfs_recipe(
+            environment_recipe,
+            signing_key,
+            selected_base_packages(platform, card),
+            release=release,
+            display_brightness=card.get("display_brightness"),
+            root_kind="external",
+        )
+        retained[f"{build_type} board microSD rootfs"] = _publish_rootfs(cache, board_recipe)
 
     debug_base_packages = packages_by_build_type["debug"]
-    for name in aport_build_order(debug_base_packages):
+    debug_applications = applications_by_build_type["debug"]
+    debug_packages = (*debug_base_packages, *local_runtime_closure(debug_applications))
+    for name in aport_build_order(debug_packages):
         _publish_apk(cache, name, environment_recipe, signing_key)
     debug_apk = cache / "apks/fplinux-debug-tools/fplinux-debug-tools-1-r0.apk"
     stale_rootfs = _publish_rootfs(cache, "1" * 64)
@@ -141,6 +168,8 @@ def test_cleanup_retains_release_and_debug_rootfs_layers_and_apks(
         pytest.fail("the second debug rootfs request should reuse the cached shared RAM layer")
 
     monkeypatch.setattr(rootfs, "acquire_source", unexpected_download)
-    cached_rootfs, output, _recipe, _bundled = rootfs.build_rootfs(1, debug_base_packages)
+    cached_rootfs, output, _recipe, _bundled = rootfs.build_rootfs(
+        1, debug_base_packages, applications=debug_applications
+    )
     assert output == retained["debug shared RAM rootfs"]
     assert cached_rootfs.read_bytes() == b"rootfs\n"

@@ -6,6 +6,17 @@ kind = "initramfs"
 
 [rootfs]
 packages = ["fplinux-soundfont-lite"]
+applications = [
+  "fplinux-calculator",
+  "fplinux-clocks",
+  "fplinux-example-apidemo",
+  "fplinux-files",
+  "fplinux-music",
+  "fplinux-notes",
+  "fplinux-showcase",
+  "fplinux-snake",
+  "fplinux-terminal",
+]
 
 [bootstrap]
 kind = "linux"

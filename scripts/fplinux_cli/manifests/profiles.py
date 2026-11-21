@@ -351,8 +351,11 @@ def load_profile(
     expected_root = "initramfs" if profile == "default" else "external"
     if root["kind"] != expected_root:
         fail(f"profile {profile} requires {expected_root} root")
-    rootfs = exact_table(config["rootfs"], {"packages"}, f"profile {profile} rootfs")
+    rootfs = exact_table(
+        config["rootfs"], {"packages", "applications"}, f"profile {profile} rootfs"
+    )
     packages = package_array(rootfs["packages"], f"profile {profile} rootfs packages")
+    applications = package_array(rootfs["applications"], f"profile {profile} rootfs applications")
     expected_packages = (
         [
             "fplinux-microsd-root",
@@ -411,7 +414,7 @@ def load_profile(
     return {
         "name": profile,
         "linux": {"root": root},
-        "rootfs": {"packages": packages},
+        "rootfs": {"packages": packages, "applications": applications},
         "bootstrap": bootstrap,
         "uboot": uboot,
         "fit": fit,

@@ -17,10 +17,21 @@ from fplinux_cli.device_data.inputs import firmware_storage, rootfs_firmware_inp
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
     from pathlib import Path
-    from typing import TextIO
+    from typing import IO, TextIO
 
     from fplinux_cli.artifacts.card_kit import CardLayout
     from fplinux_cli.device_data.inputs import FirmwareInput
+
+
+def write_card_archive(assets: Mapping[str, Path], destination: IO[bytes]) -> None:
+    """Stream regular files under the supplied archive names."""
+    with tarfile.open(fileobj=destination, mode="w|", format=tarfile.USTAR_FORMAT) as archive:
+        for name, path in sorted(assets.items()):
+            with path.open("rb") as source:
+                member = tarfile.TarInfo(name)
+                member.size = path.stat().st_size
+                member.mode = 0o600
+                archive.addfile(member, source)
 
 
 def _personalize_fit(

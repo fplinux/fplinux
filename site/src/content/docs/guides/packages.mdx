@@ -5,33 +5,32 @@ description: Install and remove optional FPLinux applications on a running phone
 
 import { Tabs, TabItem } from "@astrojs/starlight/components";
 
-Optional applications come as APK files built together with the FPLinux image. A source build includes an `apks/` directory. With a standalone ZIP, start the desired model and use the directory printed after `Optional APKs`. Install the packages manually on the running phone. Check your phone's [application support](/fplinux/phones/#application-support) before choosing a package.
+FPLinux starts with a set of applications already installed. You can remove each of those applications or install it again. The signed APK catalogue for your system includes those applications and additional packages such as TyrQuake. Check your phone's [application support](/fplinux/phones/#application-support) before choosing a package.
 
 ## How long a package stays
 
 | System | After installing |
 | --- | --- |
 | RAM system | The package is lost when the phone powers off. |
-| [microSD system card](/fplinux/guides/microsd-system-card/) | The package stays until you remove it. |
+| [microSD system card](/fplinux/guides/microsd-system-card/) | The package stays until you remove it. On `microsd-uboot`, an update keeps your selections, including applications you removed. |
 
 A card used only for personal files does not make a RAM installation permanent. Before cutting power to a system card, shut it down as described in [Power](/fplinux/use/power/).
 
 ## Install a package
 
-Copy the application's APK and any required library or font APKs to the phone. Pass them together in one `apk add` command so the phone can resolve the dependencies offline. Use the packages from the same build as the running image; you do not need to search an Alpine mirror for matching libraries.
+Bring the signed catalogue from the same build as the running system. The catalogue directory contains `Packages.adb`, `fplinux-build.rsa.pub` and the APKs. Alpine resolves the application's dependencies from this directory without network access. Run package commands in the phone's root SSH session.
 
-The example below installs [TyrQuake](/fplinux/apps/tyrquake/) (`fplinux-tyrquake.apk`) on a Nokia 3210 4G. It needs no additional library APKs on that image; its application guide explains the required game data. General USB file transfer requires Linux; the Windows launcher supports SSH but does not copy files. From Windows, use a supported data card to supply the APKs and run `apk` in the phone's SSH shell.
+The example installs [TyrQuake](/fplinux/apps/tyrquake/) on the selected Nokia. Its application guide explains the required game data. General USB file transfer uses the Linux launcher. From Windows, you can copy the catalogue using a supported data card and open the phone's SSH shell.
 
 <Tabs syncKey="source">
 <TabItem label="Source checkout">
 
-The APKs are in the `apks/` folder of the output directory printed by `./fplinux build`. Replace `<output>` with that directory:
+The catalogue is in the `apks/` folder of the output directory printed by `./fplinux build`. Replace `<output>` with that directory.
 
 ```sh title="PC"
-./fplinux console nokia-ta1618 --upload \
-  <output>/apks/fplinux-tyrquake.apk /tmp/fplinux-tyrquake.apk
-./fplinux console nokia-ta1618 --exec \
-  'apk add --no-network --allow-untrusted --force-non-repository /tmp/fplinux-tyrquake.apk'
+tar -cf fplinux-apks.tar -C "<output>/apks" .
+./fplinux console nokia-ta1618 --upload fplinux-apks.tar /tmp/fplinux-apks.tar
+./fplinux console nokia-ta1618
 ```
 
 Use the target, profile and build type of the running session. For a system card, pass its `--profile` to both commands; see [system-card profiles](/fplinux/guides/microsd-system-card/).
@@ -39,13 +38,12 @@ Use the target, profile and build type of the running session. For a system card
 </TabItem>
 <TabItem label="Linux ZIP">
 
-Run from the extracted Release ZIP. Replace `<apk-directory>` with the directory printed by the launcher and `nokia-ta1618` with the selected target ID:
+Run from the extracted Release ZIP. Replace `<apk-directory>` with the directory printed after `Optional APKs` and `nokia-ta1618` with the selected target ID.
 
 ```sh title="PC"
-sh Run.sh console nokia-ta1618 --upload \
-  "<apk-directory>/fplinux-tyrquake.apk" /tmp/fplinux-tyrquake.apk
-sh Run.sh console nokia-ta1618 --exec \
-  'apk add --no-network --allow-untrusted --force-non-repository /tmp/fplinux-tyrquake.apk'
+tar -cf fplinux-apks.tar -C "<apk-directory>" .
+sh Run.sh console nokia-ta1618 --upload fplinux-apks.tar /tmp/fplinux-apks.tar
+sh Run.sh console nokia-ta1618
 ```
 
 For a system-card session, add `--boot microsd` to both commands.
@@ -53,7 +51,21 @@ For a system-card session, add `--boot microsd` to both commands.
 </TabItem>
 </Tabs>
 
-The install command reads only the named local APKs and disables network access. `--allow-untrusted` permits these local files; it does not verify their origin. Use only the matching APKs supplied with your image.
+On the phone, unpack the catalogue and trust its release key for this command. When using a data card, set `repo` to the directory on the mounted card that contains `Packages.adb` and skip unpacking the tar file.
+
+```sh title="Phone"
+repo=$(mktemp -d /tmp/fplinux-apks.XXXXXXXX)
+tar -xf /tmp/fplinux-apks.tar -C "$repo"
+rm /tmp/fplinux-apks.tar
+
+keys=$(mktemp -d /tmp/fplinux-apk-keys.XXXXXXXX)
+for key in /etc/apk/keys/*.pub /lib/apk/keys/*.pub; do
+    [ -f "$key" ] && cp "$key" "$keys/"
+done
+cp "$repo/fplinux-build.rsa.pub" "$keys/"
+apk --no-network --no-cache --repositories-file /dev/null \
+    --keys-dir "$keys" --repository "$repo/Packages.adb" add fplinux-tyrquake
+```
 
 ## Remove a package
 
@@ -67,7 +79,7 @@ The same command can be run from Linux with `./fplinux console nokia-ta1618 --ex
 
 ## Java and MRE
 
-Install `fplinux-phoneme.apk` for `.jar` files and `fplinux-mre.apk` for `.vxp` files. Include the required library APKs from the same `apks/` directory in the install command. MRE also needs `fplinux-font-terminus-8x16.apk` if the font is not installed. After installation, open your files in [Files](/fplinux/use/files/); see [Java and MRE applications](/fplinux/apps/java-and-mre/) for controls and settings.
+Java and MRE are installed on a new system card. To install them from the catalogue, use `fplinux-phoneme` for `.jar` files and `fplinux-mre` for `.vxp` files. After installation, open your files in [Files](/fplinux/use/files/). See [Java and MRE applications](/fplinux/apps/java-and-mre/) for controls and settings.
 
 ## Full curses libraries
 

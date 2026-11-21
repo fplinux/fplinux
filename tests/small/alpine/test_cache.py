@@ -42,6 +42,7 @@ from fplinux_cli.alpine import (
 from fplinux_cli.alpine import (
     signing as alpine_signing,
 )
+from fplinux_cli.artifacts.release_identity import ReleaseContext
 from fplinux_cli.build import process as process_build
 
 from tests.small.alpine.fixtures import (
@@ -454,6 +455,11 @@ class AlpineCacheTests:
         with (
             mock.patch.object(alpine_rootfs, "CACHE", cache),
             mock.patch.dict(os.environ, {"FPLINUX_ENVIRONMENT_ARTIFACT_RECIPE": "1" * 64}),
+            mock.patch.object(
+                alpine_rootfs,
+                "current_release_context",
+                return_value=ReleaseContext("012345abcdef", "1.0.0", None, "a" * 64),
+            ),
             mock.patch.object(
                 alpine_rootfs,
                 "_ensure_apk_signing_key",

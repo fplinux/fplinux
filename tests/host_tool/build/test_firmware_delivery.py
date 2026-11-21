@@ -162,7 +162,7 @@ def test_build_stage_delivers_snapshot_bytes_at_the_selected_loader_boundary(  #
         mock.patch.object(
             build_stages, "load_platform", return_value={"linux": {"source_lock": "linux"}}
         ),
-        mock.patch.object(build_stages, "selected_packages", return_value=()),
+        mock.patch.object(build_stages, "selected_base_packages", return_value=()),
         mock.patch.object(build_stages, "bundle_packages", return_value=()),
         mock.patch.object(build_stages, "load_release", return_value={}),
         mock.patch.object(build_stages, "prepare_linux", return_value=(None, None)),

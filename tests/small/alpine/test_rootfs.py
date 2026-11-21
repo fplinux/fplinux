@@ -237,7 +237,7 @@ class AlpineRootfsTests:
                 "run",
                 return_value=subprocess.CompletedProcess([], 0, f"{package}\n", ""),
             ),
-            pytest.raises(SystemExit, match="installed in the standard rootfs"),
+            pytest.raises(SystemExit, match="installed in the mandatory rootfs"),
         ):
             alpine_rootfs_verify._require_bundle_package_absent(root, package)  # noqa: SLF001
         with (
@@ -254,26 +254,20 @@ class AlpineRootfsTests:
         self, alpine_source: AlpineSourceContext
     ) -> None:
         """A mocked offline ``apk add --simulate`` result accepts or rejects the bundle APKs."""
-        root = verified_rootfs(alpine_source)
-        base = ("fplinux-base",)
+        root = alpine_source.directory / "rootfs"
+        root.mkdir()
         bundle_apk = alpine_source.write("built/fplinux-package-b.apk", b"bundle\n")
         unresolved = (
             "ERROR: unable to select packages:\n"
             "  so:libexample.so.1 (no such package):\n"
             "    required by: fplinux-package-b-1-r0[so:libexample.so.1]\n"
         )
-        write_world(root, base)
-
-        with (
-            mock.patch.object(alpine_rootfs_verify, "_require_apk_owner"),
-            mock.patch.object(
-                subprocess, "run", return_value=subprocess.CompletedProcess([], 0, "", "")
-            ),
+        with mock.patch.object(
+            subprocess, "run", return_value=subprocess.CompletedProcess([], 0, "", "")
         ):
-            alpine_rootfs_verify._verify_alpine_rootfs(root, base, bundle_apks=(bundle_apk,))  # noqa: SLF001
+            alpine_rootfs_verify._require_bundle_packages_installable(root, (bundle_apk,))  # noqa: SLF001
 
         with (
-            mock.patch.object(alpine_rootfs_verify, "_require_apk_owner"),
             mock.patch.object(
                 subprocess,
                 "run",
@@ -281,7 +275,7 @@ class AlpineRootfsTests:
             ),
             pytest.raises(SystemExit) as rejected,
         ):
-            alpine_rootfs_verify._verify_alpine_rootfs(root, base, bundle_apks=(bundle_apk,))  # noqa: SLF001
+            alpine_rootfs_verify._require_bundle_packages_installable(root, (bundle_apk,))  # noqa: SLF001
         assert ("cannot be installed into the rootfs offline") in (str(rejected.value))
         assert ("so:libexample.so.1 (no such package)") in (str(rejected.value))
 

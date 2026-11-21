@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+from fplinux_cli.artifacts.card_kit import CARD_APK_INDEX, CARD_APK_KEY
 from fplinux_cli.common import fail, load_toml
 from fplinux_cli.manifests.paths import target_release_manifest_path
 from fplinux_cli.manifests.values import exact_table, path_array, relative_value
@@ -41,7 +42,8 @@ def load_release(target: str, *, bundle_packages: Sequence[str] = ()) -> dict[st
         "release bundle APK files",
         allow_empty=True,
     )
-    bundle_files = [*bundle_files, *apk_files]
+    if apk_files:
+        bundle_files = [*bundle_files, *apk_files, CARD_APK_INDEX, CARD_APK_KEY]
     return {
         "publish": publish,
         "image": image,
