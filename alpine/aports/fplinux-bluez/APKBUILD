@@ -57,6 +57,16 @@ build() {
 		--enable-hog \
 		--enable-a2dp \
 		--enable-avrcp \
+		--disable-bap \
+		--disable-bass \
+		--disable-mcp \
+		--disable-ccp \
+		--disable-vcp \
+		--disable-micp \
+		--disable-csip \
+		--disable-tmap \
+		--disable-gmap \
+		--disable-asha \
 		--disable-hfp \
 		--enable-datafiles \
 		--disable-tools \
