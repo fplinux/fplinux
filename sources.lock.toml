@@ -672,6 +672,27 @@ url = "https://github.com/libjpeg-turbo/libjpeg-turbo/releases/download/3.2.1/li
 algorithm = "sha512"
 checksum = "8a0be9e42f4dd0634d61ec76b959f8942c70237848bb2854baad8abd352483784b7c4f099823368fb3e40be5d9200fb4b2574aecdcebf225d74b09dc217948eb"
 
+[aport_libpng_1_6_58_apng_patch_gz]
+version = "1.6.58"
+name = "libpng-1.6.58-apng.patch.gz"
+url = "https://downloads.sourceforge.net/sourceforge/libpng-apng/libpng-1.6.58-apng.patch.gz"
+algorithm = "sha512"
+checksum = "95a6f5bb7148b5c48dccd73811d7bcf9752a631a7bb4f4856670a7da12a7159581ac1bce1749318343794e0f5cb86972711ba2ec0f523c168f0991fa940687d5"
+
+[aport_libpng_1_6_59_tar_gz]
+version = "1.6.59"
+name = "libpng-1.6.59.tar.gz"
+url = "https://github.com/pnggroup/libpng/archive/refs/tags/v1.6.59.tar.gz"
+algorithm = "sha512"
+checksum = "2d753e764846a0a75a10f2a00c6f4ae23d2ae37237c69d59d5e619da3f143d59f4ea9ce29c1fb39435df1cef77877c83b042a2275934c353a6603061da2d2dd9"
+
+[aport_libpng_fix_arm_neon_patch]
+version = "8f222b50cd6e31c83f7dd69ab7c00e7471e11d4b"
+name = "libpng-fix-arm-neon.patch"
+url = "https://raw.githubusercontent.com/alpinelinux/aports/8f222b50cd6e31c83f7dd69ab7c00e7471e11d4b/main/libpng/libpng-fix-arm-neon.patch"
+algorithm = "sha512"
+checksum = "0a5efa609bda4c2a38f5110b7287020a5f9dc81583f2b05a951d897a18ce62ea80350baf52daa3d02f20dff51bbc177b3af317ab7bbc09eb23a3c252600414a5"
+
 [aport_libudev_zero_1_0_5_tar_gz]
 version = "1.0.5"
 name = "libudev-zero-1.0.5.tar.gz"
@@ -1342,13 +1363,6 @@ name = "TurboStitchGIF-LICENSE.txt"
 url = "https://raw.githubusercontent.com/Ferki-git-creator/TurboStitchGIF-HeaderOnly-Fast-ZeroAllocation-PlatformIndependent-Embedded-C-GIF-Decoder/9107c33bc082fd79056ce200b1e9c9dc2786ea6f/LICENSE"
 algorithm = "sha512"
 checksum = "d95f8522955fc5ece6289967a7e47b9e7aa09812281a948d41a4bb85f75283012350852ba9e98fa3db4c676052e852f81d80cc506a42a0f25f20d61d037cd587"
-
-[mre_png_license]
-version = "1.6.59"
-name = "libpng-LICENSE.txt"
-url = "https://raw.githubusercontent.com/pnggroup/libpng/v1.6.59/LICENSE"
-algorithm = "sha512"
-checksum = "6ad87a12db6a012ec2874a960604d85c42fa6210737318d771fc73543bea17de4dcf98212aa41e3d309387341e416418f8e4376fbd7aa658b7d2887de641f943"
 
 [mypy]
 version = "2.4.1"

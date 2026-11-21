@@ -3,20 +3,23 @@ pkgname=fplinux-mre
 pkgver=1.0.0
 pkgrel=0
 _jpegver=@version:aport_libjpeg_turbo_3_2_1_tar_gz@
+_pngver=@version:aport_libpng_1_6_59_tar_gz@
 pkgdesc="MRE runtime for native ARM VXP applications"
 url="https://github.com/fplinux/fplinux"
 arch="armv7"
 license="GPL-2.0-only AND 0BSD AND MIT AND Zlib AND libpng-2.0 AND IJG AND BSD-3-Clause AND curl"
 depends="fplinux-ui fplinux-runtime-media fplinux-font-terminus-8x16 c-ares fplinux-libidn2"
-makedepends_build="clang23 lld23 pkgconf cmake samurai gettext"
-makedepends_host="musl-dev musl-libintl linux-headers gcc zlib-dev zlib-static libpng-dev libpng-static
+makedepends_build="clang23 lld23 pkgconf cmake samurai gettext gawk"
+makedepends_host="musl-dev musl-libintl linux-headers gcc zlib-dev zlib-static
 	c-ares-dev libidn2-dev fplinux-mre-curl-dev fplinux-mbedtls-static-dev fplinux-ui-dev fplinux-runtime-media-dev"
 options="!check"
 source="
 	@source:mre_gif@
 	@source:mre_gif_license@
-	@source:mre_png_license@
 	@source:aport_libjpeg_turbo_3_2_1_tar_gz@
+	@source:aport_libpng_1_6_59_tar_gz@
+	@source:aport_libpng_1_6_58_apng_patch_gz@
+	@source:aport_libpng_fix_arm_neon_patch@
 	subblock-length.patch
 	fplinux-mre.c
 	mre-selector-files.c
@@ -46,7 +49,12 @@ prepare() {
 	# keeping the checksum-verified cache member unchanged.
 	cp -L "$srcdir/gif.h" "$srcdir/gif.h.prepared"
 	mv -f "$srcdir/gif.h.prepared" "$srcdir/gif.h"
-	default_prepare
+	source=subblock-length.patch default_prepare
+	(
+		source="libpng-1.6.58-apng.patch.gz libpng-fix-arm-neon.patch"
+		builddir="$srcdir/libpng-$_pngver"
+		default_prepare
+	)
 	# The UI and the engine use project headers outside the public UI ABI.
 	install -Dm644 fplinux-font.h include/fplinux/fplinux-font.h
 	install -Dm644 fplinux-keypad.h include/fplinux/fplinux-keypad.h
@@ -70,19 +78,44 @@ build() {
 		-o fplinux-mre
 	msgfmt --check --output-file=ru.mo ru.po
 
-	# ARM SIMD dispatch can open /proc/cpuinfo inside the sandboxed engine.
-	# Build a separate portable JPEG library from the pinned upstream source.
 	: "${CC:?missing target CC}" \
 		"${CHOST:?missing target CHOST}" "${CBUILDROOT:?missing target sysroot}"
-	local jpeg_ar
-	jpeg_ar="$(command -v "$CHOST-ar")"
+	local target_ar
+	target_ar="$(command -v "$CHOST-ar")"
+
+	# The engine reads PNGs sequentially through memory callbacks.
+	cat >mre-png.dfa <<-EOF
+		option WRITE off
+		option SIMPLIFIED_READ off
+		option PROGRESSIVE_READ off
+		option STDIO off
+	EOF
+	cmake -S "$srcdir/libpng-$_pngver" -B png-build -G Ninja \
+		-DCMAKE_BUILD_TYPE=MinSizeRel -DCMAKE_C_FLAGS_MINSIZEREL= \
+		-DCMAKE_SYSTEM_NAME=Linux -DCMAKE_SYSTEM_PROCESSOR=armv7 \
+		-DCMAKE_C_COMPILER="$CC" -DCMAKE_C_COMPILER_TARGET="$CHOST" \
+		-DCMAKE_C_FLAGS="$CPPFLAGS $CFLAGS -marm" \
+		-DCMAKE_AR="$target_ar" -DCMAKE_SYSROOT="$CBUILDROOT" \
+		-DCMAKE_FIND_ROOT_PATH="$CBUILDROOT" \
+		-DCMAKE_FIND_ROOT_PATH_MODE_PROGRAM=NEVER \
+		-DCMAKE_FIND_ROOT_PATH_MODE_LIBRARY=ONLY \
+		-DCMAKE_FIND_ROOT_PATH_MODE_INCLUDE=ONLY \
+		-DCMAKE_FIND_ROOT_PATH_MODE_PACKAGE=ONLY \
+		-DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY \
+		-DPNG_SHARED=OFF -DPNG_STATIC=ON -DPNG_TESTS=OFF -DPNG_TOOLS=OFF \
+		-DPNG_ARM_NEON=off \
+		-DZLIB_USE_STATIC_LIBS=ON -DDFA_XTRA="$builddir/mre-png.dfa"
+	cmake --build png-build --target png_static --parallel "${JOBS:-1}"
+
+	# ARM SIMD dispatch can open /proc/cpuinfo inside the sandboxed engine.
+	# Build a separate portable JPEG library from the pinned upstream source.
 	cmake -S "$srcdir/libjpeg-turbo-$_jpegver" -B jpeg-build -G Ninja \
 		-DCMAKE_BUILD_TYPE=Release \
 		-DCMAKE_SYSTEM_NAME=Linux -DCMAKE_SYSTEM_PROCESSOR=armv7 \
 		-DCMAKE_C_COMPILER="$CC" -DCMAKE_ASM_COMPILER="$CC" \
 		-DCMAKE_C_COMPILER_TARGET="$CHOST" -DCMAKE_ASM_COMPILER_TARGET="$CHOST" \
 		-DCMAKE_C_FLAGS="$CPPFLAGS $CFLAGS -marm" \
-		-DCMAKE_AR="$jpeg_ar" -DCMAKE_SYSROOT="$CBUILDROOT" \
+		-DCMAKE_AR="$target_ar" -DCMAKE_SYSROOT="$CBUILDROOT" \
 		-DCMAKE_FIND_ROOT_PATH="$CBUILDROOT" \
 		-DCMAKE_FIND_ROOT_PATH_MODE_PROGRAM=NEVER \
 		-DCMAKE_FIND_ROOT_PATH_MODE_LIBRARY=ONLY \
@@ -91,6 +124,7 @@ build() {
 		-DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY \
 		-DENABLE_SHARED=OFF -DENABLE_STATIC=ON -DWITH_SIMD=OFF \
 		-DWITH_JPEG8=OFF -DWITH_JPEG7=OFF \
+		-DWITH_ARITH_DEC=OFF \
 		-DWITH_TURBOJPEG=OFF -DWITH_TOOLS=OFF -DWITH_TESTS=OFF
 	cmake --build jpeg-build --target jpeg-static --parallel "${JOBS:-1}"
 
@@ -103,7 +137,7 @@ build() {
 	done
 	"$CC" $CPPFLAGS $CFLAGS -marm -std=c11 -Wall -Wextra -Werror \
 		-I"$srcdir/libjpeg-turbo-$_jpegver/src" -Ijpeg-build \
-		$(pkg-config --cflags libpng) \
+		-I"$srcdir/libpng-$_pngver" -Ipng-build \
 		-c "$startdir/image/image-decode.c" -o engine-objects/image-decode.o
 	# The unchanged upstream header contains unused static helper functions.
 	# This suppression applies only to the decoder translation unit.
@@ -127,7 +161,7 @@ build() {
 		engine-objects/resize-image.o engine-objects/image-decode.o \
 		engine-objects/guest_call.o engine-objects/ads-host.o \
 		engine-objects/ads_call.o jpeg-build/libjpeg.a \
-		"$CBUILDROOT/usr/lib/libpng.a" "$CBUILDROOT/usr/lib/libz.a" -lm \
+		png-build/libpng16.a "$CBUILDROOT/usr/lib/libz.a" -lm \
 		$LDFLAGS -o mre-engine
 }
 
@@ -147,7 +181,7 @@ package() {
 		"$pkgdir/usr/share/licenses/$pkgname/TurboStitchGIF-MIT.txt"
 	install -Dm644 "$startdir/gif/LICENSE-adapter" \
 		"$pkgdir/usr/share/licenses/$pkgname/GIF-adapter-0BSD.txt"
-	install -Dm644 "$srcdir/libpng-LICENSE.txt" \
+	install -Dm644 "$srcdir/libpng-$_pngver/LICENSE" \
 		"$pkgdir/usr/share/licenses/$pkgname/libpng-LICENSE.txt"
 	install -Dm644 "$srcdir/libjpeg-turbo-$_jpegver/LICENSE.md" \
 		"$pkgdir/usr/share/licenses/$pkgname/libjpeg-turbo-LICENSE.md"
