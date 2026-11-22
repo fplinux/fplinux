@@ -515,4 +515,40 @@ for heap in 4096 8192; do
 	done
 done
 
-echo "phoneME self-test: PASS (vectors, hello, local JAD, RMS, files, canvas, Form, List/Alert LF, headless media, Bluetooth availability, JAR directory entries, Java deadlines and System.gc())"
+# A clock wait keeps its deadline and allows a runnable peer to progress.
+build_jar clock "${here}/clock.mf"
+FPLINUX_PHONEME_JIT=1 "${qemu_arm}" -L "${sysroot}" "${headless}" \
+	--system-classes "${classes}" --timeout-ms 30000 "${work}/clock.jar" \
+	>"${work}/clock-log.txt" 2>&1
+grep -E '^PM-CLOCK ' "${work}/clock-log.txt"
+grep -qx 'PM-CLOCK backwards=0' "${work}/clock-log.txt" &&
+	grep -qx 'PM-CLOCK counter-progress=true' "${work}/clock-log.txt" &&
+	awk '
+	/^PM-CLOCK late / {
+		for (i = 3; i <= NF; i++) {
+			split($i, field, "=")
+			late[field[1]] = field[2]
+		}
+		seen++
+	}
+	/^PM-CLOCK sleeper-late=/ { split($2, field, "="); sleeper = field[2]; sleeping++ }
+	END {
+		# Deadlines within 5 ms; with a second thread that has work to do
+		# the time slices of the threads show up, as with the previous VM.
+		exit !(seen == 1 && late["busy"] <= 5 && late["yield"] <= 5 &&
+			late["with-sleeper"] <= 5 && late["with-counter"] <= 25 &&
+			sleeping == 1 && sleeper <= 25)
+	}
+' "${work}/clock-log.txt" || {
+	cat "${work}/clock-log.txt" >&2
+	fail "clock wait loops missed a deadline, went backwards or starved a thread"
+}
+FPLINUX_PHONEME_JIT=1 "${qemu_arm}" -L "${sysroot}" "${headless}" \
+	--system-classes "${classes}" --timeout-ms 30000 "${work}/clock.jar" \
+	fplinux.fixtures.clock.ClockSpinMIDlet >"${work}/clock-spin.txt" 2>&1
+grep -Eq '^PM-CLOCK spin late-max=[0-5] backwards=0$' "${work}/clock-spin.txt" || {
+	cat "${work}/clock-spin.txt" >&2
+	fail "the single-threaded clock wait loop missed a deadline or went backwards"
+}
+
+echo "phoneME self-test: PASS (vectors, hello, local JAD, RMS, files, canvas, Form, List/Alert LF, headless media, Bluetooth availability, JAR directory entries, Java deadlines, System.gc() and clock waits)"

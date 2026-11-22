@@ -1,0 +1,7 @@
+MIDlet-1: Clock wait, , fplinux.fixtures.clock.ClockWaitMIDlet
+MIDlet-2: Clock spin, , fplinux.fixtures.clock.ClockSpinMIDlet
+MIDlet-Name: PM clock fixture
+MIDlet-Vendor: FPLinux
+MIDlet-Version: 1.0.0
+MicroEdition-Configuration: CLDC-1.1
+MicroEdition-Profile: MIDP-2.0

@@ -1,0 +1,153 @@
+Rest in loops that wait by reading the clock.
+
+Games wait for their next frame in loops that only call
+System.currentTimeMillis(), keeping the processor busy at full speed. A
+thread that reads the same millisecond 32 times in a row is such a loop, and
+nothing it waits for can happen before the next millisecond. If no other Java
+thread is ready to run, it sleeps until shortly before the clock reaches the
+next millisecond, computed from the microseconds of the clock, and then reads
+the clock again. The trigger counts reads and does not depend on how long a
+read takes. A clock that does not advance within a millisecond gets a fixed
+rest of half a millisecond instead.
+
+--- a/cldc/src/vm/os/linux/OS_linux.cpp
++++ b/cldc/src/vm/os/linux/OS_linux.cpp
+@@ -151,6 +151,15 @@
+     return (jlong)tv.tv_sec * 1000 + (jint)tv.tv_usec / 1000;
+ }
+ 
++jlong Os::java_time_millis_and_phase(jint* phase_us) {
++    struct timeval tv;
++    ::jvm_gettimeofday(&tv, NULL);
++    const jint usec = (jint)tv.tv_usec;
++    const jint millis = usec / 1000;
++    *phase_us = usec - millis * 1000;
++    return (jlong)tv.tv_sec * 1000 + millis;
++}
++
+ #if SUPPORTS_MONOTONIC_CLOCK
+ 
+ jlong Os::monotonic_time_millis() {
+@@ -182,6 +191,10 @@
+   }
+ }
+ 
++void Os::sleep_micros(jint us) {
++  ::usleep(us);
++}
++
+ static bool   ticker_running = false;
+ static bool   ticker_stopping = false;
+ static bool   ticker_stopped = false;
+--- a/cldc/src/vm/share/natives/Natives.cpp
++++ b/cldc/src/vm/share/natives/Natives.cpp
+@@ -488,7 +488,42 @@
+ }
+ 
+ jlong Java_java_lang_System_currentTimeMillis() {
+-  return Os::java_time_millis();
++  // Games wait for their next frame in loops that only read the clock,
++  // keeping the processor busy at full speed. A thread that reads the same
++  // millisecond many times in a row is such a loop, and nothing it waits
++  // for can happen before the next millisecond. So rest, unless another
++  // Java thread can run, for less than the rest of the millisecond. A clock
++  // that does not advance within a millisecond gets a short fixed rest.
++  enum { spin_reads = 32, margin_us = 200, min_rest_us = 100,
++         coarse_rest_us = 500 };
++  static jlong last_millis;
++  static jint last_thread = -1;
++  static int reads;
++  static jint first_phase;
++  jint phase;
++  jlong now = Os::java_time_millis_and_phase(&phase);
++  const jint thread = Thread::current()->id();
++  if (now != last_millis || thread != last_thread) {
++    last_millis = now;
++    last_thread = thread;
++    reads = 1;
++    first_phase = phase;
++  } else if (++reads >= spin_reads) {
++    reads = 0;
++    if (!Scheduler::has_runnable_peer()) {
++      const jint rest = phase != first_phase ?
++                        1000 - phase - margin_us : coarse_rest_us;
++      if (rest >= min_rest_us) {
++        Os::sleep_micros(rest);
++        now = Os::java_time_millis_and_phase(&phase);
++        if (now != last_millis) {
++          last_millis = now;
++          first_phase = phase;
++        }
++      }
++    }
++  }
++  return now;
+ }
+ 
+ jint Java_java_lang_System_identityHashCode(JVM_SINGLE_ARG_TRAPS) {
+--- a/cldc/src/vm/share/runtime/OS.hpp
++++ b/cldc/src/vm/share/runtime/OS.hpp
+@@ -63,6 +63,11 @@
+   // time and midnight, January 1, 1970 UTC.
+   static jlong java_time_millis();
+ 
++  // Returns java_time_millis() and sets *phase_us to the microseconds that
++  // have elapsed within that millisecond, or leaves it constant if the
++  // clock is not finer than a millisecond.
++  static jlong java_time_millis_and_phase(jint* phase_us);
++
+ #if USE_HIGH_RESOLUTION_TIMER
+   // Returns the current value of a system-dependent high-resolution counter.
+   // Ideally, this counter should be light-weight and should have higher
+@@ -92,6 +97,9 @@
+ 
+   static void sleep(jlong ms);
+ 
++  // Sleeps for about the given number of microseconds.
++  static void sleep_micros(jint us);
++
+   // Returns a handle to the terminal for this OS
+   static class Stream * get_tty();
+ 
+--- a/cldc/src/vm/share/runtime/Scheduler.cpp
++++ b/cldc/src/vm/share/runtime/Scheduler.cpp
+@@ -1063,6 +1063,27 @@
+ #endif
+ }
+ 
++bool Scheduler::has_runnable_peer() {
++#if ENABLE_ISOLATES
++  return true;
++#else
++  // Every ready thread, the current one included, is in the circular queue
++  // of its priority.
++  ObjArray::Raw queues = Universe::scheduler_priority_queues();
++  int queues_in_use = 0;
++  for (int priority = ThreadObj::NUM_PRIORITY_SLOTS; priority > 0; priority--) {
++    Thread::Raw first = queues().obj_at(priority);
++    if (first.not_null()) {
++      Thread::Raw next = first().next();
++      if (!next.equals(&first) || ++queues_in_use > 1) {
++        return true;
++      }
++    }
++  }
++  return false;
++#endif
++}
++
+ static jlong earliest_waiting_deadline() {
+   Thread::Raw queue;
+   Thread::Raw thread;
+--- a/cldc/src/vm/share/runtime/Scheduler.hpp
++++ b/cldc/src/vm/share/runtime/Scheduler.hpp
+@@ -261,6 +261,9 @@
+     return _active_count;
+   }
+ 
++  // True if a Java thread other than the current one is ready to run.
++  static bool has_runnable_peer();
++
+ #if ENABLE_ISOLATES
+   // Support for Isolate suspend and resume
+   static void suspend_threads(int task_id);
