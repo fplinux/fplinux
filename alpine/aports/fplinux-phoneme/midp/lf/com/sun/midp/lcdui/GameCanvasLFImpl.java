@@ -38,7 +38,6 @@ import javax.microedition.lcdui.Image;
 import javax.microedition.lcdui.Graphics;
 import javax.microedition.lcdui.game.GameCanvas;
 import java.util.Vector;
-import java.util.Enumeration;
 import java.lang.ref.WeakReference;
 
 /**
@@ -91,6 +90,14 @@ public class GameCanvasLFImpl {
     Vector gVector = new Vector();
 
     /**
+     * Size of gVector at which getGraphics drops the cleared references.
+     * Programs may ask for a Graphics every frame, and only garbage
+     * collection clears the references, so the list is pruned once it has
+     * doubled rather than scanned on every call.
+     */
+    private int gVectorPruneSize = 16;
+
+    /**
      * Create new implementation instance for the given GameCanvas
      * @param c GameCanvas instance to create the implementation for
      */
@@ -136,17 +143,12 @@ public class GameCanvasLFImpl {
              * midlets don't care about new size resulting in garbled display
              */
             synchronized(gVector) {
-                Enumeration enum = gVector.elements();
-
-                Graphics g = null;
-                WeakReference wr = null;
-                while (enum.hasMoreElements()) {
-                    wr = (WeakReference)enum.nextElement();
-                    g = (Graphics)wr.get();
+                pruneGraphics();
+                for (int i = 0; i < gVector.size(); i++) {
+                    Graphics g =
+                        (Graphics)((WeakReference)gVector.elementAt(i)).get();
                     if (g != null) {
                         graphicsAccess.setDimensions(g, w, h);
-                    } else {
-                        gVector.removeElement(wr);
                     }
                 }
             }
@@ -180,23 +182,28 @@ public class GameCanvasLFImpl {
             graphicsAccess.setGraphicsCreator(g, owner);
             // Keep track of all graphics provided midlets with until now
             synchronized(gVector) {
-                gVector.addElement(new WeakReference(g));
-
-                Enumeration enum = gVector.elements();
-
-                // clear the empty references
-                WeakReference wr = null;
-                while (enum.hasMoreElements()) {
-                    wr = (WeakReference)enum.nextElement();
-                    if (wr.get() == null) {
-                        gVector.removeElement(wr);
-                    }
+                if (gVector.size() >= gVectorPruneSize) {
+                    pruneGraphics();
+                    gVectorPruneSize = Math.max(16, 2 * gVector.size());
                 }
+                gVector.addElement(new WeakReference(g));
             }
             return g;
         }
 
         return null;
+    }
+
+    /** Drops the cleared references from gVector, keeping the others in order. */
+    private void pruneGraphics() {
+        int kept = 0;
+        for (int i = 0; i < gVector.size(); i++) {
+            Object reference = gVector.elementAt(i);
+            if (((WeakReference)reference).get() != null) {
+                gVector.setElementAt(reference, kept++);
+            }
+        }
+        gVector.setSize(kept);
     }
 
     /**
