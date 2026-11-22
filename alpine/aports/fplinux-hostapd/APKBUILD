@@ -6,8 +6,6 @@ pkgdesc="WPA wireless access point runtime"
 url="https://w1.fi/hostapd/"
 arch="armv7"
 license="BSD-3-Clause"
-_alpine_version="$pkgver-r4"
-provides="hostapd=$_alpine_version"
 provider_priority=10
 replaces="hostapd"
 makedepends_build="clang23 lld23 pkgconf"

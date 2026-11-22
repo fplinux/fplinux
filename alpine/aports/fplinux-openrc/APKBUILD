@@ -7,7 +7,7 @@ url="https://github.com/OpenRC/openrc"
 arch="armv7"
 license="BSD-2-Clause"
 depends="ifupdown-any $pkgname-user=$pkgver-r$pkgrel"
-provides="openrc=$pkgver-r$pkgrel ifupdown-ng-openrc=0.12.1-r4"
+provides="openrc=$pkgver-r$pkgrel"
 provider_priority=100
 replaces="openrc alpine-baselayout"
 makedepends_build="clang23 lld23 meson llvm23"

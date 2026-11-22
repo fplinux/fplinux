@@ -7,7 +7,6 @@ pkgdesc="GNU Bash shell for FPLinux"
 url="https://www.gnu.org/software/bash/"
 arch="armv7"
 license="GPL-3.0-or-later"
-provides="bash=$pkgver-r1"
 provider_priority=100
 replaces="bash"
 makedepends_build="bison clang23 flex lld23 make llvm23"
@@ -93,7 +92,6 @@ package() {
 
 dev() {
 	default_dev
-	provides="bash-dev=$pkgver-r1"
 	replaces="bash-dev"
 	amove bin/bashbug usr/lib/bash/Makefile*
 }

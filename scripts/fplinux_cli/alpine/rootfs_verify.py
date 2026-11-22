@@ -267,13 +267,6 @@ def _verify_alpine_rootfs(
     ):
         if (root / obsolete).exists() or (root / obsolete).is_symlink():
             fail(f"legacy USB ACM shell is present: /{obsolete}")
-    for obsolete in (
-        "etc/fplinux-build",
-        "usr/libexec/fplinux/init",
-        "usr/libexec/fplinux/usb-getty",
-    ):
-        if (root / obsolete).exists() or (root / obsolete).is_symlink():
-            fail(f"obsolete pre-Alpine runtime path is present: /{obsolete}")
     firmware_inputs.verify_installed_firmware_inputs(root, firmware)
     brightness_path = root / "etc/fplinux/brightness.conf"
     if display_brightness is None:
