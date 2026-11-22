@@ -33,7 +33,7 @@ def release_archive_name(host: str, release_id: str) -> str:
     return f"FPLinux-{host}-x64-{release_id}.zip"
 
 
-def _readme(host: str, source_stem: str) -> bytes:
+def _readme(host: str, source_stem: str, *, has_documents: bool) -> bytes:
     launcher = "Run.cmd" if host == "windows" else "sh Run.sh"
     platform = (
         "Use Windows 10 or 11 x64 and run as your regular user. The launcher "
@@ -79,8 +79,9 @@ def _readme(host: str, source_stem: str) -> bytes:
 
         The launcher prints the path to runtime.log. For more loader detail,
         add --loader-trace to the run command.
-        Windows USB loading and SSH on Xiaomi Qin 1s+ remain unverified.
         """).format(launcher=launcher, platform=platform)
+    if has_documents:
+        text += "\nModel-specific instructions are in the docs/ directory.\n"
     return append_source_companion(text.encode(), source_stem)
 
 
@@ -148,7 +149,13 @@ class HostArchive:
         ]
 
     def _bundle(
-        self, target: str, files: dict[str, bytes], executables: set[str], *, ram: bool
+        self,
+        target: str,
+        files: dict[str, bytes],
+        executables: set[str],
+        *,
+        ram: bool,
+        documents: frozenset[str],
     ) -> dict[str, Any]:
         runtime = json.loads(files["runtime-manifest.json"])
         if runtime["target"] != target:
@@ -161,7 +168,11 @@ class HostArchive:
             fail(f"release runtime and component selection differ for {target}")
         members = {}
         for name, contents in sorted(files.items()):
-            if name.startswith(_SHARED_PATHS):
+            if name in documents:
+                path = f"docs/{target}/{name}"
+                self._shared(path, contents)
+                members[name] = [path]
+            elif name.startswith(_SHARED_PATHS):
                 self._shared(name, contents, executable=name in executables)
                 members[name] = [name]
             elif name == "assets.lock.toml":
@@ -191,15 +202,16 @@ class HostArchive:
         executables: set[str],
         *,
         microsd: tuple[dict[str, bytes], set[str]] | None = None,
+        documents: frozenset[str] = frozenset(),
     ) -> None:
         """Record the RAM runtime and the optional installed system-card runtime."""
         runtime = json.loads(files["runtime-manifest.json"])
         entry = {
             "name": runtime["identity"]["target"]["display_name"],
-            **self._bundle(target, files, executables, ram=True),
+            **self._bundle(target, files, executables, ram=True, documents=documents),
         }
         if microsd is not None:
-            entry["microsd"] = self._bundle(target, *microsd, ram=False)
+            entry["microsd"] = self._bundle(target, *microsd, ram=False, documents=documents)
         self.targets[target] = entry
 
     def finish(self, source_stem: str) -> None:
@@ -207,7 +219,11 @@ class HostArchive:
         self.files[CATALOG_NAME] = canonical_json_bytes(
             {**self.release.fields(), "targets": self.targets}
         )
-        self.files["README.txt"] = _readme(self.host, source_stem)
+        self.files["README.txt"] = _readme(
+            self.host,
+            source_stem,
+            has_documents=any(name.startswith("docs/") for name in self.files),
+        )
         self.files["fplinux.py"] = (_LAUNCHERS / "release_entry.py").read_bytes()
         self.executables.add("fplinux.py")
         if self.host == "windows":

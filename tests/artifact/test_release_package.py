@@ -44,6 +44,8 @@ def test_release_preserves_optional_apps_documents_and_native_file_modes(
         payload["apks/fixture-runtime.apk"] == b"synthetic built file: apks/fixture-runtime.apk\n"
     )
     assert payload["image/ramboot.bin"] == (inputs.bundle / "image/ramboot.bin").read_bytes()
+    assert "WINDOWS.txt" not in payload
+    assert "docs/xiaomi-qin-1s-plus/WINDOWS.txt" not in files
     assert payload["assets/t117_fdl1.bin"] == (inputs.bundle / "assets/t117_fdl1.bin").read_bytes()
     assert not {"Run.sh", "Run.cmd", "Run-debug.cmd"} & payload.keys()
     assert "device-data.cpio" not in payload
@@ -202,6 +204,11 @@ def test_release_carries_each_qin_loader_and_its_original_notices(
 ) -> None:
     files, _modes = read_zip(archive_inputs.package(host))
     payload = json.loads(files["targets.json"])["targets"][archive_inputs.target]["files"]
+    note = "docs/xiaomi-qin-1s-plus/WINDOWS.txt"
+    assert payload["WINDOWS.txt"] == [note]
+    assert b"USB loading and SSH from Windows remain unverified" in files[note]
+    assert b"docs/" in files["README.txt"]
+    assert b"Xiaomi Qin 1s+" not in files["README.txt"]
     for name in ("assets/fdl1.bin", "assets/fdl2.bin", "assets/sml.bin"):
         contents = (archive_inputs.bundle / name).read_bytes()
         assert payload[name] == [f"objects/{hashlib.sha256(contents).hexdigest()}"]

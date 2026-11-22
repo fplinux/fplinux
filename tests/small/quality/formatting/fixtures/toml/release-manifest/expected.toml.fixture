@@ -1,4 +1,2 @@
 publish = false
-image = "linux.bin"
-bundle_files = ["z.bin", "linux.bin", "a.bin"]
 documents = ["z.md", "a.md"]

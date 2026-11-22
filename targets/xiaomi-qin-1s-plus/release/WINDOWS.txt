@@ -1,0 +1,3 @@
+Windows USB loading
+
+USB loading and SSH from Windows remain unverified for this phone.

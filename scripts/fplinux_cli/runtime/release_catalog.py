@@ -52,6 +52,7 @@ _CHECKSUMS = "SHA256SUMS"
 _SHARED_DIRECTORIES = {
     "assets",
     "common",
+    "docs",
     "licenses",
     "runtime",
     "scripts",

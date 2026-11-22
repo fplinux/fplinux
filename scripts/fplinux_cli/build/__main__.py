@@ -41,7 +41,7 @@ from fplinux_cli.device_data.cpio import create_device_data_initramfs
 from fplinux_cli.environment.definition import environment_artifact_recipe_digest
 from fplinux_cli.manifests.identity import BUILD_TYPES
 from fplinux_cli.manifests.platforms import load_platform
-from fplinux_cli.manifests.releases import load_release
+from fplinux_cli.manifests.releases import resolve_release
 from fplinux_cli.manifests.targets import load_target
 from fplinux_cli.manifests.values import sha256_value
 from fplinux_cli.reporting.run import RunReporter, run_entrypoint
@@ -101,7 +101,9 @@ def main() -> None:
             ),
             "Linux source",
         )
-        release_manifest = load_release(args.target, bundle_packages=bundle_apk_packages)
+        release_manifest = resolve_release(
+            args.target, target_config, platform, bundle_packages=bundle_apk_packages
+        )
 
         profile = inputs_build.selected_profile(target_config)
         work = (

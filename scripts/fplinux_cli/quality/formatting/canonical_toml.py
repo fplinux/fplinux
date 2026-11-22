@@ -343,7 +343,7 @@ def _policy(relative: str) -> Mapping[str, Sequence[str]]:  # noqa: PLR0911
             "fdl1": ("source", "path"),
         }
     if relative.endswith("/release/manifest.toml"):
-        return {"": ("publish", "image", "bundle_files", "documents")}
+        return {"": ("publish", "documents")}
     if path.name == "u-boot.lock.toml":
         return {
             "": (

@@ -98,7 +98,9 @@ def load_release_manifest(target: str, config: dict[str, Any]) -> dict[str, Any]
             load_alpine_lock(common.ROOT), rootfs_packages, selected_bundle_packages
         ),
     )
-    manifest = releases.load_release(target, bundle_packages=bundle_apk_packages)
+    manifest = releases.resolve_release(
+        target, config, platform, bundle_packages=bundle_apk_packages
+    )
     image = manifest["image"]
     bundle_files = manifest["bundle_files"]
     if config.get("linux", {}).get("root", {}).get("kind") == "initramfs":
@@ -118,16 +120,6 @@ def load_release_manifest(target: str, config: dict[str, Any]) -> dict[str, Any]
             fail(f"duplicate release archive path: {archive_name}")
         archive_names.add(archive_name)
 
-    # Archives carry the host tools the runner uses; build-only tools stay in the checkout.
-    executables = {f"host/{name}" for name in platform["host"]["runtime_tools"].values()}
-    required_runtime = {
-        image,
-        "runtime-manifest.json",
-        *config["runtime"]["assets"].values(),
-        *executables,
-    }
-    if missing := required_runtime.difference(bundle_files):
-        fail(f"release bundle files omit required runtime inputs: {', '.join(sorted(missing))}")
     return {
         "image": image,
         "bundle_files": bundle_files,

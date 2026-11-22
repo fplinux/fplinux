@@ -20,6 +20,15 @@ from tests import ROOT
 if TYPE_CHECKING:
     from pathlib import Path
 
+DEMO_BUNDLE_FILES = [
+    "image/ramboot.bin",
+    "assets/fdl1.bin",
+    "host/keyboard",
+    "runtime-manifest.json",
+    "assets.lock.toml",
+    "THIRD_PARTY_NOTICES.md",
+]
+
 
 @dataclass(frozen=True)
 class ReleaseInputs:
@@ -61,14 +70,6 @@ def release_inputs(tmp_path: Path) -> ReleaseInputs:
         },
     }
     release_manifest: dict[str, Any] = {
-        "image": "image/ramboot.bin",
-        "bundle_files": [
-            "image/ramboot.bin",
-            "assets/fdl1.bin",
-            "host/keyboard",
-            "runtime-manifest.json",
-            "assets.lock.toml",
-        ],
         "documents": ["release/EXTRA.txt"],
     }
     readme = root / "targets" / target / "release/EXTRA.txt"
@@ -110,7 +111,9 @@ class ReleaseManifestPolicyTests:
         platform = platforms.load_platform(target_config["platform"])
         rootfs = alpine_state.selected_packages(platform, target_config)
         bundle = alpine_state.bundle_packages(platform, target_config, rootfs)
-        manifest = releases.load_release(target, bundle_packages=bundle)
+        manifest = releases.resolve_release(
+            target, target_config, platform, bundle_packages=bundle
+        )
 
         assert optional <= set(bundle)
         assert not (optional & set(rootfs))
@@ -166,24 +169,25 @@ class ReleaseManifestPolicyTests:
         """Selected APKs extend the target's release contents without changing its runtime."""
         release_inputs.write_manifest(release_inputs.release_manifest)
         with mock.patch.object(common, "ROOT", release_inputs.root):
-            release = releases.load_release(
-                release_inputs.target, bundle_packages=("demo", "board-extra")
+            release = releases.resolve_release(
+                release_inputs.target,
+                release_inputs.target_config,
+                release_inputs.platform,
+                bundle_packages=("demo", "board-extra"),
             )
-            no_optional_apks = releases.load_release(release_inputs.target, bundle_packages=())
+            no_optional_apks = releases.resolve_release(
+                release_inputs.target, release_inputs.target_config, release_inputs.platform
+            )
 
         assert release["bundle_files"] == [
-            "image/ramboot.bin",
-            "assets/fdl1.bin",
-            "host/keyboard",
-            "runtime-manifest.json",
-            "assets.lock.toml",
+            *DEMO_BUNDLE_FILES,
             "apks/demo.apk",
             "apks/board-extra.apk",
             "apks/Packages.adb",
             "apks/fplinux-build.rsa.pub",
         ]
         assert release["documents"] == ["release/EXTRA.txt"]
-        assert no_optional_apks["bundle_files"] == release_inputs.release_manifest["bundle_files"]
+        assert no_optional_apks["bundle_files"] == DEMO_BUNDLE_FILES
 
     def test_archive_manifest_retains_preinstalled_applications_and_runtime_apks(
         self, release_inputs: ReleaseInputs
@@ -212,7 +216,7 @@ class ReleaseManifestPolicyTests:
             installed = package_commands.load_release_manifest(release_inputs.target, profile)
 
         expected_bundle_files = [
-            *release_inputs.release_manifest["bundle_files"],
+            *DEMO_BUNDLE_FILES,
             "apks/demo.apk",
             "apks/feature-runtime.apk",
             "apks/Packages.adb",
@@ -222,19 +226,23 @@ class ReleaseManifestPolicyTests:
             assert manifest["bundle_files"] == expected_bundle_files
             assert manifest["documents"] == ["release/EXTRA.txt"]
 
-    def test_release_manifest_rejects_a_second_apk_inventory(
-        self, release_inputs: ReleaseInputs
+    @pytest.mark.parametrize(
+        ("field", "value"),
+        [
+            ("bundle_files", ["apks/demo.apk"]),
+            ("image", "image/other.bin"),
+        ],
+    )
+    def test_release_manifest_cannot_override_the_build_inventory(
+        self, release_inputs: ReleaseInputs, field: str, value: str | list[str]
     ) -> None:
         """A target release cannot replace the bundle package owner's optional APK set."""
-        manifest = release_inputs.release_manifest
-        release_inputs.write_manifest(
-            {**manifest, "bundle_files": [*manifest["bundle_files"], "apks/demo.apk"]}
-        )
+        release_inputs.write_manifest({**release_inputs.release_manifest, field: value})
         with (
             mock.patch.object(common, "ROOT", release_inputs.root),
-            pytest.raises(SystemExit, match="resolved bundle package set"),
+            pytest.raises(SystemExit, match="must contain exactly: documents, publish"),
         ):
-            releases.load_release(release_inputs.target, bundle_packages=("other",))
+            releases.load_release(release_inputs.target)
 
     def test_target_release_file_cannot_replace_the_shared_license(
         self, release_inputs: ReleaseInputs
@@ -279,34 +287,14 @@ class ReleaseManifestPolicyTests:
                 release_inputs.target, release_inputs.target_config
             )
 
-    def test_release_manifest_rejects_an_image_outside_the_bundle(
+    def test_release_without_a_target_manifest_uses_platform_inputs(
         self, release_inputs: ReleaseInputs
     ) -> None:
-        """The target's declared image must also appear in its bundle files."""
-        release_inputs.write_manifest(
-            {**release_inputs.release_manifest, "image": "image/other.bin"}
-        )
-        with (
-            mock.patch.object(common, "ROOT", release_inputs.root),
-            pytest.raises(SystemExit, match="image must be a bundle file"),
-        ):
-            releases.load_release(release_inputs.target)
-
-    @pytest.mark.parametrize(
-        "member", ["runtime-manifest.json", "assets/fdl1.bin", "host/keyboard"]
-    )
-    def test_package_rejects_an_undeclared_runtime_member(
-        self, release_inputs: ReleaseInputs, member: str
-    ) -> None:
-        """The bundle declaration must include each required runtime input."""
-        manifest = release_inputs.release_manifest
-        bundle_files = [path for path in manifest["bundle_files"] if path != member]
-        release_inputs.write_manifest({**manifest, "bundle_files": bundle_files})
-        with (
-            mock.patch.object(common, "ROOT", release_inputs.root),
-            mock.patch.object(platforms, "load_platform", return_value=release_inputs.platform),
-            pytest.raises(SystemExit, match=f"omit required runtime inputs: {member}"),
-        ):
-            package_commands.load_release_manifest(
-                release_inputs.target, release_inputs.target_config
+        """A target gets the standard deliverables without repeating their file list."""
+        with mock.patch.object(common, "ROOT", release_inputs.root):
+            release = releases.resolve_release(
+                release_inputs.target, release_inputs.target_config, release_inputs.platform
             )
+        assert release["publish"]
+        assert release["documents"] == []
+        assert release["bundle_files"] == DEMO_BUNDLE_FILES

@@ -14,7 +14,7 @@ Prepare the dependencies, then run the package command:
 ./fplinux package
 ```
 
-After restoring the complete [dependency snapshot](/fplinux/guides/dependencies/), use `./fplinux setup --offline` to prepare the build environment from those inputs. A target with `publish = false` in its `release/manifest.toml` is available through explicit selection. To package only Konrow for Linux:
+After restoring the complete [dependency snapshot](/fplinux/guides/dependencies/), use `./fplinux setup --offline` to prepare the build environment from those inputs. Bundle contents follow the target's runtime assets, platform tools and selected APKs. An optional `release/manifest.toml` carries extra documents and can set `publish = false` for a target that remains available through explicit selection. To package only Konrow for Linux:
 
 ```sh title="PC"
 ./fplinux setup konrow-senior-280-plus

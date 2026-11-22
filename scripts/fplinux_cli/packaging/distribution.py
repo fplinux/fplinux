@@ -268,6 +268,7 @@ def package_release(
     from fplinux_cli.packaging.archive import (  # noqa: PLC0415
         finalize_runtime,
         project_bundle,
+        target_archive_file,
     )
     from fplinux_cli.packaging.autonomous import HostPayloads  # noqa: PLC0415
     from fplinux_cli.packaging.sources import (  # noqa: PLC0415
@@ -285,6 +286,10 @@ def package_release(
     native = HostPayloads(cache, jobs)
     for name, choices in groupby(sorted(selections), key=lambda selection: selection[0]):
         configuration = targets.load_target(name)
+        documents = frozenset(
+            target_archive_file(name, relative)[0]
+            for relative in releases.load_release(name)["documents"]
+        )
         bundle, manifest = build(name, jobs, include_device_data=False, release_context=release)
         card_config = None
         card_files = None
@@ -331,7 +336,7 @@ def package_release(
                 require_public_runtime_files(sd_files.keys(), name)
                 finalize_runtime(sd_files, card_manifest, sd_modes)
                 microsd = sd_files, sd_modes
-            archives[selected_host].add(name, files, modes, microsd=microsd)
+            archives[selected_host].add(name, files, modes, microsd=microsd, documents=documents)
             source.files.update(tool_sources)
             _merge_sources(
                 sources.files,

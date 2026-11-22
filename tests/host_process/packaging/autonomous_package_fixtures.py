@@ -10,8 +10,6 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 from fplinux_cli import common
-from fplinux_cli.alpine import lock as alpine_lock
-from fplinux_cli.alpine import selection
 from fplinux_cli.artifacts.bundles import CurrentBundle
 from fplinux_cli.artifacts.release import (
     PublicSourceSnapshot,
@@ -114,19 +112,13 @@ def build_archive_inputs(
     if not phone.required_phone_data:
         config["device_data"] = {"parser": None, "groups": {}}
     platform = platforms.load_platform(config["platform"])
-    rootfs_packages = selection.selected_packages(platform, config)
-    selected_bundle_packages = selection.bundle_packages(platform, config, rootfs_packages)
     lock = {
         "runtime": {
             "packages": ["openrc-1-r0.apk"],
             "additions": {"fplinux-phoneme": ["fixture-runtime-2-r0.apk"]},
         }
     }
-    bundle_apk_packages = (
-        *selected_bundle_packages,
-        *alpine_lock.bundle_runtime_packages(lock, rootfs_packages, selected_bundle_packages),
-    )
-    release = releases.load_release(target, bundle_packages=bundle_apk_packages)
+    release = releases.load_release(target)
     source_files = [
         "LICENSE",
         "LICENSES/Unlicense.txt",
@@ -149,7 +141,10 @@ def build_archive_inputs(
         write_archive_file(tmp_path, relative, (source / relative).read_bytes())
     release_document = f"targets/{target}/release/EXTRA.txt"
     write_archive_file(tmp_path, release_document, b"phone instructions\n")
-    release["documents"] = ["release/EXTRA.txt"]
+    for relative in release["documents"]:
+        document = f"targets/{target}/{relative}"
+        write_archive_file(tmp_path, document, (source / document).read_bytes())
+    release["documents"] = ["release/EXTRA.txt", *release["documents"]]
     target_manifest = f"targets/{target}/target.toml"
     write_archive_file(tmp_path, target_manifest, f'platform = "{config["platform"]}"\n'.encode())
     write_archive_file(

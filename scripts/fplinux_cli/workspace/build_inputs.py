@@ -200,7 +200,9 @@ def target_build_source_files(  # noqa: PLR0913 -- target inputs and captured da
     for source in sorted(shared_sources):
         add_source(source)
     add_source(target_root / "target.toml")
-    add_source(target_release_manifest_path(target))
+    release_policy = target_release_manifest_path(target)
+    if release_policy.exists() or release_policy.is_symlink():
+        add_source(release_policy)
     if platform["bootstrap"]["backend"] == "ums9117":
         add_source(platform_asset_lock_path(target_config["platform"]))
     display_source = target_config["display"]["source"]
