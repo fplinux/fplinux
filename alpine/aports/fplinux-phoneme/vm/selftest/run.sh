@@ -178,6 +178,19 @@ awk '
 	fail "JIT did not compile the caller with an inlined exception"
 }
 
+# Hot calls from a class initializer must not recompile after each trap.
+init_trace="${work}/jit-class-init.txt"
+run_jit_fixture 1 1 "${init_trace}" fplinux.fixtures.jit.JitClassInitLoopMIDlet
+grep -Fq 'PM-JIT-CLINIT-LOOP total=123259685' "${init_trace}" &&
+	awk '
+	match($0, /Compiling fplinux\/fixtures\/jit\/ClassInitLoop\$Spin\.[^[:space:]]+/) {
+		method = substr($0, RSTART + 10, RLENGTH - 10)
+		if (++attempts[method] > 500) repeated = 1
+		seen = 1
+	}
+	END { exit !(seen && !repeated) }
+' "${init_trace}" || fail "class initialization produced a wrong result or a recompilation loop"
+
 build_jar hello "${here}/hello.mf"
 build_jar vectors "${here}/vectors.mf"
 cp "${here}/vectors-hotspot.expected" "${work}/vectors-expected.txt"

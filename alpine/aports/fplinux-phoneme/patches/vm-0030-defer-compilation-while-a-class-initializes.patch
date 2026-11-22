@@ -1,0 +1,106 @@
+Do not compile at once again after a trap on a class being initialized.
+
+The compiler cannot call into a class, access its static fields or create its
+instances while the initialization of the class has not finished, so it emits
+an uncommon trap there. The trap unlinked the compiled code and made the next
+call compile the method again, with the same trap, for as long as the
+initialization ran, or for ever when it failed. A method that a static
+initializer calls thousands of times was compiled thousands of times, and
+every compilation was discarded by its first call.
+
+When the bytecode that trapped uses a class whose initialization is running or
+has failed, leave the method to the interpreter after unlinking it: the log of
+interpreted methods asks for its compilation again at a bounded rate, and
+the first compilation after the initialization has finished has direct calls.
+Other traps, such as a class that is not loaded yet, still compile the method
+again at once.
+
+--- a/cldc/src/vm/share/interpreter/InterpreterRuntime.cpp
++++ b/cldc/src/vm/share/interpreter/InterpreterRuntime.cpp
+@@ -1015,6 +1015,57 @@
+     frame.deoptimize();
+   }
+ 
++#if !ENABLE_ISOLATES
++  // Tells whether the bytecode at bci uses a class whose initialization is
++  // running or has failed. Such a bytecode cannot be compiled to anything but
++  // a trap: the interpreter makes the other threads wait for the initialization
++  // to finish, or throws an error, in every execution.
++  static bool uses_class_being_initialized(Method* method, jint bci) {
++    UsingFastOops fast_oops;
++    ConstantPool::Fast cp = method->constants();
++    JavaClass::Fast klass;
++
++    switch (method->bytecode_at(bci)) {
++      case Bytecodes::_fast_init_invokestatic: {
++        const int index = method->get_java_ushort(bci + 1);
++        Method::Raw callee = cp().resolved_static_method_at(index);
++        klass = callee().holder();
++        break;
++      }
++      case Bytecodes::_fast_1_getstatic:
++      case Bytecodes::_fast_2_getstatic:
++      case Bytecodes::_fast_1_putstatic:
++      case Bytecodes::_fast_2_putstatic:
++      case Bytecodes::_fast_a_putstatic:
++      case Bytecodes::_fast_init_1_getstatic:
++      case Bytecodes::_fast_init_2_getstatic:
++      case Bytecodes::_fast_init_1_putstatic:
++      case Bytecodes::_fast_init_2_putstatic:
++      case Bytecodes::_fast_init_a_putstatic: {
++        const int index = method->get_java_ushort(bci + 1);
++        int offset, class_id;
++        cp().resolved_field_type_at(index, offset, class_id);
++        klass = Universe::class_from_id(class_id);
++        break;
++      }
++      case Bytecodes::_fast_init_new: {
++        SETUP_ERROR_CHECKER_ARG;
++        const int index = method->get_java_ushort(bci + 1);
++        klass = cp().resolved_klass_at(index JVM_MUST_SUCCEED);
++        break;
++      }
++      default:
++        return false;
++    }
++
++    InstanceClass::Raw ic = klass.obj();
++    JavaClassObj::Raw mirror = ic().java_mirror();
++    return !mirror().is_initialized() &&
++           (mirror().in_progress() ||
++            (mirror().status() & JavaClassObj::ERROR_FLAG) != 0);
++  }
++#endif
++
+   void uncommon_trap() {
+     // An uncommon trap has occurred in compiled code.
+     // Deoptimize the frame.
+@@ -1029,12 +1080,27 @@
+     CompiledMethod::Raw trapper = frame.compiled_method();
+     CompiledMethod::Raw method_code;
+     frame.deoptimize();
++
++    // The compiler traps in a bytecode that needs a class whose initialization
++    // has not finished. While the initialization is running, or after it has
++    // failed, the trap is taken on every call, so compiling the method again
++    // at once only produces the same code: leave it to the compiler's log of
++    // interpreted methods, which asks for compilation at a bounded rate.
++    bool class_pending = false;
++#if !ENABLE_ISOLATES
++    class_pending = uses_class_being_initialized(&method, frame.bci());
++#endif
++
+     // Unlink the compiled code.
+     if (method().has_compiled_code()) {
+       method_code = method().compiled_code();
+       if (trapper.equals(&method_code)) {
+         method().unlink_compiled_code();
+-        method().set_execution_entry((address) shared_invoke_compiler);
++        if (class_pending) {
++          method().set_default_interpreter_entry();
++        } else {
++          method().set_execution_entry((address) shared_invoke_compiler);
++        }
+       }
+     }
+ 
