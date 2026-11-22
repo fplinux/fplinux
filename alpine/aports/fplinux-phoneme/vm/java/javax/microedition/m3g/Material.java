@@ -24,6 +24,14 @@ public class Material extends Object3D {
         return shininess;
     }
 
+    public void setVertexColorTrackingEnable(boolean enabled) {
+        vertexColorTracking = enabled;
+    }
+
+    public boolean isVertexColorTrackingEnabled() {
+        return vertexColorTracking;
+    }
+
     public int getColor(int target) {
         switch (target) {
             case AMBIENT: return ambient;

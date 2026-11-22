@@ -57,6 +57,21 @@ public class Camera extends Node {
         return projectionMode;
     }
 
+    // Perspective: field of view, aspect ratio, near and far; parallel: height,
+    // aspect ratio, near and far. A generic projection leaves params untouched.
+    public int getProjection(float[] params) {
+        if (params != null) {
+            if (params.length < 4) throw new IllegalArgumentException("projection parameters");
+            if (projectionMode != GENERIC) {
+                params[0] = extent;
+                params[1] = aspect;
+                params[2] = near;
+                params[3] = far;
+            }
+        }
+        return projectionMode;
+    }
+
     private void remember(int mode, float size, float ratio, float front, float back) {
         projectionMode = mode;
         extent = size;

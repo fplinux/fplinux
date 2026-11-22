@@ -7,6 +7,7 @@ import java.util.Vector;
 public abstract class Object3D {
     private final Vector tracks = new Vector();
     private int userId;
+    private Object userObject;
 
     public int getUserID() {
         return userId;
@@ -14,6 +15,24 @@ public abstract class Object3D {
 
     public void setUserID(int id) {
         userId = id;
+    }
+
+    public Object getUserObject() {
+        return userObject;
+    }
+
+    public void setUserObject(Object value) {
+        userObject = value;
+    }
+
+    public int getReferences(Object3D[] result) {
+        Vector objects = new Vector();
+        references(objects);
+        if (result != null) {
+            if (result.length < objects.size()) throw new IllegalArgumentException("references");
+            for (int i = 0; i < objects.size(); i++) result[i] = (Object3D) objects.elementAt(i);
+        }
+        return objects.size();
     }
 
     public Object3D find(int id) {
@@ -114,6 +133,7 @@ public abstract class Object3D {
 
     void copyFields(Object3D copy, Hashtable copies) {
         copy.userId = userId;
+        copy.userObject = userObject;
         for (int i = 0; i < tracks.size(); i++) {
             copy.tracks.addElement(tracks.elementAt(i));
         }

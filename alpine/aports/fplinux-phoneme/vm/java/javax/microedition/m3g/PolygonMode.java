@@ -22,12 +22,24 @@ public class PolygonMode extends Object3D {
         perspective = enabled;
     }
 
+    public boolean isPerspectiveCorrectionEnabled() {
+        return perspective;
+    }
+
     public void setLocalCameraLightingEnable(boolean enabled) {
         localCameraLighting = enabled;
     }
 
+    public boolean isLocalCameraLightingEnabled() {
+        return localCameraLighting;
+    }
+
     public void setTwoSidedLightingEnable(boolean enabled) {
         twoSidedLighting = enabled;
+    }
+
+    public boolean isTwoSidedLightingEnabled() {
+        return twoSidedLighting;
     }
 
     public void setWinding(int mode) {
@@ -37,6 +49,10 @@ public class PolygonMode extends Object3D {
         winding = mode;
     }
 
+    public int getWinding() {
+        return winding;
+    }
+
     public void setCulling(int mode) {
         if (mode < CULL_BACK || mode > CULL_NONE) {
             throw new IllegalArgumentException("culling mode");
@@ -44,11 +60,19 @@ public class PolygonMode extends Object3D {
         culling = mode;
     }
 
+    public int getCulling() {
+        return culling;
+    }
+
     public void setShading(int mode) {
         if (mode != SHADE_FLAT && mode != SHADE_SMOOTH) {
             throw new IllegalArgumentException("shading mode");
         }
         shading = mode;
+    }
+
+    public int getShading() {
+        return shading;
     }
 
     Object3D newCopy() {

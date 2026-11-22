@@ -41,6 +41,39 @@ public class KeyframeSequence extends Object3D {
         System.arraycopy(vector, 0, values[index], 0, components);
     }
 
+    // A null vector asks for the time alone.
+    public int getKeyframe(int index, float[] vector) {
+        if (vector != null) {
+            if (vector.length < components) throw new IllegalArgumentException("keyframe values");
+            System.arraycopy(values[index], 0, vector, 0, components);
+        }
+        return time[index];
+    }
+
+    public int getKeyframeCount() {
+        return time.length;
+    }
+
+    public int getComponentCount() {
+        return components;
+    }
+
+    public int getInterpolationType() {
+        return interpolation;
+    }
+
+    public int getRepeatMode() {
+        return repeat;
+    }
+
+    public int getValidRangeFirst() {
+        return first;
+    }
+
+    public int getValidRangeLast() {
+        return last;
+    }
+
     public void setDuration(int length) {
         if (length <= 0) {
             throw new IllegalArgumentException("animation duration");

@@ -37,6 +37,26 @@ public class VertexArray extends Object3D {
         System.arraycopy(values, 0, data, firstVertex * components, count);
     }
 
+    public int getComponentType() {
+        return componentSize;
+    }
+
+    public void get(int firstVertex, int numVertices, byte[] values) {
+        int count = checkReadRange(firstVertex, numVertices, values.length, 1);
+        int offset = firstVertex * components;
+        for (int i = 0; i < count; i++) values[i] = (byte) data[offset + i];
+    }
+
+    public void get(int firstVertex, int numVertices, short[] values) {
+        int count = checkReadRange(firstVertex, numVertices, values.length, 2);
+        System.arraycopy(data, firstVertex * components, values, 0, count);
+    }
+
+    private int checkReadRange(int first, int count, int length, int size) {
+        if (size != componentSize) throw new IllegalStateException("vertex component size");
+        return checkRange(first, count, length, size);
+    }
+
     private int checkRange(int first, int count, int length, int size) {
         if (size != componentSize || count < 0 || count > vertices ||
                 length / components < count) throw new IllegalArgumentException("vertex values");

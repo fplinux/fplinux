@@ -49,6 +49,26 @@ public class Texture2D extends Transformable {
         blending = function;
     }
 
+    public int getBlending() {
+        return blending;
+    }
+
+    public void setBlendColor(int rgb) {
+        blendColor = rgb & 0x00ffffff;
+    }
+
+    public int getBlendColor() {
+        return blendColor;
+    }
+
+    public int getWrappingS() {
+        return wrapS;
+    }
+
+    public int getWrappingT() {
+        return wrapT;
+    }
+
     public void setWrapping(int horizontal, int vertical) {
         if ((horizontal != WRAP_CLAMP && horizontal != WRAP_REPEAT) ||
                 (vertical != WRAP_CLAMP && vertical != WRAP_REPEAT)) {

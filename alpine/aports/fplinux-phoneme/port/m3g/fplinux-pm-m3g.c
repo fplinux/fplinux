@@ -4,6 +4,7 @@
 #include <math.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sni.h>
 
@@ -32,6 +33,9 @@ enum {
 	VIEW_Y,
 	VIEWPORT_WIDTH,
 	VIEWPORT_HEIGHT,
+	/* Bits of the floats that depth 0 and 1 map to. */
+	VIEW_DEPTH_NEAR,
+	VIEW_DEPTH_FAR,
 	VIEW_FIELDS,
 };
 
@@ -93,6 +97,7 @@ struct target {
 	struct rectangle clip;
 	int stride;
 	float x, y, half_width, half_height;
+	float depth_near, depth_scale;
 };
 
 struct surface {
@@ -124,11 +129,22 @@ static int upper_bound(float value, int low, int high)
 	return base < high && base < value ? base + 1 : base;
 }
 
-static bool target_init(struct target *target, jarray pixels, jarray depths,
-			jarray view)
+/* The depth buffer is native memory so that it does not take Java heap. */
+static jfloat *depth_buffer;
+static jint depth_capacity;
+
+static float state_float(jint value)
 {
-	if (KNI_IsNullHandle(pixels) || KNI_IsNullHandle(depths) ||
-	    KNI_IsNullHandle(view) || KNI_GetArrayLength(view) != VIEW_FIELDS)
+	float result;
+
+	memcpy(&result, &value, sizeof(result));
+	return result;
+}
+
+static bool target_init(struct target *target, jarray pixels, jarray view)
+{
+	if (KNI_IsNullHandle(pixels) || KNI_IsNullHandle(view) ||
+	    KNI_GetArrayLength(view) != VIEW_FIELDS)
 		return false;
 
 	const jint *bounds = SNI_GetRawArrayPointer(view);
@@ -139,15 +155,17 @@ static bool target_init(struct target *target, jarray pixels, jarray depths,
 	int64_t count = (int64_t)width * height;
 	int64_t right = (int64_t)x + viewport_width;
 	int64_t bottom = (int64_t)y + viewport_height;
+	float depth_near = state_float(bounds[VIEW_DEPTH_NEAR]);
+	float depth_far = state_float(bounds[VIEW_DEPTH_FAR]);
 
 	if (width < 0 || height < 0 || viewport_width <= 0 ||
 	    viewport_height <= 0 || count > KNI_GetArrayLength(pixels) ||
-	    count > KNI_GetArrayLength(depths))
+	    count > depth_capacity)
 		return false;
 
 	*target = (struct target){
 		.pixels = SNI_GetRawArrayPointer(pixels),
-		.depths = SNI_GetRawArrayPointer(depths),
+		.depths = depth_buffer,
 		.clip = {
 			.left = x > 0 ? x : 0,
 			.top = y > 0 ? y : 0,
@@ -159,6 +177,8 @@ static bool target_init(struct target *target, jarray pixels, jarray depths,
 		.y = (float)y,
 		.half_width = (float)viewport_width * .5f,
 		.half_height = (float)viewport_height * .5f,
+		.depth_near = depth_near,
+		.depth_scale = depth_far - depth_near,
 	};
 	return true;
 }
@@ -166,6 +186,57 @@ static bool target_init(struct target *target, jarray pixels, jarray depths,
 static bool empty(const struct rectangle *clip)
 {
 	return clip->left >= clip->right || clip->top >= clip->bottom;
+}
+
+static bool contains(const struct rectangle *outer,
+		     const struct rectangle *inner)
+{
+	return outer->left <= inner->left && outer->top <= inner->top &&
+	       outer->right >= inner->right && outer->bottom >= inner->bottom;
+}
+
+/*
+ * Part of the depth buffer, with this row stride, that holds the cleared
+ * depth because nothing was drawn since it was cleared. Games clear the depth
+ * several times a frame, often twice in a row.
+ */
+static struct rectangle depth_cleared;
+static int depth_cleared_stride;
+
+/* Fills count 32-bit values: doubling copies instead of a store per value. */
+static void fill32(void *start, const void *value, size_t count)
+{
+	unsigned char *bytes = start;
+	size_t filled = 4, total = count * 4;
+
+	if (count == 0)
+		return;
+	memcpy(bytes, value, 4);
+	while (filled < total) {
+		size_t chunk = filled < total - filled ? filled :
+							 total - filled;
+
+		memcpy(bytes + filled, bytes, chunk);
+		filled += chunk;
+	}
+}
+
+static void fill_rectangle(void *buffer, int stride,
+			   const struct rectangle *clip, const void *value)
+{
+	size_t width = (size_t)(clip->right - clip->left);
+	unsigned char *first = (unsigned char *)buffer +
+			       ((size_t)clip->top * stride + clip->left) * 4;
+
+	if (width == (size_t)stride) {
+		fill32(first, value,
+		       width * (size_t)(clip->bottom - clip->top));
+		return;
+	}
+	fill32(first, value, width);
+	for (int y = clip->top + 1; y < clip->bottom; ++y)
+		memcpy(first + (size_t)(y - clip->top) * stride * 4, first,
+		       width * 4);
 }
 
 static unsigned int channel(uint32_t color, unsigned int shift)
@@ -180,6 +251,20 @@ static uint32_t color_component(float value)
 	if (value >= 255)
 		return 255;
 	return (uint32_t)(value + .5f);
+}
+
+/*
+ * color_component without the range tests. Precondition: value is finite and
+ * |value| < 2^30, so that the conversion to an integer is defined.
+ * rasterize() establishes this for the colors it interpolates.
+ */
+static uint32_t color_component_bounded(float value)
+{
+	int rounded = (int)(value + .5f);
+
+	if (rounded < 0)
+		return 0;
+	return rounded > 255 ? 255 : (uint32_t)rounded;
 }
 
 static uint32_t argb(float alpha, const float *rgb)
@@ -331,6 +416,28 @@ static uint32_t texture_color(uint32_t color, const struct surface *surface,
 	return alpha << 24 | rgb;
 }
 
+/*
+ * mix() of all four channels with one weight, two channels per 32-bit
+ * value: the products stay below 2^16 in their halves, and x / 255 for such
+ * a x is (x + 1 + (x >> 8)) >> 8.
+ */
+static uint32_t blend_alpha(uint32_t source, uint32_t destination,
+			    unsigned int weight)
+{
+	uint32_t result = 0;
+
+	for (unsigned int shift = 0; shift < 9; shift += 8) {
+		uint32_t from = (destination >> shift) & 0x00ff00ffU;
+		uint32_t to = (source >> shift) & 0x00ff00ffU;
+		uint32_t sum =
+			from * (255 - weight) + to * weight + 0x007f007fU;
+
+		sum += 0x00010001U + ((sum >> 8) & 0x00ff00ffU);
+		result |= ((sum >> 8) & 0x00ff00ffU) << shift;
+	}
+	return result;
+}
+
 static uint32_t compose(int mode, uint32_t source, uint32_t destination)
 {
 	uint32_t rgb = 0;
@@ -338,15 +445,21 @@ static uint32_t compose(int mode, uint32_t source, uint32_t destination)
 
 	if (mode == REPLACE)
 		return source;
+	if (mode == ALPHA) {
+		/* The weights 255 and 0 give the source and the destination. */
+		if (alpha == 255)
+			return source;
+		if (alpha == 0)
+			return destination;
+		return blend_alpha(source, destination, alpha);
+	}
 
 	for (unsigned int shift = 0; shift <= 24; shift += 8) {
 		unsigned int from = channel(destination, shift);
 		unsigned int to = channel(source, shift);
 		unsigned int value;
 
-		if (mode == ALPHA)
-			value = mix(from, to, alpha);
-		else if (mode == ALPHA_ADD)
+		if (mode == ALPHA_ADD)
 			value = saturated(from + to * alpha / 255);
 		else
 			value = saturated(from * to *
@@ -365,7 +478,8 @@ static struct projected project(const struct target *target,
 	return (struct projected){
 		.x = target->x + (values[X] * inv_w + 1) * target->half_width,
 		.y = target->y + (1 - values[Y] * inv_w) * target->half_height,
-		.z = values[Z] * inv_w * .5f + .5f,
+		.z = target->depth_near +
+		     (values[Z] * inv_w * .5f + .5f) * target->depth_scale,
 		.inv_w = inv_w,
 	};
 }
@@ -385,17 +499,11 @@ static bool includes_edge(const struct projected *a, const struct projected *b,
 	return dy < 0 || (dy == 0 && dx > 0);
 }
 
-static float state_float(jint value)
-{
-	float result;
-
-	memcpy(&result, &value, sizeof(result));
-	return result;
-}
-
-static void rasterize(struct target *target, const struct surface *surface,
-		      const struct vertex *a, const struct vertex *b,
-		      const struct vertex *c, const struct vertex *flat)
+static void rasterize_reference(struct target *target,
+				const struct surface *surface,
+				const struct vertex *a, const struct vertex *b,
+				const struct vertex *c,
+				const struct vertex *flat)
 {
 	const jint *state = surface->state;
 	const struct rectangle *clip = &target->clip;
@@ -439,6 +547,14 @@ static void rasterize(struct target *target, const struct surface *surface,
 			  fmaxf(fabsf(dx), fabsf(dy));
 	}
 
+	/*
+	 * Depth as a step from the first corner: a triangle of one depth, such
+	 * as one drawn with an empty depth range, keeps exactly that depth.
+	 */
+	float z_first = pa.z + offset;
+	float z_to_b = pb.z - pa.z;
+	float z_to_c = pc.z - pa.z;
+
 	uint32_t write_mask = ((flags & COLOR_WRITE) ? 0x00ffffffU : 0) |
 			      ((flags & ALPHA_WRITE) ? 0xff000000U : 0);
 	int rgb_start = !front && (flags & BACK_LIGHTING) ? BACK_R : R;
@@ -467,7 +583,7 @@ static void rasterize(struct target *target, const struct surface *surface,
 			    (wb == 0 && !edge_b) || wc < 0 ||
 			    (wc == 0 && !edge_c))
 				continue;
-			float z = wa * pa.z + wb * pb.z + wc * pc.z + offset;
+			float z = z_first + wb * z_to_b + wc * z_to_c;
 
 			if ((flags & DEPTH_TEST) &&
 			    z > target->depths[position])
@@ -526,6 +642,709 @@ static void rasterize(struct target *target, const struct surface *surface,
 				       (under & ~write_mask));
 		}
 	}
+}
+
+/* Code of the pixel loops that must be part of each of its specialisations. */
+#define INLINE static inline __attribute__((always_inline))
+
+/*
+ * Specialisations of the pixel loop. The first bits select the stages of the
+ * loop; the others state facts about the triangle that the loop would
+ * otherwise test for every pixel. A specialisation exists for the
+ * combinations that drawing commonly produces.
+ */
+enum {
+	MODE_TEST = 1,
+	MODE_WRITE = 2,
+	MODE_SMOOTH = 4,
+	MODE_TEXTURE = 8,
+	MODE_PERSPECTIVE = 16,
+	MODE_BASE = 31,
+	/* The blend is REPLACE. */
+	MODE_REPLACE = 32,
+	/* No alpha test and no fog, and the texture filter is not linear. */
+	MODE_PLAIN = 64,
+	/* How the texel and the color combine, see blend_kind(). */
+	MODE_TEXEL = 128,
+	MODE_MASKED = 256,
+	MODE_MODULATE = 512,
+	/* Both wrap modes repeat. */
+	MODE_REPEAT = 1024,
+};
+
+/* Everything the pixel loop needs, so that it can keep it in locals. */
+struct raster {
+	jint *pixels;
+	jfloat *depths;
+	const jint *texture;
+	const struct surface *surface;
+	const struct vertex *a, *b, *c;
+	struct projected pa, pb, pc;
+	int stride, left, top, right, bottom;
+	float inv_area, step_a, step_b, step_c;
+	float z_first, z_to_b, z_to_c;
+	uint32_t write_mask, triangle_color, fog_rgb, blend_color;
+	int rgb_start, blend, threshold, function, width, height;
+	bool edge_a, edge_b, edge_c, fog, repeat_s, repeat_t, linear;
+	bool has_color, has_alpha, wide;
+	int kind;
+	uint32_t texel_mask;
+};
+
+INLINE float floor_float(float value)
+{
+	float whole;
+
+	if (fabsf(value) >= 8388608.0f)
+		return value;
+	whole = (float)(int)value;
+	return whole > value ? whole - 1.0f : whole;
+}
+
+/*
+ * texture_coordinate with the extent conversions done once per triangle; a
+ * coordinate inside the texture needs neither the finite check nor wrapping.
+ */
+INLINE int nearest_index(float coord, int extent, float flimit, bool repeat)
+{
+	if (!(coord >= 0 && coord < 1)) {
+		if (!isfinite(coord))
+			return 0;
+		if (repeat)
+			coord -= floor_float(coord);
+	}
+	float value = coord * (float)extent;
+
+	if (value <= 0)
+		return 0;
+	if (value >= flimit)
+		return extent - 1;
+	return (int)value;
+}
+
+/* How the texel and the color combine, the common cases apart from the rest. */
+enum {
+	BLEND_TEXEL,
+	BLEND_MASKED,
+	BLEND_MODULATE,
+	BLEND_GENERIC,
+};
+
+static int blend_kind(int function, bool has_color, bool has_alpha)
+{
+	if (function == TEXTURE_REPLACE)
+		return has_color && has_alpha ? BLEND_TEXEL : BLEND_MASKED;
+	if (has_color && function != TEXTURE_ADD && function != TEXTURE_BLEND &&
+	    function != TEXTURE_DECAL)
+		return BLEND_MODULATE;
+	return BLEND_GENERIC;
+}
+
+/* Same as texture_color after the texel is known. */
+INLINE uint32_t texture_blend(uint32_t color, uint32_t texel, int function,
+			      bool has_color, bool has_alpha,
+			      uint32_t blend_color)
+{
+	unsigned int alpha = channel(color, 24), tex_alpha = channel(texel, 24);
+	uint32_t rgb = 0;
+
+	if (function == TEXTURE_REPLACE)
+		return ((has_alpha ? texel : color) & 0xff000000U) |
+		       ((has_color ? texel : color) & 0x00ffffffU);
+	if (!has_color) {
+		if (function != TEXTURE_DECAL)
+			alpha = alpha * tex_alpha / 255;
+		return (color & 0x00ffffffU) | (alpha << 24);
+	}
+	if (color == 0xffffffffU && function != TEXTURE_ADD &&
+	    function != TEXTURE_BLEND && function != TEXTURE_DECAL)
+		return texel;
+
+	for (unsigned int shift = 0; shift < 24; shift += 8) {
+		unsigned int from = channel(color, shift);
+		unsigned int to = channel(texel, shift);
+		unsigned int value;
+
+		switch (function) {
+		case TEXTURE_DECAL:
+			value = mix(from, to, tex_alpha);
+			break;
+		case TEXTURE_ADD:
+			value = saturated(from + to);
+			break;
+		case TEXTURE_BLEND:
+			value = mix(from, channel(blend_color, shift), to);
+			break;
+		default:
+			value = from * to / 255;
+			break;
+		}
+		rgb |= value << shift;
+	}
+	if (has_alpha && function != TEXTURE_DECAL)
+		alpha = alpha * tex_alpha / 255;
+	return alpha << 24 | rgb;
+}
+
+/* texture_blend for the modulate function of a texture that has color. */
+INLINE uint32_t modulate(uint32_t color, uint32_t texel, bool has_alpha)
+{
+	unsigned int alpha = channel(color, 24);
+
+	if (color == 0xffffffffU)
+		return texel;
+	if (has_alpha)
+		alpha = alpha * channel(texel, 24) / 255;
+	return alpha << 24 |
+	       (channel(color, 16) * channel(texel, 16) / 255) << 16 |
+	       (channel(color, 8) * channel(texel, 8) / 255) << 8 |
+	       channel(color, 0) * channel(texel, 0) / 255;
+}
+
+/*
+ * How many of the next pixels, at most limit, a running sum surely spends on
+ * one side of zero, given its distance from zero in pixels (distance divided
+ * by the step). The sum differs from the straight line by rounding, at most a
+ * few parts in 10^5 of the distance over a row of up to 1024 pixels; the
+ * count stays well within that and one pixel short.
+ */
+INLINE int sure_pixels(float distance, int limit)
+{
+	float count = distance - distance * (1.0f / 1024) - 1;
+
+	if (!(count > 0))
+		return 0;
+	if (count >= (float)limit)
+		return limit;
+	return (int)count;
+}
+
+/*
+ * The pixels of a row that pass the edge tests are consecutive: each
+ * barycentric value is a running sum of one constant, so it only moves one
+ * way and its test can only change once. Rows are therefore walked up to the
+ * first covered pixel and left at the first uncovered pixel after it. The sums
+ * and the tests are those of the generic loop. In wide rows the tests of
+ * pixels that surely fail, or surely pass, are left out, as far as the
+ * distance of the sums from zero allows.
+ */
+/* Nearly every tested value is positive: that case needs one comparison. */
+#define EDGE_PASS(w, included) \
+	(__builtin_expect((w) > 0, 1) || ((w) == 0 && (included)))
+
+INLINE void raster_rows(const struct raster *r, const int mode)
+{
+#pragma STDC FP_CONTRACT OFF
+	jint *const pixels = r->pixels;
+	jfloat *const depths = r->depths;
+	const jint *const texture = r->texture;
+	const struct projected pa = r->pa, pb = r->pb, pc = r->pc;
+	const int stride = r->stride, left = r->left, right = r->right;
+	const int bottom = r->bottom;
+	const float inv_area = r->inv_area;
+	const float step_a = r->step_a, step_b = r->step_b, step_c = r->step_c;
+	const float z_first = r->z_first, z_to_b = r->z_to_b,
+		    z_to_c = r->z_to_c;
+	const uint32_t write_mask = r->write_mask;
+	const uint32_t keep_mask = ~write_mask;
+	const uint32_t triangle_color = r->triangle_color;
+	const int blend = r->blend;
+	const int threshold = (mode & MODE_PLAIN) ? 0 : r->threshold;
+	const bool edge_a = r->edge_a, edge_b = r->edge_b, edge_c = r->edge_c;
+	const bool fog = !(mode & MODE_PLAIN) && r->fog;
+	const bool whole = write_mask == 0xffffffffU;
+	const float *const va = r->a->values, *const vb = r->b->values;
+	const float *const vc = r->c->values;
+	const int rgb_start = r->rgb_start;
+	const float alpha_a = va[A], alpha_b = vb[A], alpha_c = vc[A];
+	const float red_a = va[rgb_start], red_b = vb[rgb_start];
+	const float red_c = vc[rgb_start];
+	const float green_a = va[rgb_start + 1], green_b = vb[rgb_start + 1];
+	const float green_c = vc[rgb_start + 1];
+	const float blue_a = va[rgb_start + 2], blue_b = vb[rgb_start + 2];
+	const float blue_c = vc[rgb_start + 2];
+	const float fog_a = va[FOG], fog_b = vb[FOG], fog_c = vc[FOG];
+	const float u_a = va[U], u_b = vb[U], u_c = vc[U];
+	const float v_a = va[V], v_b = vb[V], v_c = vc[V];
+	const float inv_w_a = pa.inv_w, inv_w_b = pb.inv_w, inv_w_c = pc.inv_w;
+	const int width = r->width, height = r->height;
+	const float limit_s = (float)(width - 1), limit_t = (float)(height - 1);
+	const bool repeat_s = (mode & MODE_REPEAT) || r->repeat_s;
+	const bool repeat_t = (mode & MODE_REPEAT) || r->repeat_t;
+	const bool linear = !(mode & MODE_PLAIN) && r->linear;
+	const int function = r->function;
+	const bool has_color = r->has_color, has_alpha = r->has_alpha;
+	const uint32_t blend_color = r->blend_color;
+	const uint32_t texel_mask = r->texel_mask;
+	const int kind = (mode & MODE_TEXEL)	? BLEND_TEXEL :
+			 (mode & MODE_MASKED)	? BLEND_MASKED :
+			 (mode & MODE_MODULATE) ? BLEND_MODULATE :
+						  r->kind;
+	/* The channels of the vertex color that the texture keeps. */
+	const uint32_t unmasked = !(mode & MODE_TEXTURE) ? 0xffffffffU :
+				  kind == BLEND_TEXEL	 ? 0 :
+				  kind == BLEND_MASKED	 ? ~texel_mask :
+							   0xffffffffU;
+	const bool need_alpha = unmasked >> 24;
+	const bool need_rgb = unmasked & 0x00ffffffU;
+	/* Long rows: pixels per unit of a sum, for its distance from zero. */
+	const bool wide = r->wide;
+	float rise_a = 0, rise_b = 0, rise_c = 0, fall_a = 0, fall_b = 0,
+	      fall_c = 0;
+	bool bounded = false;
+
+	if (wide) {
+		/* Steps nearer to zero are not trusted for the distance. */
+		rise_a = step_a >= 1e-9f ? 1.0f / step_a : 0;
+		rise_b = step_b >= 1e-9f ? 1.0f / step_b : 0;
+		rise_c = step_c >= 1e-9f ? 1.0f / step_c : 0;
+		fall_a = step_a <= -1e-9f ? -1.0f / step_a : 0;
+		fall_b = step_b <= -1e-9f ? -1.0f / step_b : 0;
+		fall_c = step_c <= -1e-9f ? -1.0f / step_c : 0;
+		bounded = (step_a >= 0 || step_a <= -1e-9f) &&
+			  (step_b >= 0 || step_b <= -1e-9f) &&
+			  (step_c >= 0 || step_c <= -1e-9f);
+	}
+	/* The edge functions of all rows share terms of the first column. */
+	const float first_x = left + .5f;
+	const float dx_a = pc.x - pb.x,
+		    term_a = (pc.y - pb.y) * (first_x - pb.x);
+	const float dx_b = pa.x - pc.x,
+		    term_b = (pa.y - pc.y) * (first_x - pc.x);
+	const float dx_c = pb.x - pa.x,
+		    term_c = (pb.y - pa.y) * (first_x - pa.x);
+
+	for (int y = r->top; y < bottom; ++y) {
+		const float row_y = y + .5f;
+		float wa = (dx_a * (row_y - pb.y) - term_a) * inv_area;
+		float wb = (dx_b * (row_y - pc.y) - term_b) * inv_area;
+		float wc = (dx_c * (row_y - pa.y) - term_c) * inv_area;
+		int x = left;
+
+		if (wide) {
+			/* Rising sums below zero: no pixel is covered yet. */
+			int skip = sure_pixels(-wa * rise_a, right - x);
+			int more = sure_pixels(-wb * rise_b, right - x);
+
+			if (more > skip)
+				skip = more;
+			more = sure_pixels(-wc * rise_c, right - x);
+			if (more > skip)
+				skip = more;
+			for (int i = 0; i < skip;
+			     ++i, wa += step_a, wb += step_b, wc += step_c)
+				;
+			x += skip;
+		}
+		/* Up to the first covered pixel. */
+		for (;; ++x, wa += step_a, wb += step_b, wc += step_c) {
+			if (x >= right)
+				goto next_row;
+			if (!EDGE_PASS(wa, edge_a)) {
+				/* A sum that does not grow never passes. */
+				if (!(step_a > 0))
+					goto next_row;
+				continue;
+			}
+			if (!EDGE_PASS(wb, edge_b)) {
+				if (!(step_b > 0))
+					goto next_row;
+				continue;
+			}
+			if (!EDGE_PASS(wc, edge_c)) {
+				if (!(step_c > 0))
+					goto next_row;
+				continue;
+			}
+			break;
+		}
+		jint *pixel = pixels + (y * stride + x);
+		jfloat *depth = depths + (y * stride + x);
+
+		/* Falling sums that stay above zero need no test. */
+		int tested = x;
+
+		if (wide) {
+			int sure = right - x;
+
+			if (!bounded) {
+				sure = 0;
+			} else {
+				if (fall_a > 0)
+					sure = sure_pixels(wa * fall_a, sure);
+				if (fall_b > 0)
+					sure = sure_pixels(wb * fall_b, sure);
+				if (fall_c > 0)
+					sure = sure_pixels(wc * fall_c, sure);
+			}
+			tested = x + sure;
+		}
+		for (; x < right; ++x, ++pixel, ++depth, wa += step_a,
+				  wb += step_b, wc += step_c) {
+			if (x >= tested &&
+			    (!EDGE_PASS(wa, edge_a) || !EDGE_PASS(wb, edge_b) ||
+			     !EDGE_PASS(wc, edge_c)))
+				break;
+			float z = z_first + wb * z_to_b + wc * z_to_c;
+
+			if ((mode & MODE_TEST) && z > *depth)
+				continue;
+			uint32_t color = triangle_color;
+
+			if (mode & MODE_SMOOTH) {
+				/* Channels that the texture replaces stay 0. */
+				color = 0;
+				if (need_alpha)
+					color = color_component_bounded(
+							wa * alpha_a +
+							wb * alpha_b +
+							wc * alpha_c)
+						<< 24;
+				if (need_rgb) {
+					float red = wa * red_a + wb * red_b +
+						    wc * red_c;
+					float green = wa * green_a +
+						      wb * green_b +
+						      wc * green_c;
+					float blue = wa * blue_a + wb * blue_b +
+						     wc * blue_c;
+
+					color |= color_component_bounded(red)
+							 << 16 |
+						 color_component_bounded(green)
+							 << 8 |
+						 color_component_bounded(blue);
+				}
+			}
+			if (mode & MODE_TEXTURE) {
+				float ua = wa, ub = wb, uc = wc;
+
+				if (mode & MODE_PERSPECTIVE) {
+					ua *= inv_w_a;
+					ub *= inv_w_b;
+					uc *= inv_w_c;
+				}
+				float divisor = (mode & MODE_PERSPECTIVE) ?
+							1 / (ua + ub + uc) :
+							1;
+				float u = (ua * u_a + ub * u_b + uc * u_c) *
+					  divisor;
+				float v = (ua * v_a + ub * v_b + uc * v_c) *
+					  divisor;
+				uint32_t texel;
+
+				if (linear) {
+					texel = sample_linear(r->surface, u, v);
+				} else {
+					int s = nearest_index(u, width, limit_s,
+							      repeat_s);
+					int t = nearest_index(
+						v, height, limit_t, repeat_t);
+
+					texel = (uint32_t)texture[t * width + s];
+				}
+				switch (kind) {
+				case BLEND_TEXEL:
+					color = texel;
+					break;
+				case BLEND_MASKED:
+					color = (texel & texel_mask) |
+						(color & ~texel_mask);
+					break;
+				case BLEND_MODULATE:
+					color = modulate(color, texel,
+							 has_alpha);
+					break;
+				default:
+					color = texture_blend(color, texel,
+							      function,
+							      has_color,
+							      has_alpha,
+							      blend_color);
+					break;
+				}
+			}
+			if (threshold > 0 &&
+			    (int)channel(color, 24) < threshold)
+				continue;
+			if (fog)
+				color = fog_color(color, r->fog_rgb,
+						  wa * fog_a + wb * fog_b +
+							  wc * fog_c);
+			if (mode & MODE_WRITE)
+				*depth = z;
+			if ((mode & MODE_REPLACE) || blend == REPLACE) {
+				if (whole)
+					*pixel = (jint)color;
+				else
+					*pixel = (jint)((color & write_mask) |
+							((uint32_t)*pixel &
+							 keep_mask));
+			} else {
+				uint32_t under = (uint32_t)*pixel;
+				uint32_t value;
+
+				if (blend != ALPHA)
+					value = compose(blend, color, under);
+				else if (color >> 24 == 255)
+					value = color;
+				else if (color >> 24 == 0)
+					continue;
+				else
+					value = blend_alpha(color, under,
+							    color >> 24);
+				*pixel = (jint)((value & write_mask) |
+						(under & keep_mask));
+			}
+		}
+next_row:;
+	}
+}
+
+/* The loop for any state: the facts that mode does not give are tested. */
+static __attribute__((noinline)) void raster_runtime(const struct raster *r,
+						     int mode)
+{
+	raster_rows(r, mode);
+}
+
+/*
+ * Loops with the state that games commonly draw with built in: the exact mode
+ * and the function that runs it.
+ * A color that the texture replaces entirely is not interpolated, so
+ * MODE_SMOOTH is not part of the texel loops.
+ */
+#define TEXTURED (MODE_TEST | MODE_TEXTURE | MODE_PERSPECTIVE | MODE_REPLACE)
+#define VARIANTS(X)                                                         \
+	X(raster_solid, MODE_TEST | MODE_WRITE | MODE_REPLACE | MODE_PLAIN) \
+	X(raster_gouraud,                                                   \
+	  MODE_TEST | MODE_WRITE | MODE_SMOOTH | MODE_REPLACE | MODE_PLAIN) \
+	X(raster_masked, MODE_TEST | MODE_WRITE | MODE_TEXTURE |            \
+				 MODE_REPLACE | MODE_PLAIN | MODE_MASKED)   \
+	X(raster_masked_smooth, MODE_TEST | MODE_WRITE | MODE_SMOOTH |      \
+					MODE_TEXTURE | MODE_REPLACE |       \
+					MODE_PLAIN | MODE_MASKED)           \
+	X(raster_modulate_smooth, TEXTURED | MODE_WRITE | MODE_SMOOTH |     \
+					  MODE_PLAIN | MODE_MODULATE |      \
+					  MODE_REPEAT)                      \
+	X(raster_texel_write,                                               \
+	  TEXTURED | MODE_WRITE | MODE_PLAIN | MODE_TEXEL | MODE_REPEAT)    \
+	X(raster_texel,                                                     \
+	  (TEXTURED & ~MODE_REPLACE) | MODE_PLAIN | MODE_TEXEL | MODE_REPEAT)
+
+#define DEFINE_VARIANT(name, bits)                                         \
+	static __attribute__((noinline)) void name(const struct raster *r) \
+	{                                                                  \
+		raster_rows(r, bits);                                      \
+	}
+
+VARIANTS(DEFINE_VARIANT)
+
+/* fminf and fmaxf for values that are not not-a-number, without a call. */
+static inline float smaller(float a, float b)
+{
+	return b < a ? b : a;
+}
+
+static inline float larger(float a, float b)
+{
+	return b > a ? b : a;
+}
+
+/*
+ * Rasterizes one triangle. Corners with a positive w are projected, the
+ * state is gathered once and the pixel loop of the matching specialisation
+ * runs. Values that would make the sums of the pixel loop unordered (not
+ * finite) take the generic loop.
+ */
+static void rasterize(struct target *target, const struct surface *surface,
+		      const struct vertex *a, const struct vertex *b,
+		      const struct vertex *c, const struct vertex *flat)
+{
+#pragma STDC FP_CONTRACT OFF
+	const jint *state = surface->state;
+	const struct rectangle *clip = &target->clip;
+	int flags = state[FLAGS];
+
+	if (!(a->values[W] > 0 && b->values[W] > 0 && c->values[W] > 0))
+		return;
+	struct projected pa = project(target, a), pb = project(target, b);
+	struct projected pc = project(target, c);
+	float area = edge(&pa, &pb, pc.x, pc.y);
+	bool front = state[WINDING] == WINDING_CCW ? area < 0 : area > 0;
+
+	if (!isfinite(area) || area == 0 ||
+	    (state[CULLING] == CULL_BACK && !front) ||
+	    (state[CULLING] == CULL_FRONT && front))
+		return;
+
+	/* The area is finite, so no corner is not-a-number. */
+	int left = lower_bound(smaller(pa.x, smaller(pb.x, pc.x)), clip->left,
+			       clip->right);
+	int top = lower_bound(smaller(pa.y, smaller(pb.y, pc.y)), clip->top,
+			      clip->bottom);
+	int right = upper_bound(larger(pa.x, larger(pb.x, pc.x)), clip->left,
+				clip->right);
+	int bottom = upper_bound(larger(pa.y, larger(pb.y, pc.y)), clip->top,
+				 clip->bottom);
+	if (left >= right || top >= bottom)
+		return;
+
+	float inv_area = 1.0f / area;
+	float step_a = (pb.y - pc.y) * inv_area;
+	float step_b = (pc.y - pa.y) * inv_area;
+	float step_c = (pa.y - pb.y) * inv_area;
+	/* Every sum is then finite or infinite, never undefined. */
+	if (!(fabsf(pa.x) + fabsf(pa.y) + fabsf(pb.x) + fabsf(pb.y) +
+		      fabsf(pc.x) + fabsf(pc.y) <
+	      1e9f) ||
+	    !(fabsf(inv_area) + fabsf(step_a) + fabsf(step_b) + fabsf(step_c) <
+	      INFINITY)) {
+		rasterize_reference(target, surface, a, b, c, flat);
+		return;
+	}
+	float offset = state_float(state[DEPTH_UNITS]) / 65535.0f;
+	if (state[DEPTH_FACTOR]) {
+		float dx = pa.z * step_a + pb.z * step_b + pc.z * step_c;
+		float dy = (pa.z * (pc.x - pb.x) + pb.z * (pa.x - pc.x) +
+			    pc.z * (pb.x - pa.x)) *
+			   inv_area;
+
+		offset += state_float(state[DEPTH_FACTOR]) *
+			  fmaxf(fabsf(dx), fabsf(dy));
+	}
+
+	int rgb_start = !front && (flags & BACK_LIGHTING) ? BACK_R : R;
+	uint32_t first[3], second[3], third[3];
+
+	memcpy(first, a->values + rgb_start, sizeof(first));
+	memcpy(second, b->values + rgb_start, sizeof(second));
+	memcpy(third, c->values + rgb_start, sizeof(third));
+	bool smooth = (flags & SMOOTH) &&
+		      (a->values[A] != b->values[A] ||
+		       a->values[A] != c->values[A] || first[0] != second[0] ||
+		       first[1] != second[1] || first[2] != second[2] ||
+		       first[0] != third[0] || first[1] != third[1] ||
+		       first[2] != third[2]);
+	if (smooth) {
+		/*
+		 * The pixel loop converts the interpolated colors without range
+		 * tests, see color_component_bounded(). A covered pixel is
+		 * within the box of the corners, so an edge function is at
+		 * most 2 * box (width + 2 times height + 2), and a row start
+		 * plus the steps along the row give a weight of at most
+		 * 3 * box * inv_area; the factor 2 covers rounding. A color
+		 * is at most 3 * weight times the sum of the absolute color
+		 * values. If that could reach 2^30, or is not a number, the
+		 * generic loop runs.
+		 */
+		float width_x = larger(pa.x, larger(pb.x, pc.x)) -
+				smaller(pa.x, smaller(pb.x, pc.x));
+		float width_y = larger(pa.y, larger(pb.y, pc.y)) -
+				smaller(pa.y, smaller(pb.y, pc.y));
+		float weight =
+			6 * (width_x + 2) * (width_y + 2) * fabsf(inv_area);
+		float magnitude = 0;
+
+		for (int i = 0; i < 4; ++i) {
+			int index = i ? rgb_start + i - 1 : A;
+
+			magnitude += fabsf(a->values[index]) +
+				     fabsf(b->values[index]) +
+				     fabsf(c->values[index]);
+		}
+		if (!(3 * weight * magnitude < 1e9f)) {
+			rasterize_reference(target, surface, a, b, c, flat);
+			return;
+		}
+	}
+	const struct vertex *color_source = flags & SMOOTH ? a : flat;
+	int format = state[TEXTURE_FORMAT];
+	struct raster raster = {
+		.pixels = target->pixels,
+		.depths = target->depths,
+		.texture = surface->texture,
+		.surface = surface,
+		.a = a,
+		.b = b,
+		.c = c,
+		.pa = pa,
+		.pb = pb,
+		.pc = pc,
+		.stride = target->stride,
+		.left = left,
+		.top = top,
+		.right = right,
+		.bottom = bottom,
+		.inv_area = inv_area,
+		.step_a = step_a,
+		.step_b = step_b,
+		.step_c = step_c,
+		/*
+		 * Depth as a step from the first corner: a triangle of one
+		 * depth, such as one drawn with an empty depth range, keeps
+		 * exactly that depth.
+		 */
+		.z_first = pa.z + offset,
+		.z_to_b = pb.z - pa.z,
+		.z_to_c = pc.z - pa.z,
+		.write_mask = ((flags & COLOR_WRITE) ? 0x00ffffffU : 0) |
+			      ((flags & ALPHA_WRITE) ? 0xff000000U : 0),
+		.triangle_color =
+			smooth ? 0 :
+				 argb(color_source->values[A],
+				      color_source->values + rgb_start),
+		.fog_rgb = (uint32_t)state[FOG_COLOR],
+		.blend_color = (uint32_t)state[BLEND_COLOR],
+		.rgb_start = rgb_start,
+		.blend = state[BLEND],
+		.threshold = state[THRESHOLD],
+		.function = state[TEXTURE_FUNCTION],
+		.width = state[TEXTURE_WIDTH],
+		.height = state[TEXTURE_HEIGHT],
+		.edge_a = includes_edge(&pb, &pc, area),
+		.edge_b = includes_edge(&pc, &pa, area),
+		.edge_c = includes_edge(&pa, &pb, area),
+		.fog = flags & FOG_ENABLED,
+		.repeat_s = state[WRAP_S] == WRAP_REPEAT,
+		.repeat_t = state[WRAP_T] == WRAP_REPEAT,
+		.linear = surface->texture &&
+			  state[IMAGE_FILTER] == FILTER_LINEAR,
+		.has_color = format != IMAGE_ALPHA,
+		.has_alpha = format != IMAGE_LUMINANCE && format != IMAGE_RGB,
+	};
+	raster.kind =
+		blend_kind(raster.function, raster.has_color, raster.has_alpha);
+	raster.texel_mask = (raster.has_alpha ? 0xff000000U : 0) |
+			    (raster.has_color ? 0x00ffffffU : 0);
+	int mode = ((flags & DEPTH_TEST) ? MODE_TEST : 0) |
+		   ((flags & DEPTH_WRITE) ? MODE_WRITE : 0) |
+		   (smooth ? MODE_SMOOTH : 0);
+
+	if (raster.blend == REPLACE)
+		mode |= MODE_REPLACE;
+	if (!raster.fog && raster.threshold <= 0 && !raster.linear)
+		mode |= MODE_PLAIN;
+	if (surface->texture) {
+		mode |= MODE_TEXTURE |
+			((flags & PERSPECTIVE) ? MODE_PERSPECTIVE : 0) |
+			(raster.repeat_s && raster.repeat_t ? MODE_REPEAT : 0);
+		if (raster.kind == BLEND_TEXEL)
+			mode = (mode | MODE_TEXEL) & ~MODE_SMOOTH;
+		else if (raster.kind == BLEND_MASKED)
+			mode |= MODE_MASKED;
+		else if (raster.kind == BLEND_MODULATE)
+			mode |= MODE_MODULATE;
+	}
+	raster.wide = right - left >= 16 && right - left <= 1024;
+	switch (mode) {
+#define RUN_VARIANT(name, bits) \
+	case bits:              \
+		name(&raster);  \
+		return;
+		VARIANTS(RUN_VARIANT)
+	}
+	raster_runtime(&raster, mode & MODE_BASE);
 }
 
 static float distance(const struct vertex *vertex, unsigned int plane)
@@ -677,26 +1496,46 @@ static int background_index(int position, int origin, int view_size, int start,
 	return index < 0 ? index + extent : index;
 }
 
+KNIEXPORT KNI_RETURNTYPE_VOID
+KNIDECL(javax_microedition_m3g_Rasterizer_bindDepth0)
+{
+	jint count = KNI_GetParameterAsInt(1);
+
+	if (count > depth_capacity) {
+		/* Zeroed like the Java array it replaces. */
+		jfloat *buffer = calloc((size_t)count, sizeof(*buffer));
+
+		if (buffer == NULL) {
+			KNI_ThrowNew("java/lang/OutOfMemoryError",
+				     "M3G depth buffer");
+		} else {
+			free(depth_buffer);
+			depth_buffer = buffer;
+			depth_capacity = count;
+			depth_cleared = (struct rectangle){ 0 };
+		}
+	}
+	KNI_ReturnVoid();
+}
+
 KNIEXPORT KNI_RETURNTYPE_VOID KNIDECL(javax_microedition_m3g_Rasterizer_clear0)
 {
 	struct target target;
-	jint color = KNI_GetParameterAsInt(4);
-	jboolean color_clear = KNI_GetParameterAsBoolean(5);
-	jboolean depth_clear = KNI_GetParameterAsBoolean(6);
-	uint32_t alpha = KNI_GetParameterAsBoolean(9) ? 0xff000000U : 0;
+	jint color = KNI_GetParameterAsInt(3);
+	jboolean color_clear = KNI_GetParameterAsBoolean(4);
+	jboolean depth_clear = KNI_GetParameterAsBoolean(5);
+	uint32_t alpha = KNI_GetParameterAsBoolean(8) ? 0xff000000U : 0;
 
-	KNI_StartHandles(5);
+	KNI_StartHandles(4);
 	KNI_DeclareHandle(pixels);
-	KNI_DeclareHandle(depths);
 	KNI_DeclareHandle(view);
 	KNI_DeclareHandle(image);
 	KNI_DeclareHandle(crop);
 	KNI_GetParameterAsObject(1, pixels);
-	KNI_GetParameterAsObject(2, depths);
-	KNI_GetParameterAsObject(3, view);
-	KNI_GetParameterAsObject(7, image);
-	KNI_GetParameterAsObject(8, crop);
-	if (!target_init(&target, pixels, depths, view)) {
+	KNI_GetParameterAsObject(2, view);
+	KNI_GetParameterAsObject(6, image);
+	KNI_GetParameterAsObject(7, crop);
+	if (!target_init(&target, pixels, view)) {
 		KNI_ThrowNew("java/lang/IllegalArgumentException",
 			     "M3G target");
 	} else if (!empty(&target.clip)) {
@@ -714,21 +1553,21 @@ KNIEXPORT KNI_RETURNTYPE_VOID KNIDECL(javax_microedition_m3g_Rasterizer_clear0)
 				source = SNI_GetRawArrayPointer(image);
 		}
 
-		for (int y = clip->top; y < clip->bottom; ++y) {
+		if (color_clear && !source)
+			fill_rectangle(target.pixels, target.stride, clip,
+				       &color);
+		for (int y = clip->top;
+		     color_clear && source && y < clip->bottom; ++y) {
 			jint *pixel_row = target.pixels + y * target.stride;
-			jfloat *depth_row = target.depths + y * target.stride;
-			int sy = source ? background_index(
-						  y, layout[VIEW_Y],
+			int sy = background_index(y, layout[VIEW_Y],
 						  layout[VIEWPORT_HEIGHT],
 						  region[3], region[5],
-						  region[1], region[7]) :
-					  -1;
+						  region[1], region[7]);
 
-			/* Separate row loops let the compiler emit plain stores. */
-			if (color_clear && sy < 0) {
+			if (sy < 0) {
 				for (int x = clip->left; x < clip->right; ++x)
 					pixel_row[x] = color;
-			} else if (color_clear) {
+			} else {
 				for (int x = clip->left; x < clip->right; ++x) {
 					int sx = background_index(
 						x, layout[VIEW_X],
@@ -745,9 +1584,19 @@ KNIEXPORT KNI_RETURNTYPE_VOID KNIDECL(javax_microedition_m3g_Rasterizer_clear0)
 							       alpha);
 				}
 			}
-			if (depth_clear) {
-				for (int x = clip->left; x < clip->right; ++x)
-					depth_row[x] = 1;
+		}
+		if (depth_clear && (depth_cleared_stride != target.stride ||
+				    !contains(&depth_cleared, clip))) {
+			const jfloat far = 1;
+
+			fill_rectangle(target.depths, target.stride, clip,
+				       &far);
+			/* Keep the larger of the known cleared parts. */
+			if (depth_cleared_stride != target.stride ||
+			    empty(&depth_cleared) ||
+			    contains(clip, &depth_cleared)) {
+				depth_cleared = *clip;
+				depth_cleared_stride = target.stride;
 			}
 		}
 	}
@@ -778,6 +1627,95 @@ KNIDECL(javax_microedition_m3g_Transformable_angleDegrees0)
 			(360.0f / 3.141592653589793f));
 }
 
+/*
+ * Transform matrices are 16 floats in rows. The float operations and their
+ * order are those of the Java code the natives replace.
+ */
+static void multiply_matrices(jfloat *left, const jfloat *right)
+{
+#pragma STDC FP_CONTRACT OFF
+	float result[16];
+
+	for (int i = 0; i < 16; i += 4) {
+		for (int j = 0; j < 4; ++j)
+			result[i + j] = left[i] * right[j] +
+					left[i + 1] * right[4 + j] +
+					left[i + 2] * right[8 + j] +
+					left[i + 3] * right[12 + j];
+	}
+	memcpy(left, result, sizeof(result));
+}
+
+/* Gauss-Jordan elimination with partial pivoting on [matrix | identity]. */
+static bool invert_matrix(jfloat *matrix)
+{
+#pragma STDC FP_CONTRACT OFF
+	float storage[4][8] = { { 0 } };
+	float *rows[4];
+
+	for (int i = 0; i < 4; ++i) {
+		rows[i] = storage[i];
+		memcpy(rows[i], matrix + 4 * i, 4 * sizeof(float));
+		rows[i][i + 4] = 1;
+	}
+	for (int column = 0; column < 4; ++column) {
+		int pivot = column;
+
+		for (int candidate = column + 1; candidate < 4; ++candidate) {
+			if (fabsf(rows[candidate][column]) >
+			    fabsf(rows[pivot][column]))
+				pivot = candidate;
+		}
+		float *basis = rows[pivot];
+
+		if (basis[column] == 0)
+			return false;
+		rows[pivot] = rows[column];
+		rows[column] = basis;
+		float divisor = basis[column];
+
+		for (int k = column; k < 8; ++k)
+			basis[k] /= divisor;
+		for (int row = 0; row < 4; ++row) {
+			if (row == column)
+				continue;
+			float coefficient = rows[row][column];
+
+			for (int k = column; k < 8; ++k)
+				rows[row][k] -= basis[k] * coefficient;
+		}
+	}
+	for (int i = 0; i < 4; ++i)
+		memcpy(matrix + 4 * i, rows[i] + 4, 4 * sizeof(float));
+	return true;
+}
+
+KNIEXPORT KNI_RETURNTYPE_VOID KNIDECL(javax_microedition_m3g_Transform_multiply0)
+{
+	KNI_StartHandles(2);
+	KNI_DeclareHandle(left);
+	KNI_DeclareHandle(right);
+	KNI_GetParameterAsObject(1, left);
+	KNI_GetParameterAsObject(2, right);
+	multiply_matrices(SNI_GetRawArrayPointer(left),
+			  SNI_GetRawArrayPointer(right));
+	KNI_EndHandles();
+	KNI_ReturnVoid();
+}
+
+KNIEXPORT KNI_RETURNTYPE_BOOLEAN
+KNIDECL(javax_microedition_m3g_Transform_invert0)
+{
+	bool inverted;
+
+	KNI_StartHandles(1);
+	KNI_DeclareHandle(matrix);
+	KNI_GetParameterAsObject(1, matrix);
+	inverted = invert_matrix(SNI_GetRawArrayPointer(matrix));
+	KNI_EndHandles();
+	KNI_ReturnBoolean(inverted);
+}
+
 struct coordinates {
 	const jshort *values;
 	const jfloat *scale_bias;
@@ -805,7 +1743,7 @@ static void prepare_vertices(jfloat *vertices, int count,
 	 */
 	const struct coordinates position_input = *positions;
 	const struct coordinates tex_input = *tex_coords;
-	float position[4], matrix[16], tex_matrix[16], tex_bias[3];
+	float position[4], matrix[16], tex_matrix[16], tex_bias[4];
 
 	memcpy(position, position_input.scale_bias, sizeof(position));
 	memcpy(matrix, projection, sizeof(matrix));
@@ -832,7 +1770,8 @@ static void prepare_vertices(jfloat *vertices, int count,
 		vertices[Z] = transform_row(matrix + 8, x, y, z);
 		vertices[W] = transform_row(matrix + 12, x, y, z);
 		if (texture) {
-			float s = 0, t = 0;
+			/* p is the third coordinate, which M3G calls r. */
+			float s = 0, t = 0, p = 0;
 
 			if (tex_input.values) {
 				const jshort *coords = tex_input.values +
@@ -840,10 +1779,13 @@ static void prepare_vertices(jfloat *vertices, int count,
 
 				s = coords[0] * tex_bias[0] + tex_bias[1];
 				t = coords[1] * tex_bias[0] + tex_bias[2];
+				if (tex_input.components > 2)
+					p = coords[2] * tex_bias[0] +
+					    tex_bias[3];
 			}
-			float u = transform_row(tex_matrix, s, t, 0);
-			float v = transform_row(tex_matrix + 4, s, t, 0);
-			float q = transform_row(tex_matrix + 12, s, t, 0);
+			float u = transform_row(tex_matrix, s, t, p);
+			float v = transform_row(tex_matrix + 4, s, t, p);
+			float q = transform_row(tex_matrix + 12, s, t, p);
 
 			vertices[U] = u / q;
 			vertices[V] = v / q;
@@ -865,6 +1807,7 @@ KNIDECL(javax_microedition_m3g_Rasterizer_prepareVertices0)
 {
 	struct coordinates positions = { 0 }, tex_coords = { 0 };
 	int count = KNI_GetParameterAsInt(2);
+	int first = KNI_GetParameterAsInt(14);
 	const char *exception = "java/lang/IllegalArgumentException";
 
 	positions.components = KNI_GetParameterAsInt(4);
@@ -884,7 +1827,8 @@ KNIDECL(javax_microedition_m3g_Rasterizer_prepareVertices0)
 	KNI_GetParameterAsObject(7, tex_values);
 	KNI_GetParameterAsObject(9, tex_scale_bias);
 	KNI_GetParameterAsObject(10, texture_matrix);
-	if (count < 1 || KNI_IsNullHandle(vertices) ||
+	if (count < 1 || first < 0 || first >= count ||
+	    KNI_IsNullHandle(vertices) ||
 	    count > KNI_GetArrayLength(vertices) / VERTEX_COMPONENTS ||
 	    positions.components < 2 || positions.components > 4 ||
 	    KNI_IsNullHandle(position_values) ||
@@ -905,7 +1849,7 @@ KNIDECL(javax_microedition_m3g_Rasterizer_prepareVertices0)
 			if (tex_coords.components < 2 ||
 			    tex_coords.components > 4 ||
 			    KNI_IsNullHandle(tex_scale_bias) ||
-			    KNI_GetArrayLength(tex_scale_bias) < 3)
+			    KNI_GetArrayLength(tex_scale_bias) < 4)
 				goto done;
 			if (count > KNI_GetArrayLength(tex_values) /
 					    tex_coords.components) {
@@ -913,14 +1857,21 @@ KNIDECL(javax_microedition_m3g_Rasterizer_prepareVertices0)
 					"java/lang/ArrayIndexOutOfBoundsException";
 				goto done;
 			}
-			tex_coords.values = SNI_GetRawArrayPointer(tex_values);
+			tex_coords.values =
+				(const jshort *)SNI_GetRawArrayPointer(
+					tex_values) +
+				first * tex_coords.components;
 			tex_coords.scale_bias =
 				SNI_GetRawArrayPointer(tex_scale_bias);
 		}
 	}
-	positions.values = SNI_GetRawArrayPointer(position_values);
+	positions.values =
+		(const jshort *)SNI_GetRawArrayPointer(position_values) +
+		first * positions.components;
 	positions.scale_bias = SNI_GetRawArrayPointer(position_scale_bias);
-	prepare_vertices(SNI_GetRawArrayPointer(vertices), count, &positions,
+	prepare_vertices((jfloat *)SNI_GetRawArrayPointer(vertices) +
+				 first * VERTEX_COMPONENTS,
+			 count - first, &positions,
 			 SNI_GetRawArrayPointer(projection), &tex_coords,
 			 texture, KNI_GetParameterAsBoolean(11),
 			 (uint32_t)KNI_GetParameterAsInt(12),
@@ -1027,6 +1978,7 @@ KNIDECL(javax_microedition_m3g_Rasterizer_shadeDirectional0)
 		.directional_first = KNI_GetParameterAsBoolean(13),
 	};
 	float alpha = channel(light.diffuse, 24) * KNI_GetParameterAsFloat(14);
+	int first = KNI_GetParameterAsInt(15);
 	jboolean shaded = KNI_FALSE;
 
 	KNI_StartHandles(4);
@@ -1039,7 +1991,8 @@ KNIDECL(javax_microedition_m3g_Rasterizer_shadeDirectional0)
 	KNI_GetParameterAsObject(4, inverse);
 	KNI_GetParameterAsObject(12, direction);
 
-	if (count > 0 && !KNI_IsNullHandle(vertices) &&
+	if (count > 0 && first >= 0 && first < count &&
+	    !KNI_IsNullHandle(vertices) &&
 	    count <= KNI_GetArrayLength(vertices) / VERTEX_COMPONENTS &&
 	    !KNI_IsNullHandle(normals) &&
 	    count <= KNI_GetArrayLength(normals) / 3 &&
@@ -1050,8 +2003,11 @@ KNIDECL(javax_microedition_m3g_Rasterizer_shadeDirectional0)
 	    isfinite(light.directional_intensity)) {
 		SNI_BEGIN_RAW_POINTERS
 		shaded = shade_directional_vertices(
-			SNI_GetRawArrayPointer(vertices), count,
-			SNI_GetRawArrayPointer(normals),
+			(jfloat *)SNI_GetRawArrayPointer(vertices) +
+				first * VERTEX_COMPONENTS,
+			count - first,
+			(const jshort *)SNI_GetRawArrayPointer(normals) +
+				first * 3,
 			SNI_GetRawArrayPointer(inverse),
 			SNI_GetRawArrayPointer(direction), &light, alpha);
 		SNI_END_RAW_POINTERS
@@ -1064,12 +2020,11 @@ KNIEXPORT KNI_RETURNTYPE_VOID KNIDECL(javax_microedition_m3g_Rasterizer_draw0)
 {
 	struct target target;
 	struct surface surface;
-	int vertex_count = KNI_GetParameterAsInt(5);
+	int vertex_count = KNI_GetParameterAsInt(4);
 	const char *error = NULL;
 
-	KNI_StartHandles(8);
+	KNI_StartHandles(7);
 	KNI_DeclareHandle(pixels);
-	KNI_DeclareHandle(depths);
 	KNI_DeclareHandle(view);
 	KNI_DeclareHandle(vertices);
 	KNI_DeclareHandle(strips);
@@ -1077,17 +2032,16 @@ KNIEXPORT KNI_RETURNTYPE_VOID KNIDECL(javax_microedition_m3g_Rasterizer_draw0)
 	KNI_DeclareHandle(texture);
 	KNI_DeclareHandle(state);
 	KNI_GetParameterAsObject(1, pixels);
-	KNI_GetParameterAsObject(2, depths);
-	KNI_GetParameterAsObject(3, view);
-	KNI_GetParameterAsObject(4, vertices);
-	KNI_GetParameterAsObject(6, strips);
-	KNI_GetParameterAsObject(7, indices);
-	KNI_GetParameterAsObject(8, texture);
-	KNI_GetParameterAsObject(9, state);
+	KNI_GetParameterAsObject(2, view);
+	KNI_GetParameterAsObject(3, vertices);
+	KNI_GetParameterAsObject(5, strips);
+	KNI_GetParameterAsObject(6, indices);
+	KNI_GetParameterAsObject(7, texture);
+	KNI_GetParameterAsObject(8, state);
 
-	if (!target_init(&target, pixels, depths, view) ||
-	    KNI_IsNullHandle(vertices) || KNI_IsNullHandle(strips) ||
-	    KNI_IsNullHandle(indices) || KNI_IsNullHandle(state) ||
+	if (!target_init(&target, pixels, view) || KNI_IsNullHandle(vertices) ||
+	    KNI_IsNullHandle(strips) || KNI_IsNullHandle(indices) ||
+	    KNI_IsNullHandle(state) ||
 	    KNI_GetArrayLength(state) != STATE_FIELDS || vertex_count < 1 ||
 	    vertex_count > KNI_GetArrayLength(vertices) / VERTEX_COMPONENTS) {
 		error = "M3G buffers";
@@ -1106,6 +2060,8 @@ KNIEXPORT KNI_RETURNTYPE_VOID KNIDECL(javax_microedition_m3g_Rasterizer_draw0)
 		}
 		surface.texture = SNI_GetRawArrayPointer(texture);
 	}
+	if (!empty(&target.clip))
+		depth_cleared = (struct rectangle){ 0 };
 	if (!empty(&target.clip) &&
 	    !draw_strips(&target, &surface, SNI_GetRawArrayPointer(vertices),
 			 vertex_count, SNI_GetRawArrayPointer(strips),

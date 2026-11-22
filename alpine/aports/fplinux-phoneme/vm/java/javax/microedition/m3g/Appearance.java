@@ -44,6 +44,15 @@ public class Appearance extends Object3D {
         material = value;
     }
 
+    public void setLayer(int index) {
+        if (index < -63 || index > 64) throw new IllegalArgumentException("appearance layer");
+        layer = index;
+    }
+
+    public int getLayer() {
+        return layer;
+    }
+
     public void setFog(Fog value) {
         fog = value;
     }

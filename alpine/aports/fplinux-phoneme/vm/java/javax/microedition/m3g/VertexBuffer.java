@@ -22,6 +22,45 @@ public class VertexBuffer extends Object3D {
         defaultColor = argb;
     }
 
+    public int getDefaultColor() {
+        return defaultColor;
+    }
+
+    public void setColors(VertexArray values) {
+        if (values != null && ((values.components != 3 && values.components != 4) ||
+                values.componentSize != 1)) {
+            throw new IllegalArgumentException("color format");
+        }
+        checkVertexCount(-3, values);
+        colors = values;
+    }
+
+    public VertexArray getColors() {
+        return colors;
+    }
+
+    public VertexArray getNormals() {
+        return normals;
+    }
+
+    // Fills scaleBias with the scale followed by the bias of each coordinate.
+    public VertexArray getPositions(float[] scaleBias) {
+        if (positions != null) copyScaleBias(position, scaleBias, 3);
+        return positions;
+    }
+
+    public VertexArray getTexCoords(int index, float[] scaleBias) {
+        VertexArray coordinates = texCoords[index];
+        if (coordinates != null) copyScaleBias(texTransform[index], scaleBias, coordinates.components);
+        return coordinates;
+    }
+
+    private static void copyScaleBias(float[] source, float[] target, int dimensions) {
+        if (target == null) return;
+        if (target.length < 1 + dimensions) throw new IllegalArgumentException("scale and bias");
+        System.arraycopy(source, 0, target, 0, 1 + dimensions);
+    }
+
     public void setPositions(VertexArray coordinates, float scale, float[] bias) {
         if (coordinates != null && coordinates.components != 3) {
             throw new IllegalArgumentException("position components");
@@ -50,7 +89,7 @@ public class VertexBuffer extends Object3D {
 
     private void checkVertexCount(int slot, VertexArray value) {
         if (value == null) return;
-        if ((slot != -1 && differs(positions, value)) || differs(colors, value) ||
+        if ((slot != -1 && differs(positions, value)) || (slot != -3 && differs(colors, value)) ||
                 (slot != -2 && differs(normals, value))) {
             throw new IllegalArgumentException("vertex count");
         }

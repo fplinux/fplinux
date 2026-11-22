@@ -47,7 +47,7 @@ PM-CANVAS nokia text range=true clippedAnchor=true
 PM-CANVAS vodafone layout=true light=true direction=true
 PM-CANVAS mascot pixels alpha=true overlay=true graphicsRestored=true
 PM-CANVAS mascot texture keyed=true rows=true clipped=true zeroIndexDrawn=true
-PM-CANVAS m3g compressed=true animation=true clipAndSeams=true depth=true lightingAndFog=true implicitIndices=true transformVectors=true alphaAndHud=true skinning=true sprite=true morphing=true poseAndTexture=true textureFilters=true picking=true
+PM-CANVAS m3g compressed=true animation=true clipAndSeams=true depth=true depthRange=true depthClears=true targetReads=true lightingAndFog=true implicitIndices=true submeshRanges=true transformVectors=true transformMath=true alphaAndHud=true skinning=true sprite=true morphing=true poseAndTexture=true textureFilters=true picking=true lightColor=true imageData=true mutableImage=true vertexColors=true pickRay=true pickCamera=true pickDeformed=true pickDeformedNormals=true pickFacing=true stateAccessors=true nodeAccessors=true vertexAccessors=true wideRows=true
 PM-CANVAS image stream size=1x1 openAfterDecode=true openAfterError=true
 PM-CANVAS font height=true width=true substring=true
 PM-CANVAS done

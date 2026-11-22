@@ -53,6 +53,13 @@ public abstract class Transformable extends Object3D {
         orientation.postRotate(angle, x, y, z);
     }
 
+    public void preRotate(float angle, float x, float y, float z) {
+        Transform rotation = new Transform();
+        rotation.postRotate(angle, x, y, z);
+        rotation.postMultiply(orientation);
+        orientation.set(rotation);
+    }
+
     public void getOrientation(float[] angleAxis) {
         if (angleAxis.length < 4) throw new IllegalArgumentException("orientation");
         float[] matrix = orientation.matrix;

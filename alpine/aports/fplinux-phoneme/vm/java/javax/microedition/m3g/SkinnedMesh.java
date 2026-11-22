@@ -190,6 +190,11 @@ public class SkinnedMesh extends Mesh {
         }
     }
 
+    void pickNode(int pickScope, Transform model, float[] ray, RayIntersection best) {
+        super.pickNode(pickScope, model, ray, best);
+        skeleton.pickWithin(pickScope, model, ray, best);
+    }
+
     void references(Vector objects) {
         super.references(objects);
         objects.addElement(skeleton);

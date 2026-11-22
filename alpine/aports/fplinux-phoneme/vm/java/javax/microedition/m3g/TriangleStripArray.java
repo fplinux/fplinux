@@ -3,6 +3,7 @@ package javax.microedition.m3g;
 
 public class TriangleStripArray extends IndexBuffer {
     final int[] strips;
+    final int minIndex;
     final int maxIndex;
 
     public TriangleStripArray(int firstIndex, int[] lengths) {
@@ -30,6 +31,7 @@ public class TriangleStripArray extends IndexBuffer {
         for (int i = 0; i < total; i++) {
             indices[i] = firstIndex + i;
         }
+        minIndex = firstIndex;
         maxIndex = firstIndex + total - 1;
     }
 
@@ -44,14 +46,17 @@ public class TriangleStripArray extends IndexBuffer {
             total += strips[i];
         }
         this.indices = new int[total];
+        int smallest = 65535;
         int largest = -1;
         for (int i = 0; i < total; i++) {
             if (indices[i] < 0 || indices[i] > 65535) {
                 throw new IllegalArgumentException("triangle strip index");
             }
             this.indices[i] = indices[i];
+            smallest = Math.min(smallest, indices[i]);
             largest = Math.max(largest, indices[i]);
         }
+        minIndex = smallest;
         maxIndex = largest;
     }
 

@@ -2,6 +2,13 @@
 package javax.microedition.m3g;
 
 public class Transform {
+    private static final float[] IDENTITY = {
+        1, 0, 0, 0,
+        0, 1, 0, 0,
+        0, 0, 1, 0,
+        0, 0, 0, 1,
+    };
+
     final float[] matrix = new float[16];
 
     public Transform() {
@@ -13,9 +20,7 @@ public class Transform {
     }
 
     public void setIdentity() {
-        for (int i = 0; i < matrix.length; i++) {
-            matrix[i] = i % 5 == 0 ? 1 : 0;
-        }
+        System.arraycopy(IDENTITY, 0, matrix, 0, 16);
     }
 
     public void set(Transform other) {
@@ -37,17 +42,7 @@ public class Transform {
     }
 
     public void postMultiply(Transform other) {
-        float[] right = other.matrix;
-        float[] result = new float[16];
-        for (int i = 0; i < 16; i += 4) {
-            for (int j = 0; j < 4; j++) {
-                result[i + j] = matrix[i] * right[j] +
-                    matrix[i + 1] * right[4 + j] +
-                    matrix[i + 2] * right[8 + j] +
-                    matrix[i + 3] * right[12 + j];
-            }
-        }
-        System.arraycopy(result, 0, matrix, 0, result.length);
+        multiply0(matrix, other.matrix);
     }
 
     public void postTranslate(float x, float y, float z) {
@@ -98,41 +93,18 @@ public class Transform {
     }
 
     public void invert() {
-        float[][] rows = new float[4][8];
-        for (int i = 0; i < 4; i++) {
-            System.arraycopy(matrix, i * 4, rows[i], 0, 4);
-            rows[i][i + 4] = 1;
+        if (!invert0(matrix)) {
+            throw new ArithmeticException("singular transform");
         }
-        for (int column = 0; column < 4; column++) {
-            int pivot = column;
-            for (int candidate = column + 1; candidate < 4; candidate++) {
-                if (Math.abs(rows[candidate][column]) >
-                        Math.abs(rows[pivot][column])) {
-                    pivot = candidate;
-                }
+    }
+
+    public void transpose() {
+        for (int row = 0; row < 4; row++) {
+            for (int column = row + 1; column < 4; column++) {
+                float value = matrix[4 * row + column];
+                matrix[4 * row + column] = matrix[4 * column + row];
+                matrix[4 * column + row] = value;
             }
-            float[] basis = rows[pivot];
-            if (basis[column] == 0) {
-                throw new ArithmeticException("singular transform");
-            }
-            rows[pivot] = rows[column];
-            rows[column] = basis;
-            float divisor = basis[column];
-            for (int k = column; k < 8; k++) {
-                basis[k] /= divisor;
-            }
-            for (int row = 0; row < 4; row++) {
-                if (row == column) {
-                    continue;
-                }
-                float coefficient = rows[row][column];
-                for (int k = column; k < 8; k++) {
-                    rows[row][k] -= basis[k] * coefficient;
-                }
-            }
-        }
-        for (int i = 0; i < 4; i++) {
-            System.arraycopy(rows[i], 4, matrix, 4 * i, 4);
         }
     }
 
@@ -156,4 +128,11 @@ public class Transform {
                 matrix[row + 2] * z + matrix[row + 3] * w;
         }
     }
+
+    // Row-major 4x4 matrices of 16 floats: left = left * right.
+    private static native void multiply0(float[] left, float[] right);
+
+    // Gauss-Jordan elimination with partial pivoting; false leaves the
+    // matrix unchanged when it is singular.
+    private static native boolean invert0(float[] matrix);
 }

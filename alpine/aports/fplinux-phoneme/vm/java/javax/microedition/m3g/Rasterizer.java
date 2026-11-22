@@ -12,16 +12,34 @@ final class Rasterizer {
     private static final int[] SPRITE_INDICES = { 0, 1, 2, 3 };
 
     int[] pixels = new int[0];
-    private float[] depths = new float[0];
     private float[] vertices = new float[0];
     private final float[] spriteOrigin = new float[4];
     private final float[] spriteReference = new float[4];
     private final float[] spriteCenter = new float[4];
-    private final int[] view = new int[6];
+    // Shared with fplinux-pm-m3g.c: image size, viewport, and the bits of the
+    // floats that depth 0 and 1 map to.
+    private final int[] view = new int[8];
     private final int[] state = new int[16];
     private final int[] backgroundView = new int[8];
+    // Per-draw scratch storage; draw does not keep it after returning.
+    private final Transform scratchTexture = new Transform();
+    private final Transform scratchFog = new Transform();
+    private final Transform scratchNormals = new Transform();
+    private final float[] scratchDirection = new float[4];
+    private final float[] scratchFogPoint = new float[4];
+    private final float[] scratchPoint = new float[3];
+    private final float[] scratchNormal = new float[3];
     private int left, top, right, bottom;
     private boolean depthEnabled;
+
+    Rasterizer() {
+        depthRange(0, 1);
+    }
+
+    void depthRange(float near, float far) {
+        view[6] = Float.floatToIntBits(near);
+        view[7] = Float.floatToIntBits(far);
+    }
 
     void bind(int width, int height, boolean depthBuffer) {
         view[0] = width;
@@ -29,9 +47,8 @@ final class Rasterizer {
         int count = width * height;
         if (count > pixels.length) {
             int[] newPixels = new int[count];
-            float[] newDepths = new float[count];
+            bindDepth0(count);
             pixels = newPixels;
-            depths = newDepths;
         }
         depthEnabled = depthBuffer;
     }
@@ -48,7 +65,7 @@ final class Rasterizer {
     }
 
     void resetDepth() {
-        clear0(pixels, depths, view, 0, false, true, null, null, false);
+        clear0(pixels, view, 0, false, true, null, null, false);
     }
 
     void clear(Background background, boolean alpha) {
@@ -70,7 +87,7 @@ final class Rasterizer {
             backgroundView[6] = background.modeX;
             backgroundView[7] = background.modeY;
         }
-        clear0(pixels, depths, view, color | opaque, clearColor, clearDepth,
+        clear0(pixels, view, color | opaque, clearColor, clearDepth,
                imagePixels, backgroundView, !alpha);
     }
 
@@ -83,6 +100,10 @@ final class Rasterizer {
         }
         if (left >= right || top >= bottom) return;
         if (vertices.length < count * COMPONENTS) vertices = new float[count * COMPONENTS];
+        // Prepare and shade only the vertices the strips refer to: submeshes
+        // of one mesh share a vertex buffer but use parts of it.
+        int first = triangles.minIndex, end = triangles.maxIndex + 1;
+        if (first >= end) return; // no strips
         SkinnedMesh skin = mesh instanceof SkinnedMesh ? (SkinnedMesh) mesh : null;
         MorphingMesh morph = mesh instanceof MorphingMesh ? (MorphingMesh) mesh : null;
         boolean deformed = skin != null || morph != null;
@@ -90,7 +111,7 @@ final class Rasterizer {
         Texture2D texture0 = look.textures[0];
         if (look.textures[1] != null) throw new IllegalStateException("multiple textures");
         if (texture0 != null) {
-            texture = new Transform();
+            texture = scratchTexture;
             texture0.getCompositeTransform(texture);
         }
         VertexArray texCoords = texture0 == null ? null : buffer.texCoords[0];
@@ -98,18 +119,20 @@ final class Rasterizer {
         boolean local = look.material != null && polygon.localCameraLighting;
         boolean backLighting = look.material != null && polygon.twoSidedLighting;
         boolean constantColor = look.material == null && look.fog == null && buffer.colors == null;
-        float[] direction = local ? new float[4] : towardEye;
-        float[] fogPoint = look.fog == null ? null : new float[4];
-        float[] point = deformed || local || fogPoint != null ? new float[3] : null;
+        float[] direction = local ? scratchDirection : towardEye;
+        float[] fogPoint = look.fog == null ? null : scratchFogPoint;
+        float[] point = deformed || local || fogPoint != null ? scratchPoint : null;
         Transform fogTransform = null;
         if (fogPoint != null) {
-            fogTransform = new Transform(cameraView);
+            fogTransform = scratchFog;
+            fogTransform.set(cameraView);
             fogTransform.postMultiply(model);
         }
         float[] inverse = null;
         Material material = look.material;
         if (buffer.normals != null && material != null) {
-            Transform normalTransform = new Transform(model);
+            Transform normalTransform = scratchNormals;
+            normalTransform.set(model);
             try {
                 normalTransform.invert();
                 inverse = normalTransform.matrix;
@@ -117,19 +140,25 @@ final class Rasterizer {
                 // Continue drawing with ambient and emissive lighting when no normal matrix exists.
             }
         }
-        prepareVertices0(vertices, count, buffer.positions.data, buffer.positions.components,
+        prepareVertices0(vertices, end, buffer.positions.data, buffer.positions.components,
                          buffer.position, projection.matrix,
                          texCoords == null ? null : texCoords.data,
                          texCoords == null ? 0 : texCoords.components, buffer.texTransform[0],
                          texture == null ? null : texture.matrix, constantColor,
-                         buffer.defaultColor, alpha);
+                         buffer.defaultColor, alpha, first);
         if (skin != null) skin.prepareSkinning();
         if (morph != null) morph.prepareMorphing();
         boolean shaded = inverse != null && !deformed && fogPoint == null && !local &&
-            !backLighting && shadeDirectional(buffer, count, inverse, material, lights, scope, alpha);
-        int shadeCount = shaded || (constantColor && !deformed) ? 0 : count;
-        float[] normal = shadeCount == 0 ? null : new float[3];
-        for (int i = 0, offset = 0; i < shadeCount; i++, offset += COMPONENTS) {
+            !backLighting &&
+            shadeDirectional(buffer, count, first, end, inverse, material, lights, scope, alpha);
+        int shadeEnd = shaded || (constantColor && !deformed) ? first : end;
+        float[] normal = null;
+        if (shadeEnd != first) {
+            // Lighting without a normal matrix sees a zero normal.
+            normal = scratchNormal;
+            normal[0] = normal[1] = normal[2] = 0;
+        }
+        for (int i = first, offset = first * COMPONENTS; i < shadeEnd; i++, offset += COMPONENTS) {
             if (point != null) buffer.point(i, point);
             float a = 0, b = 0, c = 0;
             if (inverse != null) {
@@ -182,7 +211,7 @@ final class Rasterizer {
             setupTexture(texture0.image, texture0.wrapS, texture0.wrapT,
                          texture0.blending, texture0.blendColor, texture0.imageFilter);
         }
-        draw0(pixels, depths, view, vertices, count, triangles.strips, triangles.indices,
+        draw0(pixels, view, vertices, count, triangles.strips, triangles.indices,
               texture0 == null ? null : texture0.image.pixels(), state);
     }
 
@@ -253,7 +282,7 @@ final class Rasterizer {
         setupState(look, DEFAULT_POLYGON, false);
         setupTexture(image, Texture2D.WRAP_CLAMP, Texture2D.WRAP_CLAMP,
                      Texture2D.FUNC_MODULATE, 0, Texture2D.FILTER_NEAREST);
-        draw0(pixels, depths, view, vertices, 4, SPRITE_STRIPS, SPRITE_INDICES,
+        draw0(pixels, view, vertices, 4, SPRITE_STRIPS, SPRITE_INDICES,
               image.pixels(), state);
     }
 
@@ -314,8 +343,9 @@ final class Rasterizer {
         state[14] = filter;
     }
 
-    private boolean shadeDirectional(VertexBuffer buffer, int count, float[] inverse,
-                                     Material material, Vector lights, int scope, float alpha) {
+    private boolean shadeDirectional(VertexBuffer buffer, int count, int first, int end,
+                                     float[] inverse, Material material, Vector lights,
+                                     int scope, float alpha) {
         VertexArray normals = buffer.normals;
         VertexArray colors = buffer.colors;
         if (material.vertexColorTracking || material.specular != 0 || normals.components != 3 ||
@@ -340,11 +370,11 @@ final class Rasterizer {
             }
         }
         return ambient != null && directional != null &&
-            shadeDirectional0(vertices, count, normals.data, inverse,
+            shadeDirectional0(vertices, end, normals.data, inverse,
                               material.emissive, material.ambient, material.diffuse,
                               ambient.color, ambient.intensity,
                               directional.light.color, directional.light.intensity,
-                              directional.direction, directionalFirst, alpha);
+                              directional.direction, directionalFirst, alpha, first);
     }
 
     private static int light(int color, Material material, float[] normal, float[] eye,
@@ -398,24 +428,30 @@ final class Rasterizer {
         return Math.min(255, Math.max(0, (int) (value + .5f)));
     }
 
-    private static native void clear0(int[] pixels, float[] depths, int[] view,
+    // Grows the native depth buffer to at least count values.
+    private static native void bindDepth0(int count);
+
+    private static native void clear0(int[] pixels, int[] view,
                                       int color, boolean colorClear, boolean depthClear,
                                       int[] image, int[] crop, boolean opaque);
 
-    private static native void prepareVertices0(float[] vertices, int count,
+    // Both natives process the vertices from first up to end.
+    private static native void prepareVertices0(float[] vertices, int end,
                                                short[] positions, int positionComponents,
                                                float[] positionScaleBias, float[] projection,
                                                short[] texCoords, int texComponents,
                                                float[] texScaleBias, float[] textureMatrix,
-                                               boolean constantColor, int color, float alpha);
+                                               boolean constantColor, int color, float alpha,
+                                               int first);
 
-    private static native boolean shadeDirectional0(float[] vertices, int count, short[] normals,
+    private static native boolean shadeDirectional0(float[] vertices, int end, short[] normals,
                                                     float[] inverse, int emissive, int ambient,
                                                     int diffuse, int ambientColor, float ambientIntensity,
                                                     int directionalColor, float directionalIntensity,
-                                                    float[] direction, boolean directionalFirst, float alpha);
+                                                    float[] direction, boolean directionalFirst, float alpha,
+                                                    int first);
 
-    private static native void draw0(int[] pixels, float[] depths, int[] view,
+    private static native void draw0(int[] pixels, int[] view,
                                     float[] vertices, int vertexCount, int[] strips, int[] indices,
                                     int[] texture, int[] state);
 

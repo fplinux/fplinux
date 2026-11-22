@@ -29,6 +29,10 @@ public class AnimationController extends Object3D {
         referenceTime = worldTime;
     }
 
+    public int getRefWorldTime() {
+        return referenceTime;
+    }
+
     public float getPosition(int worldTime) {
         return reference + speed * ((long) worldTime - referenceTime);
     }

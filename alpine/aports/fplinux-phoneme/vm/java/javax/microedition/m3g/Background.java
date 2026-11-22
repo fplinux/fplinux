@@ -34,8 +34,44 @@ public class Background extends Object3D {
         modeY = vertical;
     }
 
+    public int getImageModeX() {
+        return modeX;
+    }
+
+    public int getImageModeY() {
+        return modeY;
+    }
+
     public void setColor(int argb) {
         color = argb;
+    }
+
+    public int getColor() {
+        return color;
+    }
+
+    public boolean isColorClearEnabled() {
+        return colorClear;
+    }
+
+    public boolean isDepthClearEnabled() {
+        return depthClear;
+    }
+
+    public int getCropX() {
+        return x;
+    }
+
+    public int getCropY() {
+        return y;
+    }
+
+    public int getCropWidth() {
+        return width;
+    }
+
+    public int getCropHeight() {
+        return height;
     }
 
     public void setColorClearEnable(boolean enabled) {
