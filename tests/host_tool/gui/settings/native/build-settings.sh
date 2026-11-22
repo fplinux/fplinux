@@ -60,5 +60,7 @@ ui_host_compile -I"$root/tests/host_tool/gui/support" -I"$common" -I"$root/inclu
 # The private peer shares the bus with the native BlueZ fixture.
 # shellcheck disable=SC2046
 ui_host_compile $(pkg-config --cflags dbus-1) \
+	-I"$root/tests/host_tool/gui/support" \
 	"$root/tests/host_tool/media/fplinux-bluetooth-service.c" \
+	"$root/tests/host_tool/gui/support/bluez-fake.c" \
 	$(pkg-config --libs dbus-1) -o "$work/bluetooth-service"

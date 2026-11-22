@@ -88,12 +88,20 @@ void fplinux_bluez_adapter_dispatch(struct fplinux_bluez_adapter *adapter);
 /* Only while BlueZ reports exactly one adapter. */
 bool fplinux_bluez_adapter_present(const struct fplinux_bluez_adapter *adapter);
 bool fplinux_bluez_adapter_powered(const struct fplinux_bluez_adapter *adapter);
+bool fplinux_bluez_adapter_connectable(
+	const struct fplinux_bluez_adapter *adapter);
+bool fplinux_bluez_adapter_pairable(const struct fplinux_bluez_adapter *adapter);
+/* Borrowed identity strings, empty until the corresponding object is known. */
+const char *
+fplinux_bluez_adapter_address(const struct fplinux_bluez_adapter *adapter);
+const char *
+fplinux_bluez_adapter_owner(const struct fplinux_bluez_adapter *adapter);
 /* A mutation is waiting for its answer. */
 bool fplinux_bluez_adapter_pending(const struct fplinux_bluez_adapter *adapter);
 /*
- * Asks BlueZ to switch the adapter, answered through finished() within
- * timeout_ms. False without an adapter, during another request or when the
- * request cannot be queued.
+ * Switches adapter power. Enabling also allows connections from paired
+ * devices. Each BlueZ request has timeout_ms to complete.
+ * False without an adapter, during another request or on a queueing error.
  */
 bool fplinux_bluez_adapter_set_powered(struct fplinux_bluez_adapter *adapter,
 				       bool powered, int timeout_ms);
@@ -119,10 +127,11 @@ fplinux_bluez_adapter_device(const struct fplinux_bluez_adapter *adapter,
 			     const char *path);
 
 /* A single mutation may be pending. False sets error() immediately. */
+/* Sets the local Alias. An empty name restores the adapter's system name. */
 bool fplinux_bluez_adapter_set_name(struct fplinux_bluez_adapter *adapter,
 				    const char *name, int timeout_ms);
-/* Visible modes open incoming pairing for the same duration. Hidden only
- * changes discoverability, preserving the current incoming-pairing policy. */
+/* Visible modes open pairing for the same duration. Hidden closes pairing.
+ * Existing pairs can connect in every mode. */
 bool fplinux_bluez_adapter_set_visibility(
 	struct fplinux_bluez_adapter *adapter,
 	enum fplinux_bluez_visibility visibility, int timeout_ms);

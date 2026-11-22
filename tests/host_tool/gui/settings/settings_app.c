@@ -1560,6 +1560,31 @@ bool fplinux_ui_close_reply(struct fplinux_ui *ui,
 	return true;
 }
 
+void fplinux_ui_set_document_handler(struct fplinux_ui *ui,
+				     fplinux_ui_document_cb callback,
+				     void *context)
+{
+	(void)ui;
+	(void)callback;
+	(void)context;
+}
+
+bool fplinux_ui_document_reply(struct fplinux_ui *ui, uint32_t request_id,
+			       enum fplinux_ui_document_status status,
+			       int error)
+{
+	(void)ui;
+	(void)request_id;
+	(void)status;
+	(void)error;
+	return true;
+}
+
+uint64_t fplinux_ui_now_ms(void)
+{
+	return 0;
+}
+
 struct fplinux_ui_screen *fplinux_ui_current(const struct fplinux_ui *ui)
 {
 	return ui->depth ? ui->stack[ui->depth - 1] : NULL;
@@ -1857,12 +1882,19 @@ void fplinux_settings_bluetooth_event(
 	no_adapter(bluetooth);
 }
 
-void fplinux_settings_bluetooth_storage_result(
-	struct fplinux_settings_bluetooth *bluetooth,
-	const struct fplinux_volume_result *result)
+void fplinux_settings_bluetooth_receive_status(
+	struct fplinux_settings_bluetooth *bluetooth, bool ready)
 {
-	(void)result;
+	(void)ready;
 	no_adapter(bluetooth);
+}
+
+bool fplinux_settings_bluetooth_send(
+	struct fplinux_settings_bluetooth *bluetooth, const char *path)
+{
+	(void)path;
+	no_adapter(bluetooth);
+	return false;
 }
 
 void fplinux_settings_bluetooth_reset(
@@ -1876,15 +1908,6 @@ enum fplinux_ui_close_response fplinux_settings_bluetooth_prepare_close(
 {
 	no_adapter(bluetooth);
 	return FPLINUX_UI_CLOSE_CANCEL;
-}
-
-void fplinux_ui_set_storage_handler(struct fplinux_ui *ui,
-				    fplinux_ui_storage_cb callback,
-				    void *context)
-{
-	(void)ui;
-	(void)callback;
-	(void)context;
 }
 
 /* The native keyboard fixture exercises the Wi-Fi controller. */
@@ -1911,6 +1934,11 @@ void fplinux_settings_wifi_reset(struct fplinux_settings_wifi *wifi)
 }
 
 void fplinux_settings_wifi_background(struct fplinux_settings_wifi *wifi)
+{
+	assert(!wifi);
+}
+
+void fplinux_settings_wifi_foreground(struct fplinux_settings_wifi *wifi)
 {
 	assert(!wifi);
 }

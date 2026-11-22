@@ -4,7 +4,6 @@
 
 #include "fplinux-bluetooth-opp.h"
 #include "fplinux-bluez-adapter.h"
-#include <fplinux/fplinux-ui-file-picker.h>
 #include <fplinux/fplinux-ui-screen.h>
 #include <errno.h>
 #include <libintl.h>
@@ -23,7 +22,6 @@
 #define ARRAY_SIZE(array) (sizeof(array) / sizeof((array)[0]))
 #define REQUEST_TIMEOUT_MS 15000
 #define PAIR_TIMEOUT_MS 90000
-#define RECEIVE_SECONDS 120
 #define HISTORY_COUNT 8
 
 enum command {
@@ -34,9 +32,9 @@ enum command {
 	COMMAND_ACCEPT,
 	COMMAND_REJECT,
 	COMMAND_FORGET,
-	COMMAND_KEEP_BOTH,
-	COMMAND_REPLACE,
-	COMMAND_OPEN,
+	COMMAND_RESET_NAME,
+	COMMAND_TRANSFER,
+	COMMAND_HISTORY,
 	COMMAND_CLOSE_TRANSFER,
 	COMMAND_CONNECT_PROFILE,
 };
@@ -47,10 +45,7 @@ enum root_row {
 	ROOT_NAME,
 	ROOT_NEARBY,
 	ROOT_PAIRED,
-	ROOT_SEND,
-	ROOT_RECEIVE,
-	ROOT_TRANSFER,
-	ROOT_HISTORY,
+	ROOT_RECEIVE_STATUS,
 };
 
 enum device_row {
@@ -64,8 +59,6 @@ enum device_row {
 	DEVICE_TRUST,
 	DEVICE_RENAME,
 	DEVICE_FORGET,
-	DEVICE_SEND,
-	DEVICE_RECEIVE,
 };
 
 enum mutation {
@@ -91,33 +84,25 @@ enum editor_kind {
 enum peer_selection {
 	PEER_INSPECT,
 	PEER_SEND,
-	PEER_RECEIVE,
 };
 
-enum transfer_question {
-	TRANSFER_QUESTION_NONE,
-	TRANSFER_QUESTION_OFFER,
-	TRANSFER_QUESTION_CONFLICT,
+enum incoming_pairing {
+	INCOMING_PAIRING_CLOSED,
+	INCOMING_PAIRING_OPENING,
+	INCOMING_PAIRING_VISIBLE,
 };
 
 struct transfer_snapshot {
 	enum fplinux_bluetooth_opp_state state;
-	char peer[18];
 	char filename[NAME_MAX + 1];
 	uint64_t transferred_bytes;
 	uint64_t total_bytes;
 	bool total_known;
-	enum transfer_question question;
-	uint64_t question_serial;
-	bool answered;
-	bool allow;
-	enum fplinux_bluetooth_opp_conflict conflict;
 	bool done;
 	struct fplinux_bluetooth_opp_result result;
 };
 
 struct transfer_history {
-	bool receiving;
 	char peer[FPLINUX_BLUEZ_NAME_BYTES];
 	char filename[NAME_MAX + 1];
 	struct fplinux_bluetooth_opp_result result;
@@ -138,12 +123,9 @@ struct fplinux_settings_bluetooth {
 	struct fplinux_ui_screen *history;
 	struct fplinux_ui_screen *history_detail;
 	struct fplinux_ui_screen *transfer;
-	struct fplinux_ui_screen *question;
 	struct fplinux_ui_screen *wait;
 	struct fplinux_ui_screen *screens[16];
 	size_t screen_count;
-	struct fplinux_ui_file_picker *picker;
-	char home[PATH_MAX];
 	char device_path[FPLINUX_BLUEZ_PATH_BYTES];
 	char row_paths[FPLINUX_BLUEZ_DEVICE_COUNT][FPLINUX_BLUEZ_PATH_BYTES];
 	size_t row_count;
@@ -160,21 +142,21 @@ struct fplinux_settings_bluetooth {
 	bool mutation_failed;
 	bool stop_discovery;
 	bool visible;
+	bool receive_ready;
 	bool keep_screen_on;
+	bool pairing_agent_enabled;
+	enum incoming_pairing incoming_pairing;
 	uint64_t agent_serial;
 	enum fplinux_bluez_agent_kind agent_kind;
 	size_t agent_code;
 	bool agent_is_alert;
-	bool receiving;
-	bool picker_receiving;
 	bool transfer_running;
+	bool transfer_options;
 	bool close_pending;
 	bool close_question;
 	pthread_t thread;
 	pthread_mutex_t mutex;
-	pthread_cond_t condition;
 	atomic_bool cancelled;
-	atomic_bool can_answer;
 	int event_fd;
 	char transfer_peer[18];
 	char transfer_peer_name[FPLINUX_BLUEZ_NAME_BYTES];
@@ -182,9 +164,6 @@ struct fplinux_settings_bluetooth {
 	struct transfer_snapshot shared;
 	struct transfer_history records[HISTORY_COUNT];
 	size_t record_count;
-	struct transfer_history selected_record;
-	uint64_t question_serial;
-	uint32_t document_request;
 };
 
 static void root_refresh(struct fplinux_settings_bluetooth *bluetooth);
@@ -194,11 +173,9 @@ static void agent_refresh(struct fplinux_settings_bluetooth *bluetooth);
 static void transfer_refresh(struct fplinux_settings_bluetooth *bluetooth);
 static void history_refresh(struct fplinux_settings_bluetooth *bluetooth,
 			    bool added);
-static void open_devices(struct fplinux_settings_bluetooth *bluetooth,
-			 bool paired, enum peer_selection selection);
 static void open_transfer(struct fplinux_settings_bluetooth *bluetooth);
-static void open_picker(struct fplinux_settings_bluetooth *bluetooth,
-			bool receiving);
+static void start_transfer(struct fplinux_settings_bluetooth *bluetooth,
+			   const char *device_path);
 static void cancel_transfer(struct fplinux_settings_bluetooth *bluetooth);
 
 static void add_command(struct fplinux_settings_bluetooth *bluetooth,
@@ -228,8 +205,11 @@ static void add_command(struct fplinux_settings_bluetooth *bluetooth,
 	case COMMAND_FORGET:
 		glyph = "delete";
 		break;
-	case COMMAND_OPEN:
-		glyph = "file";
+	case COMMAND_TRANSFER:
+		glyph = "copy";
+		break;
+	case COMMAND_HISTORY:
+		glyph = "history";
 		break;
 	case COMMAND_CONNECT_PROFILE:
 		glyph = "bluetooth";
@@ -287,7 +267,6 @@ static void forget_screen(struct fplinux_settings_bluetooth *bluetooth,
 		&bluetooth->agent,	    &bluetooth->notice,
 		&bluetooth->confirm,	    &bluetooth->history,
 		&bluetooth->history_detail, &bluetooth->transfer,
-		&bluetooth->question,
 	};
 
 	for (size_t i = 0; i < ARRAY_SIZE(fields); ++i)
@@ -321,8 +300,7 @@ static void close_screen(struct fplinux_settings_bluetooth *bluetooth,
 
 	if (!screen)
 		return;
-	if (bluetooth->close_question &&
-	    (screen == bluetooth->agent || screen == bluetooth->question) &&
+	if (bluetooth->close_question && screen == bluetooth->agent &&
 	    fplinux_ui_current(bluetooth->ui) == bluetooth->confirm)
 		return;
 	for (index = 0; index < bluetooth->screen_count; ++index)
@@ -332,19 +310,9 @@ static void close_screen(struct fplinux_settings_bluetooth *bluetooth,
 		return;
 	fplinux_ui_pop(bluetooth->ui);
 	/* A withdrawn asynchronous prompt can have another prompt above it. */
-	while (bluetooth->screen_count > index) {
-		struct fplinux_ui_screen *removed =
-			bluetooth->screens[bluetooth->screen_count - 1];
-
-		if (removed == bluetooth->question) {
-			pthread_mutex_lock(&bluetooth->mutex);
-			bluetooth->shared.answered = true;
-			bluetooth->shared.allow = false;
-			pthread_cond_broadcast(&bluetooth->condition);
-			pthread_mutex_unlock(&bluetooth->mutex);
-		}
-		forget_screen(bluetooth, removed);
-	}
+	while (bluetooth->screen_count > index)
+		forget_screen(bluetooth,
+			      bluetooth->screens[bluetooth->screen_count - 1]);
 }
 
 static const char *device_name(const struct fplinux_bluez_device *device)
@@ -371,22 +339,14 @@ static void update_screen_hold(struct fplinux_settings_bluetooth *bluetooth)
 {
 	const struct fplinux_bluez_agent_request *request =
 		fplinux_bluez_adapter_agent_request(bluetooth->adapter);
-	bool awaiting_file;
 	bool enabled;
 
-	pthread_mutex_lock(&bluetooth->mutex);
-	awaiting_file =
-		bluetooth->transfer_running && bluetooth->receiving &&
-		(bluetooth->shared.state == FPLINUX_BLUETOOTH_OPP_CONNECTING ||
-		 bluetooth->shared.state == FPLINUX_BLUETOOTH_OPP_WAITING ||
-		 bluetooth->shared.state == FPLINUX_BLUETOOTH_OPP_AUTHORIZING ||
-		 bluetooth->shared.question != TRANSFER_QUESTION_NONE);
-	pthread_mutex_unlock(&bluetooth->mutex);
 	enabled = can_answer(bluetooth) &&
 		  (bluetooth->mutation == MUTATION_PAIR ||
-		   request->kind != FPLINUX_BLUEZ_AGENT_NONE || awaiting_file ||
-		   fplinux_bluez_adapter_visibility(bluetooth->adapter) ==
-			   FPLINUX_BLUEZ_VISIBLE_TIMED);
+		   request->kind != FPLINUX_BLUEZ_AGENT_NONE ||
+		   (bluetooth->incoming_pairing == INCOMING_PAIRING_VISIBLE &&
+		    fplinux_bluez_adapter_visibility(bluetooth->adapter) ==
+			    FPLINUX_BLUEZ_VISIBLE_TIMED));
 	if (enabled != bluetooth->keep_screen_on &&
 	    fplinux_ui_keep_screen_on(bluetooth->ui, enabled))
 		bluetooth->keep_screen_on = enabled;
@@ -477,22 +437,16 @@ transfer_problem(const struct fplinux_bluetooth_opp_result *result)
 	if (!result->error_number ||
 	    result->outcome == FPLINUX_BLUETOOTH_OPP_CANCELLED)
 		return "";
-	if (result->published || *result->path ||
-	    result->error_number == ENOSPC || result->error_number == EDQUOT ||
-	    result->error_number == EROFS)
-		return fplinux_ui_storage_error((struct fplinux_storage_result){
-			.state = result->published ?
-					 FPLINUX_STORAGE_PUBLISHED_UNSYNCED :
-					 FPLINUX_STORAGE_UNPUBLISHED,
-			.error = result->error_number,
-		});
 	return bluetooth_error_text(result->error_number);
 }
 
 static void release_discovery(struct fplinux_settings_bluetooth *bluetooth)
 {
-	if (!bluetooth->adapter)
+	if (!fplinux_bluez_adapter_discovery_owned(bluetooth->adapter) &&
+	    bluetooth->mutation != MUTATION_SCAN) {
+		bluetooth->stop_discovery = false;
 		return;
+	}
 	if (fplinux_bluez_adapter_pending(bluetooth->adapter)) {
 		bluetooth->stop_discovery = true;
 		return;
@@ -505,17 +459,25 @@ static void release_discovery(struct fplinux_settings_bluetooth *bluetooth)
 
 static void update_answering(struct fplinux_settings_bluetooth *bluetooth)
 {
-	bool answer = can_answer(bluetooth);
+	bool visible = fplinux_bluez_adapter_visibility(bluetooth->adapter) !=
+		       FPLINUX_BLUEZ_HIDDEN;
+	bool answer = can_answer(bluetooth) && usable(bluetooth);
+	bool adding = bluetooth->devices && !bluetooth->paired_only;
 
-	atomic_store(&bluetooth->can_answer, answer);
-	pthread_mutex_lock(&bluetooth->mutex);
-	pthread_cond_broadcast(&bluetooth->condition);
-	pthread_mutex_unlock(&bluetooth->mutex);
-	if (!answer) {
-		fplinux_bluez_adapter_cancel_pairing(bluetooth->adapter);
-		release_discovery(bluetooth);
+	if (!answer || (!visible && bluetooth->incoming_pairing ==
+					    INCOMING_PAIRING_VISIBLE)) {
+		bluetooth->incoming_pairing = INCOMING_PAIRING_CLOSED;
+	} else if (visible &&
+		   bluetooth->incoming_pairing == INCOMING_PAIRING_OPENING) {
+		bluetooth->incoming_pairing = INCOMING_PAIRING_VISIBLE;
 	}
-	fplinux_bluez_adapter_set_agent_enabled(bluetooth->adapter, answer);
+	answer = answer && (adding || bluetooth->incoming_pairing !=
+					      INCOMING_PAIRING_CLOSED);
+	if (answer != bluetooth->pairing_agent_enabled) {
+		bluetooth->pairing_agent_enabled = answer;
+		fplinux_bluez_adapter_set_agent_enabled(bluetooth->adapter,
+							answer);
+	}
 	update_screen_hold(bluetooth);
 }
 
@@ -530,7 +492,9 @@ static void mutation_done(struct fplinux_ui *ui, void *context)
 	bluetooth->wait = NULL;
 	bluetooth->mutation = MUTATION_NONE;
 	bluetooth->mutation_failed = false;
-	update_screen_hold(bluetooth);
+	if (mutation == MUTATION_VISIBILITY && failed)
+		bluetooth->incoming_pairing = INCOMING_PAIRING_CLOSED;
+	update_answering(bluetooth);
 	if (!failed &&
 	    (mutation == MUTATION_NAME || mutation == MUTATION_ALIAS))
 		close_screen(bluetooth, &bluetooth->editor);
@@ -587,6 +551,17 @@ static void scan(struct fplinux_settings_bluetooth *bluetooth, bool start)
 		       start ? _("Starting search…") : _("Stopping search…"));
 }
 
+static const char *receive_status(struct fplinux_settings_bluetooth *bluetooth)
+{
+	if (!fplinux_bluez_adapter_present(bluetooth->adapter))
+		return _("Unavailable");
+	if (!usable(bluetooth))
+		return _("Bluetooth is off");
+	if (!fplinux_bluez_adapter_connectable(bluetooth->adapter))
+		return _("Connections disabled");
+	return bluetooth->receive_ready ? _("Ready") : _("Service unavailable");
+}
+
 static void root_refresh(struct fplinux_settings_bluetooth *bluetooth)
 {
 	char nearby[32];
@@ -598,6 +573,15 @@ static void root_refresh(struct fplinux_settings_bluetooth *bluetooth)
 
 	if (!bluetooth->root)
 		return;
+	if (!bluetooth->transfer_options &&
+	    (bluetooth->transfer_running || bluetooth->record_count)) {
+		add_command(bluetooth, bluetooth->root, COMMAND_TRANSFER,
+			    FPLINUX_UI_COMMAND_SCREEN, _("File transfer"), 0);
+		add_command(bluetooth, bluetooth->root, COMMAND_HISTORY,
+			    FPLINUX_UI_COMMAND_SCREEN, _("Transfer history"),
+			    0);
+		bluetooth->transfer_options = true;
+	}
 	present = fplinux_bluez_adapter_present(bluetooth->adapter);
 	for (size_t i = 0;
 	     i < fplinux_bluez_adapter_device_count(bluetooth->adapter); ++i) {
@@ -616,18 +600,18 @@ static void root_refresh(struct fplinux_settings_bluetooth *bluetooth)
 			    power_value(bluetooth));
 	fplinux_ui_list_set(
 		bluetooth->root, ROOT_VISIBILITY, _("Visibility"),
-		present ? visibility_value(fplinux_bluez_adapter_visibility(
-				  bluetooth->adapter)) :
-			  _("Unavailable"));
+		usable(bluetooth) ?
+			visibility_value(fplinux_bluez_adapter_visibility(
+				bluetooth->adapter)) :
+			_("Unavailable"));
 	fplinux_ui_list_set(bluetooth->root, ROOT_NAME, _("Phone name"),
 			    present && name && *name ? name : _("Unavailable"));
 	fplinux_ui_list_set(bluetooth->root, ROOT_NEARBY, _("Nearby devices"),
 			    usable(bluetooth) ? nearby : _("Unavailable"));
 	fplinux_ui_list_set(bluetooth->root, ROOT_PAIRED, _("Paired devices"),
 			    present ? paired : _("Unavailable"));
-	fplinux_ui_list_set(bluetooth->root, ROOT_TRANSFER, _("File transfer"),
-			    bluetooth->transfer_running ? _("In progress") :
-							  _("Idle"));
+	fplinux_ui_list_set(bluetooth->root, ROOT_RECEIVE_STATUS,
+			    _("File reception"), receive_status(bluetooth));
 	if (fplinux_ui_list_get_focused(bluetooth->root) == ROOT_POWER)
 		fplinux_ui_list_set_select_label(
 			bluetooth->root,
@@ -635,6 +619,9 @@ static void root_refresh(struct fplinux_settings_bluetooth *bluetooth)
 			fplinux_bluez_adapter_powered(bluetooth->adapter) ?
 				   _("Turn off") :
 				   _("Turn on"));
+	else if (fplinux_ui_list_get_focused(bluetooth->root) ==
+		 ROOT_RECEIVE_STATUS)
+		fplinux_ui_list_set_select_label(bluetooth->root, "");
 	else
 		fplinux_ui_list_set_select_label(bluetooth->root, _("Open"));
 }
@@ -651,8 +638,6 @@ static void root_focused(struct fplinux_ui *ui, struct fplinux_ui_screen *list,
 static bool matches_list(const struct fplinux_settings_bluetooth *bluetooth,
 			 const struct fplinux_bluez_device *device)
 {
-	if (bluetooth->peer_selection != PEER_INSPECT)
-		return true;
 	return device->paired == bluetooth->paired_only;
 }
 
@@ -717,8 +702,7 @@ static void devices_refresh(struct fplinux_settings_bluetooth *bluetooth)
 					    scanning ? _("Searching…") : NULL,
 					    scanning ? _("Search") : NULL);
 	fplinux_ui_screen_remove_command(bluetooth->devices, COMMAND_SEARCH);
-	if (!bluetooth->paired_only ||
-	    bluetooth->peer_selection != PEER_INSPECT)
+	if (!bluetooth->paired_only)
 		add_command(bluetooth, bluetooth->devices, COMMAND_SEARCH,
 			    scanning ? FPLINUX_UI_COMMAND_STOP :
 				       FPLINUX_UI_COMMAND_SCREEN,
@@ -729,6 +713,8 @@ static void devices_refresh(struct fplinux_settings_bluetooth *bluetooth)
 			!usable(bluetooth)     ? _("Bluetooth is off") :
 			bluetooth->paired_only ? _("No paired devices") :
 						 _("No nearby devices"),
+			bluetooth->paired_only ?
+				NULL :
 			usable(bluetooth) ?
 				_("Choose Options, then Search to find devices.") :
 				_("Turn Bluetooth on to search."));
@@ -807,9 +793,6 @@ static void device_refresh(struct fplinux_settings_bluetooth *bluetooth)
 		      "edit");
 	device_append(bluetooth, DEVICE_FORGET, _("Forget device"), NULL,
 		      "delete");
-	device_append(bluetooth, DEVICE_SEND, _("Send file"), NULL, "send");
-	device_append(bluetooth, DEVICE_RECEIVE, _("Receive files"), NULL,
-		      "file");
 	for (size_t i = 0; i < bluetooth->device_row_count; ++i)
 		if (bluetooth->device_rows[i] == focused) {
 			fplinux_ui_list_set_focused(bluetooth->device, i);
@@ -941,9 +924,10 @@ static void editor_command(struct fplinux_ui *ui,
 		close_screen(bluetooth, &bluetooth->editor);
 		return;
 	}
-	if (id != COMMAND_SAVE)
+	if (id != COMMAND_SAVE && id != COMMAND_RESET_NAME)
 		return;
-	text = fplinux_ui_form_get_text(screen, 0);
+	text = id == COMMAND_RESET_NAME ? "" :
+					  fplinux_ui_form_get_text(screen, 0);
 	if (!text)
 		return;
 	if (strlen(text) >= sizeof(name)) {
@@ -952,7 +936,7 @@ static void editor_command(struct fplinux_ui *ui,
 		return;
 	}
 	snprintf(name, sizeof(name), "%s", text);
-	if (!*name) {
+	if (!*name && id != COMMAND_RESET_NAME) {
 		show_notice(bluetooth, _("Name"), _("Enter a name."), true);
 		return;
 	}
@@ -998,6 +982,9 @@ static void open_editor(struct fplinux_settings_bluetooth *bluetooth,
 					  FPLINUX_UI_TEXT_ANY);
 	add_back(bluetooth, bluetooth->editor);
 	add_action_row(bluetooth->editor, COMMAND_SAVE, _("Save"));
+	if (kind == EDITOR_NAME)
+		add_command(bluetooth, bluetooth->editor, COMMAND_RESET_NAME,
+			    FPLINUX_UI_COMMAND_SCREEN, _("Use model name"), 0);
 	fplinux_ui_screen_set_listener(bluetooth->editor, editor_command, NULL,
 				       bluetooth);
 	push_screen(bluetooth, bluetooth->editor);
@@ -1104,11 +1091,6 @@ static void device_command(struct fplinux_ui *ui,
 	case DEVICE_FORGET:
 		confirm_forget(bluetooth);
 		break;
-	case DEVICE_SEND:
-	case DEVICE_RECEIVE:
-		open_picker(bluetooth,
-			    bluetooth->device_rows[row] == DEVICE_RECEIVE);
-		break;
 	default:
 		break;
 	}
@@ -1145,6 +1127,7 @@ static void devices_command(struct fplinux_ui *ui,
 		close_screen(bluetooth, &bluetooth->devices);
 		bluetooth->row_count = 0;
 		bluetooth->devices_empty = false;
+		update_answering(bluetooth);
 		return;
 	}
 	if (id == COMMAND_SEARCH) {
@@ -1156,38 +1139,37 @@ static void devices_command(struct fplinux_ui *ui,
 		return;
 	if (bluetooth->peer_selection == PEER_INSPECT)
 		open_device(bluetooth, bluetooth->row_paths[row]);
-	else {
-		snprintf(bluetooth->device_path, sizeof(bluetooth->device_path),
-			 "%s", bluetooth->row_paths[row]);
-		open_picker(bluetooth,
-			    bluetooth->peer_selection == PEER_RECEIVE);
-	}
+	else
+		start_transfer(bluetooth, bluetooth->row_paths[row]);
 }
 
-static void open_devices(struct fplinux_settings_bluetooth *bluetooth,
+static bool open_devices(struct fplinux_settings_bluetooth *bluetooth,
 			 bool paired, enum peer_selection selection)
 {
 	bluetooth->paired_only = paired;
 	bluetooth->peer_selection = selection;
 	bluetooth->row_count = 0;
 	bluetooth->devices_empty = false;
-	bluetooth->devices = fplinux_ui_list_new(
-		bluetooth->ui,
-		selection == PEER_SEND	  ? _("Send to") :
-		selection == PEER_RECEIVE ? _("Receive from") :
-		paired			  ? _("Paired devices") :
-					    _("Nearby devices"),
-		FPLINUX_UI_LIST_IMPLICIT);
+	bluetooth->devices = fplinux_ui_list_new(bluetooth->ui,
+						 selection == PEER_SEND ?
+							 _("Send to") :
+						 paired ? _("Paired devices") :
+							  _("Nearby devices"),
+						 FPLINUX_UI_LIST_IMPLICIT);
 	if (!bluetooth->devices)
-		return;
+		return false;
 	add_back(bluetooth, bluetooth->devices);
 	fplinux_ui_screen_set_listener(bluetooth->devices, devices_command,
 				       NULL, bluetooth);
 	devices_refresh(bluetooth);
 	push_screen(bluetooth, bluetooth->devices);
+	if (!bluetooth->devices)
+		return false;
+	update_answering(bluetooth);
 	if (!paired && usable(bluetooth) &&
 	    !fplinux_bluez_adapter_discovery_owned(bluetooth->adapter))
 		scan(bluetooth, true);
+	return true;
 }
 
 static void visibility_command(struct fplinux_ui *ui,
@@ -1195,7 +1177,9 @@ static void visibility_command(struct fplinux_ui *ui,
 			       void *context)
 {
 	struct fplinux_settings_bluetooth *bluetooth = context;
+	struct fplinux_bluez_adapter *adapter = bluetooth->adapter;
 	size_t row = fplinux_ui_list_get_focused(list);
+	bool queued;
 
 	(void)ui;
 	if (id == COMMAND_BACK) {
@@ -1206,11 +1190,24 @@ static void visibility_command(struct fplinux_ui *ui,
 	    row > FPLINUX_BLUEZ_VISIBLE_ALWAYS)
 		return;
 	close_screen(bluetooth, &bluetooth->visibility);
-	mutation_begin(bluetooth, MUTATION_VISIBILITY,
-		       fplinux_bluez_adapter_set_visibility(
-			       bluetooth->adapter,
-			       (enum fplinux_bluez_visibility)row,
-			       REQUEST_TIMEOUT_MS),
+	/* BlueZ may leave an unchanged Connectable request pending. */
+	if (row == FPLINUX_BLUEZ_HIDDEN && usable(bluetooth) &&
+	    fplinux_bluez_adapter_visibility(adapter) == FPLINUX_BLUEZ_HIDDEN &&
+	    fplinux_bluez_adapter_connectable(adapter) &&
+	    !fplinux_bluez_adapter_pairable(adapter)) {
+		bluetooth->incoming_pairing = INCOMING_PAIRING_CLOSED;
+		update_answering(bluetooth);
+		return;
+	}
+	queued = fplinux_bluez_adapter_set_visibility(adapter, row,
+						      REQUEST_TIMEOUT_MS);
+	if (queued) {
+		bluetooth->incoming_pairing = row == FPLINUX_BLUEZ_HIDDEN ?
+						      INCOMING_PAIRING_CLOSED :
+						      INCOMING_PAIRING_OPENING;
+		update_answering(bluetooth);
+	}
+	mutation_begin(bluetooth, MUTATION_VISIBILITY, queued,
 		       _("Changing visibility…"));
 }
 
@@ -1408,110 +1405,11 @@ transfer_progress(const struct fplinux_bluetooth_opp_progress *progress,
 
 	pthread_mutex_lock(&bluetooth->mutex);
 	bluetooth->shared.state = progress->state;
-	snprintf(bluetooth->shared.peer, sizeof(bluetooth->shared.peer), "%s",
-		 progress->peer ? progress->peer : "");
-	snprintf(bluetooth->shared.filename, sizeof(bluetooth->shared.filename),
-		 "%s", progress->filename ? progress->filename : "");
 	bluetooth->shared.transferred_bytes = progress->transferred_bytes;
 	bluetooth->shared.total_bytes = progress->total_bytes;
 	bluetooth->shared.total_known = progress->total_known;
 	pthread_mutex_unlock(&bluetooth->mutex);
 	notify_transfer(bluetooth);
-}
-
-static bool transfer_ask(struct fplinux_settings_bluetooth *bluetooth,
-			 enum transfer_question question, const char *filename,
-			 const char *peer, uint64_t bytes, bool total_known,
-			 enum fplinux_bluetooth_opp_conflict *conflict)
-{
-	bool allowed;
-
-	pthread_mutex_lock(&bluetooth->mutex);
-	if (atomic_load(&bluetooth->cancelled) ||
-	    !atomic_load(&bluetooth->can_answer)) {
-		pthread_mutex_unlock(&bluetooth->mutex);
-		return false;
-	}
-	bluetooth->shared.question = question;
-	++bluetooth->shared.question_serial;
-	bluetooth->shared.answered = false;
-	bluetooth->shared.allow = false;
-	bluetooth->shared.conflict = FPLINUX_BLUETOOTH_OPP_KEEP_EXISTING;
-	snprintf(bluetooth->shared.filename, sizeof(bluetooth->shared.filename),
-		 "%s", filename);
-	if (peer)
-		snprintf(bluetooth->shared.peer, sizeof(bluetooth->shared.peer),
-			 "%s", peer);
-	bluetooth->shared.total_bytes = bytes;
-	bluetooth->shared.total_known = total_known;
-	notify_transfer(bluetooth);
-	while (!bluetooth->shared.answered &&
-	       !atomic_load(&bluetooth->cancelled) &&
-	       atomic_load(&bluetooth->can_answer))
-		pthread_cond_wait(&bluetooth->condition, &bluetooth->mutex);
-	allowed = bluetooth->shared.answered && bluetooth->shared.allow &&
-		  !atomic_load(&bluetooth->cancelled) &&
-		  atomic_load(&bluetooth->can_answer);
-	if (conflict)
-		*conflict = allowed ? bluetooth->shared.conflict :
-				      FPLINUX_BLUETOOTH_OPP_KEEP_EXISTING;
-	bluetooth->shared.question = TRANSFER_QUESTION_NONE;
-	pthread_mutex_unlock(&bluetooth->mutex);
-	notify_transfer(bluetooth);
-	return allowed;
-}
-
-static enum fplinux_bluetooth_opp_consent
-transfer_authorize(const struct fplinux_bluetooth_opp_offer *offer,
-		   void *context)
-{
-	struct fplinux_settings_bluetooth *bluetooth = context;
-	enum fplinux_bluetooth_opp_consent consent =
-		FPLINUX_BLUETOOTH_OPP_PENDING;
-	bool notify = false;
-
-	pthread_mutex_lock(&bluetooth->mutex);
-	if (atomic_load(&bluetooth->cancelled) ||
-	    !atomic_load(&bluetooth->can_answer)) {
-		bluetooth->shared.question = TRANSFER_QUESTION_NONE;
-		consent = FPLINUX_BLUETOOTH_OPP_REJECT;
-		notify = true;
-	} else if (bluetooth->shared.question == TRANSFER_QUESTION_OFFER &&
-		   bluetooth->shared.answered) {
-		consent = bluetooth->shared.allow ?
-				  FPLINUX_BLUETOOTH_OPP_ACCEPT :
-				  FPLINUX_BLUETOOTH_OPP_REJECT;
-		bluetooth->shared.question = TRANSFER_QUESTION_NONE;
-		notify = true;
-	} else if (bluetooth->shared.question != TRANSFER_QUESTION_OFFER) {
-		bluetooth->shared.question = TRANSFER_QUESTION_OFFER;
-		++bluetooth->shared.question_serial;
-		bluetooth->shared.answered = false;
-		bluetooth->shared.allow = false;
-		snprintf(bluetooth->shared.filename,
-			 sizeof(bluetooth->shared.filename), "%s",
-			 offer->filename);
-		snprintf(bluetooth->shared.peer, sizeof(bluetooth->shared.peer),
-			 "%s", offer->peer);
-		bluetooth->shared.total_bytes = offer->total_bytes;
-		bluetooth->shared.total_known = offer->total_known;
-		notify = true;
-	}
-	pthread_mutex_unlock(&bluetooth->mutex);
-	if (notify)
-		notify_transfer(bluetooth);
-	return consent;
-}
-
-static enum fplinux_bluetooth_opp_conflict
-transfer_conflict(const char *filename, void *context)
-{
-	enum fplinux_bluetooth_opp_conflict conflict =
-		FPLINUX_BLUETOOTH_OPP_KEEP_EXISTING;
-
-	transfer_ask(context, TRANSFER_QUESTION_CONFLICT, filename, NULL, 0,
-		     false, &conflict);
-	return conflict;
 }
 
 static void *transfer_worker(void *context)
@@ -1520,121 +1418,19 @@ static void *transfer_worker(void *context)
 	const struct fplinux_bluetooth_opp_callbacks callbacks = {
 		.cancelled = transfer_cancelled,
 		.progress = transfer_progress,
-		.authorize = transfer_authorize,
-		.conflict = transfer_conflict,
 		.data = bluetooth,
 	};
 	struct fplinux_bluetooth_opp_result result = { 0 };
 
-	if (bluetooth->receiving)
-		fplinux_bluetooth_opp_receive(bluetooth->transfer_peer,
-					      bluetooth->transfer_path,
-					      RECEIVE_SECONDS, &callbacks,
-					      &result);
-	else
-		fplinux_bluetooth_opp_send(bluetooth->transfer_peer,
-					   bluetooth->transfer_path, &callbacks,
-					   &result);
+	fplinux_bluetooth_opp_send(bluetooth->transfer_peer,
+				   bluetooth->transfer_path, &callbacks,
+				   &result);
 	pthread_mutex_lock(&bluetooth->mutex);
 	bluetooth->shared.result = result;
-	bluetooth->shared.question = TRANSFER_QUESTION_NONE;
 	bluetooth->shared.done = true;
 	pthread_mutex_unlock(&bluetooth->mutex);
 	notify_transfer(bluetooth);
 	return NULL;
-}
-
-static void question_command(struct fplinux_ui *ui,
-			     struct fplinux_ui_screen *screen, int id,
-			     void *context)
-{
-	struct fplinux_settings_bluetooth *bluetooth = context;
-
-	(void)ui;
-	forget_screen(bluetooth, screen);
-	pthread_mutex_lock(&bluetooth->mutex);
-	if (bluetooth->shared.question != TRANSFER_QUESTION_NONE &&
-	    bluetooth->shared.question_serial == bluetooth->question_serial) {
-		bluetooth->shared.answered = true;
-		bluetooth->shared.allow = id == COMMAND_ACCEPT ||
-					  id == COMMAND_KEEP_BOTH ||
-					  id == COMMAND_REPLACE;
-		bluetooth->shared.conflict =
-			id == COMMAND_REPLACE ?
-				FPLINUX_BLUETOOTH_OPP_REPLACE :
-			id == COMMAND_KEEP_BOTH ?
-				FPLINUX_BLUETOOTH_OPP_KEEP_BOTH :
-				FPLINUX_BLUETOOTH_OPP_KEEP_EXISTING;
-		if (bluetooth->shared.question == TRANSFER_QUESTION_CONFLICT &&
-		    !bluetooth->shared.allow)
-			atomic_store(&bluetooth->cancelled, true);
-		pthread_cond_broadcast(&bluetooth->condition);
-	}
-	pthread_mutex_unlock(&bluetooth->mutex);
-}
-
-static void conflict_command(struct fplinux_ui *ui,
-			     struct fplinux_ui_screen *screen, int id,
-			     void *context)
-{
-	question_command(ui, screen, id, context);
-	fplinux_ui_pop(ui);
-}
-
-static void question_refresh(struct fplinux_settings_bluetooth *bluetooth,
-			     const struct transfer_snapshot *snapshot)
-{
-	char message[640];
-
-	if (snapshot->question == TRANSFER_QUESTION_NONE ||
-	    snapshot->answered || !can_answer(bluetooth)) {
-		close_screen(bluetooth, &bluetooth->question);
-		return;
-	}
-	if (bluetooth->question &&
-	    bluetooth->question_serial == snapshot->question_serial)
-		return;
-	close_screen(bluetooth, &bluetooth->question);
-	bluetooth->question_serial = snapshot->question_serial;
-	if (snapshot->question == TRANSFER_QUESTION_OFFER) {
-		snprintf(message, sizeof(message), _("Receive %s from %s?"),
-			 snapshot->filename, bluetooth->transfer_peer_name);
-		bluetooth->question = fplinux_ui_alert_new(
-			bluetooth->ui, FPLINUX_UI_ALERT_CONFIRMATION,
-			_("Incoming file"), message, 0);
-		if (!bluetooth->question)
-			goto reject;
-		add_command(bluetooth, bluetooth->question, COMMAND_REJECT,
-			    FPLINUX_UI_COMMAND_CANCEL, _("Reject"), 0);
-		add_command(bluetooth, bluetooth->question, COMMAND_ACCEPT,
-			    FPLINUX_UI_COMMAND_OK, _("Receive"), 0);
-		fplinux_ui_screen_set_listener(
-			bluetooth->question, question_command, NULL, bluetooth);
-	} else {
-		snprintf(message, sizeof(message), _("%s already exists."),
-			 snapshot->filename);
-		bluetooth->question =
-			fplinux_ui_form_new(bluetooth->ui, _("File exists"));
-		if (!bluetooth->question)
-			goto reject;
-		fplinux_ui_form_append_string(bluetooth->question, NULL,
-					      message);
-		if (!add_action_row(bluetooth->question, COMMAND_KEEP_BOTH,
-				    _("Keep both")) ||
-		    !add_action_row(bluetooth->question, COMMAND_REPLACE,
-				    _("Replace")))
-			goto reject;
-		add_command(bluetooth, bluetooth->question, COMMAND_CANCEL,
-			    FPLINUX_UI_COMMAND_CANCEL, NULL, 0);
-		fplinux_ui_screen_set_listener(
-			bluetooth->question, conflict_command, NULL, bluetooth);
-	}
-	push_screen(bluetooth, bluetooth->question);
-	return;
-
-reject:
-	question_command(bluetooth->ui, bluetooth->question, COMMAND_REJECT,
-			 bluetooth);
 }
 
 static const char *transfer_state(enum fplinux_bluetooth_opp_state state)
@@ -1642,18 +1438,13 @@ static const char *transfer_state(enum fplinux_bluetooth_opp_state state)
 	switch (state) {
 	case FPLINUX_BLUETOOTH_OPP_CONNECTING:
 		return _("Connecting…");
-	case FPLINUX_BLUETOOTH_OPP_WAITING:
-		return _("Waiting for a file · 2 minutes");
-	case FPLINUX_BLUETOOTH_OPP_AUTHORIZING:
-		return _("Waiting for consent…");
 	case FPLINUX_BLUETOOTH_OPP_TRANSFERRING:
 		return _("Transferring…");
-	case FPLINUX_BLUETOOTH_OPP_PUBLISHING:
-		return _("Saving file…");
 	case FPLINUX_BLUETOOTH_OPP_COMPLETE:
 		return _("Finishing…");
+	default:
+		return "";
 	}
-	return "";
 }
 
 static const char *outcome_name(enum fplinux_bluetooth_opp_outcome outcome)
@@ -1667,7 +1458,7 @@ static void transfer_refresh(struct fplinux_settings_bluetooth *bluetooth)
 {
 	struct transfer_snapshot snapshot;
 	char bytes[96];
-	char message[768];
+	const char *message;
 
 	pthread_mutex_lock(&bluetooth->mutex);
 	snapshot = bluetooth->shared;
@@ -1708,42 +1499,18 @@ static void transfer_refresh(struct fplinux_settings_bluetooth *bluetooth)
 			fplinux_ui_form_set_value(bluetooth->transfer, 4,
 						  percent);
 		}
-		message[0] = '\0';
-		if (!bluetooth->transfer_running)
-			snprintf(
-				message, sizeof(message), "%s%s%s",
-				transfer_problem(&snapshot.result),
-				snapshot.result.published &&
-						snapshot.result.error_number ?
-					"\n" :
-					"",
-				snapshot.result.published &&
-						snapshot.result.error_number ?
-					_("The file is visible. Saving was not confirmed.") :
-					"");
+		message = bluetooth->transfer_running ?
+				  "" :
+				  transfer_problem(&snapshot.result);
 		fplinux_ui_form_set_string(bluetooth->transfer, 5, message);
 		fplinux_ui_form_set_hidden(bluetooth->transfer, 5, !*message);
-		fplinux_ui_form_set_string(bluetooth->transfer, 6,
-					   bluetooth->transfer_running ?
-						   "" :
-						   snapshot.result.path);
-		fplinux_ui_form_set_hidden(bluetooth->transfer, 6,
-					   bluetooth->transfer_running ||
-						   !*snapshot.result.path);
 		fplinux_ui_screen_remove_command(bluetooth->transfer,
 						 COMMAND_CANCEL);
-		fplinux_ui_screen_remove_command(bluetooth->transfer,
-						 COMMAND_OPEN);
 		if (bluetooth->transfer_running)
 			add_command(bluetooth, bluetooth->transfer,
 				    COMMAND_CANCEL, FPLINUX_UI_COMMAND_STOP,
 				    NULL, 0);
-		else if (bluetooth->receiving && snapshot.result.published)
-			add_command(bluetooth, bluetooth->transfer,
-				    COMMAND_OPEN, FPLINUX_UI_COMMAND_OK,
-				    _("Open file"), 0);
 	}
-	question_refresh(bluetooth, &snapshot);
 	update_screen_hold(bluetooth);
 	root_refresh(bluetooth);
 }
@@ -1778,7 +1545,6 @@ static void transfer_event(struct fplinux_ui *ui, int fd, short events,
 				sizeof(bluetooth->records[0]));
 		++bluetooth->record_count;
 		record = &bluetooth->records[0];
-		record->receiving = bluetooth->receiving;
 		snprintf(record->peer, sizeof(record->peer), "%s",
 			 bluetooth->transfer_peer_name);
 		snprintf(record->filename, sizeof(record->filename), "%s",
@@ -1799,9 +1565,6 @@ static void transfer_event(struct fplinux_ui *ui, int fd, short events,
 static void cancel_transfer(struct fplinux_settings_bluetooth *bluetooth)
 {
 	atomic_store(&bluetooth->cancelled, true);
-	pthread_mutex_lock(&bluetooth->mutex);
-	pthread_cond_broadcast(&bluetooth->condition);
-	pthread_mutex_unlock(&bluetooth->mutex);
 }
 
 static void transfer_command(struct fplinux_ui *ui,
@@ -1816,19 +1579,6 @@ static void transfer_command(struct fplinux_ui *ui,
 		close_screen(bluetooth, &bluetooth->transfer);
 	else if (id == COMMAND_CANCEL)
 		cancel_transfer(bluetooth);
-	else if (id == COMMAND_OPEN && !bluetooth->document_request) {
-		struct fplinux_bluetooth_opp_result result;
-
-		pthread_mutex_lock(&bluetooth->mutex);
-		result = bluetooth->shared.result;
-		pthread_mutex_unlock(&bluetooth->mutex);
-		if (!result.published || !bluetooth->receiving)
-			return;
-		bluetooth->document_request =
-			fplinux_ui_open_file(bluetooth->ui, result.path);
-		if (!bluetooth->document_request)
-			show_error(bluetooth, errno);
-	}
 }
 
 static void open_transfer(struct fplinux_settings_bluetooth *bluetooth)
@@ -1852,7 +1602,6 @@ static void open_transfer(struct fplinux_settings_bluetooth *bluetooth)
 	fplinux_ui_form_append_gauge(bluetooth->transfer, NULL, 0, 100, 0,
 				     false);
 	fplinux_ui_form_append_string(bluetooth->transfer, NULL, "");
-	fplinux_ui_form_append_property(bluetooth->transfer, _("Location"), "");
 	add_back(bluetooth, bluetooth->transfer);
 	fplinux_ui_screen_set_listener(bluetooth->transfer, transfer_command,
 				       NULL, bluetooth);
@@ -1861,15 +1610,14 @@ static void open_transfer(struct fplinux_settings_bluetooth *bluetooth)
 }
 
 static void start_transfer(struct fplinux_settings_bluetooth *bluetooth,
-			   bool receiving, const char *path)
+			   const char *device_path)
 {
 	const struct fplinux_bluez_device *device =
-		fplinux_bluez_adapter_device(bluetooth->adapter,
-					     bluetooth->device_path);
+		fplinux_bluez_adapter_device(bluetooth->adapter, device_path);
 	int error;
 	const char *filename;
 
-	if (!device || !usable(bluetooth)) {
+	if (!device || !device->paired || !usable(bluetooth)) {
 		show_error(bluetooth, ENODEV);
 		return;
 	}
@@ -1877,25 +1625,17 @@ static void start_transfer(struct fplinux_settings_bluetooth *bluetooth,
 		open_transfer(bluetooth);
 		return;
 	}
-	release_discovery(bluetooth);
-	bluetooth->receiving = receiving;
 	snprintf(bluetooth->transfer_peer, sizeof(bluetooth->transfer_peer),
 		 "%s", device->address);
 	snprintf(bluetooth->transfer_peer_name,
 		 sizeof(bluetooth->transfer_peer_name), "%s",
 		 device_name(device));
-	snprintf(bluetooth->transfer_path, sizeof(bluetooth->transfer_path),
-		 "%s", path);
 	pthread_mutex_lock(&bluetooth->mutex);
 	memset(&bluetooth->shared, 0, sizeof(bluetooth->shared));
-	bluetooth->shared.state = receiving ? FPLINUX_BLUETOOTH_OPP_WAITING :
-					      FPLINUX_BLUETOOTH_OPP_CONNECTING;
-	filename = strrchr(path, '/');
+	bluetooth->shared.state = FPLINUX_BLUETOOTH_OPP_CONNECTING;
+	filename = strrchr(bluetooth->transfer_path, '/');
 	snprintf(bluetooth->shared.filename, sizeof(bluetooth->shared.filename),
-		 "%s",
-		 receiving ? "" :
-		 filename  ? filename + 1 :
-			     path);
+		 "%s", filename + 1);
 	pthread_mutex_unlock(&bluetooth->mutex);
 	atomic_store(&bluetooth->cancelled, false);
 	error = pthread_create(&bluetooth->thread, NULL, transfer_worker,
@@ -1905,52 +1645,8 @@ static void start_transfer(struct fplinux_settings_bluetooth *bluetooth,
 		return;
 	}
 	bluetooth->transfer_running = true;
+	close_screen(bluetooth, &bluetooth->devices);
 	open_transfer(bluetooth);
-}
-
-static void picker_result(struct fplinux_ui_file_picker *picker,
-			  enum fplinux_ui_file_picker_status status,
-			  const char *path, int error, void *context)
-{
-	struct fplinux_settings_bluetooth *bluetooth = context;
-	char selected[PATH_MAX];
-
-	(void)picker;
-	if (status == FPLINUX_UI_FILE_PICKER_SELECTED)
-		snprintf(selected, sizeof(selected), "%s", path);
-	fplinux_ui_file_picker_close(bluetooth->picker);
-	bluetooth->picker = NULL;
-	if (status == FPLINUX_UI_FILE_PICKER_SELECTED)
-		start_transfer(bluetooth, bluetooth->picker_receiving,
-			       selected);
-	else if (status == FPLINUX_UI_FILE_PICKER_ERROR)
-		show_error(bluetooth, error);
-}
-
-static void open_picker(struct fplinux_settings_bluetooth *bluetooth,
-			bool receiving)
-{
-	const struct fplinux_ui_file_picker_options options = {
-		.mode = receiving ? FPLINUX_UI_FILE_PICKER_FOLDER :
-				    FPLINUX_UI_FILE_PICKER_FILE,
-		.home = bluetooth->home,
-		.title = receiving ? _("Receive into") : _("Send file"),
-		.writable = receiving,
-	};
-
-	if (bluetooth->transfer_running) {
-		open_transfer(bluetooth);
-		return;
-	}
-	if (!*bluetooth->home) {
-		show_error(bluetooth, ENOENT);
-		return;
-	}
-	bluetooth->picker_receiving = receiving;
-	bluetooth->picker = fplinux_ui_file_picker_open(
-		bluetooth->ui, &options, picker_result, bluetooth);
-	if (!bluetooth->picker)
-		show_error(bluetooth, errno);
 }
 
 static void history_detail_command(struct fplinux_ui *ui,
@@ -1958,23 +1654,11 @@ static void history_detail_command(struct fplinux_ui *ui,
 				   void *context)
 {
 	struct fplinux_settings_bluetooth *bluetooth = context;
-	const struct transfer_history *record;
 
 	(void)ui;
 	(void)screen;
-	if (id == COMMAND_BACK) {
+	if (id == COMMAND_BACK)
 		close_screen(bluetooth, &bluetooth->history_detail);
-		return;
-	}
-	if (id != COMMAND_OPEN)
-		return;
-	record = &bluetooth->selected_record;
-	if (!bluetooth->document_request && *record->result.path) {
-		bluetooth->document_request = fplinux_ui_open_file(
-			bluetooth->ui, record->result.path);
-		if (!bluetooth->document_request)
-			show_error(bluetooth, errno);
-	}
 }
 
 static void history_command(struct fplinux_ui *ui,
@@ -1993,7 +1677,6 @@ static void history_command(struct fplinux_ui *ui,
 	if (id != FPLINUX_UI_SELECT_COMMAND || row >= bluetooth->record_count)
 		return;
 	record = &bluetooth->records[row];
-	bluetooth->selected_record = *record;
 	bluetooth->history_detail =
 		fplinux_ui_form_new(bluetooth->ui, _("Transfer details"));
 	if (!bluetooth->history_detail)
@@ -2008,18 +1691,7 @@ static void history_command(struct fplinux_ui *ui,
 		fplinux_ui_form_append_string(
 			bluetooth->history_detail, NULL,
 			transfer_problem(&record->result));
-	if (record->result.published && record->result.error_number)
-		fplinux_ui_form_append_string(
-			bluetooth->history_detail, NULL,
-			_("The file is visible. Saving was not confirmed."));
-	if (*record->result.path)
-		fplinux_ui_form_append_property(bluetooth->history_detail,
-						_("Location"),
-						record->result.path);
 	add_back(bluetooth, bluetooth->history_detail);
-	if (record->receiving && record->result.published)
-		add_command(bluetooth, bluetooth->history_detail, COMMAND_OPEN,
-			    FPLINUX_UI_COMMAND_OK, _("Open file"), 0);
 	fplinux_ui_screen_set_listener(bluetooth->history_detail,
 				       history_detail_command, NULL, bluetooth);
 	push_screen(bluetooth, bluetooth->history_detail);
@@ -2050,11 +1722,9 @@ static void history_refresh(struct fplinux_settings_bluetooth *bluetooth,
 			 outcome_name(record->result.outcome));
 		fplinux_ui_list_append(bluetooth->history,
 				       *record->filename ? record->filename :
-				       record->receiving ? _("Receive files") :
 							   _("Send file"),
 				       detail);
-		set_glyph(bluetooth, bluetooth->history, i,
-			  record->receiving ? "file" : "send");
+		set_glyph(bluetooth, bluetooth->history, i, "send");
 	}
 	if (!bluetooth->record_count)
 		fplinux_ui_list_append(bluetooth->history,
@@ -2094,16 +1764,16 @@ static void root_command(struct fplinux_ui *ui, struct fplinux_ui_screen *list,
 		fplinux_settings_bluetooth_reset(bluetooth);
 		return;
 	}
-	if (id != FPLINUX_UI_SELECT_COMMAND)
-		return;
-	if (row == ROOT_HISTORY) {
+	if (id == COMMAND_HISTORY) {
 		open_history(bluetooth);
 		return;
 	}
-	if (row == ROOT_TRANSFER) {
+	if (id == COMMAND_TRANSFER) {
 		open_transfer(bluetooth);
 		return;
 	}
+	if (id != FPLINUX_UI_SELECT_COMMAND || row == ROOT_RECEIVE_STATUS)
+		return;
 	if (!fplinux_bluez_adapter_present(bluetooth->adapter) ||
 	    fplinux_bluez_adapter_pending(bluetooth->adapter))
 		return;
@@ -2129,10 +1799,6 @@ static void root_command(struct fplinux_ui *ui, struct fplinux_ui_screen *list,
 		open_visibility(bluetooth);
 	else if (row == ROOT_NEARBY)
 		open_devices(bluetooth, false, PEER_INSPECT);
-	else if (row == ROOT_SEND)
-		open_devices(bluetooth, false, PEER_SEND);
-	else if (row == ROOT_RECEIVE)
-		open_devices(bluetooth, false, PEER_RECEIVE);
 }
 
 struct fplinux_settings_bluetooth *
@@ -2140,9 +1806,7 @@ fplinux_settings_bluetooth_new(struct fplinux_ui *ui,
 			       struct fplinux_bluez_adapter *adapter)
 {
 	struct fplinux_settings_bluetooth *bluetooth;
-	const char *home;
 	int error;
-	int length;
 
 	if (!ui || !adapter) {
 		errno = EINVAL;
@@ -2155,36 +1819,23 @@ fplinux_settings_bluetooth_new(struct fplinux_ui *ui,
 	bluetooth->adapter = adapter;
 	bluetooth->event_fd = -1;
 	atomic_init(&bluetooth->cancelled, false);
-	atomic_init(&bluetooth->can_answer, false);
 	error = pthread_mutex_init(&bluetooth->mutex, NULL);
 	if (error)
 		goto fail;
-	error = pthread_cond_init(&bluetooth->condition, NULL);
-	if (error)
-		goto fail_mutex;
 	bluetooth->event_fd = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
 	if (bluetooth->event_fd < 0) {
 		error = errno;
-		goto fail_condition;
+		goto fail_mutex;
 	}
 	if (!fplinux_ui_watch_fd(ui, bluetooth->event_fd, POLLIN,
 				 transfer_event, bluetooth)) {
 		error = errno;
 		close(bluetooth->event_fd);
-		goto fail_condition;
-	}
-	home = getenv("HOME");
-	if (home && home[0] == '/') {
-		length = snprintf(bluetooth->home, sizeof(bluetooth->home),
-				  "%s/Files", home);
-		if (length < 0 || (size_t)length >= sizeof(bluetooth->home))
-			bluetooth->home[0] = '\0';
+		goto fail_mutex;
 	}
 	bluetooth->visible = fplinux_ui_is_visible(ui);
 	return bluetooth;
 
-fail_condition:
-	pthread_cond_destroy(&bluetooth->condition);
 fail_mutex:
 	pthread_mutex_destroy(&bluetooth->mutex);
 fail:
@@ -2198,12 +1849,10 @@ void fplinux_settings_bluetooth_show(
 {
 	static const char *const labels[] = {
 		"Power",	  "Visibility",	    "Phone name",
-		"Nearby devices", "Paired devices", "Send file",
-		"Receive files",  "File transfer",  "Transfer history",
+		"Nearby devices", "Paired devices", "File reception",
 	};
 	static const char *const glyphs[] = {
-		"bluetooth", "view", "edit", "search",	"check",
-		"send",	     "file", "copy", "history",
+		"bluetooth", "view", "edit", "search", "check", "file",
 	};
 
 	if (!bluetooth || bluetooth->root)
@@ -2218,6 +1867,7 @@ void fplinux_settings_bluetooth_show(
 		set_glyph(bluetooth, bluetooth->root, i, glyphs[i]);
 	}
 	add_back(bluetooth, bluetooth->root);
+	bluetooth->transfer_options = false;
 	fplinux_ui_screen_set_listener(bluetooth->root, root_command, NULL,
 				       bluetooth);
 	fplinux_ui_list_set_focus_listener(bluetooth->root, root_focused,
@@ -2225,6 +1875,48 @@ void fplinux_settings_bluetooth_show(
 	root_refresh(bluetooth);
 	push_screen(bluetooth, bluetooth->root);
 	update_answering(bluetooth);
+}
+
+bool fplinux_settings_bluetooth_send(
+	struct fplinux_settings_bluetooth *bluetooth, const char *path)
+{
+	if (!path || path[0] != '/' || strlen(path) >= PATH_MAX) {
+		errno = EINVAL;
+		return false;
+	}
+	if (!bluetooth || !fplinux_bluez_adapter_present(bluetooth->adapter)) {
+		errno = ENODEV;
+		return false;
+	}
+	if (!usable(bluetooth)) {
+		errno = ENETDOWN;
+		return false;
+	}
+	if (bluetooth->transfer_running ||
+	    bluetooth->mutation != MUTATION_NONE ||
+	    fplinux_bluez_adapter_pending(bluetooth->adapter)) {
+		errno = EBUSY;
+		return false;
+	}
+	if (bluetooth->root)
+		fplinux_settings_bluetooth_reset(bluetooth);
+	fplinux_settings_bluetooth_show(bluetooth);
+	if (!bluetooth->root || !open_devices(bluetooth, true, PEER_SEND)) {
+		errno = ENOMEM;
+		return false;
+	}
+	snprintf(bluetooth->transfer_path, sizeof(bluetooth->transfer_path),
+		 "%s", path);
+	return true;
+}
+
+void fplinux_settings_bluetooth_receive_status(
+	struct fplinux_settings_bluetooth *bluetooth, bool ready)
+{
+	if (!bluetooth)
+		return;
+	bluetooth->receive_ready = ready;
+	root_refresh(bluetooth);
 }
 
 void fplinux_settings_bluetooth_changed(
@@ -2235,8 +1927,11 @@ void fplinux_settings_bluetooth_changed(
 	root_refresh(bluetooth);
 	devices_refresh(bluetooth);
 	device_refresh(bluetooth);
+	if (bluetooth->stop_discovery &&
+	    !fplinux_bluez_adapter_pending(bluetooth->adapter))
+		release_discovery(bluetooth);
+	update_answering(bluetooth);
 	agent_refresh(bluetooth);
-	update_screen_hold(bluetooth);
 }
 
 bool fplinux_settings_bluetooth_shown(
@@ -2263,49 +1958,26 @@ void fplinux_settings_bluetooth_finished(
 		release_discovery(bluetooth);
 }
 
-void fplinux_settings_bluetooth_storage_result(
-	struct fplinux_settings_bluetooth *bluetooth,
-	const struct fplinux_volume_result *result)
-{
-	if (bluetooth && bluetooth->picker)
-		fplinux_ui_file_picker_storage_result(bluetooth->picker,
-						      result);
-}
-
 void fplinux_settings_bluetooth_event(
 	struct fplinux_settings_bluetooth *bluetooth,
 	const struct fplinux_ui_event *event)
 {
 	if (!bluetooth)
 		return;
-	if (event->type == FPLINUX_UI_EVENT_VISIBILITY) {
+	if (event->type == FPLINUX_UI_EVENT_VISIBILITY)
 		bluetooth->visible = event->visible;
-		update_answering(bluetooth);
-		agent_refresh(bluetooth);
-		transfer_refresh(bluetooth);
-	} else if (event->type == FPLINUX_UI_EVENT_LIFECYCLE) {
+	if (event->type == FPLINUX_UI_EVENT_VISIBILITY ||
+	    event->type == FPLINUX_UI_EVENT_LIFECYCLE) {
+		if (!can_answer(bluetooth))
+			release_discovery(bluetooth);
 		update_answering(bluetooth);
 		agent_refresh(bluetooth);
 		transfer_refresh(bluetooth);
 	} else if (event->type == FPLINUX_UI_EVENT_CLOSE) {
-		atomic_store(&bluetooth->can_answer, false);
+		bluetooth->visible = false;
 		cancel_transfer(bluetooth);
-		fplinux_bluez_adapter_cancel_pairing(bluetooth->adapter);
-		fplinux_bluez_adapter_set_agent_enabled(bluetooth->adapter,
-							false);
 		release_discovery(bluetooth);
-	} else if (event->type == FPLINUX_UI_EVENT_DOCUMENT_RESULT &&
-		   event->document_result.request_id ==
-			   bluetooth->document_request &&
-		   event->document_result.status != FPLINUX_UI_DOCUMENT_WAIT) {
-		bluetooth->document_request = 0;
-		if (event->document_result.status == FPLINUX_UI_DOCUMENT_ERROR)
-			show_notice(
-				bluetooth, _("Open file"),
-				event->document_result.error == ENOEXEC ?
-					_("No application can open this file type.") :
-					_("Cannot open this file."),
-				true);
+		update_answering(bluetooth);
 	}
 }
 
@@ -2314,17 +1986,6 @@ void fplinux_settings_bluetooth_reset(
 {
 	if (!bluetooth)
 		return;
-	pthread_mutex_lock(&bluetooth->mutex);
-	if (bluetooth->shared.question != TRANSFER_QUESTION_NONE) {
-		bluetooth->shared.answered = true;
-		bluetooth->shared.allow = false;
-		pthread_cond_broadcast(&bluetooth->condition);
-	}
-	pthread_mutex_unlock(&bluetooth->mutex);
-	if (bluetooth->picker) {
-		fplinux_ui_file_picker_close(bluetooth->picker);
-		bluetooth->picker = NULL;
-	}
 	if (bluetooth->root)
 		close_screen(bluetooth, &bluetooth->root);
 	else if (bluetooth->screen_count) {
@@ -2343,10 +2004,10 @@ void fplinux_settings_bluetooth_reset(
 	bluetooth->history = NULL;
 	bluetooth->history_detail = NULL;
 	bluetooth->transfer = NULL;
-	bluetooth->question = NULL;
 	bluetooth->wait = NULL;
 	bluetooth->agent_serial = 0;
 	bluetooth->row_count = 0;
+	release_discovery(bluetooth);
 	bluetooth->mutation = MUTATION_NONE;
 	update_answering(bluetooth);
 }
@@ -2380,11 +2041,9 @@ enum fplinux_ui_close_response fplinux_settings_bluetooth_prepare_close(
 {
 	if (!bluetooth || !bluetooth->transfer_running) {
 		if (bluetooth) {
-			fplinux_bluez_adapter_cancel_pairing(
-				bluetooth->adapter);
-			fplinux_bluez_adapter_set_agent_enabled(
-				bluetooth->adapter, false);
+			bluetooth->visible = false;
 			release_discovery(bluetooth);
+			update_answering(bluetooth);
 		}
 		return FPLINUX_UI_CLOSE_READY;
 	}
@@ -2419,7 +2078,6 @@ void fplinux_settings_bluetooth_free(
 	fplinux_settings_bluetooth_reset(bluetooth);
 	fplinux_ui_unwatch_fd(bluetooth->ui, bluetooth->event_fd);
 	close(bluetooth->event_fd);
-	pthread_cond_destroy(&bluetooth->condition);
 	pthread_mutex_destroy(&bluetooth->mutex);
 	free(bluetooth);
 }

@@ -33,6 +33,7 @@
 #include "fplinux-ui-profile.h"
 #include "session-audio.h"
 #include "session-battery.h"
+#include "session-bluetooth.h"
 #include "session-child.h"
 #include "session-clock.h"
 #include "session-power.h"
@@ -44,6 +45,7 @@
 
 #define FPLINUX_SESSION_LAUNCHER FPLINUX_DESKTOP_LAUNCHER_ID
 #define FPLINUX_SESSION_SETTINGS "org.fplinux.settings"
+#define FPLINUX_SESSION_FILES "org.fplinux.files"
 #define FPLINUX_SESSION_CLOCK "org.fplinux.clock"
 #define FPLINUX_SESSION_PROGRESS_MS 200U
 #define FPLINUX_SESSION_PROCESS_TICK_MS 100U
@@ -58,6 +60,7 @@
 #define FPLINUX_SESSION_PREPARE_CLOSE_MS 3000U
 #define FPLINUX_SESSION_SETTINGS_RETRY_MS 2000U
 #define FPLINUX_SESSION_SETTINGS_RETRY_MAX_MS 30000U
+#define FPLINUX_SESSION_WIFI_NOTICE_MS 3000U
 
 static uint64_t system_ms(void)
 {
@@ -528,6 +531,31 @@ static bool clock_covers_app(const struct fplinux_session *session)
 	return clock_raises_launcher(session) && session->launcher_shown;
 }
 
+static bool bluetooth_due(const struct fplinux_session *session)
+{
+	const struct fplinux_ui_bluetooth_prompt *prompt =
+		&session->bluetooth_prompt;
+
+	return prompt->id && !session->power.locked && !clock_due(session) &&
+	       !notice_due(session) &&
+	       session->power.display != FPLINUX_UI_SESSION_DISPLAY_OFF &&
+	       (prompt->phase != FPLINUX_UI_BLUETOOTH_RECEIVING ||
+		prompt->id != session->bluetooth_hidden_id);
+}
+
+static bool bluetooth_raises_launcher(const struct fplinux_session *session)
+{
+	const struct process *launcher = &session->launcher;
+
+	return bluetooth_due(session) && is_running(launcher) &&
+	       launcher->control_fd >= 0 && launcher->policy.ready &&
+	       launcher->policy.framed &&
+	       session->bluetooth_drawn_id == session->bluetooth_prompt.id &&
+	       (session->launcher_shown ||
+		session->bluetooth_drawn_phase ==
+			session->bluetooth_prompt.phase);
+}
+
 bool fplinux_session_clock_keys_eligible(const struct fplinux_session *session)
 {
 	return clock_covers_app(session) &&
@@ -555,7 +583,8 @@ static void clock_power(struct fplinux_session *session, uint64_t time)
 static bool launcher_on_top(const struct fplinux_session *session)
 {
 	return session->power.locked || notice_covers_app(session) ||
-	       clock_covers_app(session);
+	       clock_covers_app(session) ||
+	       (bluetooth_raises_launcher(session) && session->launcher_shown);
 }
 
 /*
@@ -636,8 +665,19 @@ static void publish_system_levels(struct fplinux_session *session)
 void fplinux_session_get_indicator(struct fplinux_session *session,
 				   struct fplinux_session_indicator *state)
 {
-	if (state)
-		*state = session->volume.indicator;
+	if (!state)
+		return;
+	*state = session->volume.indicator;
+	if (!session->wifi_notice_deadline_ms || session->power.locked ||
+	    session->power.display == FPLINUX_UI_SESSION_DISPLAY_OFF ||
+	    notice_due(session) || clock_due(session) || bluetooth_due(session))
+		return;
+	*state = (struct fplinux_session_indicator){
+		.visible = true,
+		.wifi_russian = !strcmp(session->settings.locale, "ru"),
+	};
+	memcpy(state->wifi_name, session->wifi_notice.name,
+	       sizeof(state->wifi_name));
 }
 
 static void initialize_process(struct process *process)
@@ -742,6 +782,7 @@ static bool start_process(struct fplinux_session *session,
 	if (process == &session->launcher) {
 		session->battery_notice_drawn = false;
 		session->clock_drawn_event = 0;
+		session->bluetooth_drawn_id = 0;
 		session->launcher_tasks_view = session->launcher_restore_tasks;
 		session->launcher_quick_settings_view = false;
 		session->launcher_shown = false;
@@ -914,6 +955,8 @@ static void send_active(struct fplinux_session *session)
 		event_id = ring.event.id;
 	fplinux_session_clock_presentation(&session->clock,
 					   &message.clock_presentation);
+	if (bluetooth_due(session))
+		message.bluetooth_prompt = session->bluetooth_prompt;
 	fplinux_session_copy_value(
 		message.notice, sizeof(message.notice),
 		battery_notice_code(session->battery_notice));
@@ -1368,7 +1411,8 @@ static void open_document_with(struct fplinux_session *session, const char *id)
 
 	if (error || !read_entry(session, id, &entry) ||
 	    entry.mode == FPLINUX_UI_SESSION_LAUNCHER ||
-	    !fplinux_desktop_entry_handles(&entry, request->path)) {
+	    (!request->system_handler &&
+	     !fplinux_desktop_entry_handles(&entry, request->path))) {
 		document_result(session, FPLINUX_UI_DOCUMENT_ERROR,
 				error ? error : ENOENT);
 		return;
@@ -1435,6 +1479,16 @@ static void open_document(struct fplinux_session *session,
 		document_result(session, FPLINUX_UI_DOCUMENT_ERROR, error);
 		return;
 	}
+	if (message->type == FPLINUX_UI_SESSION_BLUETOOTH_SEND) {
+		if (!session->bluetooth_ready) {
+			document_result(session, FPLINUX_UI_DOCUMENT_ERROR,
+					ENODEV);
+			return;
+		}
+		session->document.system_handler = true;
+		open_document_with(session, FPLINUX_SESSION_SETTINGS);
+		return;
+	}
 	directory = opendir(session->options.applications);
 	if (!directory) {
 		document_result(session, FPLINUX_UI_DOCUMENT_ERROR, errno);
@@ -1482,6 +1536,202 @@ static void open_document(struct fplinux_session *session,
 		      compare_document_choices);
 		fplinux_ui_session_send(origin->control_fd, &choices);
 	}
+}
+
+static void bluetooth_ready(struct fplinux_session *session,
+			    struct process *process)
+{
+	struct fplinux_ui_session_message ready = {
+		.type = FPLINUX_UI_SESSION_BLUETOOTH_READY,
+		.enabled = session->bluetooth_ready,
+	};
+
+	if (session->bluetooth && process && process->control_fd >= 0 &&
+	    !process->policy.closing &&
+	    (!strcmp(process->policy.app_id, FPLINUX_SESSION_SETTINGS) ||
+	     !strcmp(process->policy.app_id, FPLINUX_SESSION_FILES)))
+		fplinux_ui_session_send(process->control_fd, &ready);
+}
+
+/* A single installed handler can be opened without a second selection. */
+static void bluetooth_find_handler(struct fplinux_session *session)
+{
+	struct fplinux_desktop_entry entry;
+	DIR *directory = opendir(session->options.applications);
+	struct dirent *item;
+
+	session->bluetooth_handler_id[0] = '\0';
+	if (!directory)
+		return;
+	while ((item = readdir(directory))) {
+		char id[FPLINUX_UI_SESSION_ID_BYTES];
+		size_t bytes = strlen(item->d_name);
+
+		if (bytes <= 8 || bytes - 8 >= sizeof(id) ||
+		    strcmp(item->d_name + bytes - 8, ".desktop"))
+			continue;
+		memcpy(id, item->d_name, bytes - 8);
+		id[bytes - 8] = '\0';
+		if (!read_entry(session, id, &entry) ||
+		    entry.mode == FPLINUX_UI_SESSION_LAUNCHER ||
+		    !fplinux_desktop_entry_handles(
+			    &entry, session->bluetooth_received_path))
+			continue;
+		if (session->bluetooth_handler_id[0]) {
+			session->bluetooth_handler_id[0] = '\0';
+			break;
+		}
+		strcpy(session->bluetooth_handler_id, id);
+	}
+	closedir(directory);
+}
+
+static void clear_bluetooth_prompt(struct fplinux_session *session)
+{
+	memset(&session->bluetooth_prompt, 0,
+	       sizeof(session->bluetooth_prompt));
+	session->bluetooth_drawn_id = 0;
+	session->bluetooth_hidden_id = 0;
+}
+
+static void bluetooth_event(struct fplinux_session *session,
+			    const struct fplinux_session_bluetooth_event *event)
+{
+	struct fplinux_ui_bluetooth_prompt *prompt = &session->bluetooth_prompt;
+	bool old_ready = session->bluetooth_ready;
+
+	switch (event->state) {
+	case FPLINUX_SESSION_BLUETOOTH_READY:
+		session->bluetooth_ready = true;
+		break;
+	case FPLINUX_SESSION_BLUETOOTH_OFF:
+	case FPLINUX_SESSION_BLUETOOTH_UNAVAILABLE:
+	case FPLINUX_SESSION_BLUETOOTH_BUSY:
+		session->bluetooth_ready = false;
+		if (prompt->phase == FPLINUX_UI_BLUETOOTH_OFFER)
+			clear_bluetooth_prompt(session);
+		break;
+	case FPLINUX_SESSION_BLUETOOTH_CLEARED:
+		if (event->id == prompt->id)
+			clear_bluetooth_prompt(session);
+		break;
+	case FPLINUX_SESSION_BLUETOOTH_OFFER:
+		clear_bluetooth_prompt(session);
+		prompt->id = event->id;
+		prompt->phase = FPLINUX_UI_BLUETOOTH_OFFER;
+		fplinux_session_copy_value(prompt->peer, sizeof(prompt->peer),
+					   event->peer);
+		fplinux_session_copy_value(prompt->filename,
+					   sizeof(prompt->filename),
+					   event->filename);
+		prompt->total_bytes = event->total_bytes;
+		prompt->total_known = event->total_known;
+		if (!session->power.locked)
+			fplinux_session_power_activity(
+				&session->power, false,
+				fplinux_session_now_ms(session));
+		break;
+	case FPLINUX_SESSION_BLUETOOTH_TRANSFERRING:
+		if (event->id == prompt->id) {
+			prompt->phase = FPLINUX_UI_BLUETOOTH_RECEIVING;
+			prompt->transferred_bytes = event->transferred_bytes;
+			prompt->total_bytes = event->total_bytes;
+			prompt->total_known = event->total_known;
+		}
+		break;
+	case FPLINUX_SESSION_BLUETOOTH_COMPLETE:
+	case FPLINUX_SESSION_BLUETOOTH_FAILED:
+		if (event->id != prompt->id)
+			break;
+		prompt->phase =
+			event->state == FPLINUX_SESSION_BLUETOOTH_COMPLETE ?
+				FPLINUX_UI_BLUETOOTH_COMPLETE :
+				FPLINUX_UI_BLUETOOTH_FAILED;
+		if (event->filename[0])
+			fplinux_session_copy_value(prompt->filename,
+						   sizeof(prompt->filename),
+						   event->filename);
+		if (prompt->phase == FPLINUX_UI_BLUETOOTH_COMPLETE) {
+			fplinux_session_copy_value(
+				session->bluetooth_received_path,
+				sizeof(session->bluetooth_received_path),
+				event->path);
+			bluetooth_find_handler(session);
+			prompt->can_open = session->bluetooth_handler_id[0] !=
+					   '\0';
+		}
+		break;
+	}
+	if (old_ready != session->bluetooth_ready) {
+		bluetooth_ready(session,
+				task_for_id(session, FPLINUX_SESSION_SETTINGS));
+		bluetooth_ready(session,
+				task_for_id(session, FPLINUX_SESSION_FILES));
+	}
+}
+
+static void bluetooth_action(struct fplinux_session *session,
+			     const struct fplinux_ui_session_message *message)
+{
+	struct fplinux_ui_bluetooth_prompt *prompt = &session->bluetooth_prompt;
+	const char *action = message->value;
+
+	if (!bluetooth_due(session) || message->serial != prompt->id ||
+	    prompt->id != session->bluetooth_drawn_id ||
+	    prompt->phase != session->bluetooth_drawn_phase)
+		return;
+	switch (prompt->phase) {
+	case FPLINUX_UI_BLUETOOTH_OFFER: {
+		bool accept = !strcmp(action, "accept");
+
+		if (!accept && strcmp(action, "decline"))
+			return;
+		if (session->bluetooth &&
+		    fplinux_session_bluetooth_decide(session->bluetooth,
+						     prompt->id, accept) &&
+		    accept) {
+			prompt->phase = FPLINUX_UI_BLUETOOTH_RECEIVING;
+		} else {
+			clear_bluetooth_prompt(session);
+		}
+		break;
+	}
+	case FPLINUX_UI_BLUETOOTH_RECEIVING:
+		if (!strcmp(action, "hide"))
+			session->bluetooth_hidden_id = prompt->id;
+		break;
+	case FPLINUX_UI_BLUETOOTH_COMPLETE:
+		if ((!strcmp(action, "folder") || !strcmp(action, "open")) &&
+		    !session->document.request_id &&
+		    !launch_in_progress(session)) {
+			bool open = !strcmp(action, "open") && prompt->can_open;
+
+			session->document.request_id = prompt->id;
+			session->document.system_handler = !open;
+			if (app_in_foreground(session))
+				session->document.origin_token =
+					session->app->policy.token;
+			fplinux_session_copy_value(
+				session->document.path,
+				sizeof(session->document.path),
+				session->bluetooth_received_path);
+			clear_bluetooth_prompt(session);
+			open_document_with(
+				session, open ? session->bluetooth_handler_id :
+						FPLINUX_SESSION_FILES);
+		} else if (!strcmp(action, "close")) {
+			clear_bluetooth_prompt(session);
+		}
+		break;
+	case FPLINUX_UI_BLUETOOTH_FAILED:
+		if (!strcmp(action, "close"))
+			clear_bluetooth_prompt(session);
+		break;
+	case FPLINUX_UI_BLUETOOTH_IDLE:
+		break;
+	}
+	send_active(session);
+	changed(session);
 }
 
 static void return_home(struct fplinux_session *session)
@@ -2598,18 +2848,44 @@ static void wireless_setting(struct fplinux_session *session,
 	session->wireless_request.level = message->setting.value.enabled;
 }
 
-static void wifi_state(struct fplinux_session *session, struct process *process)
+static void wifi_state(struct process *process,
+		       const struct fplinux_ui_wifi_state *state)
 {
 	struct fplinux_ui_session_message message = {
 		.type = FPLINUX_UI_SESSION_WIFI_STATE,
+		.wifi_state = *state,
 	};
 
 	if (!process || process->control_fd < 0 || !process->policy.ready ||
 	    process->policy.closing)
 		return;
-	fplinux_session_wireless_wifi_state(session->wireless,
-					    &message.wifi_state);
 	fplinux_ui_session_send(process->control_fd, &message);
+}
+
+static void wifi_status(struct process *launcher,
+			const struct fplinux_ui_wifi_state *state)
+{
+	struct fplinux_ui_session_message message = {
+		.type = FPLINUX_UI_SESSION_WIFI_STATUS,
+		.wifi_status = { .power = state->power, .link = state->link },
+	};
+
+	if (launcher->control_fd < 0 || !launcher->policy.ready ||
+	    launcher->policy.closing)
+		return;
+	if (state->link != FPLINUX_UI_WIFI_DISCONNECTED)
+		memcpy(message.wifi_status.name, state->current.name,
+		       sizeof(message.wifi_status.name));
+	fplinux_ui_session_send(launcher->control_fd, &message);
+}
+
+static bool wifi_connected_to(const struct fplinux_ui_wifi_state *state,
+			      const struct fplinux_ui_wifi_network *network)
+{
+	/* Escaped names are a unique representation of the SSID bytes. */
+	return state->link == FPLINUX_UI_WIFI_CONNECTED && network->id &&
+	       state->current.security == network->security &&
+	       !strcmp(state->current.name, network->name);
 }
 
 static void wifi_result(struct process *process, uint32_t serial,
@@ -2673,6 +2949,8 @@ static void dispatch_wireless(struct fplinux_session *session)
 		.setting.kind = FPLINUX_UI_SETTING_WIFI,
 	};
 	struct fplinux_session_wireless_state state;
+	struct fplinux_ui_wifi_state station;
+	struct fplinux_ui_wifi_network connected;
 	struct process *process;
 	enum fplinux_ui_wifi_result result;
 	uint32_t ticket;
@@ -2683,8 +2961,15 @@ static void dispatch_wireless(struct fplinux_session *session)
 	session->wireless_initialized = true;
 	state = fplinux_session_wireless_state(session->wireless);
 	has_wifi_result = fplinux_session_wireless_take_wifi_result(
-		session->wireless, &ticket, &result);
-	wifi_state(session, task_for_id(session, FPLINUX_SESSION_SETTINGS));
+		session->wireless, &ticket, &result, &connected);
+	fplinux_session_wireless_wifi_state(session->wireless, &station);
+	wifi_state(task_for_id(session, FPLINUX_SESSION_SETTINGS), &station);
+	wifi_status(&session->launcher, &station);
+	if (session->wifi_notice_deadline_ms &&
+	    !wifi_connected_to(&station, &session->wifi_notice)) {
+		session->wifi_notice_deadline_ms = 0;
+		changed(session);
+	}
 	if (has_wifi_result && session->wifi_request.pending &&
 	    ticket == session->wifi_ticket) {
 		/* A backgrounded Settings may need to clear a pending request. */
@@ -2694,6 +2979,16 @@ static void dispatch_wireless(struct fplinux_session *session)
 		if (process && process->policy.token == request->token &&
 		    process->control_fd >= 0)
 			wifi_result(process, request->serial, result);
+		if (wifi_connected_to(&station, &connected) &&
+		    !session->power.locked && !clock_due(session) &&
+		    !notice_due(session) && !bluetooth_due(session) &&
+		    session->power.display != FPLINUX_UI_SESSION_DISPLAY_OFF) {
+			session->wifi_notice = connected;
+			session->wifi_notice_deadline_ms =
+				fplinux_session_now_ms(session) +
+				FPLINUX_SESSION_WIFI_NOTICE_MS;
+			changed(session);
+		}
 		session->wifi_request.pending = false;
 	}
 	if (fplinux_session_wireless_take_result(session->wireless, &error)) {
@@ -3293,6 +3588,16 @@ static bool receive_message(struct fplinux_session *session, struct peer *peer,
 			return false;
 		open_document(session, process, message);
 		break;
+	case FPLINUX_UI_SESSION_BLUETOOTH_SEND:
+		if (strcmp(process->policy.app_id, FPLINUX_SESSION_FILES))
+			return false;
+		open_document(session, process, message);
+		break;
+	case FPLINUX_UI_SESSION_BLUETOOTH_ACTION:
+		if (process != &session->launcher)
+			return false;
+		bluetooth_action(session, message);
+		break;
 	case FPLINUX_UI_SESSION_DOCUMENT_CHOICE:
 		if (process->policy.token != session->document.origin_token ||
 		    message->serial != session->document.request_id)
@@ -3312,11 +3617,21 @@ static bool receive_message(struct fplinux_session *session, struct peer *peer,
 		if (!process->policy.ready && process->drawn)
 			process->handoff_ms = fplinux_session_now_ms(session);
 		process->policy.ready = true;
+		bluetooth_ready(session, process);
 		if (process == session->app)
 			finish_activation(session);
 		send_active(session);
-		if (!strcmp(process->policy.app_id, FPLINUX_SESSION_SETTINGS))
-			wifi_state(session, process);
+		if (process == &session->launcher ||
+		    !strcmp(process->policy.app_id, FPLINUX_SESSION_SETTINGS)) {
+			struct fplinux_ui_wifi_state state;
+
+			fplinux_session_wireless_wifi_state(session->wireless,
+							    &state);
+			if (process == &session->launcher)
+				wifi_status(process, &state);
+			else
+				wifi_state(process, &state);
+		}
 		break;
 	case FPLINUX_UI_SESSION_LAUNCH:
 		if (process != &session->launcher)
@@ -3375,6 +3690,10 @@ static bool receive_message(struct fplinux_session *session, struct peer *peer,
 		if (message->serial &&
 		    message->serial == session->last_active.serial) {
 			session->launcher_ack_serial = message->serial;
+			session->bluetooth_drawn_id =
+				session->last_active.bluetooth_prompt.id;
+			session->bluetooth_drawn_phase =
+				session->last_active.bluetooth_prompt.phase;
 			session->clock_drawn_event =
 				session->last_active_clock_event;
 			if (session->battery_notice !=
@@ -4063,7 +4382,8 @@ static void manage_processes(struct fplinux_session *session, uint64_t time,
 	if (!session->destroying && !session->launcher.policy.pid &&
 	    (!session->app->policy.pid || session->app->policy.closing ||
 	     !app_runs_alone(session) || session->app->leaving || locked ||
-	     notice_due(session) || clock_due(session)) &&
+	     notice_due(session) || bluetooth_due(session) ||
+	     clock_due(session)) &&
 	    (!session->pending_id[0] || session->app->leaving ||
 	     clock_due(session)) &&
 	    session->launcher_failures < 3) {
@@ -4075,7 +4395,8 @@ static void manage_processes(struct fplinux_session *session, uint64_t time,
 	/* An unanswered notice keeps it, also while the display is off. */
 	if (!locked && app_in_foreground(session) && app_runs_alone(session) &&
 	    session->battery_notice == FPLINUX_SESSION_BATTERY_ALERT_NONE &&
-	    !clock_due(session) && is_running(&session->launcher))
+	    !bluetooth_due(session) && !clock_due(session) &&
+	    is_running(&session->launcher))
 		request_close(session, &session->launcher);
 	for (i = 0; i < FPLINUX_SESSION_PEERS; ++i) {
 		struct peer *peer = &session->peers[i];
@@ -4216,7 +4537,12 @@ static void advance(struct fplinux_session *session)
 		fplinux_session_volume_end_app_previews(session);
 	settle_held_scene(session);
 	fplinux_session_power_set_keep_screen_on(
-		&session->power, keeps_screen_on(session), time);
+		&session->power,
+		keeps_screen_on(session) ||
+			(bluetooth_due(session) &&
+			 session->bluetooth_prompt.phase ==
+				 FPLINUX_UI_BLUETOOTH_OFFER),
+		time);
 	if (session->lit_display == FPLINUX_UI_SESSION_DISPLAY_OFF &&
 	    session->power.display != FPLINUX_UI_SESSION_DISPLAY_OFF) {
 		/* Clients redraw before the backlight comes back. */
@@ -4256,6 +4582,8 @@ static void advance(struct fplinux_session *session)
 	    session->active_locked != session->power.locked ||
 	    session->active_notice != session->power.notice ||
 	    session->active_battery_notice != session->battery_notice ||
+	    (bluetooth_due(session) ? session->bluetooth_prompt.id : 0) !=
+		    session->last_active.bluetooth_prompt.id ||
 	    session->active_charging != session->charger_online ||
 	    session->last_active.background_playing !=
 		    background_playing(session) ||
@@ -4272,10 +4600,22 @@ static void advance(struct fplinux_session *session)
 		session->app->policy.mode != FPLINUX_UI_SESSION_FULLSCREEN ||
 		session->app->local_softkeys;
 
-	if (fplinux_session_volume_advance_indicator(session, time, &earliest,
-						     notice_due(session),
-						     indicator_softkeys))
+	if (fplinux_session_volume_advance_indicator(
+		    session, time, &earliest,
+		    notice_due(session) || bluetooth_due(session),
+		    indicator_softkeys))
 		changed(session);
+	if (session->wifi_notice_deadline_ms) {
+		if (time >= session->wifi_notice_deadline_ms ||
+		    session->power.locked || clock_due(session) ||
+		    notice_due(session) || bluetooth_due(session) ||
+		    session->power.display == FPLINUX_UI_SESSION_DISPLAY_OFF) {
+			session->wifi_notice_deadline_ms = 0;
+			changed(session);
+		} else {
+			consider(&earliest, session->wifi_notice_deadline_ms);
+		}
+	}
 	if (needs_tick)
 		consider(&earliest, time + FPLINUX_SESSION_PROCESS_TICK_MS);
 	if (launch_in_progress(session) &&
@@ -4313,11 +4653,37 @@ void fplinux_session_dispatch(struct fplinux_session *session)
 	int event_count = epoll_wait(session->epoll_fd, events,
 				     sizeof(events) / sizeof(events[0]), 0);
 
-	for (int event = 0; event < event_count; ++event)
+	for (int event = 0; event < event_count; ++event) {
 		if (session->wireless &&
 		    events[event].data.fd ==
 			    fplinux_session_wireless_fd(session->wireless))
 			dispatch_wireless(session);
+		if (session->bluetooth &&
+		    events[event].data.fd ==
+			    fplinux_session_bluetooth_fd(session->bluetooth)) {
+			struct fplinux_session_bluetooth_event incoming;
+
+			while (fplinux_session_bluetooth_receive(
+				session->bluetooth, &incoming))
+				bluetooth_event(session, &incoming);
+			if ((events[event].events & (EPOLLHUP | EPOLLERR)) ||
+			    fplinux_session_bluetooth_fd(session->bluetooth) <
+				    0) {
+				bluetooth_event(
+					session,
+					&(struct fplinux_session_bluetooth_event){
+						.state =
+							FPLINUX_SESSION_BLUETOOTH_UNAVAILABLE,
+					});
+				clear_bluetooth_prompt(session);
+				fplinux_session_bluetooth_destroy(
+					session->bluetooth);
+				session->bluetooth = NULL;
+			}
+			send_active(session);
+			changed(session);
+		}
+	}
 	read(session->timer_fd, &ticks, sizeof(ticks));
 	if (read(session->alarm_fd, &ticks, sizeof(ticks)) < 0 &&
 	    errno == ECANCELED)
@@ -4489,6 +4855,13 @@ fplinux_session_create(const struct fplinux_session_options *options)
 		fplinux_session_wireless_destroy(session->wireless);
 		session->wireless = NULL;
 	}
+	session->bluetooth = fplinux_session_bluetooth_create(options);
+	if (session->bluetooth &&
+	    !add_fd(session,
+		    fplinux_session_bluetooth_fd(session->bluetooth))) {
+		fplinux_session_bluetooth_destroy(session->bluetooth);
+		session->bluetooth = NULL;
+	}
 	if (options->vibrate)
 		session->has_vibrator = true;
 	else if (options->input_dir) {
@@ -4591,6 +4964,7 @@ void fplinux_session_destroy(struct fplinux_session *session)
 	remove_fd(session, session->listener_fd);
 	remove_fd(session, session->clock_signal_fd);
 	remove_fd(session, session->audio_status_fd);
+	fplinux_session_bluetooth_destroy(session->bluetooth);
 	if (session->wireless) {
 		epoll_ctl(session->epoll_fd, EPOLL_CTL_DEL,
 			  fplinux_session_wireless_fd(session->wireless), NULL);
@@ -4672,7 +5046,8 @@ bool fplinux_session_is_locked(struct fplinux_session *session)
 bool fplinux_session_launcher_on_top(struct fplinux_session *session)
 {
 	return session->power.locked || notice_raises_launcher(session) ||
-	       clock_raises_launcher(session);
+	       clock_raises_launcher(session) ||
+	       bluetooth_raises_launcher(session);
 }
 
 /*

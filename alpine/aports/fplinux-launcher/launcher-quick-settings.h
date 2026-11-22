@@ -51,8 +51,7 @@ struct fplinux_launcher_quick_settings {
 	bool preview_pending;
 	bool save_requested;
 	bool save_pending;
-	bool wifi_known;
-	bool wifi_on;
+	struct fplinux_ui_wifi_status wifi_status;
 	bool wifi_pending;
 	bool wifi_turning_on;
 	bool bluetooth_turning_on;

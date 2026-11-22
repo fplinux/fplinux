@@ -24,6 +24,8 @@
 struct fake_adapter {
 	char path[64];
 	bool powered;
+	bool connectable;
+	bool pending_connectable;
 	char alias[256];
 	bool discoverable;
 	uint32_t discoverable_timeout;
@@ -138,15 +140,20 @@ static void append_properties(DBusMessageIter *parent,
 {
 	DBusMessageIter properties;
 	dbus_bool_t powered = adapter->powered;
+	dbus_bool_t connectable = adapter->connectable;
 	dbus_bool_t visible = adapter->discoverable;
 	dbus_bool_t pairable = adapter->pairable;
 	dbus_bool_t discovering = adapter->external_discovery ||
 				  adapter->discovery_owner[0];
 	const char *alias = adapter->alias;
+	const char *address = "66:55:44:33:22:11";
 
 	assert(dbus_message_iter_open_container(parent, DBUS_TYPE_ARRAY, "{sv}",
 						&properties));
 	append_value(&properties, "Powered", DBUS_TYPE_BOOLEAN, &powered);
+	append_value(&properties, "Connectable", DBUS_TYPE_BOOLEAN,
+		     &connectable);
+	append_value(&properties, "Address", DBUS_TYPE_STRING, &address);
 	append_value(&properties, "Alias", DBUS_TYPE_STRING, &alias);
 	append_value(&properties, "Discoverable", DBUS_TYPE_BOOLEAN, &visible);
 	append_value(&properties, "DiscoverableTimeout", DBUS_TYPE_UINT32,
@@ -289,6 +296,32 @@ static void reply_objects(struct bluez_fake *fake, DBusMessage *call)
 	send_message(fake, reply);
 }
 
+static DBusMessage *get_adapter_property(const struct fake_adapter *adapter,
+					 DBusMessage *call)
+{
+	const char *interface, *property;
+	DBusMessage *reply;
+	DBusMessageIter arguments, value;
+	dbus_bool_t connectable = adapter->connectable;
+
+	if (!dbus_message_get_args(call, NULL, DBUS_TYPE_STRING, &interface,
+				   DBUS_TYPE_STRING, &property,
+				   DBUS_TYPE_INVALID) ||
+	    strcmp(interface, ADAPTER_INTERFACE) ||
+	    strcmp(property, "Connectable"))
+		return dbus_message_new_error(call, DBUS_ERROR_UNKNOWN_PROPERTY,
+					      "Adapter property not modeled");
+	reply = dbus_message_new_method_return(call);
+	assert(reply);
+	dbus_message_iter_init_append(reply, &arguments);
+	assert(dbus_message_iter_open_container(&arguments, DBUS_TYPE_VARIANT,
+						"b", &value));
+	assert(dbus_message_iter_append_basic(&value, DBUS_TYPE_BOOLEAN,
+					      &connectable));
+	assert(dbus_message_iter_close_container(&arguments, &value));
+	return reply;
+}
+
 static void signal_property(struct bluez_fake *fake, const char *path,
 			    const char *interface, const char *property,
 			    int type, const void *value)
@@ -363,14 +396,17 @@ static DBusMessage *apply_call(struct bluez_fake *fake, DBusMessage *call)
 			assert(dbus_message_iter_get_arg_type(&value) ==
 			       DBUS_TYPE_STRING);
 			dbus_message_iter_get_basic(&value, &text);
-			if (adapter)
+			if (adapter) {
 				snprintf(adapter->alias, sizeof(adapter->alias),
 					 "%s", text[0] ? text : "Test adapter");
-			else if (device)
+				text = adapter->alias;
+			} else if (device) {
 				snprintf(device->alias, sizeof(device->alias),
 					 "%s", text[0] ? text : device->name);
-			else
+				text = device->alias;
+			} else {
 				goto missing;
+			}
 			signal_property(fake, path, interface, property,
 					DBUS_TYPE_STRING, &text);
 		} else if (adapter &&
@@ -391,16 +427,43 @@ static DBusMessage *apply_call(struct bluez_fake *fake, DBusMessage *call)
 			dbus_message_iter_get_basic(&value, &boolean);
 			if (adapter && !strcmp(property, "Powered")) {
 				adapter->powered = boolean;
-				if (!boolean)
+				if (!boolean) {
 					adapter->discovery_owner[0] = '\0';
-			} else if (adapter && !strcmp(property, "Discoverable"))
+					bluez_fake_set_connectable(fake, path,
+								   false);
+				}
+			} else if (adapter &&
+				   !strcmp(property, "Connectable")) {
+				if (boolean == adapter->connectable &&
+				    adapter->pending_connectable)
+					return NULL;
+				adapter->pending_connectable = false;
+				adapter->connectable = boolean;
+			} else if (adapter &&
+				   !strcmp(property, "Discoverable")) {
+				if (boolean && !adapter->discoverable) {
+					/* An internal no-op page-scan request can
+					 * leave an identical Set waiting in BlueZ.
+					 */
+					adapter->pending_connectable =
+						adapter->connectable;
+					bluez_fake_set_connectable(fake, path,
+								   true);
+				} else if (!boolean && adapter->discoverable) {
+					/* The Connectable signal may follow the
+					 * Discoverable reply.
+					 */
+					adapter->connectable = false;
+					adapter->pending_connectable = false;
+				}
 				adapter->discoverable = boolean;
-			else if (adapter && !strcmp(property, "Pairable"))
+			} else if (adapter && !strcmp(property, "Pairable")) {
 				adapter->pairable = boolean;
-			else if (device && !strcmp(property, "Trusted"))
+			} else if (device && !strcmp(property, "Trusted")) {
 				device->trusted = boolean;
-			else
+			} else {
 				goto missing;
+			}
 			signal_property(fake, path, interface, property,
 					DBUS_TYPE_BOOLEAN, &boolean);
 		}
@@ -514,14 +577,19 @@ static DBusHandlerResult handle(DBusConnection *connection,
 				DBusMessage *message, void *data)
 {
 	struct bluez_fake *fake = data;
+	struct fake_adapter *adapter;
 
 	(void)connection;
 	if (dbus_message_get_type(message) != DBUS_MESSAGE_TYPE_METHOD_CALL)
 		return DBUS_HANDLER_RESULT_NOT_YET_HANDLED;
+	adapter = find(fake, dbus_message_get_path(message));
 	if (dbus_message_is_method_call(message, OBJECT_MANAGER,
 					"GetManagedObjects") &&
 	    !strcmp(dbus_message_get_path(message), "/"))
 		reply_objects(fake, message);
+	else if (adapter &&
+		 dbus_message_is_method_call(message, PROPERTIES, "Get"))
+		send_message(fake, get_adapter_property(adapter, message));
 	else if (dbus_message_has_interface(message, AGENT_MANAGER)) {
 		const char *path, *capability;
 
@@ -535,6 +603,11 @@ static DBusHandlerResult handle(DBusConnection *connection,
 				 "%s", path);
 			snprintf(fake->agent_owner, sizeof(fake->agent_owner),
 				 "%s", dbus_message_get_sender(message));
+			for (size_t i = 0; i < ADAPTER_COUNT; ++i)
+				if (fake->adapters[i].path[0])
+					bluez_fake_set_pairable(
+						fake, fake->adapters[i].path,
+						true);
 		} else if (dbus_message_has_member(message,
 						   "UnregisterAgent")) {
 			fake->agent_owner[0] = '\0';
@@ -657,6 +730,7 @@ void bluez_fake_add_adapter(struct bluez_fake *fake, const char *path,
 
 		if (adapter->path[0])
 			continue;
+		*adapter = (struct fake_adapter){ 0 };
 		snprintf(adapter->path, sizeof(adapter->path), "%s", path);
 		adapter->powered = powered;
 		snprintf(adapter->alias, sizeof(adapter->alias), "%s",
@@ -922,6 +996,41 @@ void bluez_fake_set_pairable(struct bluez_fake *fake, const char *path,
 	adapter->pairable = pairable;
 	signal_property(fake, path, ADAPTER_INTERFACE, "Pairable",
 			DBUS_TYPE_BOOLEAN, &value);
+}
+
+void bluez_fake_set_connectable(struct bluez_fake *fake, const char *path,
+				bool connectable)
+{
+	struct fake_adapter *adapter = find(fake, path);
+	dbus_bool_t value = connectable;
+
+	assert(adapter);
+	if (adapter->connectable != connectable)
+		adapter->pending_connectable = false;
+	adapter->connectable = connectable;
+	signal_property(fake, path, ADAPTER_INTERFACE, "Connectable",
+			DBUS_TYPE_BOOLEAN, &value);
+}
+
+bool bluez_fake_connectable(struct bluez_fake *fake, const char *path)
+{
+	struct fake_adapter *adapter = find(fake, path);
+
+	assert(adapter);
+	return adapter->connectable;
+}
+
+void bluez_fake_expire_visibility(struct bluez_fake *fake, const char *path)
+{
+	struct fake_adapter *adapter = find(fake, path);
+	dbus_bool_t value = FALSE;
+
+	assert(adapter && adapter->discoverable_timeout &&
+	       adapter->pairable_timeout);
+	adapter->discoverable = false;
+	signal_property(fake, path, ADAPTER_INTERFACE, "Discoverable",
+			DBUS_TYPE_BOOLEAN, &value);
+	bluez_fake_set_pairable(fake, path, false);
 }
 
 bool bluez_fake_pairable(struct bluez_fake *fake, const char *path)

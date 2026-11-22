@@ -79,6 +79,29 @@ enum fplinux_ui_session_message_type {
 	FPLINUX_UI_SESSION_WIFI_REQUEST,
 	FPLINUX_UI_SESSION_WIFI_STATE,
 	FPLINUX_UI_SESSION_WIFI_RESULT,
+	FPLINUX_UI_SESSION_WIFI_STATUS,
+	FPLINUX_UI_SESSION_BLUETOOTH_READY,
+	FPLINUX_UI_SESSION_BLUETOOTH_ACTION,
+	FPLINUX_UI_SESSION_BLUETOOTH_SEND,
+};
+
+enum fplinux_ui_bluetooth_phase {
+	FPLINUX_UI_BLUETOOTH_IDLE,
+	FPLINUX_UI_BLUETOOTH_OFFER,
+	FPLINUX_UI_BLUETOOTH_RECEIVING,
+	FPLINUX_UI_BLUETOOTH_COMPLETE,
+	FPLINUX_UI_BLUETOOTH_FAILED,
+};
+
+struct fplinux_ui_bluetooth_prompt {
+	enum fplinux_ui_bluetooth_phase phase;
+	uint32_t id;
+	uint64_t transferred_bytes;
+	uint64_t total_bytes;
+	bool total_known;
+	bool can_open;
+	char peer[256];
+	char filename[256];
 };
 
 #define FPLINUX_UI_WIFI_SSID_BYTES 32
@@ -156,6 +179,13 @@ struct fplinux_ui_wifi_state {
 	size_t saved_count;
 	struct fplinux_ui_wifi_network available[FPLINUX_UI_WIFI_ROW_COUNT];
 	struct fplinux_ui_wifi_network saved[FPLINUX_UI_WIFI_ROW_COUNT];
+};
+
+/* WIFI_STATUS: launcher snapshot without scan results, profiles or keys. */
+struct fplinux_ui_wifi_status {
+	enum fplinux_ui_wifi_power power;
+	enum fplinux_ui_wifi_link link;
+	char name[FPLINUX_UI_WIFI_DISPLAY_BYTES];
 };
 
 struct fplinux_ui_wifi_request {
@@ -458,6 +488,8 @@ struct fplinux_ui_session_message {
 	char clock_data[FPLINUX_UI_SESSION_CLOCK_BYTES];
 	/* ACTIVE: stable Home state; countdowns use CLOCK_MONOTONIC locally. */
 	struct fplinux_ui_session_clock_presentation clock_presentation;
+	/* ACTIVE: the current system-owned incoming Bluetooth offer or transfer. */
+	struct fplinux_ui_bluetooth_prompt bluetooth_prompt;
 	/* CONFIG: capabilities available to this application. */
 	bool audio;
 	bool background_audio;
@@ -500,6 +532,7 @@ struct fplinux_ui_session_message {
 	union {
 		struct fplinux_ui_wifi_request wifi_request;
 		struct fplinux_ui_wifi_state wifi_state;
+		struct fplinux_ui_wifi_status wifi_status;
 		enum fplinux_ui_wifi_result wifi_result;
 	};
 };

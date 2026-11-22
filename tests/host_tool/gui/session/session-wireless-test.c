@@ -1,5 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 #define _GNU_SOURCE
+#include "session-wifi-dhcp.h"
+#include "session-wifi-station.h"
 #include "session-wireless.h"
 
 #include <errno.h>
@@ -34,6 +36,19 @@ static struct {
 static int events[2];
 static atomic_int listener_fd;
 
+struct fplinux_session_wifi_station {
+	struct fplinux_ui_wifi_state state;
+	uint32_t ticket;
+};
+
+struct fplinux_session_wifi_dhcp {
+	bool active;
+};
+
+static struct fplinux_session_wifi_station station;
+static struct fplinux_session_wifi_dhcp dhcp;
+
+int __real_access(const char *path, int mode);
 int __real_socket(int domain, int type, int protocol);
 int __real_bind(int fd, const struct sockaddr *address, socklen_t length);
 
@@ -43,6 +58,112 @@ static void require(bool condition, const char *message)
 		fprintf(stderr, "FAIL: %s\n", message);
 		exit(1);
 	}
+}
+
+int __wrap_access(const char *path, int mode)
+{
+	if (!strcmp(path, "/sbin/wpa_supplicant"))
+		return 0;
+	return __real_access(path, mode);
+}
+
+struct fplinux_session_wifi_station *
+fplinux_session_wifi_station_create(const char *ifname, const char *config_path)
+{
+	(void)config_path;
+	require(!strcmp(ifname, "test0"),
+		"station receives the chosen interface");
+	return &station;
+}
+
+void fplinux_session_wifi_station_destroy(
+	struct fplinux_session_wifi_station *peer)
+{
+	if (peer)
+		*peer = (struct fplinux_session_wifi_station){ 0 };
+}
+
+enum fplinux_ui_wifi_result
+fplinux_session_wifi_station_acquire(struct fplinux_session_wifi_station *peer)
+{
+	(void)peer;
+	return FPLINUX_UI_WIFI_APPLIED;
+}
+
+bool fplinux_session_wifi_station_request(
+	struct fplinux_session_wifi_station *peer,
+	const struct fplinux_ui_wifi_request *request, uint32_t serial,
+	enum fplinux_ui_wifi_result *result)
+{
+	(void)result;
+	peer->ticket = serial;
+	if (request->action == FPLINUX_UI_WIFI_SCAN) {
+		peer->state.scan = FPLINUX_UI_WIFI_SCAN_READY;
+	} else {
+		require(request->action == FPLINUX_UI_WIFI_CONNECT_HIDDEN,
+			"station receives the manual join request");
+		peer->state.link = FPLINUX_UI_WIFI_ADDRESSING;
+		peer->state.current = (struct fplinux_ui_wifi_network){
+			.id = 42,
+			.security = FPLINUX_UI_WIFI_WPA2,
+			.name = "Test AP",
+		};
+	}
+	return false;
+}
+
+void fplinux_session_wifi_station_update(
+	struct fplinux_session_wifi_station *peer)
+{
+	(void)peer;
+}
+
+bool fplinux_session_wifi_station_take_result(
+	struct fplinux_session_wifi_station *peer, uint32_t *serial,
+	enum fplinux_ui_wifi_result *result)
+{
+	if (!peer->ticket)
+		return false;
+	*serial = peer->ticket;
+	*result = FPLINUX_UI_WIFI_APPLIED;
+	peer->ticket = 0;
+	return true;
+}
+
+enum fplinux_ui_wifi_result
+fplinux_session_wifi_station_commit(struct fplinux_session_wifi_station *peer)
+{
+	(void)peer;
+	return FPLINUX_UI_WIFI_APPLIED;
+}
+
+const struct fplinux_ui_wifi_state *fplinux_session_wifi_station_state(
+	const struct fplinux_session_wifi_station *peer)
+{
+	return &peer->state;
+}
+
+struct fplinux_session_wifi_dhcp *
+fplinux_session_wifi_dhcp_start(const char *interface)
+{
+	(void)interface;
+	dhcp.active = true;
+	return &dhcp;
+}
+
+enum fplinux_session_wifi_dhcp_state
+fplinux_session_wifi_dhcp_read(struct fplinux_session_wifi_dhcp *lease,
+			       char address[INET_ADDRSTRLEN])
+{
+	require(lease->active, "the DHCP lease is active");
+	strcpy(address, "192.0.2.24");
+	return FPLINUX_SESSION_WIFI_DHCP_BOUND;
+}
+
+void fplinux_session_wifi_dhcp_destroy(struct fplinux_session_wifi_dhcp *lease)
+{
+	if (lease)
+		lease->active = false;
 }
 
 int __wrap_socket(int domain, int type, int protocol)
@@ -226,6 +347,7 @@ static void cancel_queued_connection(struct fplinux_session_wireless *wireless)
 		.target = 99,
 	};
 	enum fplinux_ui_wifi_result result;
+	struct fplinux_ui_wifi_network connected;
 	uint32_t ticket;
 
 	atomic_store(&network.entered_get, 0);
@@ -244,17 +366,58 @@ static void cancel_queued_connection(struct fplinux_session_wireless *wireless)
 			0,
 		"cancel is accepted before the worker dequeues the connection");
 	wait_notification(wireless);
-	require(fplinux_session_wireless_take_wifi_result(wireless, &ticket,
-							  &result) &&
-			ticket == 102 && result == FPLINUX_UI_WIFI_APPLIED,
+	require(fplinux_session_wireless_take_wifi_result(
+			wireless, &ticket, &result, &connected) &&
+			ticket == 102 && result == FPLINUX_UI_WIFI_APPLIED &&
+			!connected.id,
 		"result acknowledges cancel while the worker is still held");
 	require(fplinux_session_wireless_request(wireless, false) == 0,
 		"cancelled connection no longer occupies the request queue");
 	atomic_store(&network.hold_get, 0);
 	require(finish(wireless) == 0, "worker continues after cancellation");
 	require(!fplinux_session_wireless_take_wifi_result(wireless, &ticket,
-							   &result),
+							   &result, &connected),
 		"cancelled connection does not produce a second result");
+}
+
+static void scan_after_join(struct fplinux_session_wireless *wireless)
+{
+	const struct fplinux_ui_wifi_request connect = {
+		.action = FPLINUX_UI_WIFI_CONNECT_HIDDEN,
+		.security = FPLINUX_UI_WIFI_WPA2,
+		.ssid = "Test AP",
+		.key = "test-password",
+	};
+	const struct fplinux_ui_wifi_request scan = {
+		.action = FPLINUX_UI_WIFI_SCAN
+	};
+	struct fplinux_ui_wifi_network connected;
+	struct fplinux_ui_wifi_state state;
+	enum fplinux_ui_wifi_result result;
+	uint32_t ticket;
+
+	require(fplinux_session_wireless_wifi_request(wireless, &connect,
+						      201) == 0,
+		"join is queued");
+	wait_notification(wireless);
+	require(fplinux_session_wireless_take_wifi_result(
+			wireless, &ticket, &result, &connected) &&
+			ticket == 201 && result == FPLINUX_UI_WIFI_APPLIED &&
+			!strcmp(connected.name, "Test AP"),
+		"the address result identifies the chosen network");
+	require(fplinux_session_wireless_wifi_request(wireless, &scan, 202) ==
+			0,
+		"scan is queued while associated");
+	wait_notification(wireless);
+	require(fplinux_session_wireless_take_wifi_result(
+			wireless, &ticket, &result, &connected) &&
+			ticket == 202 && result == FPLINUX_UI_WIFI_APPLIED &&
+			!connected.id,
+		"a completed scan has no connection to announce");
+	fplinux_session_wireless_wifi_state(wireless, &state);
+	require(state.link == FPLINUX_UI_WIFI_CONNECTED &&
+			!strcmp(state.address, "192.0.2.24"),
+		"refresh retains the existing connection");
 }
 
 int main(void)
@@ -284,6 +447,7 @@ int main(void)
 		"enable requested");
 	require(finish(wireless) == 0, "enable confirmed");
 	expect_state(wireless, true, true, true, 0);
+	scan_after_join(wireless);
 	atomic_store(&network.up, 0);
 	expect_change(wireless, true, true, false, 0);
 	atomic_store(&network.up, 1);

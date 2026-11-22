@@ -1,0 +1,279 @@
+Reject object pushes without a valid response from the registered agent.
+Receive into the inode prepared by the agent and report interrupted transfers.
+
+--- a/obexd/src/manager.c
++++ b/obexd/src/manager.c
+@@ -38,17 +38,17 @@
+ #define TRANSFER_INTERFACE OBEXD_SERVICE ".Transfer1"
+ #define SESSION_INTERFACE OBEXD_SERVICE ".Session1"
+ #define AGENT_INTERFACE OBEXD_SERVICE ".Agent1"
+-#define OBEX_ERROR_REJECT      "org.bluez.obex.Error.Rejected"
+-
+ #define TIMEOUT 60*1000 /* Timeout for user response (milliseconds) */
+
++struct authorization {
++	DBusMessage *reply;
++	gboolean disconnected;
++};
++
+ struct agent {
+ 	char *bus_name;
+ 	char *path;
+-	gboolean auth_pending;
+-	gboolean auth_reject;
+-	char *new_name;
+-	char *new_folder;
++	struct authorization *authorization;
+ 	unsigned int watch_id;
+ };
+
+@@ -74,8 +74,6 @@
+ 	if (!agent)
+ 		return;
+
+-	g_free(agent->new_folder);
+-	g_free(agent->new_name);
+ 	g_free(agent->bus_name);
+ 	g_free(agent->path);
+ 	g_free(agent);
+@@ -621,60 +619,18 @@
+
+ static void agent_reply(DBusPendingCall *call, void *user_data)
+ {
+-	DBusMessage *reply = dbus_pending_call_steal_reply(call);
+-	const char *name;
+-	DBusError derr;
+-	gboolean *got_reply = user_data;
+-
+-	*got_reply = TRUE;
+-
+-	/* Received a reply after the agent exited */
+-	if (!agent)
+-		return;
+-
+-	agent->auth_pending = FALSE;
+-
+-	dbus_error_init(&derr);
+-	if (dbus_set_error_from_message(&derr, reply)) {
+-		error("Agent replied with an error: %s, %s",
+-				derr.name, derr.message);
+-
+-		if (dbus_error_has_name(&derr, DBUS_ERROR_NO_REPLY))
+-			agent_cancel();
+-		else if (dbus_error_has_name(&derr, OBEX_ERROR_REJECT))
+-			agent->auth_reject = TRUE;
+-
+-		dbus_error_free(&derr);
+-		dbus_message_unref(reply);
+-		return;
+-	}
+-
+-	if (dbus_message_get_args(reply, NULL,
+-				DBUS_TYPE_STRING, &name,
+-				DBUS_TYPE_INVALID)) {
+-		/* Splits folder and name */
+-		const char *slash = strrchr(name, '/');
+-		DBG("Agent replied with %s", name);
+-		if (!slash) {
+-			agent->new_name = g_strdup(name);
+-			agent->new_folder = NULL;
+-		} else {
+-			if (strlen(slash) == 1)
+-				agent->new_name = NULL;
+-			else
+-				agent->new_name = g_strdup(slash + 1);
+-			agent->new_folder = g_strndup(name, slash - name);
+-		}
+-	}
++	struct authorization *authorization = user_data;
+
+-	dbus_message_unref(reply);
++	authorization->reply = dbus_pending_call_steal_reply(call);
+ }
+
+ static gboolean auth_error(GIOChannel *io, GIOCondition cond, void *user_data)
+ {
+-	agent->auth_pending = FALSE;
++	struct authorization *authorization = user_data;
+
+-	return FALSE;
++	authorization->disconnected = TRUE;
++
++	return TRUE;
+ }
+
+ int manager_request_authorization(struct obex_transfer *transfer,
+@@ -684,12 +640,14 @@
+ 	DBusMessage *msg;
+ 	DBusPendingCall *call;
+ 	unsigned int watch;
+-	gboolean got_reply;
++	struct authorization authorization = { 0 };
++	const char *name, *slash;
++	int err = -EPERM;
+
+ 	if (!agent)
+ 		return -1;
+
+-	if (agent->auth_pending)
++	if (agent->authorization)
+ 		return -EPERM;
+
+ 	if (!new_folder || !new_name)
+@@ -709,39 +667,52 @@
+
+ 	dbus_message_unref(msg);
+
+-	agent->auth_pending = TRUE;
+-	agent->auth_reject  = FALSE;
+-	got_reply = FALSE;
++	agent->authorization = &authorization;
+
+ 	/* Catches errors before authorization response comes */
+ 	watch = g_io_add_watch_full(os->io, G_PRIORITY_DEFAULT,
+ 			G_IO_HUP | G_IO_ERR | G_IO_NVAL,
+-			auth_error, NULL, NULL);
+-
+-	dbus_pending_call_set_notify(call, agent_reply, &got_reply, NULL);
+-
+-	/* Workaround: process events while agent doesn't reply */
+-	while (agent && agent->auth_pending)
+-		g_main_context_iteration(NULL, TRUE);
++				auth_error, &authorization, NULL);
+
+-	g_source_remove(watch);
+-
+-	if (!got_reply) {
+-		dbus_pending_call_cancel(call);
+-		agent_cancel();
++	if (dbus_pending_call_set_notify(call, agent_reply, &authorization, NULL)) {
++		while (agent && agent->authorization == &authorization &&
++				!authorization.reply && !authorization.disconnected)
++			g_main_context_iteration(NULL, TRUE);
+ 	}
+
++	if (!authorization.reply)
++		dbus_pending_call_cancel(call);
+ 	dbus_pending_call_unref(call);
++	g_source_remove(watch);
+
+-	if (!agent || agent->auth_reject)
+-		return -EPERM;
++	if (!agent || agent->authorization != &authorization)
++		goto done;
++	agent->authorization = NULL;
+
+-	*new_folder = agent->new_folder;
+-	*new_name = agent->new_name;
+-	agent->new_folder = NULL;
+-	agent->new_name = NULL;
++	if (!authorization.reply ||
++			dbus_message_is_error(authorization.reply, DBUS_ERROR_NO_REPLY)) {
++		agent_cancel();
++		goto done;
++	}
+
+-	return 0;
++	if (authorization.disconnected ||
++			dbus_message_get_type(authorization.reply) != DBUS_MESSAGE_TYPE_METHOD_RETURN ||
++			!dbus_message_get_args(authorization.reply, NULL,
++						DBUS_TYPE_STRING, &name,
++						DBUS_TYPE_INVALID))
++		goto done;
++
++	slash = strrchr(name, '/');
++	if (name[0] != '/' || slash == name || slash[1] == '\0')
++		goto done;
++
++	*new_folder = g_strndup(name, slash - name);
++	*new_name = g_strdup(slash + 1);
++	err = 0;
++done:
++	if (authorization.reply)
++		dbus_message_unref(authorization.reply);
++	return err;
+ }
+
+ static DBusMessage *session_get_capabilities(DBusConnection *connection,
+--- a/obexd/src/obex.c
++++ b/obexd/src/obex.c
+@@ -389,6 +389,7 @@
+
+ 	if (err != NULL) {
+ 		error("transfer failed: %s\n", err->message);
++		os->aborted = TRUE;
+ 		goto reset;
+ 	}
+
+@@ -707,7 +708,8 @@
+ {
+ 	int err;
+
+-	os->object = os->driver->open(filename, O_WRONLY | O_CREAT | O_TRUNC,
++	/* The receiving agent creates the private staging inode. */
++	os->object = os->driver->open(filename, O_WRONLY | O_TRUNC | O_NOFOLLOW,
+ 					0600, os->service_data,
+ 					os->size != OBJECT_SIZE_UNKNOWN ?
+ 					(size_t *) &os->size : NULL, &err);
+@@ -933,6 +935,7 @@
+
+ 	print_event(G_OBEX_OP_ABORT, -1);
+
++	os->aborted = TRUE;
+ 	os_reset_session(os);
+
+ 	os_set_response(os, 0);
+@@ -955,6 +958,7 @@
+ 	struct obex_session *os = user_data;
+
+ 	error("disconnected: %s\n", err ? err->message : "<no err>");
++	os->aborted = TRUE;
+ 	obex_session_destroy(os);
+ }
+
+--- a/obexd/plugins/opp.c
++++ b/obexd/plugins/opp.c
+@@ -60,28 +60,10 @@
+
+ 	manager_emit_transfer_queued(user_data);
+
+-	if (obex_option_auto_accept()) {
+-		folder = g_strdup(obex_option_root_folder());
+-		name = g_strdup(obex_get_name(os));
+-		goto skip_auth;
+-	}
+-
+ 	err = manager_request_authorization(user_data, &folder, &name);
+ 	if (err < 0)
+ 		return -EPERM;
+
+-	if (folder == NULL)
+-		folder = g_strdup(obex_option_root_folder());
+-
+-	if (name == NULL)
+-		name = g_strdup(obex_get_name(os));
+-
+-skip_auth:
+-	if (name == NULL || strlen(name) == 0) {
+-		err = -EBADR;
+-		goto failed;
+-	}
+-
+ 	if (g_strcmp0(name, obex_get_name(os)) != 0)
+ 		obex_set_name(os, name);
+
+@@ -96,12 +78,8 @@
+
+ 	g_free(path);
+
+-	if (err < 0)
+-		goto failed;
+-
+-	manager_emit_transfer_started(user_data);
+-
+-failed:
++	if (err == 0)
++		manager_emit_transfer_started(user_data);
+ 	g_free(folder);
+ 	g_free(name);
+

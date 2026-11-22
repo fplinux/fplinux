@@ -5,7 +5,6 @@
 #include <stdbool.h>
 
 #include <fplinux/fplinux-ui.h>
-#include <fplinux/fplinux-ui-storage.h>
 
 struct fplinux_bluez_adapter;
 struct fplinux_settings_bluetooth;
@@ -19,6 +18,11 @@ void fplinux_settings_bluetooth_free(
 	struct fplinux_settings_bluetooth *bluetooth);
 void fplinux_settings_bluetooth_show(
 	struct fplinux_settings_bluetooth *bluetooth);
+/* Opens the paired recipient list for one selected file. False sets errno. */
+bool fplinux_settings_bluetooth_send(
+	struct fplinux_settings_bluetooth *bluetooth, const char *path);
+void fplinux_settings_bluetooth_receive_status(
+	struct fplinux_settings_bluetooth *bluetooth, bool ready);
 bool fplinux_settings_bluetooth_shown(
 	const struct fplinux_settings_bluetooth *bluetooth);
 void fplinux_settings_bluetooth_changed(
@@ -28,9 +32,6 @@ void fplinux_settings_bluetooth_finished(
 void fplinux_settings_bluetooth_event(
 	struct fplinux_settings_bluetooth *bluetooth,
 	const struct fplinux_ui_event *event);
-void fplinux_settings_bluetooth_storage_result(
-	struct fplinux_settings_bluetooth *bluetooth,
-	const struct fplinux_volume_result *result);
 /* Removes its screen subtree before Settings rebuilds its root. Transfers
  * continue; discovery and pairing prompts are released when hidden. */
 void fplinux_settings_bluetooth_reset(

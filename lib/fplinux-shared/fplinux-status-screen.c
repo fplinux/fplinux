@@ -44,24 +44,51 @@ uint16_t fplinux_status_blend(uint16_t foreground, uint16_t background,
 	return (uint16_t)((r << 11) | (g << 5) | b);
 }
 
-/* The supplied text uses ASCII and the four UTF-8 arrow characters. */
-static unsigned int next_glyph(const char **text)
+static unsigned int next_glyph(const struct fplinux_status_font *font,
+			       const char **text)
 {
 	const unsigned char *s = (const unsigned char *)*text;
-	unsigned int index = '?' - ' ';
+	unsigned int code = *s;
+	unsigned int trailing = 0;
+	unsigned int low = 0, high = font->extended_count;
 
-	if (*s >= 32U && *s <= 126U) {
-		index = *s - 32U;
-		++s;
-	} else if (s[0] == 0xe2U && s[1] && s[1] == 0x86U && s[2] &&
-		   s[2] >= 0x90U && s[2] <= 0x93U) {
-		index = 95U + s[2] - 0x90U;
-		s += 3;
-	} else if (*s) {
-		++s;
+	if (!code)
+		return '?' - ' ';
+	++s;
+	if (code >= 0xc2U && code <= 0xdfU) {
+		trailing = 1;
+		code &= 0x1fU;
+	} else if (code >= 0xe0U && code <= 0xefU) {
+		trailing = 2;
+		code &= 0x0fU;
+	} else if (code >= 0xf0U && code <= 0xf4U) {
+		trailing = 3;
+		code &= 0x07U;
+	}
+	for (unsigned int i = 0; i < trailing; ++i) {
+		if ((*s & 0xc0U) != 0x80U) {
+			code = 0;
+			break;
+		}
+		code = (code << 6) | (*s++ & 0x3fU);
 	}
 	*text = (const char *)s;
-	return index;
+	if (code >= 32U && code <= 126U)
+		return code - 32U;
+	if (code >= 0x2190U && code <= 0x2193U)
+		return 95U + code - 0x2190U;
+	while (low < high) {
+		unsigned int middle = low + (high - low) / 2U;
+		unsigned int candidate = font->extended_codes[middle];
+
+		if (candidate < code)
+			low = middle + 1U;
+		else
+			high = middle;
+	}
+	if (low < font->extended_count && font->extended_codes[low] == code)
+		return 99U + low;
+	return '?' - ' ';
 }
 
 static unsigned int advance(const struct fplinux_status_font *font,
@@ -69,12 +96,12 @@ static unsigned int advance(const struct fplinux_status_font *font,
 {
 	int value = font->glyphs[left].advance;
 	unsigned int low = 0, high = font->kerning_count;
-	unsigned int key = left * 256U + right;
+	unsigned int key = left * 65536U + right;
 
 	while (low < high) {
 		unsigned int middle = low + (high - low) / 2U;
 		const struct fplinux_status_kern *pair = &font->kerning[middle];
-		unsigned int candidate = pair->left * 256U + pair->right;
+		unsigned int candidate = pair->left * 65536U + pair->right;
 
 		if (candidate < key)
 			low = middle + 1U;
@@ -94,9 +121,10 @@ static unsigned int span_width(const struct fplinux_status_font *font,
 	const char *s = first;
 
 	while (s < end) {
-		unsigned int glyph = next_glyph(&s);
+		unsigned int glyph = next_glyph(font, &s);
 		const char *next = s;
-		unsigned int following = s < end ? next_glyph(&next) : 255U;
+		unsigned int following = s < end ? next_glyph(font, &next) :
+						   UINT16_MAX;
 
 		width += advance(font, glyph, following);
 	}
@@ -111,13 +139,14 @@ static void draw_span(const struct painter *p,
 	const char *s = first;
 
 	while (s < end) {
-		unsigned int index = next_glyph(&s);
+		unsigned int index = next_glyph(font, &s);
 		const struct fplinux_status_glyph *glyph = &font->glyphs[index];
 		int gx = x + glyph->ofs_x;
 		int gy = y + font->line_height - font->base_line -
 			 glyph->box_h - glyph->ofs_y;
 		const char *next = s;
-		unsigned int following = s < end ? next_glyph(&next) : 255U;
+		unsigned int following = s < end ? next_glyph(font, &next) :
+						   UINT16_MAX;
 
 		for (unsigned int row = 0; row < glyph->box_h; ++row) {
 			for (unsigned int col = 0; col < glyph->box_w; ++col) {
@@ -176,7 +205,7 @@ static const char *wrap_end(const struct fplinux_status_font *font,
 
 	while (*end && *end != '\n') {
 		next = end;
-		(void)next_glyph(&next);
+		(void)next_glyph(font, &next);
 		if (span_width(font, text, next) > (unsigned int)width)
 			break;
 		if (*end == ' ')
@@ -186,7 +215,7 @@ static const char *wrap_end(const struct fplinux_status_font *font,
 	if (*end && *end != '\n' && word)
 		end = word;
 	if (end == text && *end && *end != '\n')
-		(void)next_glyph(&end);
+		(void)next_glyph(font, &end);
 	return end;
 }
 

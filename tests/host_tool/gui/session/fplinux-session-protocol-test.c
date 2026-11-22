@@ -1563,6 +1563,88 @@ static void check_light_effects(int sender, int receiver)
 	      "serializer rejects capability outside CONFIG");
 }
 
+static void check_wifi_status(int sender, int receiver)
+{
+	struct fplinux_ui_session_message response;
+	const struct fplinux_ui_session_message status = {
+		.type = FPLINUX_UI_SESSION_WIFI_STATUS,
+		.wifi_status = {
+			.power = FPLINUX_UI_WIFI_ON,
+			.link = FPLINUX_UI_WIFI_CONNECTED,
+			.name = "Локальная сеть",
+		},
+	};
+
+	check(fplinux_ui_session_send(sender, &status) &&
+		      fplinux_ui_session_receive(receiver, &response) == 1 &&
+		      response.type == FPLINUX_UI_SESSION_WIFI_STATUS &&
+		      response.wifi_status.power == FPLINUX_UI_WIFI_ON &&
+		      response.wifi_status.link == FPLINUX_UI_WIFI_CONNECTED &&
+		      !strcmp(response.wifi_status.name, "Локальная сеть"),
+	      "the launcher snapshot retains the confirmed connection name");
+	check(receive_raw(
+		      sender, receiver,
+		      "{\"type\":\"WIFI_STATUS\",\"wifi\":{\"power\":1,\"link\":3,\"name\":\"\"}}",
+		      &response) == -1 &&
+		      errno == EPROTO,
+	      "powered-off Wi-Fi cannot have a current connection");
+}
+
+static void check_bluetooth_handoff(int sender, int receiver)
+{
+	struct fplinux_ui_session_message received;
+	const struct fplinux_ui_session_message offer = {
+		.type = FPLINUX_UI_SESSION_ACTIVE,
+		.serial = 41,
+		.bluetooth_prompt = {
+			.phase = FPLINUX_UI_BLUETOOTH_OFFER,
+			.id = 9,
+			.total_bytes = UINT64_C(4294967300),
+			.total_known = true,
+			.peer = "Android",
+			.filename = "Фото.jpg",
+		},
+	};
+	const struct fplinux_ui_session_message accept = {
+		.type = FPLINUX_UI_SESSION_BLUETOOTH_ACTION,
+		.serial = 9,
+		.value = "accept",
+	};
+	const struct fplinux_ui_session_message send = {
+		.type = FPLINUX_UI_SESSION_BLUETOOTH_SEND,
+		.serial = 10,
+		.path = "/home/fplinux/Files/Photo.jpg",
+	};
+
+	check(fplinux_ui_session_send(sender, &offer) &&
+		      fplinux_ui_session_receive(receiver, &received) == 1 &&
+		      received.serial == 41 &&
+		      received.bluetooth_prompt.id == 9 &&
+		      received.bluetooth_prompt.phase ==
+			      FPLINUX_UI_BLUETOOTH_OFFER &&
+		      received.bluetooth_prompt.total_known &&
+		      received.bluetooth_prompt.total_bytes ==
+			      UINT64_C(4294967300) &&
+		      !strcmp(received.bluetooth_prompt.filename, "Фото.jpg"),
+	      "active message carries the same offer and the full file size");
+	check(fplinux_ui_session_send(sender, &accept) &&
+		      fplinux_ui_session_receive(receiver, &received) == 1 &&
+		      received.type == FPLINUX_UI_SESSION_BLUETOOTH_ACTION &&
+		      received.serial == 9 && !strcmp(received.value, "accept"),
+	      "offer decision preserves its identity across the UI socket");
+	check(fplinux_ui_session_send(sender, &send) &&
+		      fplinux_ui_session_receive(receiver, &received) == 1 &&
+		      received.type == FPLINUX_UI_SESSION_BLUETOOTH_SEND &&
+		      received.serial == 10 &&
+		      !strcmp(received.path, send.path),
+	      "outgoing handoff preserves the selected file and request serial");
+	check(receive_raw(sender, receiver,
+			  "{\"type\":\"BLUETOOTH_ACTION\",\"value\":\"accept\"}",
+			  &received) == -1 &&
+		      errno == EPROTO,
+	      "a decision without an offer ID is invalid");
+}
+
 int main(void)
 {
 	static const char *const invalid[] = {
@@ -1640,6 +1722,8 @@ int main(void)
 	check_documents(pair[0], pair[1]);
 	check_volumes(pair[0], pair[1]);
 	check_system_levels(pair[0], pair[1]);
+	check_wifi_status(pair[0], pair[1]);
+	check_bluetooth_handoff(pair[0], pair[1]);
 	check_light_effects(pair[0], pair[1]);
 	check_tasks(pair[0], pair[1]);
 	check_close_preparation(pair[0], pair[1]);

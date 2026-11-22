@@ -317,6 +317,14 @@ static void settings_inventory(void)
 	assert(fplinux_bluez_adapter_device_count(driver.adapter) == 1);
 	assert(!fplinux_bluez_adapter_device_at(driver.adapter, 1));
 	assert(!bluez_fake_agent_registered(driver.fake));
+	assert(!strcmp(fplinux_bluez_adapter_address(driver.adapter),
+		       "66:55:44:33:22:11"));
+	assert(fplinux_bluez_adapter_owner(driver.adapter)[0] == ':');
+	bluez_fake_set_pairable(driver.fake, HCI0, true);
+	run_for(&driver, 100);
+	assert(fplinux_bluez_adapter_pairable(driver.adapter));
+	assert(bluez_fake_requests(driver.fake) == 0);
+	bluez_fake_set_pairable(driver.fake, HCI0, false);
 
 	bluez_fake_set_device_rssi(driver.fake, DEVICE, -54, true);
 	bluez_fake_set_device_battery(driver.fake, DEVICE, 77, true);
@@ -341,6 +349,10 @@ static void settings_inventory(void)
 	assert(fplinux_bluez_adapter_set_name(driver.adapter, "Pocket", 1000));
 	expect_answer(&driver, true, 2000);
 	assert(!strcmp(fplinux_bluez_adapter_name(driver.adapter), "Pocket"));
+	assert(fplinux_bluez_adapter_set_name(driver.adapter, "", 1000));
+	expect_answer(&driver, true, 2000);
+	assert(!strcmp(fplinux_bluez_adapter_name(driver.adapter),
+		       "Test adapter"));
 	assert(!bluez_fake_pairable(driver.fake, HCI0));
 	assert(fplinux_bluez_adapter_set_visibility(
 		driver.adapter, FPLINUX_BLUEZ_VISIBLE_TIMED, 1000));
@@ -356,6 +368,24 @@ static void settings_inventory(void)
 	expect_answer(&driver, true, 2000);
 	assert(bluez_fake_pairable(driver.fake, HCI0));
 	assert(bluez_fake_pairable_timeout(driver.fake, HCI0) == 120);
+	bluez_fake_expire_visibility(driver.fake, HCI0);
+	run_for(&driver, 100);
+	assert(fplinux_bluez_adapter_visibility(driver.adapter) ==
+	       FPLINUX_BLUEZ_HIDDEN);
+	assert(fplinux_bluez_adapter_connectable(driver.adapter));
+	assert(!fplinux_bluez_adapter_pairable(driver.adapter));
+	assert(fplinux_bluez_adapter_set_visibility(
+		driver.adapter, FPLINUX_BLUEZ_HIDDEN, 1000));
+	expect_answer(&driver, true, 2000);
+	assert(bluez_fake_connectable(driver.fake, HCI0));
+	assert(!bluez_fake_pairable(driver.fake, HCI0));
+	assert(fplinux_bluez_adapter_set_visibility(
+		driver.adapter, FPLINUX_BLUEZ_VISIBLE_TIMED, 1000));
+	expect_answer(&driver, true, 2000);
+	assert(fplinux_bluez_adapter_visibility(driver.adapter) ==
+	       FPLINUX_BLUEZ_VISIBLE_TIMED);
+	assert(bluez_fake_connectable(driver.fake, HCI0));
+	assert(bluez_fake_pairable(driver.fake, HCI0));
 	assert(fplinux_bluez_adapter_set_visibility(
 		driver.adapter, FPLINUX_BLUEZ_VISIBLE_ALWAYS, 1000));
 	expect_answer(&driver, true, 2000);
@@ -368,11 +398,16 @@ static void settings_inventory(void)
 	expect_answer(&driver, true, 2000);
 	assert(fplinux_bluez_adapter_visibility(driver.adapter) ==
 	       FPLINUX_BLUEZ_HIDDEN);
-	assert(bluez_fake_pairable(driver.fake, HCI0));
-	bluez_fake_set_pairable(driver.fake, HCI0, false);
-	assert(fplinux_bluez_adapter_set_visibility(
-		driver.adapter, FPLINUX_BLUEZ_HIDDEN, 1000));
+	assert(bluez_fake_connectable(driver.fake, HCI0));
+	assert(!bluez_fake_pairable(driver.fake, HCI0));
+	assert(fplinux_bluez_adapter_set_powered(driver.adapter, false, 1000));
 	expect_answer(&driver, true, 2000);
+	assert(!bluez_fake_connectable(driver.fake, HCI0));
+	assert(fplinux_bluez_adapter_set_powered(driver.adapter, true, 1000));
+	expect_answer(&driver, true, 2000);
+	assert(bluez_fake_connectable(driver.fake, HCI0));
+	assert(fplinux_bluez_adapter_visibility(driver.adapter) ==
+	       FPLINUX_BLUEZ_HIDDEN);
 	assert(!bluez_fake_pairable(driver.fake, HCI0));
 
 	bluez_fake_set_external_discovery(driver.fake, HCI0, true);
@@ -564,6 +599,8 @@ static void pairing_agent(void)
 	assert(fplinux_bluez_adapter_pair(driver.adapter, DEVICE, 2000));
 	run_for(&driver, 100);
 	assert(fplinux_bluez_adapter_pending(driver.adapter));
+	assert(bluez_fake_pairable(driver.fake, HCI0));
+	bluez_fake_answer(driver.fake, BLUEZ_FAKE_APPLY, 0);
 	{
 		unsigned int answers = driver.seen.answers;
 
@@ -575,6 +612,7 @@ static void pairing_agent(void)
 	run_for(&driver, 100);
 	assert(!fplinux_bluez_adapter_pending(driver.adapter));
 	assert(bluez_fake_cancel_requests(driver.fake) == 1);
+	assert(!bluez_fake_pairable(driver.fake, HCI0));
 	fplinux_bluez_adapter_close(driver.adapter);
 	bluez_fake_stop(driver.fake);
 	puts("bluez-adapter: authenticated pairing requests require real user replies");

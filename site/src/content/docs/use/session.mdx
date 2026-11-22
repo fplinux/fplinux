@@ -72,11 +72,13 @@ The available languages come from installed language packages. The standard imag
 
 ## Wi-Fi
 
-Open **Settings → Wi-Fi** and turn on the interface. **Available networks** starts a scan. Select a WPA2 Personal network, enter its password and choose the **Connect** row. To enter a hidden network, choose **Options → Add network**. While typing, the right soft key clears text and **Options → Cancel** leaves the editor.
+Open **Settings → Wi-Fi** and turn on the interface. The list scans when you open it with Wi-Fi on or after you turn Wi-Fi on. Use **Options → Refresh** to scan again or **Options → Add hidden network** to enter a network name manually.
 
-**Save network** stores the profile after the network accepts the password. Reopen it from **Saved networks** to connect again or choose **Forget network** to remove it. The active connection survives returning Home and closing Settings. Use **Disconnect** to leave the network. If association succeeds and no address is available, **Options → Retry** in the connection details requests an address again.
+Select a WPA2 Personal network, enter its password and press **Connect**. The profile is saved after the network accepts the password. Choose **Options → Only once** in the password form to connect without saving. A saved network connects with one press. You can find saved networks outside the scan under **Options → Saved networks** and remove a profile with **Forget network**.
 
-Saved profiles follow the [lifetime of the system root](#keeping-data). The power switch in Quick settings controls the same interface.
+After the phone gets an IP address, a short message names the network and its row shows **Connected**. The Wi-Fi icon in the status bar confirms the connection. Select the connected network to see its IPv4 address or choose **Disconnect**. If the network accepts the password and the phone cannot get an IP address, choose **Retry** or **Disconnect**. The address confirms access to the local network.
+
+The connection stays active when you return Home or close Settings. Saved profiles follow the [lifetime of the system root](#keeping-data). To reconnect after turning Wi-Fi back on, select a network.
 
 ## Quick settings
 
@@ -84,7 +86,7 @@ Press <Key>Dial</Key> on Home to open Quick settings. **Back**, <Key>Dial</Key> 
 
 - **Brightness** and **Volume** change with Left and Right. **Save** keeps the new level and **Cancel** restores the previous level. Leaving Quick settings without saving also restores it.
 - **Volume** controls application audio through the FPLinux audio service. Direct ALSA playback and FM radio use their own controls.
-- **Wi-Fi** turns the wireless interface on or off when available. Use [Settings](#wi-fi) to select and connect to a network.
+- **Wi-Fi** turns the wireless interface on or off when available. Its row shows connection progress or the connected network name. Use [Settings](#wi-fi) to select a network.
 - **Bluetooth** turns Bluetooth on and off as in [Settings](/fplinux/use/bluetooth/#turn-bluetooth-on-and-off). The row is shown only while Bluetooth is available.
 
 Where the phone's keymap provides dedicated volume keys, they change application volume while the keypad is unlocked. External keyboard volume keys work the same way. Hold a key to keep adjusting. During a Volume edit in Quick settings, they adjust the preview; **Save** keeps the level and **Cancel** restores it. A press that wakes a dark screen only wakes it, as with other keys.

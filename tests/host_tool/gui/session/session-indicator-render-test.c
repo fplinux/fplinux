@@ -48,6 +48,10 @@ static const char *select_scenario(const char *name,
 		number = "--";
 	} else if (!strcmp(name, "warning")) {
 		indicator->warning = true;
+	} else if (!strcmp(name, "wifi") || !strcmp(name, "wifi-ru")) {
+		indicator->wifi_russian = !strcmp(name, "wifi-ru");
+		strcpy(indicator->wifi_name, "Сеть ABCDEFGHIJKLMNOPQRSTUVWXYZ");
+		number = NULL;
 	} else {
 		assert(!strcmp(name, "ready"));
 	}
@@ -158,7 +162,9 @@ int main(int argc, char **argv)
 	profile = fplinux_ui_profile_spec(
 		fplinux_ui_profile_for_screen(width, height));
 	assert(profile);
-	check_number(&frame, profile, fplinux_ui_theme_spec(theme), number);
+	if (number)
+		check_number(&frame, profile, fplinux_ui_theme_spec(theme),
+			     number);
 	check_frame_lifetime(width, height, theme, &indicator, &frame);
 	output = fopen(argv[6], "wb");
 	assert(output);

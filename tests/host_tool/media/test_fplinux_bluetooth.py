@@ -26,6 +26,8 @@ if TYPE_CHECKING:
 CLIENT_SOURCE = ROOT / "alpine/aports/fplinux-bluetooth/fplinux-bluetooth.c"
 SHARED_INCLUDE = ROOT / "include/fplinux"
 SERVICE_SOURCE = ROOT / "tests/host_tool/media/fplinux-bluetooth-service.c"
+BLUEZ_FAKE = ROOT / "tests/host_tool/gui/support/bluez-fake.c"
+SESSION_APORT = ROOT / "alpine/aports/fplinux-session"
 PEER = "01:23:45:67:89:AB"
 CONNECTED = "connected 01:23:45:67:89:AB via bnep0; configure IP, DHCP and NAT separately\n"
 # No service directories: a request to an absent name fails instead of
@@ -40,6 +42,7 @@ class BluetoothTools:
     client: Path
     service: Path
     transfer: Path
+    session: Path
 
 
 @pytest.fixture(scope="module")
@@ -67,6 +70,7 @@ def bluetooth_tools(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Blueto
             work / "fplinux-bluetooth",
             work / "fplinux-bluetooth-service",
             work / "fplinux-bluetooth-transfer",
+            work / "fplinux-bluetooth-session",
         )
         for source, output, name, extra_sources in (
             (
@@ -76,11 +80,18 @@ def bluetooth_tools(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Blueto
                 [
                     str(ROOT / "lib/fplinux-shared/fplinux-bluetooth-opp.c"),
                     str(CLIENT_SOURCE.with_name("fplinux-bluetooth-pan.c")),
+                    str(CLIENT_SOURCE.with_name("fplinux-bluetooth-receive.c")),
                     str(ROOT / "lib/fplinux-shared/fplinux-bluetooth-common.c"),
+                    str(ROOT / "lib/fplinux-shared/fplinux-bluez-adapter.c"),
                     str(ROOT / "lib/fplinux-shared/fplinux-cli.c"),
                 ],
             ),
-            (SERVICE_SOURCE, tools.service, "compile FPLinux Bluetooth test service", []),
+            (
+                SERVICE_SOURCE,
+                tools.service,
+                "compile FPLinux Bluetooth test service",
+                [f"-I{BLUEZ_FAKE.parent}", str(BLUEZ_FAKE)],
+            ),
             (
                 SERVICE_SOURCE.with_name("fplinux-bluetooth-transfer.c"),
                 tools.transfer,
@@ -88,6 +99,16 @@ def bluetooth_tools(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Blueto
                 [
                     str(ROOT / "lib/fplinux-shared/fplinux-bluetooth-opp.c"),
                     str(ROOT / "lib/fplinux-shared/fplinux-bluetooth-common.c"),
+                ],
+            ),
+            (
+                SERVICE_SOURCE.with_name("fplinux-bluetooth-session.c"),
+                tools.session,
+                "compile the Bluetooth session worker boundary",
+                [
+                    f"-I{SESSION_APORT}",
+                    f'-DFPLINUX_BLUETOOTH_RECEIVE_EXECUTABLE="{tools.client}"',
+                    str(SESSION_APORT / "session-bluetooth.c"),
                 ],
             ),
         ):
@@ -100,6 +121,7 @@ def bluetooth_tools(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Blueto
                     "-Werror",
                     f"-I{SHARED_INCLUDE}",
                     '-DFPLINUX_BLUETOOTH_DRIVER_DIR="platform-driver"',
+                    '-DFPLINUX_BLUETOOTH_RECEIVE_SOCKET="receive.sock"',
                     *cflags,
                     str(source),
                     *extra_sources,
@@ -209,6 +231,46 @@ class BluetoothContext:
         self.cleanup.callback(shutil.rmtree, self.driver_directory)
         return self.driver_directory
 
+    def start_session(self) -> subprocess.Popen[str]:
+        """Start the real receive worker through the session's child boundary."""
+        session = subprocess.Popen(
+            [str(self.tools.session), str(self.root)],
+            env=self.child_environment(),
+            cwd=self.root,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            start_new_session=True,
+        )
+        self.cleanup.callback(self.stop_process, session)
+        self.session_event(session, "ready")
+        return session
+
+    @staticmethod
+    def session_event(session: subprocess.Popen[str], state: str) -> str:
+        """Wait for the requested event kind through the production session socket."""
+        assert session.stdout is not None
+        deadline = time.monotonic() + 3
+        while True:
+            line = read_process_line(session.stdout, deadline=deadline, name=state).strip()
+            if line.split(maxsplit=1)[0] == state:
+                return line
+
+    def push_result(self, expected: str) -> None:
+        """Wait for the peer's authorization result and clear its marker."""
+        marker = self.service_directory / "push-result"
+        deadline = time.monotonic() + 3
+        while time.monotonic() < deadline:
+            with suppress(FileNotFoundError):
+                observed = marker.read_text(encoding="ascii")
+                if observed:
+                    assert observed == f"{expected}\n"
+                    marker.unlink()
+                    return
+            time.sleep(0.01)
+        pytest.fail(f"expected peer authorization result {expected}")
+
 
 @pytest.fixture
 def bluetooth_without_bus(bluetooth_tools: BluetoothTools) -> Iterator[BluetoothContext]:
@@ -271,6 +333,94 @@ class FplinuxBluetoothHostToolTests:
         assert (result.stdout) == (
             "Bluetooth interfaces ready; use bluetoothctl for adapter power\n"
         )
+
+    def test_session_receive_validates_exact_consent_hands_off_agent_and_keeps_both_files(
+        self, bluetooth_case: BluetoothContext
+    ) -> None:
+        bluetooth_case.start_service("receive-session")
+        session = bluetooth_case.start_session()
+        assert session.stdin is not None
+        request = bluetooth_case.service_directory / "push"
+        destination = bluetooth_case.root / "Files/Bluetooth"
+
+        request.touch()
+        first = bluetooth_case.session_event(session, "offer").split()
+        assert first[2:] == ["PairedPhone", "incoming.txt", "7", "1"]
+        busy = bluetooth_case.run_client("receive", PEER, str(bluetooth_case.root), "1")
+        assert busy.returncode == 1
+        assert "Bluetooth receive is busy" in busy.stderr
+        session.stdin.write(f"{int(first[1]) + 1} 1\n{first[1]} 0\n")
+        session.stdin.flush()
+        assert bluetooth_case.session_event(session, "cleared") == f"cleared {first[1]}"
+        bluetooth_case.push_result("rejected")
+        assert not destination.exists()
+
+        diagnostic = bluetooth_case.run_client("receive", PEER, str(bluetooth_case.root), "1")
+        assert diagnostic.returncode == 1
+        assert "receive window expired" in diagnostic.stderr
+        bluetooth_case.session_event(session, "busy")
+        bluetooth_case.session_event(session, "ready")
+
+        for filename in ("incoming.txt", "incoming (1).txt"):
+            request.touch()
+            offer = bluetooth_case.session_event(session, "offer").split()
+            assert offer[1] != first[1]
+            session.stdin.write(f"{offer[1]} 1\n")
+            session.stdin.flush()
+            assert bluetooth_case.session_event(session, "complete") == (
+                f"complete {offer[1]} {destination / filename}"
+            )
+            bluetooth_case.push_result("written")
+
+        assert sorted(entry.name for entry in destination.iterdir()) == [
+            "incoming (1).txt",
+            "incoming.txt",
+        ]
+        assert (destination / "incoming.txt").read_bytes() == b"fixture"
+        assert (destination / "incoming (1).txt").read_bytes() == b"fixture"
+
+    @pytest.mark.parametrize("boundary", ["wrong-local", "unpaired"])
+    def test_session_receive_rejects_a_source_outside_the_powered_pair(
+        self, bluetooth_case: BluetoothContext, boundary: str
+    ) -> None:
+        bluetooth_case.service_directory.mkdir()
+        (bluetooth_case.service_directory / boundary).touch()
+        bluetooth_case.start_service("receive-session")
+        bluetooth_case.start_session()
+
+        (bluetooth_case.service_directory / "push").touch()
+        bluetooth_case.push_result("rejected")
+
+        assert not (bluetooth_case.root / "Files").exists()
+
+    def test_session_receive_power_off_clears_an_offer_and_truncated_transfer_leaves_no_file(
+        self, bluetooth_case: BluetoothContext
+    ) -> None:
+        bluetooth_case.start_service("receive-session")
+        session = bluetooth_case.start_session()
+        assert session.stdin is not None
+        directory = bluetooth_case.service_directory
+        (directory / "push").touch()
+        first = bluetooth_case.session_event(session, "offer").split()[1]
+
+        (directory / "power-off").touch()
+        bluetooth_case.session_event(session, "off")
+        assert bluetooth_case.session_event(session, "cleared") == f"cleared {first}"
+        bluetooth_case.push_result("rejected")
+        assert not (bluetooth_case.root / "Files").exists()
+
+        (directory / "power-on").touch()
+        bluetooth_case.session_event(session, "ready")
+        (directory / "truncate-push").touch()
+        (directory / "push").touch()
+        second = bluetooth_case.session_event(session, "offer").split()[1]
+        assert second != first
+        session.stdin.write(f"{second} 1\n")
+        session.stdin.flush()
+        assert bluetooth_case.session_event(session, "failed") == f"failed {second}"
+        bluetooth_case.push_result("written")
+
+        assert list((bluetooth_case.root / "Files/Bluetooth").iterdir()) == []
 
     @pytest.mark.parametrize(
         "arguments",

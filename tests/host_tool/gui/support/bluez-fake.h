@@ -76,6 +76,10 @@ void bluez_fake_set_external_discovery(struct bluez_fake *fake,
 				       const char *path, bool discovering);
 unsigned int bluez_fake_discovery_requests(const struct bluez_fake *fake);
 unsigned int bluez_fake_cancel_requests(const struct bluez_fake *fake);
+void bluez_fake_set_connectable(struct bluez_fake *fake, const char *path,
+				bool connectable);
+bool bluez_fake_connectable(struct bluez_fake *fake, const char *path);
+void bluez_fake_expire_visibility(struct bluez_fake *fake, const char *path);
 void bluez_fake_set_pairable(struct bluez_fake *fake, const char *path,
 			     bool pairable);
 bool bluez_fake_pairable(struct bluez_fake *fake, const char *path);

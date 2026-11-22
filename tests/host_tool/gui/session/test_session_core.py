@@ -83,6 +83,7 @@ def session_core_harness(tmp_path_factory: pytest.TempPathFactory) -> Path:
             str(ROOT / "alpine/aports/fplinux-clocks"),
             str(Path(__file__).with_name("fplinux-session-core-test.c")),
             str(APORT / "session-core.c"),
+            str(APORT / "session-bluetooth.c"),
             str(APORT / "session-child.c"),
             str(APORT / "session-storage.c"),
             str(APORT / "session-audio.c"),

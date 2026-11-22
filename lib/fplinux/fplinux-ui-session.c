@@ -125,6 +125,10 @@ static const char *const message_names[] = {
 	[FPLINUX_UI_SESSION_WIFI_REQUEST] = "WIFI_REQUEST",
 	[FPLINUX_UI_SESSION_WIFI_STATE] = "WIFI_STATE",
 	[FPLINUX_UI_SESSION_WIFI_RESULT] = "WIFI_RESULT",
+	[FPLINUX_UI_SESSION_WIFI_STATUS] = "WIFI_STATUS",
+	[FPLINUX_UI_SESSION_BLUETOOTH_READY] = "BLUETOOTH_READY",
+	[FPLINUX_UI_SESSION_BLUETOOTH_ACTION] = "BLUETOOTH_ACTION",
+	[FPLINUX_UI_SESSION_BLUETOOTH_SEND] = "BLUETOOTH_SEND",
 };
 
 static const char *const level_names[] = {
@@ -316,6 +320,7 @@ static const char *const field_names[] = {
 	"light_effects",
 	"light_effect",
 	"wifi",
+	"bluetooth_prompt",
 };
 
 static void add_string(struct json_object *object, const char *name,
@@ -616,8 +621,19 @@ static bool wifi_fields_valid(const struct fplinux_ui_session_message *message)
 {
 	const struct fplinux_ui_wifi_state *state = &message->wifi_state;
 	const struct fplinux_ui_wifi_request *request = &message->wifi_request;
+	const struct fplinux_ui_wifi_status *status = &message->wifi_status;
 
 	switch (message->type) {
+	case FPLINUX_UI_SESSION_WIFI_STATUS:
+		return !message->serial &&
+		       (unsigned int)status->power <= FPLINUX_UI_WIFI_ON &&
+		       (unsigned int)status->link <=
+			       FPLINUX_UI_WIFI_NO_ADDRESS &&
+		       wifi_text_valid(status->name, sizeof(status->name)) &&
+		       (status->link == FPLINUX_UI_WIFI_DISCONNECTED ?
+				!status->name[0] :
+				status->power == FPLINUX_UI_WIFI_ON &&
+					status->name[0]);
 	case FPLINUX_UI_SESSION_WIFI_STATE:
 		return !message->serial &&
 		       (unsigned int)state->power <= FPLINUX_UI_WIFI_ON &&
@@ -757,13 +773,21 @@ static void add_wifi_fields(struct json_object *object,
 
 	if (message->type != FPLINUX_UI_SESSION_WIFI_STATE &&
 	    message->type != FPLINUX_UI_SESSION_WIFI_REQUEST &&
-	    message->type != FPLINUX_UI_SESSION_WIFI_RESULT)
+	    message->type != FPLINUX_UI_SESSION_WIFI_RESULT &&
+	    message->type != FPLINUX_UI_SESSION_WIFI_STATUS)
 		return;
 	wifi = json_object_new_object();
 	json_object_object_add(object, "wifi", wifi);
 	if (message->serial)
 		add_wifi_u32(object, "serial", message->serial);
 	switch (message->type) {
+	case FPLINUX_UI_SESSION_WIFI_STATUS:
+		add_wifi_u32(wifi, "power", message->wifi_status.power);
+		add_wifi_u32(wifi, "link", message->wifi_status.link);
+		json_object_object_add(
+			wifi, "name",
+			json_object_new_string(message->wifi_status.name));
+		break;
 	case FPLINUX_UI_SESSION_WIFI_STATE:
 		add_wifi_u32(wifi, "power", state->power);
 		add_wifi_u32(wifi, "scan", state->scan);
@@ -836,10 +860,22 @@ static bool get_wifi_fields(struct json_object *object,
 {
 	struct fplinux_ui_wifi_request *request = &message->wifi_request;
 	struct json_object *wifi = NULL;
-	uint32_t action, security, result;
+	uint32_t action, security, result, power, link;
 
 	json_object_object_get_ex(object, "wifi", &wifi);
 	switch (message->type) {
+	case FPLINUX_UI_SESSION_WIFI_STATUS:
+		if (!json_object_is_type(wifi, json_type_object) ||
+		    json_object_object_length(wifi) != 3 ||
+		    !get_wifi_u32(wifi, "power", &power) ||
+		    !get_wifi_u32(wifi, "link", &link) ||
+		    power > FPLINUX_UI_WIFI_ON ||
+		    link > FPLINUX_UI_WIFI_NO_ADDRESS)
+			return false;
+		message->wifi_status.power = power;
+		message->wifi_status.link = link;
+		return get_string(wifi, "name", message->wifi_status.name,
+				  sizeof(message->wifi_status.name));
 	case FPLINUX_UI_SESSION_WIFI_STATE:
 		return json_object_is_type(wifi, json_type_object) &&
 		       get_wifi_state(wifi, &message->wifi_state);
@@ -2112,10 +2148,114 @@ static void add_volume_result(struct json_object *object,
 	json_object_object_add(object, "volumes", array);
 }
 
+static bool bluetooth_fields_valid(const struct fplinux_ui_session_message *m)
+{
+	const struct fplinux_ui_bluetooth_prompt *prompt = &m->bluetooth_prompt;
+
+	if (m->type == FPLINUX_UI_SESSION_BLUETOOTH_ACTION) {
+		static const char *const actions[] = {
+			"accept", "decline", "hide", "close", "open", "folder",
+		};
+
+		if (!m->serial)
+			return false;
+		for (size_t i = 0; i < ARRAY_SIZE(actions); ++i)
+			if (!strcmp(m->value, actions[i]))
+				return true;
+		return false;
+	}
+	if (prompt->phase == FPLINUX_UI_BLUETOOTH_IDLE)
+		return prompt->id == 0;
+	return m->type == FPLINUX_UI_SESSION_ACTIVE && prompt->id &&
+	       (unsigned int)prompt->phase <= FPLINUX_UI_BLUETOOTH_FAILED &&
+	       prompt->filename[0] &&
+	       strnlen(prompt->filename, sizeof(prompt->filename)) <
+		       sizeof(prompt->filename) &&
+	       strnlen(prompt->peer, sizeof(prompt->peer)) <
+		       sizeof(prompt->peer) &&
+	       (!prompt->can_open ||
+		prompt->phase == FPLINUX_UI_BLUETOOTH_COMPLETE);
+}
+
+static bool get_bluetooth_bytes(struct json_object *object, const char *field,
+				uint64_t *value)
+{
+	struct json_object *number;
+
+	if (!json_object_object_get_ex(object, field, &number) ||
+	    !json_object_is_type(number, json_type_int) ||
+	    json_object_get_int64(number) < 0)
+		return false;
+	*value = json_object_get_uint64(number);
+	return true;
+}
+
+static bool get_bluetooth_prompt(struct json_object *object,
+				 struct fplinux_ui_session_message *m)
+{
+	struct fplinux_ui_bluetooth_prompt *prompt = &m->bluetooth_prompt;
+	struct json_object *state;
+	int phase = 0;
+
+	if (!json_object_object_get_ex(object, "bluetooth_prompt", &state))
+		return true;
+	if (m->type != FPLINUX_UI_SESSION_ACTIVE ||
+	    !json_object_is_type(state, json_type_object) ||
+	    !get_token(state, &prompt->id) ||
+	    !get_int(state, "phase", &phase) || phase <= 0 ||
+	    phase > FPLINUX_UI_BLUETOOTH_FAILED ||
+	    !get_string(state, "peer", prompt->peer, sizeof(prompt->peer)) ||
+	    !get_string(state, "filename", prompt->filename,
+			sizeof(prompt->filename)) ||
+	    !get_bluetooth_bytes(state, "transferred",
+				 &prompt->transferred_bytes) ||
+	    !get_bluetooth_bytes(state, "total", &prompt->total_bytes) ||
+	    !get_bool(state, "total_known", &prompt->total_known) ||
+	    !get_bool(state, "can_open", &prompt->can_open))
+		return false;
+	prompt->phase = phase;
+	return true;
+}
+
+static void
+add_bluetooth_prompt(struct json_object *object,
+		     const struct fplinux_ui_bluetooth_prompt *prompt)
+{
+	struct json_object *state;
+
+	if (prompt->phase == FPLINUX_UI_BLUETOOTH_IDLE)
+		return;
+	state = json_object_new_object();
+	json_object_object_add(state, "token",
+			       json_object_new_int64(prompt->id));
+	json_object_object_add(state, "phase",
+			       json_object_new_int(prompt->phase));
+	add_string(state, "peer", prompt->peer);
+	add_string(state, "filename", prompt->filename);
+	json_object_object_add(
+		state, "transferred",
+		json_object_new_uint64(prompt->transferred_bytes));
+	json_object_object_add(state, "total",
+			       json_object_new_uint64(prompt->total_bytes));
+	json_object_object_add(state, "total_known",
+			       json_object_new_boolean(prompt->total_known));
+	json_object_object_add(state, "can_open",
+			       json_object_new_boolean(prompt->can_open));
+	json_object_object_add(object, "bluetooth_prompt", state);
+}
+
 static bool is_document_type(unsigned int type)
 {
-	return type >= FPLINUX_UI_SESSION_OPEN_FILE &&
-	       type <= FPLINUX_UI_SESSION_DOCUMENT_RESULT;
+	return (type >= FPLINUX_UI_SESSION_OPEN_FILE &&
+		type <= FPLINUX_UI_SESSION_DOCUMENT_RESULT) ||
+	       type == FPLINUX_UI_SESSION_BLUETOOTH_SEND;
+}
+
+static bool document_has_path(unsigned int type)
+{
+	return type == FPLINUX_UI_SESSION_OPEN_FILE ||
+	       type == FPLINUX_UI_SESSION_DOCUMENT ||
+	       type == FPLINUX_UI_SESSION_BLUETOOTH_SEND;
 }
 
 static bool document_fields_valid(const struct fplinux_ui_session_message *m)
@@ -2132,11 +2272,9 @@ static bool document_fields_valid(const struct fplinux_ui_session_message *m)
 	if (m->type != FPLINUX_UI_SESSION_DOCUMENT_CHOICES &&
 	    m->document_choice_count)
 		return false;
-	if (m->type != FPLINUX_UI_SESSION_OPEN_FILE &&
-	    m->type != FPLINUX_UI_SESSION_DOCUMENT && m->path[0])
+	if (!document_has_path(m->type) && m->path[0])
 		return false;
-	if (m->type == FPLINUX_UI_SESSION_OPEN_FILE ||
-	    m->type == FPLINUX_UI_SESSION_DOCUMENT)
+	if (document_has_path(m->type))
 		return m->path[0] == '/' &&
 		       strnlen(m->path, sizeof(m->path)) < sizeof(m->path);
 	if (m->type == FPLINUX_UI_SESSION_DOCUMENT_RESULT)
@@ -2192,8 +2330,7 @@ static bool get_document_fields(struct json_object *object, unsigned int type,
 		       !json_object_object_get_ex(object, "document_choices",
 						  &field);
 	if ((json_object_object_get_ex(object, "path", &field) &&
-	     type != FPLINUX_UI_SESSION_OPEN_FILE &&
-	     type != FPLINUX_UI_SESSION_DOCUMENT) ||
+	     !document_has_path(type)) ||
 	    ((json_object_object_get_ex(object, "document_status", &field) ||
 	      json_object_object_get_ex(object, "document_error", &field)) &&
 	     type != FPLINUX_UI_SESSION_DOCUMENT_RESULT) ||
@@ -2487,6 +2624,7 @@ bool fplinux_ui_session_send(int fd,
 	    !storage_result_valid(message) || !document_fields_valid(message) ||
 	    !volume_fields_valid(message) || !system_levels_valid(message) ||
 	    !light_fields_valid(message) || !wifi_fields_valid(message) ||
+	    !bluetooth_fields_valid(message) ||
 	    (setting.kind &&
 	     !setting_valid(message->type, message->applied, &setting)) ||
 	    (launcher &&
@@ -2556,6 +2694,7 @@ bool fplinux_ui_session_send(int fd,
 		add_clock_presentation(object, &message->clock_presentation);
 	add_string(object, "type", message_names[message->type]);
 	add_wifi_fields(object, message);
+	add_bluetooth_prompt(object, &message->bluetooth_prompt);
 	if (message->type == FPLINUX_UI_SESSION_SYSTEM_LEVELS)
 		add_system_levels(object, &message->system_levels);
 	if (message->type == FPLINUX_UI_SESSION_STORAGE_REQUEST ||
@@ -2672,6 +2811,7 @@ bool fplinux_ui_session_send(int fd,
 	     message->type == FPLINUX_UI_SESSION_REDRAW_ACK ||
 	     message->type == FPLINUX_UI_SESSION_CLOSE_ACK ||
 	     message->type == FPLINUX_UI_SESSION_SETTING ||
+	     message->type == FPLINUX_UI_SESSION_BLUETOOTH_ACTION ||
 	     message->type == FPLINUX_UI_SESSION_ERROR ||
 	     message->type == FPLINUX_UI_SESSION_CLOCK ||
 	     message->type == FPLINUX_UI_SESSION_PREPARE_CLOSE ||
@@ -3041,6 +3181,9 @@ int fplinux_ui_session_receive(int fd,
 	if (valid)
 		valid = get_wifi_fields(object, message) &&
 			wifi_fields_valid(message);
+	if (valid)
+		valid = get_bluetooth_prompt(object, message) &&
+			bluetooth_fields_valid(message);
 	json_object_put(object);
 	if (valid && (type == FPLINUX_UI_SESSION_ACTIVE_ACK ||
 		      type == FPLINUX_UI_SESSION_ACTIVATION ||

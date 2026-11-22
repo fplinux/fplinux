@@ -40,6 +40,7 @@ int fplinux_session_wireless_wifi_request(
 	const struct fplinux_ui_wifi_request *request, uint32_t ticket);
 bool fplinux_session_wireless_take_wifi_result(
 	struct fplinux_session_wireless *wireless, uint32_t *ticket,
-	enum fplinux_ui_wifi_result *result);
+	enum fplinux_ui_wifi_result *result,
+	struct fplinux_ui_wifi_network *connected);
 
 #endif

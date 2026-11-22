@@ -12,6 +12,15 @@ msgstr ""
 msgid "Files"
 msgstr "Файлы"
 
+msgid "Send via Bluetooth"
+msgstr "Отправить по Bluetooth"
+
+msgid "Bluetooth"
+msgstr "Bluetooth"
+
+msgid "Could not start Bluetooth sharing."
+msgstr "Не удалось начать отправку по Bluetooth."
+
 msgid "Help"
 msgstr "Справка"
 

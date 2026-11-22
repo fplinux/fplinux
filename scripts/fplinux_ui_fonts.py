@@ -875,6 +875,8 @@ def resolver_source(fonts: Sequence[FontSpec]) -> str:
 def status_source(tokens: dict[str, Any], source_dir: Path, profile: str | None) -> str:
     """Export the early-screen subset of already converted UI fonts."""
     names = fplinux_ui_profile.PROFILES if profile is None else (profile,)
+    extended_codes = sorted(set(TEXT) - set(STATUS_CODES)) if profile is None else []
+    status_codes = (*STATUS_CODES, *extended_codes)
     if any(name not in fplinux_ui_profile.PROFILES for name in names):
         raise FontBuildError(f"unknown profile {profile!r}")
     selected: dict[str, FontSpec] = {}
@@ -893,14 +895,21 @@ def status_source(tokens: dict[str, Any], source_dir: Path, profile: str | None)
         "#include <stddef.h>",
         "",
     ]
+    if extended_codes:
+        lines += ["static const uint16_t extended_codes[] = {"]
+        lines += [
+            "\t" + ", ".join(f"0x{code:04x}" for code in extended_codes[offset : offset + 8]) + ","
+            for offset in range(0, len(extended_codes), 8)
+        ]
+        lines += ["};", ""]
     for number, (font_id, spec) in enumerate(sorted(selected.items())):
         parsed = parse_c_font((source_dir / spec.c_name).read_text(encoding="utf-8"))
-        missing = set(STATUS_CODES) - parsed.glyphs.keys()
+        missing = set(status_codes) - parsed.glyphs.keys()
         if missing:
             raise FontBuildError(f"{font_id}: status glyphs missing {_ranges(missing)}")
         bitmap = bytearray()
         glyph_lines = []
-        for code in STATUS_CODES:
+        for code in status_codes:
             glyph = parsed.glyphs[code]
             expected_size = (glyph.box_w * glyph.box_h + 1) // 2
             if len(glyph.bitmap) != expected_size:
@@ -910,12 +919,12 @@ def status_source(tokens: dict[str, Any], source_dir: Path, profile: str | None)
                 f"{glyph.ofs_x}, {glyph.ofs_y} }},"
             )
             bitmap.extend(glyph.bitmap)
-        indices = {code: index for index, code in enumerate(STATUS_CODES)}
-        kern = [
+        indices = {code: index for index, code in enumerate(status_codes)}
+        kern = sorted(
             (indices[left], indices[right], value * parsed.kern_scale // 16)
-            for (left, right), value in sorted(parsed.kerning.items())
+            for (left, right), value in parsed.kerning.items()
             if left in indices and right in indices and value * parsed.kern_scale // 16
-        ]
+        )
         lines += [f"/* {font_id} */", f"static const uint8_t bitmap_{number}[] = {{"]
         lines += [
             "\t" + ", ".join(f"0x{value:02x}" for value in bitmap[offset : offset + 12]) + ","
@@ -932,6 +941,7 @@ def status_source(tokens: dict[str, Any], source_dir: Path, profile: str | None)
             f"static const struct fplinux_status_font font_{number} = {{",
             f"\tbitmap_{number}, glyphs_{number}, {f'kern_{number}' if kern else 'NULL'},",
             f"\t{len(kern)}, {parsed.line_height}, {parsed.base_line},",
+            f"\t{'extended_codes' if extended_codes else 'NULL'}, {len(extended_codes)},",
             "};",
             "",
         ]

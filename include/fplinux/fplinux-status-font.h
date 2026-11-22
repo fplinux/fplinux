@@ -13,7 +13,7 @@ struct fplinux_status_glyph {
 };
 
 struct fplinux_status_kern {
-	uint8_t left, right;
+	uint16_t left, right;
 	int16_t adjustment; /* 1/16 pixel */
 };
 
@@ -25,6 +25,9 @@ struct fplinux_status_font {
 	uint16_t kerning_count;
 	uint8_t line_height;
 	int8_t base_line;
+	/* Additional glyphs follow the arrows, in this code point order. */
+	const uint16_t *extended_codes;
+	uint16_t extended_count;
 };
 
 /* The returned font has static lifetime; unknown ids return NULL. */

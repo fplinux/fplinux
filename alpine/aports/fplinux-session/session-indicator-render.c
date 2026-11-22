@@ -3,6 +3,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "fplinux-indicator-masks.h"
 #include "fplinux-status-screen.h"
@@ -59,6 +60,32 @@ static void draw_mask(const struct fplinux_status_canvas *canvas,
 		}
 }
 
+static void draw_notice_line(const struct fplinux_status_canvas *canvas,
+			     const struct fplinux_status_font *font,
+			     const char *text, unsigned int padding, int y,
+			     uint16_t foreground, uint16_t background)
+{
+	char line[FPLINUX_UI_WIFI_DISPLAY_BYTES + sizeof("…")];
+	unsigned int width = fplinux_status_text_width(font, text);
+	unsigned int available = canvas->width - 2 * padding;
+	size_t length = strlen(text);
+
+	if (width > available) {
+		memcpy(line, text, length);
+		do {
+			do {
+				--length;
+			} while (length &&
+				 ((unsigned char)line[length] & 0xc0) == 0x80);
+			memcpy(line + length, "…", sizeof("…"));
+			width = fplinux_status_text_width(font, line);
+		} while (length && width > available);
+		text = line;
+	}
+	fplinux_status_text_draw(canvas, font, (canvas->width - width) / 2, y,
+				 text, foreground, background);
+}
+
 void fplinux_session_indicator_frame_clear(
 	struct fplinux_session_indicator_frame *frame)
 {
@@ -87,6 +114,7 @@ bool fplinux_session_indicator_render(
 	int padding, row_height, text_y, bar_y, bottom;
 	char text[16];
 	bool ready;
+	bool wifi;
 
 	if (!frame || frame->pixels || !indicator || !indicator->visible ||
 	    screen_width <= 0 || screen_width > 65535 || screen_height <= 0 ||
@@ -97,12 +125,13 @@ bool fplinux_session_indicator_render(
 	palette = fplinux_ui_theme_spec(theme);
 	if (!profile || !palette)
 		return false;
+	wifi = indicator->wifi_name[0] != '\0';
 	font = fplinux_status_font_by_id(profile->font_body);
 	masks = masks_for_size(profile->row_icon_size);
 	if (!font || !font->line_height || !masks)
 		return false;
 	alpha = level_mask(masks, indicator);
-	if (!alpha)
+	if (!alpha && !wifi)
 		return false;
 	level = &indicator->level;
 	ready = level->availability == FPLINUX_SYSTEM_LEVEL_READY &&
@@ -121,10 +150,15 @@ bool fplinux_session_indicator_render(
 	next.width = profile->width - 2 * profile->margin;
 	if (next.width > screen_width - 2 * profile->margin)
 		next.width = screen_width - 2 * profile->margin;
-	next.height = 2 * padding + row_height + profile->spacing +
-		      profile->bar_height;
-	bottom = screen_height - profile->margin -
-		 (indicator->softkeys ? profile->softkey_height : 0);
+	next.height = 2 * padding + profile->spacing +
+		      (wifi ? 2 * font->line_height :
+			      row_height + profile->bar_height);
+	bottom = wifi ? screen_height - profile->status_height -
+				 profile->margin :
+			screen_height - profile->margin -
+				 (indicator->softkeys ?
+					  profile->softkey_height :
+					  0);
 	if (padding <= 0 || profile->spacing < 0 || profile->bar_height <= 0 ||
 	    profile->divider_width <= 0 ||
 	    next.width > FPLINUX_INDICATOR_MAX_WIDTH ||
@@ -135,7 +169,8 @@ bool fplinux_session_indicator_render(
 				 (int)fplinux_status_text_width(font, "!"))
 		return false;
 	next.x = (screen_width - next.width) / 2;
-	next.y = bottom - next.height;
+	next.y = wifi ? profile->status_height + profile->margin :
+			bottom - next.height;
 	next.stride_bytes = (size_t)next.width * sizeof(uint16_t);
 	next.pixels = malloc(next.stride_bytes * (size_t)next.height);
 	if (!next.pixels)
@@ -162,6 +197,18 @@ bool fplinux_session_indicator_render(
 		canvas.width - 2U * (unsigned int)profile->divider_width,
 		canvas.height - 2U * (unsigned int)profile->divider_width,
 		background);
+	if (wifi) {
+		draw_notice_line(&canvas, font,
+				 indicator->wifi_russian ?
+					 "Подключено к Wi-Fi" :
+					 "Connected to Wi-Fi",
+				 padding, padding, foreground, background);
+		draw_notice_line(&canvas, font, indicator->wifi_name, padding,
+				 padding + font->line_height + profile->spacing,
+				 foreground, background);
+		*frame = next;
+		return true;
+	}
 	draw_mask(&canvas, alpha, masks->size, (unsigned int)padding,
 		  (unsigned int)(padding + (row_height - (int)masks->size) / 2),
 		  foreground, background);

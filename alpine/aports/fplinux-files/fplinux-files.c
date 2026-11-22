@@ -9,6 +9,7 @@
 #include <fplinux/fplinux-ui-file-picker.h>
 #include <fplinux/fplinux-ui-menu.h>
 #include <fplinux/fplinux-ui-screen.h>
+#include <fplinux/fplinux-ui-session.h>
 #include <fplinux/fplinux-ui-storage.h>
 #include <fplinux/fplinux-utf8.h>
 
@@ -48,6 +49,7 @@ enum command {
 	COMMAND_OTHER_NAME,
 	COMMAND_CLOSE_STOP,
 	COMMAND_CLOSE_CONTINUE,
+	COMMAND_BLUETOOTH_SEND,
 };
 
 enum naming_action { NAMING_MKDIR, NAMING_RENAME, NAMING_DESTINATION };
@@ -130,6 +132,9 @@ struct files_app {
 	uint32_t storage_request;
 	enum fplinux_volume_operation storage_operation;
 	uint32_t document_request;
+	uint32_t received_request;
+	bool bluetooth_ready;
+	bool sending_bluetooth;
 	bool picker;
 	bool move;
 	bool closing;
@@ -541,9 +546,10 @@ static void focused(struct fplinux_ui *ui, struct fplinux_ui_screen *screen,
 	struct files_app *app = folder->app;
 	size_t index = entry_index(folder, screen, row);
 	const struct fplinux_files_entry *entry;
-	static const int commands[] = { COMMAND_DETAILS, COMMAND_COPY,
-					COMMAND_MOVE, COMMAND_RENAME,
-					COMMAND_DELETE };
+	static const int commands[] = {
+		COMMAND_DETAILS, COMMAND_COPY,	 COMMAND_MOVE,
+		COMMAND_RENAME,	 COMMAND_DELETE, COMMAND_BLUETOOTH_SEND
+	};
 
 	(void)ui;
 	if (folder->command_screen == screen) {
@@ -567,6 +573,10 @@ static void focused(struct fplinux_ui *ui, struct fplinux_ui_screen *screen,
 	if (entry->kind == FPLINUX_FILES_KIND_FILE && !folder->system)
 		add_item(app, screen, row, COMMAND_COPY,
 			 FPLINUX_UI_COMMAND_ITEM, _("Copy"), 11);
+	if (entry->kind == FPLINUX_FILES_KIND_FILE && !folder->system &&
+	    app->bluetooth_ready)
+		add_item(app, screen, row, COMMAND_BLUETOOTH_SEND,
+			 FPLINUX_UI_COMMAND_ITEM, _("Send via Bluetooth"), 15);
 	if (folder->read_only || folder->system)
 		return;
 	if (entry->kind == FPLINUX_FILES_KIND_FILE)
@@ -1254,6 +1264,21 @@ static void show_read_error(struct files_app *app)
 	show_wait_error(app);
 }
 
+static void finish_received_folder(struct files_app *app, int error)
+{
+	uint32_t serial = app->received_request;
+
+	if (!serial)
+		return;
+	app->received_request = 0;
+	fplinux_ui_document_reply(app->ui, serial,
+				  error == ECANCELED ?
+					  FPLINUX_UI_DOCUMENT_CANCELLED :
+				  error ? FPLINUX_UI_DOCUMENT_ERROR :
+					  FPLINUX_UI_DOCUMENT_ACCEPTED,
+				  error == ECANCELED ? 0 : error);
+}
+
 static void show_read_folder(struct files_app *app)
 {
 	struct files_folder *folder = app->pending;
@@ -1288,11 +1313,13 @@ static void show_read_folder(struct files_app *app)
 	if (!screen) {
 		free_folder(folder);
 		show_error(app, ENOMEM);
+		finish_received_folder(app, ENOMEM);
 		return;
 	}
 	app->folder = folder;
 	if (!old || app->target == FOLDER_CHILD) {
 		fplinux_ui_push(app->ui, screen);
+		finish_received_folder(app, 0);
 		return;
 	}
 	pop_to(app, old->screen);
@@ -1314,6 +1341,7 @@ static void read_finished(struct files_app *app, int error)
 		app->pending = NULL;
 		free_folder(folder);
 		fplinux_files_job_reset(&app->job);
+		finish_received_folder(app, error);
 		app->error = error == ECANCELED ? 0 : error;
 		if (card && error != ECANCELED) {
 			app->read_storage_waiting = true;
@@ -1910,6 +1938,16 @@ static void folder_command(struct fplinux_ui *ui,
 	case COMMAND_DETAILS:
 		show_details(app, index);
 		break;
+	case COMMAND_BLUETOOTH_SEND:
+		if (entry->kind == FPLINUX_FILES_KIND_FILE && !folder->system &&
+		    app->bluetooth_ready && !app->document_request) {
+			app->document_request =
+				fplinux_ui_send_file_bluetooth(ui, path);
+			app->sending_bluetooth = app->document_request != 0;
+			if (!app->document_request)
+				show_error(app, errno);
+		}
+		break;
 	case COMMAND_RENAME:
 		snprintf(app->selected, sizeof(app->selected), "%s", path);
 		show_name(app, NAMING_RENAME, entry->name);
@@ -2006,6 +2044,53 @@ static bool has_pending_search(const struct files_folder *folder)
 	return false;
 }
 
+static struct fplinux_ui_document_result
+show_received_file(struct fplinux_ui *ui,
+		   const struct fplinux_ui_document_request *request,
+		   void *context)
+{
+	struct files_app *app = context;
+	char directory[FPLINUX_FILES_PATH_MAX];
+	size_t length;
+	const char *filename;
+
+	(void)ui;
+	if (app->job.active || app->waiting || app->decision || app->name_box ||
+	    app->picker || app->document_request ||
+	    has_pending_search(app->folder))
+		return (struct fplinux_ui_document_result){
+			.status = FPLINUX_UI_DOCUMENT_ERROR,
+			.error = EBUSY,
+		};
+	if (fplinux_files_child_path(app->home, "Bluetooth", directory,
+				     sizeof(directory)) < 0)
+		return (struct fplinux_ui_document_result){
+			.status = FPLINUX_UI_DOCUMENT_ERROR,
+			.error = errno,
+		};
+	length = strlen(directory);
+	filename = base_name(request->path);
+	if (strncmp(request->path, directory, length) ||
+	    request->path[length] != '/' ||
+	    filename != request->path + length + 1 || !*filename)
+		return (struct fplinux_ui_document_result){
+			.status = FPLINUX_UI_DOCUMENT_ERROR,
+			.error = EINVAL,
+		};
+	show_places(app);
+	open_folder(app, directory, app->home, 0, false, false, filename,
+		    FOLDER_CHILD);
+	if (!app->reading)
+		return (struct fplinux_ui_document_result){
+			.status = FPLINUX_UI_DOCUMENT_ERROR,
+			.error = EIO,
+		};
+	app->received_request = request->request_id;
+	return (struct fplinux_ui_document_result){
+		.status = FPLINUX_UI_DOCUMENT_WAIT
+	};
+}
+
 static void app_event(struct fplinux_ui *ui,
 		      const struct fplinux_ui_event *event, void *context)
 {
@@ -2014,6 +2099,15 @@ static void app_event(struct fplinux_ui *ui,
 	if (event->type == FPLINUX_UI_EVENT_CLOSE) {
 		fplinux_files_job_cancel(&app->job);
 		fplinux_ui_quit(ui);
+	} else if (event->type == FPLINUX_UI_EVENT_SESSION &&
+		   event->session->type == FPLINUX_UI_SESSION_BLUETOOTH_READY) {
+		struct fplinux_ui_screen *screen = fplinux_ui_current(ui);
+
+		app->bluetooth_ready = event->session->enabled;
+		if (app->folder && (screen == app->folder->screen ||
+				    screen == app->folder->results_screen))
+			focused(ui, screen, fplinux_ui_list_get_focused(screen),
+				app->folder);
 	} else if (event->type == FPLINUX_UI_EVENT_ACTIVATION) {
 		if (event->activation == FPLINUX_UI_ACTIVATION_OPEN &&
 		    !app->job.active && !app->waiting && !app->name_box &&
@@ -2024,11 +2118,17 @@ static void app_event(struct fplinux_ui *ui,
 	} else if (event->type == FPLINUX_UI_EVENT_DOCUMENT_RESULT &&
 		   event->document_result.request_id == app->document_request &&
 		   event->document_result.status != FPLINUX_UI_DOCUMENT_WAIT) {
+		bool bluetooth = app->sending_bluetooth;
+
 		app->document_request = 0;
+		app->sending_bluetooth = false;
 		if (event->document_result.status ==
 		    FPLINUX_UI_DOCUMENT_ERROR) {
 			struct fplinux_ui_screen *alert = fplinux_ui_alert_new(
-				ui, FPLINUX_UI_ALERT_ERROR, _("Open file"),
+				ui, FPLINUX_UI_ALERT_ERROR,
+				bluetooth ? _("Bluetooth") : _("Open file"),
+				bluetooth ?
+					_("Could not start Bluetooth sharing.") :
 				event->document_result.error == ENOEXEC ?
 					_("No application can open this file type.") :
 				event->document_result.error == EUSERS ?
@@ -2077,6 +2177,7 @@ int main(int argc, char **argv)
 		return 1;
 	}
 	fplinux_ui_set_close_handler(app.ui, prepare_close, &app);
+	fplinux_ui_set_document_handler(app.ui, show_received_file, &app);
 	fplinux_ui_set_storage_handler(app.ui, storage_result, &app);
 	if (!fplinux_ui_watch_fd(app.ui, app.job.pipe[0], POLLIN, job_event,
 				 &app)) {

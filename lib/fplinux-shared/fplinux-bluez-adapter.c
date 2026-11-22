@@ -36,10 +36,8 @@ enum operation {
 	OP_NONE,
 	OP_POWER,
 	OP_CHANGE,
-	OP_VISIBILITY_TIMEOUT,
-	OP_PAIRABLE_TIMEOUT,
-	OP_PAIRABLE,
 	OP_VISIBILITY,
+	OP_PAIRABLE_OFF,
 	OP_DISCOVERY_START,
 	OP_DISCOVERY_STOP,
 	OP_PAIR,
@@ -48,8 +46,11 @@ enum operation {
 struct inventory {
 	unsigned int adapters;
 	char path[PATH_BYTES];
+	char address[18];
 	char name[FPLINUX_BLUEZ_NAME_BYTES];
 	bool powered;
+	bool connectable;
+	bool pairable;
 	bool discoverable;
 	bool discovering;
 	uint32_t discoverable_timeout;
@@ -80,7 +81,8 @@ struct fplinux_bluez_adapter {
 	enum operation operation;
 	bool requested;
 	int timeout_ms;
-	uint32_t visibility_timeout;
+	enum fplinux_bluez_visibility visibility;
+	size_t policy_step;
 	char operation_device[PATH_BYTES];
 	int error;
 	bool discovery_owned;
@@ -88,6 +90,7 @@ struct fplinux_bluez_adapter {
 	bool agent_registered;
 	bool agent_ready;
 	bool agent_default_pending;
+	bool close_pairing;
 	uint64_t agent_serial;
 	struct fplinux_bluez_agent_request agent_request;
 	DBusMessage *agent_message;
@@ -348,12 +351,23 @@ static void clear_agent_request(struct fplinux_bluez_adapter *adapter,
 	adapter->agent_request = (struct fplinux_bluez_agent_request){ 0 };
 }
 
+static void close_pairing_if_idle(struct fplinux_bluez_adapter *adapter);
+static void register_agent(struct fplinux_bluez_adapter *adapter);
+
 static void end_operation(struct fplinux_bluez_adapter *adapter, int error)
 {
+	bool automatic = adapter->operation == OP_PAIRABLE_OFF;
+
 	adapter->operation = OP_NONE;
 	adapter->operation_device[0] = '\0';
 	adapter->error = error;
-	finished(adapter, !error);
+	if (automatic) {
+		register_agent(adapter);
+		changed(adapter);
+	} else {
+		finished(adapter, !error);
+	}
+	close_pairing_if_idle(adapter);
 }
 
 static void replace_inventory(struct fplinux_bluez_adapter *adapter,
@@ -429,10 +443,21 @@ static void read_properties(DBusMessageIter *properties,
 			if (!strcmp(name, "Alias"))
 				read_text(&value, state->name,
 					  sizeof(state->name));
+			else if (!strcmp(name, "Address"))
+				read_text(&value, state->address,
+					  sizeof(state->address));
 			else if (!strcmp(name, "Powered") &&
 				 read_basic(&value, DBUS_TYPE_BOOLEAN,
 					    &boolean))
 				state->powered = boolean;
+			else if (!strcmp(name, "Connectable") &&
+				 read_basic(&value, DBUS_TYPE_BOOLEAN,
+					    &boolean))
+				state->connectable = boolean;
+			else if (!strcmp(name, "Pairable") &&
+				 read_basic(&value, DBUS_TYPE_BOOLEAN,
+					    &boolean))
+				state->pairable = boolean;
 			else if (!strcmp(name, "Discoverable") &&
 				 read_basic(&value, DBUS_TYPE_BOOLEAN,
 					    &boolean))
@@ -661,30 +686,146 @@ static DBusMessage *property_message(struct fplinux_bluez_adapter *adapter,
 
 static void mutation_done(DBusPendingCall *call, void *data);
 
-static bool advance_visibility(struct fplinux_bluez_adapter *adapter)
+static void close_pairing_if_idle(struct fplinux_bluez_adapter *adapter)
 {
-	dbus_bool_t enabled = TRUE;
-	DBusMessage *message;
+	dbus_bool_t enabled = FALSE;
 
-	if (adapter->operation == OP_VISIBILITY_TIMEOUT) {
-		message = property_message(adapter, adapter->state.path,
-					   BLUEZ_ADAPTER, "PairableTimeout",
-					   DBUS_TYPE_UINT32,
-					   &adapter->visibility_timeout);
-		adapter->operation = OP_PAIRABLE_TIMEOUT;
-	} else if (adapter->operation == OP_PAIRABLE_TIMEOUT) {
-		message = property_message(adapter, adapter->state.path,
-					   BLUEZ_ADAPTER, "Pairable",
-					   DBUS_TYPE_BOOLEAN, &enabled);
-		adapter->operation = OP_PAIRABLE;
+	if (!adapter->close_pairing || adapter->mutation)
+		return;
+	adapter->close_pairing = false;
+	if (!fplinux_bluez_adapter_powered(adapter))
+		return;
+	if (send_call(adapter,
+		      property_message(adapter, adapter->state.path,
+				       BLUEZ_ADAPTER, "Pairable",
+				       DBUS_TYPE_BOOLEAN, &enabled),
+		      REQUEST_TIMEOUT_MS, mutation_done, &adapter->mutation))
+		adapter->operation = OP_PAIRABLE_OFF;
+}
+
+struct mode_change {
+	const char *name;
+	bool enabled;
+	bool timeout;
+};
+
+static const struct mode_change power_on[] = {
+	{ .name = "Connectable", .enabled = true },
+};
+
+static const struct mode_change show_adapter[] = {
+	{ .name = "PairableTimeout", .timeout = true },
+	{ .name = "Connectable", .enabled = true },
+	{ .name = "Pairable", .enabled = true },
+	{ .name = "DiscoverableTimeout", .timeout = true },
+	{ .name = "Discoverable", .enabled = true },
+};
+
+static const struct mode_change hide_adapter[] = {
+	{ .name = "Discoverable" },
+	/* BlueZ can turn off page scan when it disables discoverability. */
+	{ .name = "Connectable", .enabled = true },
+	{ .name = "Pairable" },
+};
+
+static DBusMessage *mode_message(struct fplinux_bluez_adapter *adapter,
+				 const struct mode_change *change)
+{
+	dbus_bool_t enabled = change->enabled;
+	dbus_uint32_t seconds =
+		adapter->visibility == FPLINUX_BLUEZ_VISIBLE_TIMED ? 120 : 0;
+
+	return property_message(
+		adapter, adapter->state.path, BLUEZ_ADAPTER, change->name,
+		change->timeout ? DBUS_TYPE_UINT32 : DBUS_TYPE_BOOLEAN,
+		change->timeout ? (const void *)&seconds :
+				  (const void *)&enabled);
+}
+
+static const struct mode_change *
+next_mode_change(struct fplinux_bluez_adapter *adapter)
+{
+	const struct mode_change *steps;
+	size_t count;
+
+	if (adapter->operation == OP_POWER && adapter->requested) {
+		steps = power_on;
+		count = sizeof(power_on) / sizeof(power_on[0]);
+	} else if (adapter->operation != OP_VISIBILITY) {
+		return NULL;
+	} else if (adapter->visibility == FPLINUX_BLUEZ_HIDDEN) {
+		steps = hide_adapter;
+		count = sizeof(hide_adapter) / sizeof(hide_adapter[0]);
 	} else {
-		message = property_message(adapter, adapter->state.path,
-					   BLUEZ_ADAPTER, "Discoverable",
-					   DBUS_TYPE_BOOLEAN, &enabled);
-		adapter->operation = OP_VISIBILITY;
+		steps = show_adapter;
+		count = sizeof(show_adapter) / sizeof(show_adapter[0]);
 	}
-	return send_call(adapter, message, adapter->timeout_ms, mutation_done,
-			 &adapter->mutation);
+	return adapter->policy_step < count ? &steps[adapter->policy_step++] :
+					      NULL;
+}
+
+static void connectable_done(DBusPendingCall *call, void *data);
+
+static bool query_connectable(struct fplinux_bluez_adapter *adapter)
+{
+	const char *interface = BLUEZ_ADAPTER, *property = "Connectable";
+	DBusMessage *message = dbus_message_new_method_call(
+		adapter->owner, adapter->state.path, PROPERTIES, "Get");
+
+	if (message &&
+	    !dbus_message_append_args(message, DBUS_TYPE_STRING, &interface,
+				      DBUS_TYPE_STRING, &property,
+				      DBUS_TYPE_INVALID)) {
+		dbus_message_unref(message);
+		return false;
+	}
+	return send_call(adapter, message, adapter->timeout_ms,
+			 connectable_done, &adapter->mutation);
+}
+
+static void continue_mutation(struct fplinux_bluez_adapter *adapter, int error)
+{
+	bool power_changed = false;
+
+	if (!error) {
+		const struct mode_change *change = next_mode_change(adapter);
+
+		if (change) {
+			bool queued;
+
+			/* Read after the previous Set, before property signals
+			 * necessarily reach this client. A redundant Set can
+			 * get stuck behind a completed controller request.
+			 */
+			if (!strcmp(change->name, "Connectable"))
+				queued = query_connectable(adapter);
+			else
+				queued = send_call(
+					adapter, mode_message(adapter, change),
+					adapter->timeout_ms, mutation_done,
+					&adapter->mutation);
+			if (queued)
+				return;
+			error = ENOMEM;
+		}
+		if (!error && adapter->operation == OP_POWER &&
+		    adapter->state.powered != adapter->requested) {
+			adapter->state.powered = adapter->requested;
+			power_changed = true;
+		}
+		if (adapter->operation == OP_DISCOVERY_START)
+			adapter->discovery_owned = true;
+		else if (adapter->operation == OP_DISCOVERY_STOP ||
+			 (adapter->operation == OP_POWER &&
+			  !adapter->requested))
+			adapter->discovery_owned = false;
+	}
+	query_adapters(adapter);
+	if (adapter->operation == OP_PAIR)
+		clear_agent_request(adapter, "org.bluez.Error.Canceled");
+	end_operation(adapter, error);
+	if (power_changed)
+		changed(adapter);
 }
 
 static void mutation_done(DBusPendingCall *call, void *data)
@@ -695,30 +836,47 @@ static void mutation_done(DBusPendingCall *call, void *data)
 
 	(void)call;
 	reply = take_reply(&adapter->mutation, &error);
-	if (reply) {
+	if (reply)
 		dbus_message_unref(reply);
-		if (adapter->operation == OP_VISIBILITY_TIMEOUT ||
-		    adapter->operation == OP_PAIRABLE_TIMEOUT ||
-		    adapter->operation == OP_PAIRABLE) {
-			if (advance_visibility(adapter))
-				return;
-			error = ENOMEM;
-		} else if (adapter->operation == OP_POWER &&
-			   adapter->state.powered != adapter->requested) {
-			adapter->state.powered = adapter->requested;
-			changed(adapter);
-		}
-		if (adapter->operation == OP_DISCOVERY_START)
-			adapter->discovery_owned = true;
-		else if (adapter->operation == OP_DISCOVERY_STOP ||
-			 (adapter->operation == OP_POWER &&
-			  !adapter->requested))
-			adapter->discovery_owned = false;
-		query_adapters(adapter);
+	continue_mutation(adapter, error);
+}
+
+static void connectable_done(DBusPendingCall *call, void *data)
+{
+	struct fplinux_bluez_adapter *adapter = data;
+	DBusMessageIter arguments, value;
+	dbus_bool_t connectable = FALSE;
+	DBusMessage *reply;
+	int error;
+
+	(void)call;
+	reply = take_reply(&adapter->mutation, &error);
+	if (!reply) {
+		continue_mutation(adapter, error);
+		return;
 	}
-	if (adapter->operation == OP_PAIR)
-		clear_agent_request(adapter, "org.bluez.Error.Canceled");
-	end_operation(adapter, error);
+	if (!dbus_message_has_signature(reply, "v") ||
+	    !dbus_message_iter_init(reply, &arguments)) {
+		error = EPROTO;
+	} else {
+		dbus_message_iter_recurse(&arguments, &value);
+		if (!read_basic(&value, DBUS_TYPE_BOOLEAN, &connectable))
+			error = EPROTO;
+	}
+	dbus_message_unref(reply);
+	if (!error && !connectable) {
+		const dbus_bool_t enabled = TRUE;
+
+		if (send_call(adapter,
+			      property_message(adapter, adapter->state.path,
+					       BLUEZ_ADAPTER, "Connectable",
+					       DBUS_TYPE_BOOLEAN, &enabled),
+			      adapter->timeout_ms, mutation_done,
+			      &adapter->mutation))
+			return;
+		error = ENOMEM;
+	}
+	continue_mutation(adapter, error);
 }
 
 static void hello_done(DBusPendingCall *call, void *data)
@@ -765,7 +923,8 @@ static DBusMessage *agent_manager_message(struct fplinux_bluez_adapter *adapter,
 static void register_agent(struct fplinux_bluez_adapter *adapter)
 {
 	if (!adapter->agent_enabled || !adapter->owner[0] ||
-	    adapter->agent_registered || adapter->agent_call)
+	    adapter->agent_registered || adapter->agent_call ||
+	    adapter->operation == OP_PAIRABLE_OFF)
 		return;
 	if (!send_call(adapter, agent_manager_message(adapter, "RegisterAgent"),
 		       REQUEST_TIMEOUT_MS, agent_done, &adapter->agent_call)) {
@@ -979,6 +1138,7 @@ static void set_owner(struct fplinux_bluez_adapter *adapter, const char *owner)
 	adapter->agent_registered = false;
 	adapter->agent_ready = false;
 	adapter->agent_default_pending = false;
+	adapter->close_pairing = false;
 	adapter->discovery_owned = false;
 	snprintf(adapter->owner, sizeof(adapter->owner), "%s", owner);
 	memset(&adapter->state, 0, sizeof(adapter->state));
@@ -1141,6 +1301,7 @@ static void disconnect(struct fplinux_bluez_adapter *adapter)
 	adapter->agent_registered = false;
 	adapter->agent_ready = false;
 	adapter->agent_default_pending = false;
+	adapter->close_pairing = false;
 	if (requested)
 		end_operation(adapter, ENODEV);
 	if (was_present)
@@ -1340,6 +1501,32 @@ bool fplinux_bluez_adapter_powered(const struct fplinux_bluez_adapter *adapter)
 	return fplinux_bluez_adapter_present(adapter) && adapter->state.powered;
 }
 
+bool fplinux_bluez_adapter_connectable(
+	const struct fplinux_bluez_adapter *adapter)
+{
+	return fplinux_bluez_adapter_present(adapter) &&
+	       adapter->state.connectable;
+}
+
+bool fplinux_bluez_adapter_pairable(const struct fplinux_bluez_adapter *adapter)
+{
+	return fplinux_bluez_adapter_present(adapter) &&
+	       adapter->state.pairable;
+}
+
+const char *
+fplinux_bluez_adapter_address(const struct fplinux_bluez_adapter *adapter)
+{
+	return fplinux_bluez_adapter_present(adapter) ? adapter->state.address :
+							"";
+}
+
+const char *
+fplinux_bluez_adapter_owner(const struct fplinux_bluez_adapter *adapter)
+{
+	return adapter->owner;
+}
+
 bool fplinux_bluez_adapter_pending(const struct fplinux_bluez_adapter *adapter)
 {
 	return adapter->mutation != NULL;
@@ -1388,6 +1575,7 @@ bool fplinux_bluez_adapter_set_powered(struct fplinux_bluez_adapter *adapter,
 	if (!can_mutate(adapter, NULL))
 		return false;
 	adapter->requested = powered;
+	adapter->policy_step = 0;
 	return start_mutation(adapter,
 			      property_message(adapter, adapter->state.path,
 					       BLUEZ_ADAPTER, "Powered",
@@ -1404,7 +1592,8 @@ fplinux_bluez_adapter_name(const struct fplinux_bluez_adapter *adapter)
 enum fplinux_bluez_visibility
 fplinux_bluez_adapter_visibility(const struct fplinux_bluez_adapter *adapter)
 {
-	if (!adapter->state.discoverable)
+	if (!fplinux_bluez_adapter_powered(adapter) ||
+	    !adapter->state.discoverable)
 		return FPLINUX_BLUEZ_HIDDEN;
 	return adapter->state.discoverable_timeout ?
 		       FPLINUX_BLUEZ_VISIBLE_TIMED :
@@ -1494,9 +1683,7 @@ bool fplinux_bluez_adapter_set_visibility(
 	struct fplinux_bluez_adapter *adapter,
 	enum fplinux_bluez_visibility visibility, int timeout_ms)
 {
-	dbus_bool_t visible = FALSE;
-	dbus_uint32_t seconds =
-		visibility == FPLINUX_BLUEZ_VISIBLE_TIMED ? 120 : 0;
+	const struct mode_change *steps;
 
 	if (!can_mutate(adapter, NULL))
 		return false;
@@ -1505,20 +1692,16 @@ bool fplinux_bluez_adapter_set_visibility(
 		adapter->error = EINVAL;
 		return false;
 	}
-	if (visibility == FPLINUX_BLUEZ_HIDDEN)
-		return start_mutation(
-			adapter,
-			property_message(adapter, adapter->state.path,
-					 BLUEZ_ADAPTER, "Discoverable",
-					 DBUS_TYPE_BOOLEAN, &visible),
-			OP_VISIBILITY, NULL, timeout_ms);
-	adapter->visibility_timeout = seconds;
-	return start_mutation(adapter,
-			      property_message(adapter, adapter->state.path,
-					       BLUEZ_ADAPTER,
-					       "DiscoverableTimeout",
-					       DBUS_TYPE_UINT32, &seconds),
-			      OP_VISIBILITY_TIMEOUT, NULL, timeout_ms);
+	if (!fplinux_bluez_adapter_powered(adapter)) {
+		adapter->error = ENETDOWN;
+		return false;
+	}
+	adapter->visibility = visibility;
+	adapter->policy_step = 1;
+	steps = visibility == FPLINUX_BLUEZ_HIDDEN ? hide_adapter :
+						     show_adapter;
+	return start_mutation(adapter, mode_message(adapter, &steps[0]),
+			      OP_VISIBILITY, NULL, timeout_ms);
 }
 
 bool fplinux_bluez_adapter_set_discovery(struct fplinux_bluez_adapter *adapter,
@@ -1670,15 +1853,19 @@ bool fplinux_bluez_adapter_set_agent_enabled(
 
 	adapter->agent_enabled = enabled;
 	if (enabled) {
+		adapter->close_pairing = false;
 		register_agent(adapter);
 		return !adapter->owner[0] || adapter->agent_registered ||
-		       adapter->agent_call;
+		       adapter->agent_call ||
+		       adapter->operation == OP_PAIRABLE_OFF;
 	}
+	if (!was_enabled)
+		return true;
 	if (adapter->operation == OP_PAIR || adapter->agent_request.device[0])
 		fplinux_bluez_adapter_cancel_pairing(adapter);
 	abort_pair(adapter);
 	cancel_call(&adapter->agent_call);
-	if (was_enabled && adapter->connection && adapter->owner[0]) {
+	if (adapter->connection && adapter->owner[0]) {
 		DBusMessage *message =
 			agent_manager_message(adapter, "UnregisterAgent");
 
@@ -1692,6 +1879,8 @@ bool fplinux_bluez_adapter_set_agent_enabled(
 	adapter->agent_registered = false;
 	adapter->agent_ready = false;
 	adapter->agent_default_pending = false;
+	adapter->close_pairing = true;
+	close_pairing_if_idle(adapter);
 	changed(adapter);
 	return true;
 }

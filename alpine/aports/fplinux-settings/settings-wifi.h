@@ -11,6 +11,7 @@ void fplinux_settings_wifi_free(struct fplinux_settings_wifi *wifi);
 void fplinux_settings_wifi_show(struct fplinux_settings_wifi *wifi);
 void fplinux_settings_wifi_reset(struct fplinux_settings_wifi *wifi);
 void fplinux_settings_wifi_background(struct fplinux_settings_wifi *wifi);
+void fplinux_settings_wifi_foreground(struct fplinux_settings_wifi *wifi);
 bool fplinux_settings_wifi_shown(const struct fplinux_settings_wifi *wifi);
 enum fplinux_ui_wifi_power
 fplinux_settings_wifi_power(const struct fplinux_settings_wifi *wifi);

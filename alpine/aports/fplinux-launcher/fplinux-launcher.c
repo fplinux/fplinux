@@ -21,6 +21,7 @@
 
 #include <dirent.h>
 #include <errno.h>
+#include <inttypes.h>
 #include <libintl.h>
 #include <limits.h>
 #include <linux/input-event-codes.h>
@@ -90,6 +91,11 @@ struct launcher {
 	struct fplinux_ui_screen *canvas;
 	struct fplinux_ui_screen *catalogue;
 	struct fplinux_ui_screen *notice_alert;
+	struct fplinux_ui_screen *bluetooth_alert;
+	struct fplinux_ui_bluetooth_prompt bluetooth_prompt;
+	uint32_t bluetooth_alert_id;
+	enum fplinux_ui_bluetooth_phase bluetooth_alert_phase;
+	bool bluetooth_answered;
 	struct fplinux_ui_screen *notice_parent;
 	enum fplinux_launcher_notice alert_notice;
 	bool catalogue_dirty;
@@ -119,6 +125,7 @@ struct launcher {
 	lv_obj_t *status_clock;
 	lv_obj_t *lock_glyph;
 	lv_obj_t *playback_glyph;
+	lv_obj_t *wifi_glyph;
 	bool background_playing;
 	struct battery_icon battery_icon;
 	lv_obj_t *body;
@@ -526,6 +533,16 @@ static enum launcher_screen current_screen(const struct launcher *launcher)
 		return SCREEN_APPLICATION;
 	return launcher->view == FPLINUX_LAUNCHER_VIEW_HOME ? SCREEN_HOME :
 							      SCREEN_CATALOGUE;
+}
+
+static void update_wifi_glyph(struct launcher *launcher)
+{
+	if (launcher->wifi_glyph)
+		lv_obj_set_hidden(
+			launcher->wifi_glyph,
+			!launcher->session_known ||
+				launcher->quick_settings.wifi_status.link !=
+					FPLINUX_UI_WIFI_CONNECTED);
 }
 
 /*
@@ -1446,6 +1463,186 @@ static size_t clock_application(const struct launcher *launcher)
 	return SIZE_MAX;
 }
 
+enum bluetooth_command {
+	BLUETOOTH_ACCEPT = 1,
+	BLUETOOTH_DECLINE,
+	BLUETOOTH_HIDE,
+	BLUETOOTH_CLOSE,
+	BLUETOOTH_OPEN,
+	BLUETOOTH_FOLDER,
+};
+
+static void bluetooth_command(struct fplinux_ui *ui,
+			      struct fplinux_ui_screen *alert, int id,
+			      void *context)
+{
+	static const char *const actions[] = {
+		[BLUETOOTH_ACCEPT] = "accept", [BLUETOOTH_DECLINE] = "decline",
+		[BLUETOOTH_HIDE] = "hide",     [BLUETOOTH_CLOSE] = "close",
+		[BLUETOOTH_OPEN] = "open",     [BLUETOOTH_FOLDER] = "folder",
+	};
+	struct launcher *launcher = context;
+	struct fplinux_ui_session_message reply = {
+		.type = FPLINUX_UI_SESSION_BLUETOOTH_ACTION,
+		.serial = launcher->bluetooth_alert_id,
+	};
+
+	if (alert != launcher->bluetooth_alert)
+		return;
+	launcher->bluetooth_alert = NULL;
+	if (id < BLUETOOTH_ACCEPT || id > BLUETOOTH_FOLDER)
+		return;
+	strcpy(reply.value, actions[id]);
+	launcher->bluetooth_answered = fplinux_ui_send(ui, &reply);
+	if (!launcher->bluetooth_answered)
+		render(launcher);
+}
+
+static void bluetooth_button(struct fplinux_ui_screen *alert,
+			     enum bluetooth_command id,
+			     enum fplinux_ui_command_type type,
+			     const char *label)
+{
+	struct fplinux_ui_command command = {
+		.id = id,
+		.type = type,
+		.label = label,
+		.direct = true,
+	};
+
+	fplinux_ui_screen_add_command(alert, &command);
+}
+
+static void hide_stale_bluetooth(struct launcher *launcher)
+{
+	const struct fplinux_ui_bluetooth_prompt *prompt =
+		&launcher->bluetooth_prompt;
+
+	if (prompt->id == launcher->bluetooth_alert_id &&
+	    prompt->phase == launcher->bluetooth_alert_phase)
+		return;
+	launcher->bluetooth_answered = false;
+	if (launcher->bluetooth_alert &&
+	    fplinux_ui_current(launcher->ui) == launcher->bluetooth_alert) {
+		launcher->bluetooth_alert = NULL;
+		fplinux_ui_pop(launcher->ui);
+	}
+}
+
+static void render_bluetooth(struct launcher *launcher)
+{
+	const struct fplinux_ui_bluetooth_prompt *prompt =
+		&launcher->bluetooth_prompt;
+	struct fplinux_ui_screen *alert = launcher->bluetooth_alert;
+	enum fplinux_ui_alert_kind kind = FPLINUX_UI_ALERT_INFO;
+	const char *title;
+	char text[sizeof(prompt->peer) + sizeof(prompt->filename) + 64];
+	char progress[80];
+
+	if (prompt->phase == FPLINUX_UI_BLUETOOTH_IDLE ||
+	    launcher->bluetooth_answered)
+		return;
+	switch (prompt->phase) {
+	case FPLINUX_UI_BLUETOOTH_OFFER:
+		title = _("Incoming file");
+		kind = FPLINUX_UI_ALERT_CONFIRMATION;
+		if (prompt->total_known)
+			snprintf(text, sizeof(text), "%s\n%s\n%" PRIu64 " B",
+				 prompt->peer, prompt->filename,
+				 prompt->total_bytes);
+		else
+			snprintf(text, sizeof(text), "%s\n%s", prompt->peer,
+				 prompt->filename);
+		break;
+	case FPLINUX_UI_BLUETOOTH_RECEIVING:
+		title = _("Receiving file…");
+		snprintf(text, sizeof(text), "%s", prompt->filename);
+		break;
+	case FPLINUX_UI_BLUETOOTH_COMPLETE:
+		title = _("File received");
+		snprintf(text, sizeof(text),
+			 _("%s\nSaved in My files / Bluetooth"),
+			 prompt->filename);
+		break;
+	case FPLINUX_UI_BLUETOOTH_FAILED:
+		title = _("Transfer failed");
+		kind = FPLINUX_UI_ALERT_ERROR;
+		snprintf(text, sizeof(text), "%s", prompt->filename);
+		break;
+	default:
+		return;
+	}
+	if (!alert) {
+		alert = fplinux_ui_alert_new(launcher->ui, kind, title, text,
+					     0);
+		if (!alert)
+			return;
+		switch (prompt->phase) {
+		case FPLINUX_UI_BLUETOOTH_OFFER:
+			bluetooth_button(alert, BLUETOOTH_ACCEPT,
+					 FPLINUX_UI_COMMAND_OK, _("Accept"));
+			bluetooth_button(alert, BLUETOOTH_DECLINE,
+					 FPLINUX_UI_COMMAND_CANCEL,
+					 _("Decline"));
+			break;
+		case FPLINUX_UI_BLUETOOTH_RECEIVING:
+			bluetooth_button(alert, BLUETOOTH_HIDE,
+					 FPLINUX_UI_COMMAND_BACK, _("Hide"));
+			break;
+		case FPLINUX_UI_BLUETOOTH_COMPLETE:
+			if (prompt->can_open)
+				bluetooth_button(alert, BLUETOOTH_OPEN,
+						 FPLINUX_UI_COMMAND_OK,
+						 _("Open"));
+			bluetooth_button(alert, BLUETOOTH_FOLDER,
+					 prompt->can_open ?
+						 FPLINUX_UI_COMMAND_SCREEN :
+						 FPLINUX_UI_COMMAND_OK,
+					 _("Files"));
+			/* Fall through to the shared Close action. */
+			/* fallthrough */
+		case FPLINUX_UI_BLUETOOTH_FAILED:
+			bluetooth_button(alert, BLUETOOTH_CLOSE,
+					 FPLINUX_UI_COMMAND_BACK, _("Close"));
+			break;
+		default:
+			break;
+		}
+		fplinux_ui_screen_set_listener(alert, bluetooth_command, NULL,
+					       launcher);
+		launcher->bluetooth_alert = alert;
+		launcher->bluetooth_alert_id = prompt->id;
+		launcher->bluetooth_alert_phase = prompt->phase;
+		fplinux_ui_push(launcher->ui, alert);
+	}
+	if (prompt->phase == FPLINUX_UI_BLUETOOTH_RECEIVING) {
+		unsigned int percent = 0;
+
+		if (prompt->total_known && prompt->total_bytes) {
+			percent =
+				prompt->transferred_bytes >=
+						prompt->total_bytes ?
+					100 :
+					(unsigned int)(100.0 *
+						       (double)prompt
+							       ->transferred_bytes /
+						       (double)prompt
+							       ->total_bytes);
+			snprintf(progress, sizeof(progress),
+				 "%" PRIu64 " / %" PRIu64 " B",
+				 prompt->transferred_bytes,
+				 prompt->total_bytes);
+		} else {
+			snprintf(progress, sizeof(progress), "%" PRIu64 " B",
+				 prompt->transferred_bytes);
+		}
+		fplinux_ui_alert_set_progress(
+			alert, percent,
+			prompt->total_known && prompt->total_bytes ? 100 : 0);
+		fplinux_ui_alert_set_footer(alert, progress);
+	}
+}
+
 static void render(struct launcher *launcher)
 {
 	enum launcher_screen screen = current_screen(launcher);
@@ -1463,6 +1660,7 @@ static void render(struct launcher *launcher)
 	     notice != FPLINUX_LAUNCHER_NOTICE_NONE))
 		launcher->marquee_app[0] = '\0';
 
+	hide_stale_bluetooth(launcher);
 	/* Remove the clock's own finished modal before changing the base view. */
 	if (!fplinux_launcher_clock_is_ringing(&launcher->ringing))
 		fplinux_launcher_clock_render(&launcher->ringing);
@@ -1482,6 +1680,7 @@ static void render(struct launcher *launcher)
 		lv_obj_set_hidden(launcher->playback_glyph,
 				  !launcher->background_playing ||
 					  screen == SCREEN_BLANK);
+	update_wifi_glyph(launcher);
 	switch (screen) {
 	case SCREEN_BLANK:
 		break;
@@ -1528,6 +1727,7 @@ static void render(struct launcher *launcher)
 	if (base_ready)
 		show_notice(launcher);
 	fplinux_launcher_clock_render(&launcher->ringing);
+	render_bluetooth(launcher);
 	if (launcher->tasks_pending && !tasks_blocked && base_ready) {
 		launcher->tasks_pending = false;
 		fplinux_launcher_tasks_open(&launcher->tasks);
@@ -1816,6 +2016,7 @@ static void receive_active(struct launcher *launcher,
 	launcher->locked = message->locked;
 	launcher->background_playing = message->background_playing;
 	launcher->clock_presentation = message->clock_presentation;
+	launcher->bluetooth_prompt = message->bluetooth_prompt;
 	copy_message_text(launcher->active_title, message->title);
 	launcher->display = message->display;
 	copy_message_text(launcher->active_left, message->left);
@@ -1865,6 +2066,10 @@ static void receive_active(struct launcher *launcher,
 	lv_refr_now(NULL);
 	if (fplinux_launcher_clock_is_ringing(&launcher->ringing) &&
 	    !fplinux_launcher_clock_is_visible(&launcher->ringing))
+		return;
+	if (message->bluetooth_prompt.id &&
+	    (!launcher->bluetooth_alert ||
+	     fplinux_ui_current(launcher->ui) != launcher->bluetooth_alert))
 		return;
 	struct fplinux_ui_session_message ack = {
 		.type = FPLINUX_UI_SESSION_ACTIVE_ACK,
@@ -1916,6 +2121,8 @@ static void ui_event(struct fplinux_ui *ui,
 		return;
 	} else if (fplinux_launcher_quick_settings_receive(
 			   &launcher->quick_settings, message)) {
+		if (message->type == FPLINUX_UI_SESSION_WIFI_STATUS)
+			update_wifi_glyph(launcher);
 		return;
 	} else if (fplinux_launcher_tasks_receive(&launcher->tasks, message)) {
 		return;
@@ -2064,6 +2271,8 @@ static void create_view(struct launcher *launcher)
 		fplinux_ui_glyph(launcher->ui, "lock", FPLINUX_UI_GLYPH_STATUS);
 	const void *music = fplinux_ui_glyph(launcher->ui, "music",
 					     FPLINUX_UI_GLYPH_STATUS);
+	const void *wifi =
+		fplinux_ui_glyph(launcher->ui, "wifi", FPLINUX_UI_GLYPH_STATUS);
 	lv_obj_t *status_bar = fill(screen,
 				    (struct fplinux_launcher_rect){
 					    .width = frame->width,
@@ -2095,6 +2304,15 @@ static void create_view(struct launcher *launcher)
 		box.x += spec->status_icon_size + spec->gap_small;
 		launcher->playback_glyph =
 			glyph(status_bar, music, box, theme->bar_text);
+	}
+	if (wifi) {
+		struct fplinux_launcher_rect box =
+			fplinux_launcher_status_glyph(spec);
+
+		box.x += 2 * (spec->status_icon_size + spec->gap_small);
+		launcher->wifi_glyph =
+			glyph(status_bar, wifi, box, theme->bar_text);
+		update_wifi_glyph(launcher);
 	}
 	launcher->status_clock = label(status_bar, status_clock_line(launcher),
 				       theme->font, theme->bar_text, "");
@@ -2131,6 +2349,7 @@ static void resize_view(struct launcher *launcher)
 	launcher->body = NULL;
 	launcher->lock_glyph = NULL;
 	launcher->playback_glyph = NULL;
+	launcher->wifi_glyph = NULL;
 	memset(&launcher->battery_icon, 0, sizeof(launcher->battery_icon));
 	fplinux_launcher_frame(launcher->spec, fplinux_ui_width(launcher->ui),
 			       fplinux_ui_height(launcher->ui),

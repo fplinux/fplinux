@@ -532,16 +532,16 @@ def test_actual_settings_bluetooth_devices_use_live_paths_and_pairing_consent(
         "settings-bluetooth-devices: real paths retain focus; pairing, connection and trust "
         "are distinct; hiding releases only owned discovery and the agent\n"
     )
-    for state in ("nearby", "pairing", "device", "services"):
+    for state in ("nearby", "pairing", "device", "services", "visible", "receiving-ready"):
         assert (tmp_path / f"settings-bluetooth-{state}.rgb565").stat().st_size == (
             width * (height - ROOT_ROWS[screen][2]) * 2
         )
 
 
-def test_actual_settings_bluetooth_file_pickers_and_worker_complete_and_cancel_transfers(
+def test_actual_settings_bluetooth_sends_selected_file_and_waits_for_cancellation(
     settings_native: Path, tmp_path: Path
 ) -> None:
-    """The real UI, pickers and worker exchange bytes over a private OBEX service."""
+    """The real recipient picker and send worker use the Files document path."""
     home = tmp_path / "home"
     files = home / "Files"
     files.mkdir(parents=True)
@@ -557,7 +557,7 @@ def test_actual_settings_bluetooth_file_pickers_and_worker_complete_and_cancel_t
                 str(ROOT / "alpine/aports/fplinux-language"),
                 "bluetooth-transfers",
             ],
-            name="send, receive and cancel through real Settings and shared file pickers",
+            name="send and cancel the Files selection through real Settings",
             env=bus.environment()
             | {
                 "HOME": str(home),
@@ -580,53 +580,9 @@ def test_actual_settings_bluetooth_file_pickers_and_worker_complete_and_cancel_t
         )
     assert result.returncode == 0, result.stdout + result.stderr
     assert result.stdout == (
-        "settings-bluetooth-transfers: shared pickers send bytes, consent publishes "
-        "received files, document results return, and close waits for cancellation\n"
+        "settings-bluetooth-transfers: a Files selection sends its bytes to the chosen paired "
+        "device; close waits for cancellation\n"
     )
     assert (tmp_path / "obex-send/sent-bytes").read_bytes() == b"settings payload\n"
-    assert (files / "incoming.txt").read_bytes() == b"fixture"
     assert (tmp_path / "obex-cancel/cancelled").read_bytes() == b"cancelled\n"
-    assert {path.name for path in files.iterdir()} == {"payload.txt", "incoming.txt"}
-
-
-@pytest.mark.parametrize(
-    ("choice", "published"),
-    [
-        ("keep-both", {"incoming.txt": b"original", "incoming (1).txt": b"fixture"}),
-        ("replace", {"incoming.txt": b"fixture"}),
-        ("cancel", {"incoming.txt": b"original"}),
-    ],
-)
-def test_actual_settings_bluetooth_conflict_publishes_only_the_chosen_files(
-    settings_native: Path, tmp_path: Path, choice: str, published: dict[str, bytes]
-) -> None:
-    """Choose a conflict row or Cancel with the real UI on the smallest profile."""
-    home = tmp_path / "home"
-    files = home / "Files"
-    files.mkdir(parents=True)
-    (files / "incoming.txt").write_bytes(b"original")
-    with private_bus() as bus:
-        result = run_process(
-            [
-                str(settings_native / "settings-screens"),
-                str(settings_native / "settings"),
-                str(ROOT / "tests/host_tool/gui/screens/keypad.xkb"),
-                str(tmp_path / "session.sock"),
-                str(tmp_path),
-                str(ROOT / "alpine/aports/fplinux-language"),
-                f"bluetooth-conflict-{choice}",
-            ],
-            name=f"choose {choice} for an existing Bluetooth destination",
-            env=bus.environment()
-            | {
-                "HOME": str(home),
-                "FPLINUX_SETTINGS_TEST_WIDTH": "128",
-                "FPLINUX_SETTINGS_TEST_HEIGHT": "128",
-                "FPLINUX_SETTINGS_TEST_LOCALE": "en",
-                "FPLINUX_SETTINGS_TEST_THEME": "dark",
-                "FPLINUX_SETTINGS_TEST_OBEX_SERVICE": str(settings_native / "bluetooth-service"),
-            },
-            timeout=30,
-        )
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert {path.name: path.read_bytes() for path in files.iterdir()} == published
+    assert {path.name for path in files.iterdir()} == {"payload.txt"}

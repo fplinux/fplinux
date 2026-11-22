@@ -17,50 +17,62 @@ enum command {
 	COMMAND_BACK,
 	COMMAND_POWER,
 	COMMAND_CONNECTION,
-	COMMAND_AVAILABLE,
 	COMMAND_SAVED,
 	COMMAND_REFRESH,
 	COMMAND_ADD,
 	COMMAND_CONNECT,
+	COMMAND_ONCE,
+	COMMAND_SAVE_PROFILE,
 	COMMAND_CANCEL,
 	COMMAND_DISCONNECT,
 	COMMAND_RETRY_ADDRESS,
 	COMMAND_OTHER_PASSWORD,
+	COMMAND_RETRY_CONNECTION,
 	COMMAND_FORGET,
 	COMMAND_CONFIRM_FORGET,
+};
+
+struct wifi_list {
+	struct fplinux_ui_screen *screen;
+	size_t count;
+	struct fplinux_ui_wifi_network rows[FPLINUX_UI_WIFI_ROW_COUNT + 2];
 };
 
 struct fplinux_settings_wifi {
 	struct fplinux_ui *ui;
 	struct fplinux_ui_wifi_state state;
-	struct fplinux_ui_screen *root;
-	struct fplinux_ui_screen *networks;
+	struct wifi_list root;
+	struct wifi_list saved;
 	struct fplinux_ui_screen *properties;
 	struct fplinux_ui_screen *editor;
 	struct fplinux_ui_screen *dialog;
 	bool current_properties;
-	bool saved;
+	size_t connection_item;
+	size_t address_item;
+	struct fplinux_ui_wifi_network property_network;
 	bool hidden;
+	bool once;
 	bool scan_on_open;
 	size_t ssid_item;
 	size_t security_item;
 	size_t key_item;
-	size_t save_item;
-	uint32_t row_ids[FPLINUX_UI_WIFI_ROW_COUNT];
-	size_t row_count;
+	size_t once_item;
 	struct fplinux_ui_wifi_network selected;
 	struct fplinux_ui_wifi_network attempted;
+	char attempted_ssid[FPLINUX_UI_WIFI_SSID_BYTES + 1];
+	bool attempted_open;
+	bool attempted_once;
+	bool attempted_credentials;
 	uint32_t serial;
 	uint32_t pending;
+	uint32_t cancel_pending;
+	bool result_deferred;
+	enum fplinux_ui_wifi_result deferred_result;
 	enum fplinux_ui_wifi_action action;
 	enum fplinux_ui_wifi_result scan_result;
 };
 
-static void root_refresh(struct fplinux_settings_wifi *wifi);
-static void networks_refresh(struct fplinux_settings_wifi *wifi);
-static void root_command(struct fplinux_ui *ui,
-			 struct fplinux_ui_screen *screen, int id,
-			 void *context);
+static void refresh_lists(struct fplinux_settings_wifi *wifi);
 static void network_command(struct fplinux_ui *ui,
 			    struct fplinux_ui_screen *screen, int id,
 			    void *context);
@@ -109,9 +121,28 @@ static void close_children(struct fplinux_settings_wifi *wifi)
 	pop_screen(wifi, &wifi->dialog);
 	close_editor(wifi);
 	pop_screen(wifi, &wifi->properties);
-	pop_screen(wifi, &wifi->networks);
-	wifi->row_count = 0;
+	pop_screen(wifi, &wifi->saved.screen);
+	wifi->saved.count = 0;
 	wifi->scan_on_open = false;
+}
+
+static bool is_join(enum fplinux_ui_wifi_action action)
+{
+	return action == FPLINUX_UI_WIFI_CONNECT ||
+	       action == FPLINUX_UI_WIFI_CONNECT_SAVED ||
+	       action == FPLINUX_UI_WIFI_CONNECT_HIDDEN;
+}
+
+static bool is_connecting(enum fplinux_ui_wifi_action action)
+{
+	return is_join(action) || action == FPLINUX_UI_WIFI_RETRY_ADDRESS;
+}
+
+static bool same_network(const struct fplinux_ui_wifi_network *first,
+			 const struct fplinux_ui_wifi_network *second)
+{
+	return first->id && second->id && first->security == second->security &&
+	       !strcmp(first->name, second->name);
 }
 
 static bool send_request(struct fplinux_settings_wifi *wifi,
@@ -132,13 +163,15 @@ static bool send_request(struct fplinux_settings_wifi *wifi,
 	explicit_bzero(message.wifi_request.key,
 		       sizeof(message.wifi_request.key));
 	if (sent) {
+		if (request->action == FPLINUX_UI_WIFI_CANCEL) {
+			wifi->cancel_pending = message.serial;
+			return true;
+		}
 		wifi->pending = message.serial;
 		wifi->action = request->action;
 		if (wifi->action == FPLINUX_UI_WIFI_SCAN)
 			wifi->scan_result = FPLINUX_UI_WIFI_APPLIED;
-		if (wifi->action == FPLINUX_UI_WIFI_SET_POWER)
-			root_refresh(wifi);
-		networks_refresh(wifi);
+		refresh_lists(wifi);
 	}
 	return sent;
 }
@@ -160,11 +193,15 @@ static bool can_scan(const struct fplinux_settings_wifi *wifi)
 
 static void start_pending_scan(struct fplinux_settings_wifi *wifi)
 {
-	if (!wifi->scan_on_open || wifi->pending)
+	if (!wifi->scan_on_open || wifi->state.power != FPLINUX_UI_WIFI_ON ||
+	    wifi->pending ||
+	    fplinux_ui_lifecycle(wifi->ui) != FPLINUX_UI_FOREGROUND)
 		return;
 	wifi->scan_on_open = false;
-	if (can_scan(wifi))
-		request_action(wifi, FPLINUX_UI_WIFI_SCAN);
+	if (can_scan(wifi) && !request_action(wifi, FPLINUX_UI_WIFI_SCAN)) {
+		wifi->scan_result = FPLINUX_UI_WIFI_FAILED;
+		refresh_lists(wifi);
+	}
 }
 
 static const char *security_name(enum fplinux_ui_wifi_security security)
@@ -242,8 +279,11 @@ static void warning(struct fplinux_settings_wifi *wifi, const char *text)
 
 static void show_progress(struct fplinux_settings_wifi *wifi)
 {
-	struct fplinux_ui_screen *alert =
-		new_alert(wifi, FPLINUX_UI_ALERT_INFO, _("Connecting…"));
+	struct fplinux_ui_screen *alert = new_alert(
+		wifi, FPLINUX_UI_ALERT_INFO,
+		link_status(wifi->action == FPLINUX_UI_WIFI_RETRY_ADDRESS ?
+				    FPLINUX_UI_WIFI_ADDRESSING :
+				    FPLINUX_UI_WIFI_CONNECTING));
 
 	if (!alert)
 		return;
@@ -252,14 +292,20 @@ static void show_progress(struct fplinux_settings_wifi *wifi)
 	show_dialog(wifi, alert);
 }
 
-static void root_row(struct fplinux_ui_screen *list, const char *label,
-		     const char *value, enum command id, const char *action)
+static void add_row(struct wifi_list *list,
+		    const struct fplinux_ui_wifi_network *network,
+		    const char *label, const char *value, enum command id,
+		    const char *action)
 {
-	size_t index = fplinux_ui_list_append(list, label, value);
+	size_t index = fplinux_ui_list_append(list->screen, label, value);
 
-	if (index != SIZE_MAX && action)
+	if (index == SIZE_MAX)
+		return;
+	list->rows[list->count++] =
+		network ? *network : (struct fplinux_ui_wifi_network){ 0 };
+	if (action)
 		fplinux_ui_list_add_item_command(
-			list, index,
+			list->screen, index,
 			&(const struct fplinux_ui_command){
 				.id = id,
 				.type = FPLINUX_UI_COMMAND_OK,
@@ -267,109 +313,45 @@ static void root_row(struct fplinux_ui_screen *list, const char *label,
 			});
 }
 
-static void root_refresh(struct fplinux_settings_wifi *wifi)
+static const struct fplinux_ui_wifi_network *
+focused_network(const struct wifi_list *list)
 {
-	struct fplinux_ui_screen *list = wifi->root;
-	const struct fplinux_ui_wifi_state *state = &wifi->state;
-	size_t focus;
-	const char *connection;
-	bool changing_power = wifi->pending &&
-			      wifi->action == FPLINUX_UI_WIFI_SET_POWER;
+	size_t index = fplinux_ui_list_get_focused(list->screen);
 
-	if (!list)
-		return;
-	focus = fplinux_ui_list_get_focused(list);
-	if (fplinux_ui_current(wifi->ui) == list)
-		fplinux_ui_menu_close(wifi->ui);
-	fplinux_ui_list_delete_all(list);
-	fplinux_ui_list_set_select_label(list, "");
-	fplinux_ui_screen_set_header_status(
-		list, changing_power ? _("Applying…") : NULL, NULL);
-	if (state->power == FPLINUX_UI_WIFI_UNAVAILABLE) {
-		root_row(list, _("Wi-Fi unavailable"), NULL, COMMAND_POWER,
-			 NULL);
-		return;
-	}
-	if (state->power == FPLINUX_UI_WIFI_OFF) {
-		root_row(list, _("Wi-Fi"), _("Off"), COMMAND_POWER,
-			 changing_power ? NULL : _("Turn on"));
-		return;
-	}
-	root_row(list, _("Wi-Fi"), _("On"), COMMAND_POWER,
-		 changing_power ? NULL : _("Turn off"));
-	connection = state->link == FPLINUX_UI_WIFI_CONNECTED ?
-			     state->current.name :
-			     link_status(state->link);
-	root_row(list, _("Connection"), connection, COMMAND_CONNECTION,
-		 state->link == FPLINUX_UI_WIFI_DISCONNECTED ? NULL :
-							       _("Properties"));
-	root_row(list, _("Available networks"), NULL, COMMAND_AVAILABLE,
-		 _("Open"));
-	root_row(list, _("Saved networks"), NULL, COMMAND_SAVED, _("Open"));
-	if (focus < fplinux_ui_list_size(list))
-		fplinux_ui_list_set_focused(list, focus);
+	return index < list->count && list->rows[index].id ?
+		       &list->rows[index] :
+		       NULL;
 }
 
-static void render_networks(struct fplinux_settings_wifi *wifi,
-			    const struct fplinux_ui_wifi_network *rows,
-			    size_t count, const char *empty)
+static bool is_current(const struct fplinux_settings_wifi *wifi,
+		       const struct fplinux_ui_wifi_network *network)
 {
-	struct fplinux_ui_screen *list = wifi->networks;
-	size_t old = fplinux_ui_list_get_focused(list);
-	uint32_t id = old < wifi->row_count ? wifi->row_ids[old] : 0;
-	size_t focus = old == SIZE_MAX ? 0 : old;
+	return wifi->state.link != FPLINUX_UI_WIFI_DISCONNECTED &&
+	       same_network(&wifi->state.current, network);
+}
 
-	if (fplinux_ui_current(wifi->ui) == list)
-		fplinux_ui_menu_close(wifi->ui);
-	fplinux_ui_list_delete_all(list);
-	wifi->row_count = 0;
-	if (!count) {
-		fplinux_ui_list_append(list, empty, NULL);
-		fplinux_ui_list_set_select_label(list, "");
-		return;
-	}
-	fplinux_ui_list_set_select_label(list, wifi->pending ? "" : NULL);
-	for (size_t i = 0; i < count; ++i) {
-		size_t index = fplinux_ui_list_append(
-			list, rows[i].name, security_name(rows[i].security));
+static void add_network(struct fplinux_settings_wifi *wifi,
+			struct wifi_list *list,
+			const struct fplinux_ui_wifi_network *network)
+{
+	bool current = is_current(wifi, network);
+	bool properties = current || !can_connect(wifi, network);
 
-		if (index == SIZE_MAX)
-			break;
-		wifi->row_ids[index] = rows[i].id;
-		++wifi->row_count;
-		if (rows[i].id == id)
-			focus = index;
-		if (wifi->pending)
-			continue;
-		if (wifi->saved)
-			fplinux_ui_list_add_item_command(
-				list, index,
-				&(const struct fplinux_ui_command){
-					.id = COMMAND_FORGET,
-					.type = FPLINUX_UI_COMMAND_ITEM,
-					.label = _("Forget network"),
-				});
-		if (!can_connect(wifi, &rows[i]))
-			fplinux_ui_list_add_item_command(
-				list, index,
-				&(const struct fplinux_ui_command){
-					.id = COMMAND_CONNECTION,
-					.type = FPLINUX_UI_COMMAND_OK,
-					.label = _("Properties"),
-				});
-	}
-	fplinux_ui_list_set_focused(list, focus);
+	add_row(list, network, network->name,
+		current ? link_status(wifi->state.link) :
+			  security_name(network->security),
+		properties ? COMMAND_CONNECTION : COMMAND_CONNECT,
+		properties    ? _("Properties") :
+		wifi->pending ? NULL :
+				_("Connect"));
 }
 
 static const char *scan_status(const struct fplinux_settings_wifi *wifi)
 {
 	enum fplinux_ui_wifi_scan phase = wifi->state.scan;
 
-	if (wifi->pending)
-		return wifi->action == FPLINUX_UI_WIFI_SCAN &&
-				       phase == FPLINUX_UI_WIFI_SCANNING ?
-			       _("Scanning…") :
-			       _("Waiting to scan…");
+	if (wifi->pending && wifi->action == FPLINUX_UI_WIFI_SCAN)
+		return _("Scanning…");
 	if (wifi->scan_result == FPLINUX_UI_WIFI_BUSY)
 		return _("Wi-Fi busy");
 	if (wifi->scan_result != FPLINUX_UI_WIFI_APPLIED ||
@@ -382,53 +364,131 @@ static const char *scan_status(const struct fplinux_settings_wifi *wifi)
 	return NULL;
 }
 
-static void networks_refresh(struct fplinux_settings_wifi *wifi)
+static void refresh_root_rows(struct fplinux_settings_wifi *wifi)
 {
+	struct wifi_list *list = &wifi->root;
 	const struct fplinux_ui_wifi_state *state = &wifi->state;
-	struct fplinux_ui_screen *list = wifi->networks;
-	const char *status;
+	bool on = state->power == FPLINUX_UI_WIFI_ON;
+	bool power_pending = wifi->pending &&
+			     wifi->action == FPLINUX_UI_WIFI_SET_POWER;
+	const char *status = power_pending ? _("Applying…") :
+			     on		   ? scan_status(wifi) :
+					     NULL;
 
-	if (!list)
-		return;
-	if (wifi->saved) {
-		render_networks(wifi, state->saved, state->saved_count,
-				_("No saved networks"));
+	fplinux_ui_screen_set_header_status(
+		list->screen, status,
+		wifi->scan_on_open ? _("Scanning…") : NULL);
+	if (!on) {
+		fplinux_ui_screen_remove_command(list->screen, COMMAND_REFRESH);
+		fplinux_ui_screen_remove_command(list->screen, COMMAND_SAVED);
+		fplinux_ui_screen_remove_command(list->screen, COMMAND_ADD);
+	}
+	if (state->power == FPLINUX_UI_WIFI_UNAVAILABLE) {
+		add_row(list, NULL, _("Wi-Fi unavailable"), NULL, COMMAND_POWER,
+			NULL);
 		return;
 	}
-	if (can_scan(wifi))
-		add_command(list, COMMAND_REFRESH, FPLINUX_UI_COMMAND_SCREEN,
-			    _("Refresh"));
-	else
-		fplinux_ui_screen_remove_command(list, COMMAND_REFRESH);
-	if (!wifi->pending)
-		add_command(list, COMMAND_ADD, FPLINUX_UI_COMMAND_SCREEN,
-			    _("Add network"));
-	else
-		fplinux_ui_screen_remove_command(list, COMMAND_ADD);
-	status = scan_status(wifi);
-	fplinux_ui_screen_set_header_status(
-		list, state->available_count ? status : NULL, NULL);
-	render_networks(wifi, state->available, state->available_count,
-			status ? status : _("No networks found"));
+	add_row(list, NULL, _("Wi-Fi"), on ? _("On") : _("Off"), COMMAND_POWER,
+		wifi->pending ? NULL :
+		on	      ? _("Turn off") :
+				_("Turn on"));
+	if (!on)
+		return;
+	add_command(list->screen, COMMAND_REFRESH, FPLINUX_UI_COMMAND_SCREEN,
+		    _("Refresh"));
+	add_command(list->screen, COMMAND_SAVED, FPLINUX_UI_COMMAND_SCREEN,
+		    _("Saved networks"));
+	add_command(list->screen, COMMAND_ADD, FPLINUX_UI_COMMAND_SCREEN,
+		    _("Add hidden network"));
+	if (state->link != FPLINUX_UI_WIFI_DISCONNECTED)
+		add_network(wifi, list, &state->current);
+	for (size_t i = 0; i < state->available_count; ++i)
+		if (!is_current(wifi, &state->available[i]))
+			add_network(wifi, list, &state->available[i]);
+	if (!status && list->count == 1)
+		add_row(list, NULL, _("No networks found"), NULL,
+			COMMAND_CONNECT, NULL);
 }
 
-static void open_networks(struct fplinux_settings_wifi *wifi, bool saved)
+static void refresh_list(struct fplinux_settings_wifi *wifi,
+			 struct wifi_list *list)
 {
-	struct fplinux_ui_screen *list = fplinux_ui_list_new(
-		wifi->ui, saved ? _("Saved networks") : _("Available networks"),
-		FPLINUX_UI_LIST_IMPLICIT);
+	struct fplinux_ui_screen *screen = list->screen;
+	struct fplinux_ui_wifi_network old_network = { 0 };
+	size_t focus, first;
+	bool found = false;
 
-	if (!list)
+	if (!screen)
 		return;
-	wifi->networks = list;
-	wifi->saved = saved;
-	wifi->scan_on_open = !saved && !(wifi->pending &&
-					 wifi->action == FPLINUX_UI_WIFI_SCAN);
-	add_command(list, COMMAND_BACK, FPLINUX_UI_COMMAND_BACK, NULL);
-	fplinux_ui_screen_set_listener(list, network_command, NULL, wifi);
-	networks_refresh(wifi);
-	fplinux_ui_push(wifi->ui, list);
-	start_pending_scan(wifi);
+	focus = fplinux_ui_list_get_focused(screen);
+	first = fplinux_ui_list_get_first_visible(screen);
+	if (focus < list->count)
+		old_network = list->rows[focus];
+	fplinux_ui_list_delete_all(screen);
+	list->count = 0;
+	if (list == &wifi->root)
+		refresh_root_rows(wifi);
+	else
+		for (size_t i = 0; i < wifi->state.saved_count; ++i)
+			add_network(wifi, list, &wifi->state.saved[i]);
+	if (!list->count && list == &wifi->saved)
+		add_row(list, NULL, _("No saved networks"), NULL,
+			COMMAND_CONNECT, NULL);
+	for (size_t i = 0; i < list->count; ++i) {
+		if (same_network(&list->rows[i], &old_network)) {
+			focus = i;
+			found = true;
+			break;
+		}
+	}
+	if (!found && old_network.id &&
+	    fplinux_ui_current(wifi->ui) == screen && list == &wifi->saved)
+		fplinux_ui_menu_close(wifi->ui);
+	if (focus >= list->count)
+		focus = focus == SIZE_MAX ? 0 : list->count - 1;
+	fplinux_ui_list_set_focused(screen, focus);
+	if (first != SIZE_MAX)
+		fplinux_ui_list_set_first_visible(screen, first);
+}
+
+static void saved_focused(struct fplinux_ui *ui,
+			  struct fplinux_ui_screen *screen, size_t index,
+			  void *context)
+{
+	struct fplinux_settings_wifi *wifi = context;
+
+	(void)ui;
+	(void)index;
+	if (!screen)
+		return;
+	if (focused_network(&wifi->saved) && !wifi->pending)
+		add_command(screen, COMMAND_FORGET, FPLINUX_UI_COMMAND_SCREEN,
+			    _("Forget network"));
+	else
+		fplinux_ui_screen_remove_command(screen, COMMAND_FORGET);
+}
+
+static void refresh_lists(struct fplinux_settings_wifi *wifi)
+{
+	refresh_list(wifi, &wifi->root);
+	refresh_list(wifi, &wifi->saved);
+	saved_focused(wifi->ui, wifi->saved.screen, 0, wifi);
+}
+
+static void open_saved(struct fplinux_settings_wifi *wifi)
+{
+	struct fplinux_ui_screen *screen = fplinux_ui_list_new(
+		wifi->ui, _("Saved networks"), FPLINUX_UI_LIST_IMPLICIT);
+
+	if (!screen)
+		return;
+	wifi->saved.screen = screen;
+	add_command(screen, COMMAND_BACK, FPLINUX_UI_COMMAND_BACK, NULL);
+	fplinux_ui_list_set_select_label(screen, "");
+	fplinux_ui_screen_set_listener(screen, network_command, NULL, wifi);
+	fplinux_ui_list_set_focus_listener(screen, saved_focused, wifi);
+	refresh_lists(wifi);
+	fplinux_ui_push(wifi->ui, screen);
 }
 
 static void property_command(struct fplinux_ui *ui,
@@ -439,13 +499,45 @@ static void property_command(struct fplinux_ui *ui,
 
 	(void)ui;
 	(void)screen;
-	if (id == COMMAND_DISCONNECT &&
-	    !request_action(wifi, FPLINUX_UI_WIFI_DISCONNECT))
-		return;
-	if (id == COMMAND_RETRY_ADDRESS &&
-	    !request_action(wifi, FPLINUX_UI_WIFI_RETRY_ADDRESS))
-		return;
+	if (id == COMMAND_DISCONNECT || id == COMMAND_RETRY_ADDRESS) {
+		enum fplinux_ui_wifi_action action =
+			id == COMMAND_DISCONNECT ?
+				FPLINUX_UI_WIFI_DISCONNECT :
+				FPLINUX_UI_WIFI_RETRY_ADDRESS;
+
+		if (!request_action(wifi, action)) {
+			warning(wifi, wifi->pending ? _("Wi-Fi busy") :
+						      _("Wi-Fi unavailable"));
+			return;
+		}
+	}
 	pop_screen(wifi, &wifi->properties);
+	if (id == COMMAND_RETRY_ADDRESS)
+		show_progress(wifi);
+}
+
+static void refresh_properties(struct fplinux_settings_wifi *wifi)
+{
+	struct fplinux_ui_screen *form = wifi->properties;
+	enum fplinux_ui_wifi_link link = wifi->state.link;
+
+	if (!form || !wifi->current_properties)
+		return;
+	if (!is_current(wifi, &wifi->property_network) && !wifi->dialog) {
+		pop_screen(wifi, &wifi->properties);
+		return;
+	}
+	fplinux_ui_form_set_string(form, wifi->connection_item,
+				   link_status(link));
+	fplinux_ui_form_set_string(form, wifi->address_item,
+				   wifi->state.address);
+	fplinux_ui_form_set_hidden(form, wifi->address_item,
+				   link != FPLINUX_UI_WIFI_CONNECTED);
+	if (link == FPLINUX_UI_WIFI_NO_ADDRESS)
+		add_command(form, COMMAND_RETRY_ADDRESS,
+			    FPLINUX_UI_COMMAND_SCREEN, _("Retry"));
+	else
+		fplinux_ui_screen_remove_command(form, COMMAND_RETRY_ADDRESS);
 }
 
 static void open_properties(struct fplinux_settings_wifi *wifi,
@@ -461,14 +553,11 @@ static void open_properties(struct fplinux_settings_wifi *wifi,
 	fplinux_ui_form_append_property(form, _("Security"),
 					security_name(network->security));
 	if (current) {
-		fplinux_ui_form_append_property(form, _("Connection"),
-						link_status(wifi->state.link));
-		if (wifi->state.link == FPLINUX_UI_WIFI_CONNECTED)
-			fplinux_ui_form_append_property(form, _("IP address"),
-							wifi->state.address);
-		if (wifi->state.link == FPLINUX_UI_WIFI_NO_ADDRESS)
-			add_command(form, COMMAND_RETRY_ADDRESS,
-				    FPLINUX_UI_COMMAND_SCREEN, _("Retry"));
+		wifi->property_network = *network;
+		wifi->connection_item = fplinux_ui_form_append_property(
+			form, _("Connection"), NULL);
+		wifi->address_item = fplinux_ui_form_append_property(
+			form, _("IP address"), NULL);
 		add_command(form, COMMAND_DISCONNECT, FPLINUX_UI_COMMAND_SCREEN,
 			    _("Disconnect"));
 	} else {
@@ -482,36 +571,8 @@ static void open_properties(struct fplinux_settings_wifi *wifi,
 	fplinux_ui_screen_set_listener(form, property_command, NULL, wifi);
 	wifi->properties = form;
 	wifi->current_properties = current;
+	refresh_properties(wifi);
 	fplinux_ui_push(wifi->ui, form);
-}
-
-static void root_command(struct fplinux_ui *ui,
-			 struct fplinux_ui_screen *screen, int id,
-			 void *context)
-{
-	struct fplinux_settings_wifi *wifi = context;
-
-	(void)ui;
-	(void)screen;
-	switch (id) {
-	case COMMAND_BACK:
-		pop_screen(wifi, &wifi->root);
-		break;
-	case COMMAND_POWER:
-		send_request(wifi, &(const struct fplinux_ui_wifi_request){
-					   .action = FPLINUX_UI_WIFI_SET_POWER,
-					   .enabled = wifi->state.power ==
-						      FPLINUX_UI_WIFI_OFF,
-				   });
-		break;
-	case COMMAND_CONNECTION:
-		open_properties(wifi, &wifi->state.current, true);
-		break;
-	case COMMAND_AVAILABLE:
-	case COMMAND_SAVED:
-		open_networks(wifi, id == COMMAND_SAVED);
-		break;
-	}
 }
 
 static void editor_changed(struct fplinux_ui *ui,
@@ -530,48 +591,57 @@ static void editor_changed(struct fplinux_ui *ui,
 	fplinux_ui_form_set_hidden(form, wifi->key_item, open);
 }
 
-static void open_editor(struct fplinux_settings_wifi *wifi, bool hidden)
+static void update_save_option(struct fplinux_settings_wifi *wifi)
+{
+	struct fplinux_ui_screen *form = wifi->editor;
+
+	fplinux_ui_screen_remove_command(
+		form, wifi->once ? COMMAND_ONCE : COMMAND_SAVE_PROFILE);
+	add_command(form, wifi->once ? COMMAND_SAVE_PROFILE : COMMAND_ONCE,
+		    FPLINUX_UI_COMMAND_SCREEN,
+		    wifi->once ? _("Save network") : _("Only once"));
+	fplinux_ui_form_set_hidden(form, wifi->once_item, !wifi->once);
+}
+
+static void open_editor(struct fplinux_settings_wifi *wifi, const char *ssid,
+			bool open, bool once)
 {
 	const char *const security[] = { "WPA2-Personal", _("Open network") };
-	const char *const save_choices[] = { _("No"), _("Yes") };
-	const struct fplinux_ui_command connect = {
-		.id = COMMAND_CONNECT,
-		.type = FPLINUX_UI_COMMAND_OK,
-		.label = _("Connect"),
-	};
 	struct fplinux_ui_screen *form = fplinux_ui_form_new(
-		wifi->ui, hidden ? _("Add network") : _("Connect"));
-	size_t connect_item;
+		wifi->ui, ssid ? _("Add hidden network") : wifi->selected.name);
 
 	if (!form)
 		return;
 	wifi->ssid_item = SIZE_MAX;
 	wifi->security_item = SIZE_MAX;
-	wifi->save_item = SIZE_MAX;
-	wifi->hidden = hidden;
-	if (hidden) {
+	wifi->hidden = ssid != NULL;
+	wifi->once = once;
+	if (ssid) {
 		wifi->ssid_item = fplinux_ui_form_append_text_field(
-			form, _("Network name"), "", FPLINUX_UI_WIFI_SSID_BYTES,
-			FPLINUX_UI_TEXT_ANY);
+			form, _("Network name"), ssid,
+			FPLINUX_UI_WIFI_SSID_BYTES, FPLINUX_UI_TEXT_ANY);
 		wifi->security_item = fplinux_ui_form_append_choice(
 			form, _("Security"), FPLINUX_UI_CHOICE_POPUP, security,
 			wifi->state.open_supported ? 2 : 1);
-	} else {
-		fplinux_ui_form_append_string(form, NULL, wifi->selected.name);
+		if (open && wifi->state.open_supported)
+			fplinux_ui_form_set_choice(form, wifi->security_item,
+						   1);
 	}
 	wifi->key_item = fplinux_ui_form_append_text_field(
 		form, _("Password"), "", FPLINUX_UI_WIFI_KEY_BYTES,
 		FPLINUX_UI_TEXT_ANY | FPLINUX_UI_TEXT_PASSWORD);
-	if (hidden || !wifi->selected.profile_id)
-		wifi->save_item = fplinux_ui_form_append_choice(
-			form, _("Save network"), FPLINUX_UI_CHOICE_POPUP,
-			save_choices, 2);
-	connect_item = fplinux_ui_form_append_value(form, connect.label, NULL);
-	fplinux_ui_form_add_item_command(form, connect_item, &connect);
+	wifi->once_item =
+		fplinux_ui_form_append_string(form, NULL, _("Only once"));
+	add_command(form, COMMAND_CONNECT, FPLINUX_UI_COMMAND_OK, _("Connect"));
 	add_command(form, COMMAND_CANCEL, FPLINUX_UI_COMMAND_CANCEL, NULL);
 	fplinux_ui_screen_set_listener(form, editor_command, editor_changed,
 				       wifi);
 	wifi->editor = form;
+	update_save_option(wifi);
+	if (ssid && *ssid && !open)
+		fplinux_ui_form_set_focus(form, wifi->key_item);
+	if (ssid)
+		editor_changed(wifi->ui, form, wifi->security_item, wifi);
 	fplinux_ui_push(wifi->ui, form);
 }
 
@@ -598,6 +668,12 @@ static void connect_network(struct fplinux_settings_wifi *wifi,
 	erase_key(wifi);
 	if (sent) {
 		wifi->attempted = wifi->selected;
+		memcpy(wifi->attempted_ssid, request->ssid,
+		       sizeof(wifi->attempted_ssid));
+		wifi->attempted_open = request->security ==
+				       FPLINUX_UI_WIFI_OPEN;
+		wifi->attempted_once = wifi->editor && wifi->once;
+		wifi->attempted_credentials = request->key[0] != '\0';
 		close_editor(wifi);
 		show_progress(wifi);
 	} else if (!wifi->pending) {
@@ -617,8 +693,17 @@ static void editor_command(struct fplinux_ui *ui,
 		close_editor(wifi);
 		return;
 	}
-	if (id != COMMAND_CONNECT || wifi->pending)
+	if (id == COMMAND_ONCE || id == COMMAND_SAVE_PROFILE) {
+		wifi->once = id == COMMAND_ONCE;
+		update_save_option(wifi);
 		return;
+	}
+	if (id != COMMAND_CONNECT)
+		return;
+	if (wifi->pending) {
+		warning(wifi, _("Wi-Fi busy"));
+		return;
+	}
 	if (wifi->hidden) {
 		const char *ssid =
 			fplinux_ui_form_get_text(screen, wifi->ssid_item);
@@ -655,10 +740,7 @@ static void editor_command(struct fplinux_ui *ui,
 		}
 		strcpy(request.key, key);
 	}
-	request.save =
-		request.action == FPLINUX_UI_WIFI_CONNECT_SAVED ||
-		(wifi->save_item != SIZE_MAX &&
-		 fplinux_ui_form_get_choice(screen, wifi->save_item) == 1);
+	request.save = !wifi->once;
 	connect_network(wifi, &request);
 	explicit_bzero(request.key, sizeof(request.key));
 }
@@ -685,62 +767,105 @@ static void confirm_forget(struct fplinux_settings_wifi *wifi)
 	show_dialog(wifi, alert);
 }
 
+static void connect_selected(struct fplinux_settings_wifi *wifi)
+{
+	const struct fplinux_ui_wifi_network *network = &wifi->selected;
+
+	if (!network->profile_id && network->security == FPLINUX_UI_WIFI_WPA2) {
+		open_editor(wifi, NULL, false, false);
+		return;
+	}
+	connect_network(
+		wifi,
+		&(const struct fplinux_ui_wifi_request){
+			.action = network->profile_id ?
+					  FPLINUX_UI_WIFI_CONNECT_SAVED :
+					  FPLINUX_UI_WIFI_CONNECT,
+			.target = network->profile_id ? network->profile_id :
+							network->id,
+			.security = network->security,
+			.save = !network->profile_id,
+		});
+}
+
 static void network_command(struct fplinux_ui *ui,
 			    struct fplinux_ui_screen *screen, int id,
 			    void *context)
 {
 	struct fplinux_settings_wifi *wifi = context;
-	const struct fplinux_ui_wifi_network *rows =
-		wifi->saved ? wifi->state.saved : wifi->state.available;
-	size_t focus = fplinux_ui_list_get_focused(screen);
+	struct wifi_list *list = screen == wifi->root.screen ? &wifi->root :
+							       &wifi->saved;
+	const struct fplinux_ui_wifi_network *network = focused_network(list);
 
 	(void)ui;
 	switch (id) {
 	case COMMAND_BACK:
-		pop_screen(wifi, &wifi->networks);
-		wifi->row_count = 0;
-		wifi->scan_on_open = false;
+		pop_screen(wifi, &list->screen);
+		list->count = 0;
+		if (list == &wifi->root)
+			wifi->scan_on_open = false;
+		return;
+	case COMMAND_POWER:
+		if (!send_request(wifi,
+				  &(const struct fplinux_ui_wifi_request){
+					  .action = FPLINUX_UI_WIFI_SET_POWER,
+					  .enabled = wifi->state.power ==
+						     FPLINUX_UI_WIFI_OFF,
+				  }))
+			warning(wifi, _("Wi-Fi unavailable"));
 		return;
 	case COMMAND_REFRESH:
-		if (can_scan(wifi))
-			request_action(wifi, FPLINUX_UI_WIFI_SCAN);
-		return;
-	case COMMAND_ADD:
-		if (!wifi->pending) {
-			wifi->selected = (struct fplinux_ui_wifi_network){ 0 };
-			open_editor(wifi, true);
+		if (can_scan(wifi) &&
+		    !request_action(wifi, FPLINUX_UI_WIFI_SCAN)) {
+			wifi->scan_result = FPLINUX_UI_WIFI_FAILED;
+			refresh_lists(wifi);
 		}
 		return;
-	}
-	if (focus >= wifi->row_count || wifi->pending)
+	case COMMAND_SAVED:
+		open_saved(wifi);
 		return;
-	wifi->selected = rows[focus];
-	if (id == COMMAND_FORGET) {
-		confirm_forget(wifi);
-	} else if (id == COMMAND_CONNECTION) {
-		open_properties(wifi, &wifi->selected, false);
-	} else if (id == FPLINUX_UI_SELECT_COMMAND) {
-		const struct fplinux_ui_wifi_network *network = &wifi->selected;
-
-		if (!can_connect(wifi, network))
-			return;
-		if (network->profile_id ||
-		    network->security == FPLINUX_UI_WIFI_OPEN)
-			connect_network(
-				wifi,
-				&(const struct fplinux_ui_wifi_request){
-					.action =
-						network->profile_id ?
-							FPLINUX_UI_WIFI_CONNECT_SAVED :
-							FPLINUX_UI_WIFI_CONNECT,
-					.target = network->profile_id ?
-							  network->profile_id :
-							  network->id,
-					.security = network->security,
-				});
-		else
-			open_editor(wifi, false);
+	case COMMAND_ADD:
+		wifi->selected = (struct fplinux_ui_wifi_network){ 0 };
+		open_editor(wifi, "", false, false);
+		return;
 	}
+	if (!network)
+		return;
+	wifi->selected = *network;
+	if (id == COMMAND_FORGET && !wifi->pending)
+		confirm_forget(wifi);
+	else if (id == COMMAND_CONNECTION)
+		open_properties(wifi, &wifi->selected,
+				is_current(wifi, network));
+	else if (id == COMMAND_CONNECT && !wifi->pending)
+		connect_selected(wifi);
+}
+
+static void retry_connection(struct fplinux_settings_wifi *wifi, bool password)
+{
+	const struct fplinux_ui_wifi_network *rows;
+	size_t count;
+
+	wifi->selected = wifi->attempted;
+	if (wifi->attempted_ssid[0]) {
+		open_editor(wifi, wifi->attempted_ssid, wifi->attempted_open,
+			    wifi->attempted_once);
+		return;
+	}
+	rows = wifi->selected.profile_id ? wifi->state.saved :
+					   wifi->state.available;
+	count = wifi->selected.profile_id ? wifi->state.saved_count :
+					    wifi->state.available_count;
+
+	for (size_t i = 0; i < count; ++i)
+		if (same_network(&rows[i], &wifi->selected)) {
+			wifi->selected = rows[i];
+			break;
+		}
+	if (password || wifi->attempted_credentials)
+		open_editor(wifi, NULL, false, wifi->attempted_once);
+	else
+		connect_selected(wifi);
 }
 
 static void dialog_command(struct fplinux_ui *ui,
@@ -754,17 +879,23 @@ static void dialog_command(struct fplinux_ui *ui,
 	wifi->dialog = NULL;
 	switch (id) {
 	case COMMAND_CANCEL:
-		send_request(wifi, &(const struct fplinux_ui_wifi_request){
-					   .action = FPLINUX_UI_WIFI_CANCEL,
-					   .target = wifi->pending,
-				   });
+		if (wifi->pending &&
+		    !send_request(wifi,
+				  &(const struct fplinux_ui_wifi_request){
+					  .action = FPLINUX_UI_WIFI_CANCEL,
+					  .target = wifi->pending,
+				  }))
+			show_progress(wifi);
 		break;
 	case COMMAND_OTHER_PASSWORD:
-		wifi->selected = wifi->attempted;
-		open_editor(wifi, false);
+	case COMMAND_RETRY_CONNECTION:
+		retry_connection(wifi, id == COMMAND_OTHER_PASSWORD);
 		break;
 	case COMMAND_RETRY_ADDRESS:
-		request_action(wifi, FPLINUX_UI_WIFI_RETRY_ADDRESS);
+		if (request_action(wifi, FPLINUX_UI_WIFI_RETRY_ADDRESS))
+			show_progress(wifi);
+		else
+			warning(wifi, _("Wi-Fi unavailable"));
 		break;
 	case COMMAND_DISCONNECT:
 		request_action(wifi, FPLINUX_UI_WIFI_DISCONNECT);
@@ -783,47 +914,88 @@ static void receive_result(struct fplinux_settings_wifi *wifi,
 {
 	const char *text;
 	struct fplinux_ui_screen *alert;
-	bool saved_auth_error = false;
+	bool password_error = false;
 	bool address_error = false;
+	bool retry = false;
 
+	if (message->serial == wifi->cancel_pending) {
+		bool deferred = wifi->result_deferred;
+
+		wifi->cancel_pending = 0;
+		wifi->result_deferred = false;
+		if (message->wifi_result == FPLINUX_UI_WIFI_APPLIED) {
+			wifi->pending = 0;
+			refresh_lists(wifi);
+		} else if (deferred) {
+			receive_result(
+				wifi,
+				&(const struct fplinux_ui_session_message){
+					.serial = wifi->pending,
+					.wifi_result = wifi->deferred_result,
+				});
+		} else if (wifi->pending) {
+			if (message->wifi_result == FPLINUX_UI_WIFI_BUSY &&
+			    wifi->root.screen)
+				show_progress(wifi);
+			else if (message->wifi_result != FPLINUX_UI_WIFI_BUSY) {
+				wifi->pending = 0;
+				refresh_lists(wifi);
+				if (wifi->root.screen)
+					warning(wifi,
+						_("Wi-Fi operation failed"));
+			}
+		}
+		return;
+	}
 	if (message->serial != wifi->pending)
 		return;
+	if (wifi->cancel_pending) {
+		wifi->result_deferred = true;
+		wifi->deferred_result = message->wifi_result;
+		return;
+	}
 	wifi->pending = 0;
 	if (wifi->action == FPLINUX_UI_WIFI_SCAN)
 		wifi->scan_result = message->wifi_result;
-	networks_refresh(wifi);
-	if (wifi->action == FPLINUX_UI_WIFI_SET_POWER)
-		root_refresh(wifi);
-	if (wifi->action == FPLINUX_UI_WIFI_CONNECT ||
-	    wifi->action == FPLINUX_UI_WIFI_CONNECT_SAVED ||
-	    wifi->action == FPLINUX_UI_WIFI_CONNECT_HIDDEN)
+	if (is_connecting(wifi->action) && wifi->dialog)
 		pop_screen(wifi, &wifi->dialog);
-	if (!wifi->root || wifi->dialog ||
+	refresh_lists(wifi);
+	if (!wifi->root.screen || wifi->dialog ||
 	    message->wifi_result == FPLINUX_UI_WIFI_APPLIED ||
 	    wifi->action == FPLINUX_UI_WIFI_SCAN)
 		return;
 	switch (message->wifi_result) {
 	case FPLINUX_UI_WIFI_BUSY:
 		text = _("Wi-Fi busy");
+		retry = is_join(wifi->action);
 		break;
 	case FPLINUX_UI_WIFI_NETWORK_UNAVAILABLE:
 		text = _("Network unavailable");
+		retry = is_join(wifi->action);
 		break;
 	case FPLINUX_UI_WIFI_AUTH_FAILED:
+		text = _("Connection timed out");
+		password_error = wifi->action == FPLINUX_UI_WIFI_CONNECT_SAVED;
+		retry = is_join(wifi->action);
+		break;
 	case FPLINUX_UI_WIFI_BAD_PASSWORD:
-		text = message->wifi_result == FPLINUX_UI_WIFI_BAD_PASSWORD ?
-			       _("Incorrect password") :
-			       _("Could not join the network");
-		saved_auth_error =
-			wifi->action == FPLINUX_UI_WIFI_CONNECT_SAVED &&
-			wifi->attempted.security == FPLINUX_UI_WIFI_WPA2;
+		text = _("Incorrect password");
+		password_error = is_join(wifi->action);
 		break;
 	case FPLINUX_UI_WIFI_ADDRESS_FAILED:
 		text = _("No IP address");
 		address_error = true;
 		break;
 	case FPLINUX_UI_WIFI_PROFILE_FAILED:
-		text = _("Could not save network changes");
+		if (is_join(wifi->action) &&
+		    wifi->state.link == FPLINUX_UI_WIFI_CONNECTED)
+			text = _("Connected, but could not save the network");
+		else if (is_join(wifi->action) &&
+			 wifi->state.link == FPLINUX_UI_WIFI_NO_ADDRESS) {
+			text = _("No IP address. Could not save the network.");
+			address_error = true;
+		} else
+			text = _("Could not save network changes");
 		break;
 	default:
 		text = _("Wi-Fi operation failed");
@@ -832,13 +1004,17 @@ static void receive_result(struct fplinux_settings_wifi *wifi,
 	alert = new_alert(wifi, FPLINUX_UI_ALERT_ERROR, text);
 	if (!alert)
 		return;
-	if (saved_auth_error)
+	if (password_error)
 		add_command(alert, COMMAND_OTHER_PASSWORD,
-			    FPLINUX_UI_COMMAND_SCREEN,
+			    retry ? FPLINUX_UI_COMMAND_SCREEN :
+				    FPLINUX_UI_COMMAND_OK,
 			    _("Enter another password"));
+	if (retry)
+		add_command(alert, COMMAND_RETRY_CONNECTION,
+			    FPLINUX_UI_COMMAND_OK, _("Retry"));
 	if (address_error) {
-		add_command(alert, COMMAND_RETRY_ADDRESS,
-			    FPLINUX_UI_COMMAND_SCREEN, _("Retry"));
+		add_command(alert, COMMAND_RETRY_ADDRESS, FPLINUX_UI_COMMAND_OK,
+			    _("Retry"));
 		add_command(alert, COMMAND_DISCONNECT,
 			    FPLINUX_UI_COMMAND_SCREEN, _("Disconnect"));
 	}
@@ -867,27 +1043,33 @@ void fplinux_settings_wifi_show(struct fplinux_settings_wifi *wifi)
 {
 	struct fplinux_ui_screen *root;
 
-	if (!wifi || wifi->root ||
+	if (!wifi || wifi->root.screen ||
 	    wifi->state.power == FPLINUX_UI_WIFI_UNAVAILABLE)
 		return;
 	root = fplinux_ui_list_new(wifi->ui, _("Wi-Fi"),
 				   FPLINUX_UI_LIST_IMPLICIT);
 	if (!root)
 		return;
-	wifi->root = root;
+	wifi->root.screen = root;
+	wifi->scan_on_open =
+		wifi->state.power == FPLINUX_UI_WIFI_ON &&
+		!(wifi->pending && wifi->action == FPLINUX_UI_WIFI_SCAN);
 	fplinux_ui_list_set_value_details(root);
+	fplinux_ui_list_set_select_label(root, "");
 	add_command(root, COMMAND_BACK, FPLINUX_UI_COMMAND_BACK, NULL);
-	fplinux_ui_screen_set_listener(root, root_command, NULL, wifi);
-	root_refresh(wifi);
+	fplinux_ui_screen_set_listener(root, network_command, NULL, wifi);
+	refresh_lists(wifi);
 	fplinux_ui_push(wifi->ui, root);
+	start_pending_scan(wifi);
 }
 
 void fplinux_settings_wifi_reset(struct fplinux_settings_wifi *wifi)
 {
-	if (!wifi || !wifi->root)
+	if (!wifi || !wifi->root.screen)
 		return;
 	close_children(wifi);
-	pop_screen(wifi, &wifi->root);
+	pop_screen(wifi, &wifi->root.screen);
+	wifi->root.count = 0;
 }
 
 void fplinux_settings_wifi_background(struct fplinux_settings_wifi *wifi)
@@ -899,9 +1081,15 @@ void fplinux_settings_wifi_background(struct fplinux_settings_wifi *wifi)
 	close_editor(wifi);
 }
 
+void fplinux_settings_wifi_foreground(struct fplinux_settings_wifi *wifi)
+{
+	if (wifi)
+		start_pending_scan(wifi);
+}
+
 bool fplinux_settings_wifi_shown(const struct fplinux_settings_wifi *wifi)
 {
-	return wifi && wifi->root;
+	return wifi && wifi->root.screen;
 }
 
 enum fplinux_ui_wifi_power
@@ -919,20 +1107,21 @@ void fplinux_settings_wifi_receive(
 		start_pending_scan(wifi);
 		return;
 	}
-	if (message->wifi_state.power != FPLINUX_UI_WIFI_ON && wifi->root)
+	if (message->wifi_state.power != FPLINUX_UI_WIFI_ON &&
+	    wifi->root.screen)
 		close_children(wifi);
-	else if (wifi->properties && wifi->current_properties &&
-		 (wifi->state.link != message->wifi_state.link ||
-		  wifi->state.current.id != message->wifi_state.current.id ||
-		  strcmp(wifi->state.address, message->wifi_state.address)))
-		pop_screen(wifi, &wifi->properties);
-	if (wifi->state.power != message->wifi_state.power)
+	if (wifi->state.power != message->wifi_state.power) {
 		wifi->scan_result = FPLINUX_UI_WIFI_APPLIED;
+		wifi->scan_on_open = wifi->root.screen &&
+				     message->wifi_state.power ==
+					     FPLINUX_UI_WIFI_ON;
+	}
 	wifi->state = message->wifi_state;
-	root_refresh(wifi);
-	networks_refresh(wifi);
-	if (wifi->dialog && wifi->pending &&
+	refresh_lists(wifi);
+	refresh_properties(wifi);
+	if (wifi->dialog && wifi->pending && is_connecting(wifi->action) &&
 	    wifi->state.link == FPLINUX_UI_WIFI_ADDRESSING)
 		fplinux_ui_alert_set_text(wifi->dialog,
 					  link_status(wifi->state.link));
+	start_pending_scan(wifi);
 }

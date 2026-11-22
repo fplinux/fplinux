@@ -148,6 +148,23 @@ static void send_system_levels(struct capture *capture)
 	assert(fplinux_ui_session_send(capture->session, &message));
 }
 
+static void publish_wifi(struct capture *capture,
+			 enum fplinux_ui_wifi_link link, const char *network)
+{
+	struct fplinux_ui_session_message message = {
+		.type = FPLINUX_UI_SESSION_WIFI_STATUS,
+		.wifi_status = {
+			.power = !capture->wifi_supported ? FPLINUX_UI_WIFI_UNAVAILABLE :
+				 capture->wifi_on ? FPLINUX_UI_WIFI_ON : FPLINUX_UI_WIFI_OFF,
+			.link = link,
+		},
+	};
+
+	snprintf(message.wifi_status.name, sizeof(message.wifi_status.name),
+		 "%s", network);
+	assert(fplinux_ui_session_send(capture->session, &message));
+}
+
 /* As the manager: a preview shows a level, Save stores it, "" restores. */
 static void answer_setting(struct capture *capture,
 			   const struct fplinux_ui_session_message *request)
@@ -173,6 +190,7 @@ static void answer_setting(struct capture *capture,
 				capture->wifi_on = !strcmp(request->value, "1");
 			strcpy(reply.value, capture->wifi_on ? "1" : "0");
 		}
+		publish_wifi(capture, FPLINUX_UI_WIFI_DISCONNECTED, "");
 		assert(fplinux_ui_session_send(capture->session, &reply));
 		return;
 	}
@@ -1827,6 +1845,7 @@ static void quick_settings(struct capture *capture)
 	wait_quick_settings(capture, false);
 	wait_no_label(capture, "Quick settings");
 	capture->wifi_supported = true;
+	publish_wifi(capture, FPLINUX_UI_WIFI_DISCONNECTED, "");
 	press(capture, KEY_PICKUP_PHONE);
 	wait_quick_settings(capture, true);
 	deadline = fplinux_ui_frame_now_ms() + 3000;
@@ -1850,9 +1869,25 @@ static void quick_settings(struct capture *capture)
 	press(capture, KEY_OK);
 	wait_legends(capture, "", "Turn off", "Back");
 	assert(capture->wifi_on);
+	wait_label(capture, "No network");
+	publish_wifi(capture, FPLINUX_UI_WIFI_CONNECTING, "Test station");
+	wait_label(capture, "Connecting…");
+	publish_wifi(capture, FPLINUX_UI_WIFI_ADDRESSING, "Test station");
+	wait_label(capture, "Getting IP address…");
+	publish_wifi(capture, FPLINUX_UI_WIFI_NO_ADDRESS, "Test station");
+	wait_label(capture, "No IP address");
+	save_frame(capture, "quick-wifi-no-address");
+	publish_wifi(capture, FPLINUX_UI_WIFI_CONNECTED, "Test station");
+	wait_label(capture, "Test station");
+	wait_legends(capture, "", "Turn off", "Back");
+	save_frame(capture, "quick-wifi-connected");
+	publish_wifi(capture, FPLINUX_UI_WIFI_DISCONNECTED, "");
+	wait_label(capture, "No network");
+	save_frame(capture, "quick-wifi-disconnected");
 	press(capture, KEY_PICKUP_PHONE);
 	wait_quick_settings(capture, false);
 	capture->wifi_supported = false;
+	publish_wifi(capture, FPLINUX_UI_WIFI_DISCONNECTED, "");
 	capture->brightness_unavailable = true;
 	send_system_levels(capture);
 	press(capture, KEY_PICKUP_PHONE);

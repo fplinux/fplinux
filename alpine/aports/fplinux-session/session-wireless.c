@@ -36,6 +36,7 @@ struct wifi_request {
 struct wifi_result {
 	uint32_t ticket;
 	enum fplinux_ui_wifi_result result;
+	struct fplinux_ui_wifi_network connected;
 };
 
 struct wifi_worker {
@@ -414,6 +415,10 @@ update_wifi(struct wifi_worker *wifi,
 		    wifi->dhcp_state == FPLINUX_SESSION_WIFI_DHCP_FAILED)
 			result = FPLINUX_UI_WIFI_ADDRESS_FAILED;
 		reply = complete_wifi(wifi, result);
+		if (wifi->dhcp_state == FPLINUX_SESSION_WIFI_DHCP_BOUND &&
+		    (result == FPLINUX_UI_WIFI_APPLIED ||
+		     result == FPLINUX_UI_WIFI_PROFILE_FAILED))
+			reply.connected = state->current;
 	}
 	if (wifi->dhcp_state == FPLINUX_SESSION_WIFI_DHCP_BOUND) {
 		state->link = FPLINUX_UI_WIFI_CONNECTED;
@@ -765,7 +770,8 @@ int fplinux_session_wireless_wifi_request(
 
 bool fplinux_session_wireless_take_wifi_result(
 	struct fplinux_session_wireless *wireless, uint32_t *ticket,
-	enum fplinux_ui_wifi_result *result)
+	enum fplinux_ui_wifi_result *result,
+	struct fplinux_ui_wifi_network *connected)
 {
 	struct wifi_result reply;
 
@@ -779,5 +785,6 @@ bool fplinux_session_wireless_take_wifi_result(
 		return false;
 	*ticket = reply.ticket;
 	*result = reply.result;
+	*connected = reply.connected;
 	return true;
 }

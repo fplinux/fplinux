@@ -272,6 +272,31 @@ def blend_pixel(alpha: int, foreground: int, background: int) -> int:
 
 
 @pytest.mark.parametrize(
+    ("width", "height", "top", "padding", "line"), [(128, 128, 20, 4, 14), (240, 320, 28, 8, 18)]
+)
+def test_wifi_notice_uses_both_lines_and_keeps_the_name_inside_the_panel(
+    renderer: Path,
+    tmp_path: Path,
+    width: int,
+    height: int,
+    top: int,
+    padding: int,
+    line: int,
+) -> None:
+    english = frame(renderer, tmp_path / "en", width, height, theme="dark", state="wifi")
+    russian = frame(renderer, tmp_path / "ru", width, height, theme="dark", state="wifi-ru")
+    assert (russian.x, russian.y, russian.width) == (padding, top, width - 2 * padding)
+    title_end = (padding + line) * russian.width
+    assert russian.pixels[:title_end] != english.pixels[:title_end]
+    assert russian.pixels[title_end:] == english.pixels[title_end:]
+    background = 0x2945
+    for row in range(padding, russian.height - padding):
+        assert russian.pixels[row * russian.width + 1] == background
+        assert russian.pixels[(row + 1) * russian.width - 2] == background
+    assert any(pixel not in {background, 0x3A29} for pixel in russian.pixels[title_end:])
+
+
+@pytest.mark.parametrize(
     ("width", "height", "margin", "icon_size"),
     [
         (128, 128, 4, 16),

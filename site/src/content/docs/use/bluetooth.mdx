@@ -40,9 +40,9 @@ Pairings are kept while Bluetooth is off.
 
 ## Manage devices in Settings
 
-**Phone name** changes the name other devices see. Enter the name, move to **Save** and press <Key>Centre</Key>. **Visibility** offers **Hidden**, **2 minutes** and **Always visible**. A visible window also permits incoming pairing. Keep Bluetooth settings in the foreground while pairing or accepting an incoming file; leaving them releases the pairing agent and any search started there. It does not turn the radio off.
+Other devices see the model name by default. To change it, open **Phone name**, enter a name, move to **Save** and press <Key>Centre</Key>. **Options → Use model name** restores the default.
 
-Timed visibility, pairing prompts and receive windows keep the display on while Bluetooth settings are visible. Ordinary accepted transfers can continue with the display off.
+Choose **Visibility → 2 minutes** when pairing from another device. Keep Bluetooth settings in the foreground to answer pairing prompts. **Always visible** keeps the phone discoverable. **Hidden** ends discoverability and closes incoming pairing. Devices that are already paired can still connect after you hide the phone or the two-minute window ends.
 
 Open **Nearby devices** to search. Press **Stop** to end the search and keep the discovered devices listed, or choose **Options → Back** to leave the list. Use **Options → Search** to start again. **Paired devices** lists saved pairings. Select a device to see its address and state, with signal strength or battery level when available. You can pair, connect or disconnect, change its local name, toggle **Trusted**, and **Forget device**. Forgetting removes the pairing; pair again before reconnecting.
 
@@ -50,13 +50,13 @@ Follow the pairing request shown on the phone. When asked to enter a PIN or pass
 
 The phone name, aliases, pairing and trust belong to BlueZ. They survive closing Settings. A RAM system loses them at power-off; a supported system card keeps them as described in [Storage lifetime](/fplinux/guides/microsd-system-card/#what-persists).
 
-## Exchange a file in Settings
+## Exchange files in the graphical session
 
-For sending, choose **Send file**, select the recipient and choose one file. The shared file picker lists **My files** and available cards. You can also start from a device's details.
+On the sending device, share a file via Bluetooth and choose the phone. An **Incoming file** prompt shows the sender and file name, with its size when available. Select **Accept** or **Reject**. The sender must already be paired with the phone. In **Settings → Bluetooth**, the **File reception** row shows whether the phone is ready to receive.
 
-For receiving, choose **Receive files**, select the sending device and open a writable destination folder. Choose **Here**, then send a file from that device during the two-minute receive window. The phone asks before accepting the incoming file. If the name already exists, select **Keep both** or **Replace** and press <Key>Centre</Key>. **Cancel** ends the receive without changing the existing file.
+Accepted files go to **Files → My files → Bluetooth** (`~/Files/Bluetooth`). If the name is already in use, the new file gets a numbered suffix. The completion prompt can open a supported file or take you to the Bluetooth folder. You can leave the progress screen during a transfer.
 
-**File transfer** shows the actual state, transferred bytes and progress when the total is known. Press **Stop** to end the transfer. **Options → Back** leaves the progress screen while the transfer continues. An accepted transfer continues while Settings is in the background; closing Settings asks whether to stop it. **Transfer history** keeps results for the current Settings session. A received file can be opened with an installed application that supports its format.
+To send, select a file in **Files**, choose **Options → Send via Bluetooth**, then select a paired recipient. The progress screen shows the actual bytes sent and a percentage when the total is known. Use **Stop** to cancel. You can leave the progress screen with **Options → Back** while sending. To check progress or completed sends, open **Settings → Bluetooth → Options**, then choose **File transfer** or **Transfer history**. Closing Settings during a send asks whether to stop it.
 
 ## Pair with a computer or another phone
 
@@ -120,7 +120,7 @@ This method pairs without comparing a passkey. Check both addresses, pair only w
 
 ## Receive a file on the phone
 
-Create a destination directory, then open a receive window for one file from the paired device. The last number is the time limit in seconds, from 1 to 3600:
+For a receive from the shell, create a destination directory, then open a receive window for one file from the paired device. If the graphical session is running, start the command between incoming offers and transfers. The last number is the time limit in seconds, from 1 to 3600:
 
 ```sh title="Phone"
 mkdir -p /tmp/bluetooth-receive

@@ -251,6 +251,8 @@ static bool same_indicator(const struct fplinux_session_indicator *left,
 			   const struct fplinux_session_indicator *right)
 {
 	return left->softkeys == right->softkeys &&
+	       left->wifi_russian == right->wifi_russian &&
+	       !strcmp(left->wifi_name, right->wifi_name) &&
 	       left->warning == right->warning && left->kind == right->kind &&
 	       left->level.availability == right->level.availability &&
 	       left->level.minimum == right->level.minimum &&
@@ -292,7 +294,7 @@ static void update_indicator_surface(struct phone_shell *shell,
 	if (!create_launch_surface(shell, &surface, PIXMAN_r5g6b5, frame.pixels,
 				   frame.width, frame.height,
 				   (int)frame.stride_bytes, position,
-				   "FPLinux level indicator")) {
+				   "FPLinux feedback")) {
 		fplinux_session_indicator_frame_clear(&frame);
 		hide_indicator_surface(shell);
 		return;

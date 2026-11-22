@@ -2524,10 +2524,12 @@ bool fplinux_ui_close_reply(struct fplinux_ui *ui,
 	return send_close_reply(ui, response);
 }
 
-uint32_t fplinux_ui_open_file(struct fplinux_ui *ui, const char *absolute_path)
+static uint32_t open_file_request(struct fplinux_ui *ui,
+				  const char *absolute_path,
+				  enum fplinux_ui_session_message_type type)
 {
 	struct fplinux_ui_session_message message = {
-		.type = FPLINUX_UI_SESSION_OPEN_FILE,
+		.type = type,
 	};
 	int error;
 
@@ -2554,6 +2556,19 @@ uint32_t fplinux_ui_open_file(struct fplinux_ui *ui, const char *absolute_path)
 		return 0;
 	ui->open_file_request = message.serial;
 	return message.serial;
+}
+
+uint32_t fplinux_ui_open_file(struct fplinux_ui *ui, const char *absolute_path)
+{
+	return open_file_request(ui, absolute_path,
+				 FPLINUX_UI_SESSION_OPEN_FILE);
+}
+
+uint32_t fplinux_ui_send_file_bluetooth(struct fplinux_ui *ui,
+					const char *absolute_path)
+{
+	return open_file_request(ui, absolute_path,
+				 FPLINUX_UI_SESSION_BLUETOOTH_SEND);
 }
 
 void fplinux_ui_set_storage_handler(struct fplinux_ui *ui,
@@ -2840,6 +2855,7 @@ bool fplinux_ui_send(struct fplinux_ui *ui,
 	    message->type == FPLINUX_UI_SESSION_SYSTEM_LEVELS ||
 	    message->type == FPLINUX_UI_SESSION_WIFI_STATE ||
 	    message->type == FPLINUX_UI_SESSION_WIFI_RESULT ||
+	    message->type == FPLINUX_UI_SESSION_WIFI_STATUS ||
 	    (message->type >= FPLINUX_UI_SESSION_OPEN_FILE &&
 	     message->type <= FPLINUX_UI_SESSION_DOCUMENT_RESULT)) {
 		errno = EINVAL;

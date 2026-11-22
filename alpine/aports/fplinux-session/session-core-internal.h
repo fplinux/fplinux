@@ -116,6 +116,7 @@ struct document_request {
 	bool restarting;
 	bool detached;
 	bool self_target;
+	bool system_handler;
 };
 
 struct setting_request {
@@ -192,6 +193,14 @@ struct fplinux_session {
 	uint32_t next_task_token;
 	uint32_t next_close_serial;
 	struct document_request document;
+	struct fplinux_session_bluetooth *bluetooth;
+	struct fplinux_ui_bluetooth_prompt bluetooth_prompt;
+	uint32_t bluetooth_drawn_id;
+	enum fplinux_ui_bluetooth_phase bluetooth_drawn_phase;
+	uint32_t bluetooth_hidden_id;
+	char bluetooth_received_path[FPLINUX_UI_SESSION_PATH_BYTES];
+	char bluetooth_handler_id[FPLINUX_UI_SESSION_ID_BYTES];
+	bool bluetooth_ready;
 	struct fplinux_session_storage *storage;
 	struct fplinux_volume_snapshot storage_snapshot;
 	uint32_t storage_origin_token;
@@ -351,6 +360,8 @@ struct fplinux_session {
 	struct setting_request wireless_request;
 	struct setting_request wifi_request;
 	uint32_t wifi_ticket;
+	struct fplinux_ui_wifi_network wifi_notice;
+	uint64_t wifi_notice_deadline_ms;
 	struct fplinux_session_vibration vibration;
 	struct fplinux_session_vibrator vibrator;
 	bool has_vibrator;

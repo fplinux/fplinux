@@ -4,6 +4,7 @@
 
 #include <limits.h>
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 enum fplinux_bluetooth_opp_state {
@@ -88,5 +89,28 @@ int fplinux_bluetooth_opp_receive(
 	const char *peer, const char *directory, int seconds,
 	const struct fplinux_bluetooth_opp_callbacks *callbacks,
 	struct fplinux_bluetooth_opp_result *result);
+
+struct fplinux_bluetooth_opp_listener {
+	/* A suspension request relinquishes the agent when no file is pending. */
+	bool (*suspended)(bool busy, void *data);
+	/* At offer creation, name receives the paired device's display name.
+	 * Later checks use NULL and must verify the same pairing and BlueZ owner. */
+	bool (*peer_allowed)(const char *local, const char *remote, char *name,
+			     size_t name_size, void *data);
+	void (*registered)(bool ready, void *data);
+	/* Called once for each displayed offer, including expiry and rejection. */
+	void (*finished)(bool accepted,
+			 const struct fplinux_bluetooth_opp_result *result,
+			 void *data);
+	/* Wait on the application's own descriptors and on bus_fd when >= 0. */
+	void (*wait)(int bus_fd, int timeout_ms, void *data);
+};
+
+/* Runs a persistent receive agent until cancelled. Creates the directory on
+ * the first acceptance and defaults to keeping both names on conflicts. */
+void fplinux_bluetooth_opp_listen(
+	const char *directory,
+	const struct fplinux_bluetooth_opp_callbacks *callbacks,
+	const struct fplinux_bluetooth_opp_listener *listener);
 
 #endif

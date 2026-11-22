@@ -48,8 +48,8 @@ struct capture {
 	/* The Bluetooth scenario's BlueZ; other scenarios have no bus. */
 	bool bluetooth;
 	struct bluez_fake *bluez;
-	unsigned int document_requests;
-	char document_path[FPLINUX_UI_SESSION_PATH_BYTES];
+	uint32_t document_serial;
+	enum fplinux_ui_document_status document_status;
 	const char *stage;
 };
 
@@ -174,20 +174,11 @@ static void read_messages(struct capture *capture)
 			       FPLINUX_VOLUME_REFRESH);
 			assert(fplinux_ui_session_send(capture->session,
 						       &reply));
-		} else if (message.type == FPLINUX_UI_SESSION_OPEN_FILE) {
-			struct fplinux_ui_session_message reply = {
-				.type = FPLINUX_UI_SESSION_DOCUMENT_RESULT,
-				.serial = message.serial,
-				.document_status =
-					FPLINUX_UI_DOCUMENT_CANCELLED,
-			};
-
-			++capture->document_requests;
-			snprintf(capture->document_path,
-				 sizeof(capture->document_path), "%s",
-				 message.path);
-			assert(fplinux_ui_session_send(capture->session,
-						       &reply));
+		} else if (message.type == FPLINUX_UI_SESSION_DOCUMENT_RESULT &&
+			   message.document_status !=
+				   FPLINUX_UI_DOCUMENT_WAIT) {
+			capture->document_serial = message.serial;
+			capture->document_status = message.document_status;
 		}
 	}
 	assert(received == 0);
@@ -1168,7 +1159,7 @@ static void bluetooth_name_wait_retains_editor(struct capture *capture)
 	wait_legends(capture, "Options", "", "Clear");
 	bluez_fake_answer(capture->bluez, BLUEZ_FAKE_FAIL, 1000);
 	press(capture, KEY_DOWN);
-	wait_legends(capture, "", "Save", "Back");
+	wait_legends(capture, "Options", "Save", "Back");
 	press(capture, KEY_OK);
 	pump_for(capture, 150);
 	assert(has_label(capture, "Name"));
@@ -1179,7 +1170,7 @@ static void bluetooth_name_wait_retains_editor(struct capture *capture)
 	press(capture, KEY_F14);
 	wait_label(capture, "Name");
 	wait_form_text(capture, "Test adapter123");
-	wait_legends(capture, "", "Save", "Back");
+	wait_legends(capture, "Options", "Save", "Back");
 	bluez_fake_answer(capture->bluez, BLUEZ_FAKE_APPLY, 1000);
 	press(capture, KEY_OK);
 	pump_for(capture, 150);
@@ -1190,6 +1181,13 @@ static void bluetooth_name_wait_retains_editor(struct capture *capture)
 	wait_legends(capture, "", "Open", "Back");
 	wait_label(capture, "Test adapter123");
 	bluez_fake_answer(capture->bluez, BLUEZ_FAKE_APPLY, 0);
+	press(capture, KEY_OK);
+	wait_label(capture, "Phone name");
+	press(capture, KEY_F13);
+	wait_label(capture, "Use model name");
+	press(capture, KEY_OK);
+	wait_legends(capture, "", "Open", "Back");
+	wait_label(capture, "Test adapter");
 	press(capture, KEY_UP);
 	press(capture, KEY_UP);
 }
@@ -1225,6 +1223,10 @@ static void bluetooth_devices(struct capture *capture)
 	struct fplinux_ui_session_message lifecycle = {
 		.type = FPLINUX_UI_SESSION_LIFECYCLE,
 		.lifecycle = FPLINUX_UI_SESSION_BACKGROUND,
+	};
+	const struct fplinux_ui_session_message receiver = {
+		.type = FPLINUX_UI_SESSION_BLUETOOTH_READY,
+		.enabled = true,
 	};
 	const char *const services[] = {
 		"00001105-0000-1000-8000-00805f9b34fb",
@@ -1340,11 +1342,13 @@ static void bluetooth_devices(struct capture *capture)
 	assert(fplinux_ui_session_send(capture->session, &lifecycle));
 	deadline = fplinux_ui_frame_now_ms() + 3000;
 	while ((bluez_fake_discovery_owned(capture->bluez, HCI0) ||
-		bluez_fake_agent_registered(capture->bluez)) &&
+		bluez_fake_agent_registered(capture->bluez) ||
+		bluez_fake_pairable(capture->bluez, HCI0)) &&
 	       fplinux_ui_frame_now_ms() < deadline)
 		pump(capture);
 	assert(!bluez_fake_discovery_owned(capture->bluez, HCI0));
 	assert(!bluez_fake_agent_registered(capture->bluez));
+	assert(!bluez_fake_pairable(capture->bluez, HCI0));
 	assert(bluez_fake_discovering(capture->bluez, HCI0));
 	assert(bluez_fake_powered(capture->bluez, HCI0));
 	bluez_fake_set_external_discovery(capture->bluez, HCI0, false);
@@ -1356,6 +1360,19 @@ static void bluetooth_devices(struct capture *capture)
 	press(capture, KEY_F14);
 	wait_label(capture, "Bluetooth");
 	wait_legends(capture, "", "Open", "Back");
+	press(capture, KEY_UP);
+	press(capture, KEY_UP);
+	press(capture, KEY_OK);
+	wait_label(capture, "Hidden");
+	press(capture, KEY_DOWN);
+	press(capture, KEY_OK);
+	wait_legends(capture, "", "Open", "Back");
+	wait_label(capture, "2 minutes");
+	wait_screen_hold(capture, true);
+	assert(bluez_fake_connectable(capture->bluez, HCI0));
+	assert(bluez_fake_pairable(capture->bluez, HCI0));
+	assert(bluez_fake_agent_registered(capture->bluez));
+	save_frame(capture, "settings-bluetooth-visible");
 	bluetooth_pair_with_passkey(capture);
 	bluez_fake_request_agent(capture->bluez, BLUEZ_FAKE_AGENT_AUTHORIZATION,
 				 VISITOR, 0, 0, NULL);
@@ -1363,10 +1380,38 @@ static void bluetooth_devices(struct capture *capture)
 	press(capture, KEY_F14);
 	pump_for(capture, 150);
 	assert(bluez_fake_agent_rejected(capture->bluez));
+	bluez_fake_expire_visibility(capture->bluez, HCI0);
+	wait_label(capture, "Hidden");
+	wait_screen_hold(capture, false);
+	pump_for(capture, 150);
+	assert(bluez_fake_powered(capture->bluez, HCI0));
+	assert(bluez_fake_connectable(capture->bluez, HCI0));
+	assert(!bluez_fake_pairable(capture->bluez, HCI0));
+	assert(!bluez_fake_agent_registered(capture->bluez));
+	press(capture, KEY_OK);
+	wait_legends(capture, "", "Select", "Back");
+	wait_label(capture, "Hidden");
+	requests = bluez_fake_requests(capture->bluez);
+	bluez_fake_answer(capture->bluez, BLUEZ_FAKE_SILENT, 0);
+	press(capture, KEY_OK);
+	wait_legends(capture, "", "Open", "Back");
+	wait_label(capture, "Hidden");
+	assert(bluez_fake_requests(capture->bluez) == requests);
+	bluez_fake_answer(capture->bluez, BLUEZ_FAKE_APPLY, 0);
+	for (size_t i = 0; i < 4; ++i)
+		press(capture, KEY_DOWN);
+	wait_label(capture, "File reception");
+	wait_label(capture, "Service unavailable");
+	assert(fplinux_ui_session_send(capture->session, &receiver));
+	wait_label(capture, "Ready");
+	wait_legends(capture, "", "", "Back");
+	save_frame(capture, "settings-bluetooth-receiving-ready");
 	press(capture, KEY_F14);
 	wait_label(capture, "Settings");
 	pump_for(capture, 150);
 	assert(!bluez_fake_agent_registered(capture->bluez));
+	assert(!bluez_fake_pairable(capture->bluez, HCI0));
+	assert(bluez_fake_connectable(capture->bluez, HCI0));
 	assert(bluez_fake_powered(capture->bluez, HCI0));
 	puts("settings-bluetooth-devices: real paths retain focus; pairing, connection and trust are distinct; hiding releases only owned discovery and the agent");
 }
@@ -1421,14 +1466,6 @@ static void reap_obex(struct capture *capture, pid_t child)
 	assert(WIFEXITED(status) && WEXITSTATUS(status) == 0);
 }
 
-static void choose_transfer_folder(struct capture *capture)
-{
-	wait_label(capture, "My files");
-	press(capture, KEY_OK);
-	wait_legends(capture, "Here", "", "Back");
-	press(capture, KEY_F13);
-}
-
 static void send_prepare_close(struct capture *capture, uint32_t serial)
 {
 	struct fplinux_ui_session_message close = {
@@ -1455,7 +1492,7 @@ static void request_user_close(struct capture *capture)
 		   "Stop the current file transfer and close Settings?");
 }
 
-static void wait_for_cancelled_receive(struct capture *capture)
+static void wait_for_cancelled_send(struct capture *capture)
 {
 	char cancel_requested[PATH_MAX];
 	char release_cancel[PATH_MAX];
@@ -1493,118 +1530,66 @@ static void wait_for_cancelled_receive(struct capture *capture)
 	assert(access(cancelled, F_OK) == 0);
 }
 
+static void choose_recipient(struct capture *capture, const char *path)
+{
+	struct fplinux_ui_session_message document = {
+		.type = FPLINUX_UI_SESSION_DOCUMENT,
+		.serial = ++capture->serial,
+	};
+	uint64_t deadline = fplinux_ui_frame_now_ms() + 4000;
+
+	assert(strlen(path) < sizeof(document.path));
+	strcpy(document.path, path);
+	assert(fplinux_ui_session_send(capture->session, &document));
+	while (capture->document_serial != document.serial &&
+	       fplinux_ui_frame_now_ms() < deadline)
+		pump(capture);
+	assert(capture->document_serial == document.serial);
+	assert(capture->document_status == FPLINUX_UI_DOCUMENT_ACCEPTED);
+	wait_label(capture, "Send to");
+	wait_label(capture, "Test peer");
+	assert(!has_label(capture, "Visitor"));
+	assert(!bluez_fake_discovery_owned(capture->bluez, HCI0));
+	assert(!bluez_fake_agent_registered(capture->bluez));
+	press(capture, KEY_OK);
+}
+
 static void bluetooth_transfers(struct capture *capture)
 {
 	const char *home = getenv("HOME");
-	char incoming[PATH_MAX];
+	char path[PATH_MAX];
 	uint64_t deadline;
 	pid_t obex;
 
 	assert(home);
-	assert(snprintf(incoming, sizeof(incoming), "%s/Files/incoming.txt",
-			home) < (int)sizeof(incoming));
+	assert(snprintf(path, sizeof(path), "%s/Files/payload.txt", home) <
+	       (int)sizeof(path));
 	bluez_fake_add_device(capture->bluez, TRANSFER_PEER,
 			      "01:23:45:67:89:AB", "Test peer", true);
-	pump_for(capture, 100);
-	press(capture, KEY_DOWN);
-	press(capture, KEY_DOWN);
-	press(capture, KEY_OK);
-	wait_label(capture, "Power");
-	for (size_t i = 0; i < 5; ++i)
-		press(capture, KEY_DOWN);
-	capture->stage = "send: choose peer";
+	bluez_fake_add_device(capture->bluez, VISITOR, "22:33:44:55:66:77",
+			      "Visitor", false);
+	capture->stage = "send: choose peer for Files selection";
 	obex = start_obex(capture, "send-fast", "send");
-	press(capture, KEY_OK);
-	wait_label(capture, "Test peer");
-	wait_scan_controls(capture);
-	press(capture, KEY_OK);
-	capture->stage = "send: choose file";
-	wait_label(capture, "My files");
-	press(capture, KEY_OK);
-	wait_label(capture, "payload.txt");
-	press(capture, KEY_OK);
+	choose_recipient(capture, path);
 	capture->stage = "send: await completion";
 	wait_label(capture, "Complete");
-	/* A long displayed path can push the count below the first page. */
-	if (!has_label(capture, "17 / 17 bytes"))
-		press(capture, KEY_RIGHT);
 	wait_label(capture, "17 / 17 bytes");
 	reap_obex(capture, obex);
 	press(capture, KEY_F14);
-	press(capture, KEY_F14);
-	wait_label(capture, "Send file");
-	press(capture, KEY_DOWN);
-	capture->stage = "receive: choose peer";
-	obex = start_obex(capture, "receive", "receive");
-	press(capture, KEY_OK);
-	wait_label(capture, "Test peer");
-	wait_scan_controls(capture);
-	press(capture, KEY_OK);
-	capture->stage = "receive: choose destination";
-	choose_transfer_folder(capture);
-	capture->stage = "receive: consent";
-	wait_label(capture, "Receive incoming.txt from Test peer?");
-	wait_screen_hold(capture, true);
-	assert(access(incoming, F_OK) < 0 && errno == ENOENT);
-	press(capture, KEY_OK);
-	capture->stage = "receive: await publication";
-	wait_label(capture, "Complete");
-	wait_legends(capture, "", "Open file", "Back");
-	assert(access(incoming, R_OK) == 0);
-	wait_screen_hold(capture, false);
-	press(capture, KEY_OK);
-	capture->stage = "receive: open document";
-	deadline = fplinux_ui_frame_now_ms() + 3000;
-	while (!capture->document_requests &&
-	       fplinux_ui_frame_now_ms() < deadline)
-		pump(capture);
-	assert(capture->document_requests == 1);
-	assert(!strcmp(capture->document_path, incoming));
-	reap_obex(capture, obex);
-	press(capture, KEY_F14);
-	press(capture, KEY_F14);
-	/* Cancelling a new send picker preserves the last received result. */
-	press(capture, KEY_UP);
-	capture->stage = "cancel new send: choose peer";
-	press(capture, KEY_OK);
-	wait_label(capture, "Test peer");
-	wait_scan_controls(capture);
-	press(capture, KEY_OK);
-	capture->stage = "cancel new send: cancel picker";
-	wait_label(capture, "My files");
-	press(capture, KEY_F14);
-	wait_label(capture, "Test peer");
-	wait_scan_controls(capture);
-	press(capture, KEY_F14);
-	wait_legends(capture, "Options", "Select", "Back");
-	assert(!bluez_fake_discovering(capture->bluez, HCI0));
-	press(capture, KEY_F14);
-	wait_label(capture, "Bluetooth");
-	wait_legends(capture, "", "Open", "Back");
-	press(capture, KEY_DOWN);
+	press(capture, KEY_F13);
+	wait_label(capture, "Transfer history");
 	press(capture, KEY_DOWN);
 	press(capture, KEY_OK);
-	capture->stage = "cancel new send: reopen received result";
-	wait_legends(capture, "", "Open file", "Back");
-	press(capture, KEY_F14);
-	press(capture, KEY_UP);
+	wait_label(capture, "payload.txt");
 
-	capture->stage = "cancel receive: choose peer";
-	obex = start_obex(capture, "receive-cancel-held", "cancel");
-	press(capture, KEY_OK);
-	wait_label(capture, "Test peer");
-	wait_scan_controls(capture);
-	press(capture, KEY_OK);
-	capture->stage = "cancel receive: choose destination";
-	choose_transfer_folder(capture);
-	capture->stage = "cancel receive: consent";
-	wait_label(capture, "Receive incoming.txt from Test peer?");
-	press(capture, KEY_OK);
-	capture->stage = "cancel receive: await partial bytes";
-	wait_label(capture, "3 / 7 bytes");
+	capture->stage = "cancel send: choose peer";
+	obex = start_obex(capture, "send-cancel-held", "cancel");
+	choose_recipient(capture, path);
+	capture->stage = "cancel send: await partial bytes";
+	wait_label(capture, "3 / 17 bytes");
 	wait_legends(capture, "Options", "", "Stop");
 	save_frame(capture, "settings-bluetooth-transfer");
-	capture->stage = "cancel receive: stay after close";
+	capture->stage = "cancel send: stay after close";
 	request_user_close(capture);
 	press(capture, KEY_F14);
 	deadline = fplinux_ui_frame_now_ms() + 3000;
@@ -1612,55 +1597,14 @@ static void bluetooth_transfers(struct capture *capture)
 	       fplinux_ui_frame_now_ms() < deadline)
 		pump(capture);
 	assert(!strcmp(capture->close_value, "cancel"));
-	wait_label(capture, "3 / 7 bytes");
-	capture->stage = "cancel receive: cancel and close";
+	wait_label(capture, "3 / 17 bytes");
+	capture->stage = "cancel send: cancel and close";
 	request_user_close(capture);
 	press(capture, KEY_OK);
-	wait_for_cancelled_receive(capture);
+	wait_for_cancelled_send(capture);
 	reap_obex(capture, obex);
 	close_and_reap(capture);
-	puts("settings-bluetooth-transfers: shared pickers send bytes, consent publishes received files, document results return, and close waits for cancellation");
-}
-
-static void bluetooth_conflict(struct capture *capture, const char *choice)
-{
-	bool cancel = !strcmp(choice, "cancel");
-	const char *result = cancel ? "Cancelled" : "Complete";
-	pid_t obex;
-
-	bluez_fake_add_device(capture->bluez, TRANSFER_PEER,
-			      "01:23:45:67:89:AB", "Test peer", true);
-	pump_for(capture, 100);
-	press(capture, KEY_DOWN);
-	press(capture, KEY_DOWN);
-	press(capture, KEY_OK);
-	wait_label(capture, "Power");
-	for (size_t i = 0; i < 6; ++i)
-		press(capture, KEY_DOWN);
-	capture->stage = "conflict: choose peer and destination";
-	obex = start_obex(capture, "receive", "conflict");
-	press(capture, KEY_OK);
-	wait_label(capture, "Test peer");
-	wait_scan_controls(capture);
-	press(capture, KEY_OK);
-	choose_transfer_folder(capture);
-	capture->stage = "conflict: consent and choose how to publish";
-	wait_label(capture, "Receive incoming.txt from Test peer?");
-	press(capture, KEY_OK);
-	wait_label(capture, "incoming.txt already exists.");
-	wait_label(capture, "Keep both");
-	wait_label(capture, "Replace");
-	wait_legends(capture, "", "Keep both", "Cancel");
-	if (!strcmp(choice, "replace")) {
-		press(capture, KEY_DOWN);
-		wait_legends(capture, "", "Replace", "Cancel");
-	}
-	press(capture, cancel ? KEY_F14 : KEY_OK);
-	wait_legends(capture, "", cancel ? "" : "Open file", "Back");
-	for (size_t i = 0; i < 3 && !has_label(capture, result); ++i)
-		press(capture, KEY_DOWN);
-	wait_label(capture, result);
-	reap_obex(capture, obex);
+	puts("settings-bluetooth-transfers: a Files selection sends its bytes to the chosen paired device; close waits for cancellation");
 }
 
 static void wifi_publish(struct capture *capture,
@@ -1728,34 +1672,39 @@ static void wifi_choose_option(struct capture *capture, const char *label,
 	press(capture, KEY_OK);
 }
 
-static void wifi_submit_editor(struct capture *capture, unsigned int rows)
-{
-	bool ru = !strcmp(capture->observed.locale, "ru");
-
-	for (unsigned int i = 0; i < rows; ++i)
-		press(capture, KEY_DOWN);
-	wait_legends(capture, "", ru ? "Подключить" : "Connect",
-		     ru ? "Отмена" : "Cancel");
-	press(capture, KEY_OK);
-}
-
 static void wifi_screens(struct capture *capture)
 {
 	bool ru = !strcmp(capture->observed.locale, "ru");
+	const char *options = ru ? "Опции" : "Options";
+	const char *back = ru ? "Назад" : "Back";
+	const char *connect = ru ? "Подключить" : "Connect";
+	const char *password = ru ? "Пароль" : "Password";
+	const char *properties = ru ? "Свойства" : "Properties";
+	const char *retry = ru ? "Повторить" : "Retry";
+	const char *refresh = ru ? "Обновить" : "Refresh";
+	const char *saved = ru ? "Сохранённые сети" : "Saved networks";
+	const char *once = ru ? "Только один раз" : "Only once";
+	const char *addressing = ru ? "Получение IP…" : "Getting IP address…";
+	const char *wrong = ru ? "Неверный пароль" : "Incorrect password";
 	struct fplinux_ui_wifi_state state = { 0 };
-	struct fplinux_ui_wifi_network open = {
+	const struct fplinux_ui_wifi_network open = {
 		.id = 411,
 		.security = FPLINUX_UI_WIFI_OPEN,
 		.name = "Twin",
 	};
-	struct fplinux_ui_wifi_network wpa2 = {
+	const struct fplinux_ui_wifi_network wpa2 = {
 		.id = 912,
 		.security = FPLINUX_UI_WIFI_WPA2,
 		.name = "Twin",
 	};
+	const struct fplinux_ui_wifi_network long_name = {
+		.id = 919,
+		.security = FPLINUX_UI_WIFI_WPA2,
+		.name = "Long name of 32 bytes for a WLAN",
+	};
 	uint32_t serial, original;
 
-	capture->stage = "wifi qualification and root focus";
+	capture->stage = "wifi capability and power-on scan";
 	press(capture, KEY_DOWN);
 	press(capture, KEY_DOWN);
 	wait_label(capture, ru ? "Время и язык" : "Time & language");
@@ -1769,312 +1718,163 @@ static void wifi_screens(struct capture *capture)
 	press(capture, KEY_UP);
 	press(capture, KEY_OK);
 	wait_label(capture, ru ? "Выкл." : "Off");
-	assert(!has_label(capture,
-			  ru ? "Доступные сети" : "Available networks"));
 	assert(!capture->wifi_serial);
 	press(capture, KEY_OK);
 	serial = wifi_request(capture, FPLINUX_UI_WIFI_SET_POWER, 0, "");
 	assert(capture->wifi_request.enabled);
-	assert(has_label(capture, ru ? "Выкл." : "Off"));
 	state.power = FPLINUX_UI_WIFI_ON;
-	state.open_supported = true;
 	wifi_publish(capture, &state);
 	wifi_result(capture, serial, FPLINUX_UI_WIFI_APPLIED);
-	wait_label(capture, ru ? "Вкл." : "On");
-	save_frame(capture, "wifi-on");
-	assert(!capture->wifi_serial);
-
-	capture->stage = "wifi scan refusal without a snapshot";
-	press(capture, KEY_DOWN);
-	press(capture, KEY_DOWN);
-	press(capture, KEY_OK);
 	serial = wifi_request(capture, FPLINUX_UI_WIFI_SCAN, 0, "");
+	wait_label(capture, ru ? "Поиск…" : "Scanning…");
+	save_frame(capture, "wifi-on");
 	wifi_result(capture, serial, FPLINUX_UI_WIFI_BUSY);
 	wait_label(capture, ru ? "Wi-Fi занят" : "Wi-Fi busy");
-	assert(!has_label(capture,
-			  ru ? "Ожидание поиска…" : "Waiting to scan…"));
-	wifi_choose_option(capture, ru ? "Обновить" : "Refresh", 0);
+	wifi_choose_option(capture, refresh, 0);
 	serial = wifi_request(capture, FPLINUX_UI_WIFI_SCAN, 0, "");
-	wifi_result(capture, serial, FPLINUX_UI_WIFI_FAILED);
-	wait_label(capture, ru ? "Ошибка поиска" : "Scan failed");
-	assert(!has_label(capture,
-			  ru ? "Ожидание поиска…" : "Waiting to scan…"));
-	wifi_choose_option(capture, ru ? "Обновить" : "Refresh", 0);
-	serial = wifi_request(capture, FPLINUX_UI_WIFI_SCAN, 0, "");
-
-	capture->stage = "wifi scan and stable network identity";
-	state.scan = FPLINUX_UI_WIFI_SCANNING;
-	wifi_publish(capture, &state);
-	wait_label(capture, ru ? "Поиск…" : "Scanning…");
-	state.available[0] = open;
-	state.available[1] = (struct fplinux_ui_wifi_network){
-		.id = 919,
-		.security = FPLINUX_UI_WIFI_WPA2,
-		.name = "Long name of 32 bytes for a WLAN",
-	};
-	state.available[2] = wpa2;
-	state.available[3] = (struct fplinux_ui_wifi_network){
-		.id = 513,
-		.security = FPLINUX_UI_WIFI_WPA3,
-		.name = "WPA3-only",
-	};
-	state.available_count = 4;
+	state.available[0] = wpa2;
+	state.available[1] = long_name;
+	state.available[2] = open;
+	state.available_count = 3;
 	state.scan = FPLINUX_UI_WIFI_SCAN_READY;
 	wifi_publish(capture, &state);
 	wifi_result(capture, serial, FPLINUX_UI_WIFI_APPLIED);
-	wait_label(capture, "Twin");
-	wait_legends(capture, ru ? "Опции" : "Options",
-		     ru ? "Выбрать" : "Select", ru ? "Назад" : "Back");
+
+	capture->stage = "wifi scan preserves the selected network and Options";
 	press(capture, KEY_DOWN);
-	wait_label(capture, state.available[1].name);
+	wait_legends(capture, options, connect, back);
+	press(capture, KEY_DOWN);
+	wait_label(capture, long_name.name);
 	save_frame(capture, "wifi-available-long");
-	press(capture, KEY_DOWN);
-	wifi_choose_option(capture, ru ? "Обновить" : "Refresh", 0);
+	press(capture, KEY_UP);
+	wifi_choose_option(capture, refresh, 0);
 	serial = wifi_request(capture, FPLINUX_UI_WIFI_SCAN, 0, "");
+	press(capture, KEY_F13);
+	wait_label(capture, refresh);
 	state.scan = FPLINUX_UI_WIFI_SCANNING;
 	wifi_publish(capture, &state);
-	wait_label(capture, ru ? "Поиск…" : "Scanning…");
-	assert(has_label(capture, "Twin"));
-	state.available[0] = wpa2;
-	state.available[2] = open;
+	state.available[0] = open;
+	state.available[2] = wpa2;
 	state.scan = FPLINUX_UI_WIFI_SCAN_READY;
 	wifi_publish(capture, &state);
 	wifi_result(capture, serial, FPLINUX_UI_WIFI_APPLIED);
 	pump_for(capture, 100);
+	wait_legends(capture, "", ru ? "Выбрать" : "Select", back);
+	press(capture, KEY_F14);
 	press(capture, KEY_OK);
-	wait_label(capture, ru ? "Пароль" : "Password");
+	wait_label(capture, password);
 
-	capture->stage = "wifi masked password and cancellation";
-	wait_legends(capture, "", "", ru ? "Отмена" : "Cancel");
-	wifi_submit_editor(capture, 2);
+	capture->stage = "wifi direct submit and incorrect password";
+	wait_legends(capture, options, connect, ru ? "Отмена" : "Cancel");
+	press(capture, KEY_OK);
 	wait_label(
 		capture,
 		ru ? "Введите 8–63 символа ASCII или 64 шестнадцатеричные цифры" :
 		     "Enter 8–63 ASCII characters or 64 hex digits");
 	assert(!capture->wifi_serial);
 	press(capture, KEY_F14);
-	press(capture, KEY_UP);
-	press(capture, KEY_UP);
 	wifi_numeric_key(capture);
 	wait_label(capture, "••••••••");
-	wait_legends(capture, ru ? "Опции" : "Options", "",
-		     ru ? "Стереть" : "Clear");
 	assert(!has_label(capture, "12345678"));
 	save_frame(capture, "wifi-masked");
-	wifi_choose_option(capture, ru ? "Отмена" : "Cancel", 0);
-	wait_label(capture, ru ? "Доступные сети" : "Available networks");
-	assert(!capture->wifi_serial);
 	press(capture, KEY_OK);
-	wait_label(capture, ru ? "Пароль" : "Password");
-	assert(!has_label(capture, "••••••••"));
+	serial = wifi_request(capture, FPLINUX_UI_WIFI_CONNECT, wpa2.id,
+			      "12345678");
+	assert(capture->wifi_request.save);
+	wifi_result(capture, serial, FPLINUX_UI_WIFI_BAD_PASSWORD);
+	wait_label(capture, wrong);
+	press(capture, KEY_OK);
+	wait_label(capture, password);
+
+	capture->stage = "wifi one-time join and cancellation";
+	wifi_choose_option(capture, once, 0);
+	wait_label(capture, once);
 	wifi_numeric_key(capture);
-	wifi_submit_editor(capture, 2);
-	original =
-		wifi_request(capture, FPLINUX_UI_WIFI_CONNECT, 912, "12345678");
+	press(capture, KEY_OK);
+	original = wifi_request(capture, FPLINUX_UI_WIFI_CONNECT, wpa2.id,
+				"12345678");
 	assert(!capture->wifi_request.save);
-	wait_label(capture, ru ? "Подключение…" : "Connecting…");
 	state.current = wpa2;
+	state.current.id = 1212;
 	state.link = FPLINUX_UI_WIFI_ADDRESSING;
 	wifi_publish(capture, &state);
-	wait_label(capture, ru ? "Получение IP…" : "Getting IP address…");
+	wait_label(capture, addressing);
 	press(capture, KEY_F14);
 	serial = wifi_request(capture, FPLINUX_UI_WIFI_CANCEL, original, "");
 	state.link = FPLINUX_UI_WIFI_DISCONNECTED;
 	wifi_publish(capture, &state);
 	wifi_result(capture, original, FPLINUX_UI_WIFI_BAD_PASSWORD);
 	wifi_result(capture, serial, FPLINUX_UI_WIFI_APPLIED);
-	wait_label(capture, ru ? "Доступные сети" : "Available networks");
-	pump_for(capture, 80);
-	assert(!has_label(capture,
-			  ru ? "Неверный пароль" : "Incorrect password"));
+	wait_legends(capture, options, connect, back);
+	assert(!has_label(capture, wrong));
 
-	capture->stage = "wifi available open network and scan failure";
-	press(capture, KEY_DOWN);
-	press(capture, KEY_DOWN);
+	capture->stage = "wifi DHCP retry keeps focus on the active row";
 	press(capture, KEY_OK);
-	serial = wifi_request(capture, FPLINUX_UI_WIFI_CONNECT, 411, "");
-	wifi_result(capture, serial, FPLINUX_UI_WIFI_NETWORK_UNAVAILABLE);
-	wait_label(capture, ru ? "Сеть недоступна" : "Network unavailable");
-	press(capture, KEY_F14);
-	press(capture, KEY_DOWN);
-	wait_legends(capture, ru ? "Опции" : "Options",
-		     ru ? "Свойства" : "Properties", ru ? "Назад" : "Back");
-	press(capture, KEY_OK);
-	wait_label(capture, "WPA3");
-	assert(!capture->wifi_serial);
-	press(capture, KEY_F14);
-	wifi_choose_option(capture, ru ? "Обновить" : "Refresh", 0);
-	serial = wifi_request(capture, FPLINUX_UI_WIFI_SCAN, 0, "");
-	state.scan = FPLINUX_UI_WIFI_SCAN_FAILED;
-	wifi_publish(capture, &state);
-	wifi_result(capture, serial, FPLINUX_UI_WIFI_FAILED);
-	wait_label(capture, ru ? "Ошибка поиска" : "Scan failed");
-	assert(has_label(capture, "Twin"));
-	wifi_choose_option(capture, ru ? "Обновить" : "Refresh", 0);
-	serial = wifi_request(capture, FPLINUX_UI_WIFI_SCAN, 0, "");
-	state.available_count = 0;
-	state.scan = FPLINUX_UI_WIFI_SCAN_READY;
-	wifi_publish(capture, &state);
-	wifi_result(capture, serial, FPLINUX_UI_WIFI_APPLIED);
-	wait_label(capture, ru ? "Сетей не найдено" : "No networks found");
-	wifi_choose_option(capture, ru ? "Добавить сеть" : "Add network", 1);
-	wait_label(capture, ru ? "Имя сети" : "Network name");
-	wifi_submit_editor(capture, 4);
-	wait_label(capture, ru ? "Введите имя сети длиной до 32 байт" :
-				 "Enter a network name of up to 32 bytes");
-	assert(!capture->wifi_serial);
-	press(capture, KEY_F14);
-	for (unsigned int i = 0; i < 4; ++i)
-		press(capture, KEY_UP);
+	wait_label(capture, password);
 	wifi_numeric_key(capture);
-	press(capture, KEY_DOWN);
 	press(capture, KEY_OK);
-	wait_label(capture, ru ? "Открытая сеть" : "Open network");
-	press(capture, KEY_DOWN);
-	press(capture, KEY_OK);
-	wifi_submit_editor(capture, 2);
-	serial = wifi_request(capture, FPLINUX_UI_WIFI_CONNECT_HIDDEN, 0, "");
-	assert(capture->wifi_request.security == FPLINUX_UI_WIFI_OPEN);
-	assert(!strcmp(capture->wifi_request.ssid, "12345678"));
-	wifi_result(capture, serial, FPLINUX_UI_WIFI_BUSY);
-	wait_label(capture, ru ? "Wi-Fi занят" : "Wi-Fi busy");
-	press(capture, KEY_F14);
-	wait_label(capture, ru ? "Сетей не найдено" : "No networks found");
-
-	capture->stage = "wifi saved network, replacement password and IP";
-	press(capture, KEY_F14);
-	press(capture, KEY_DOWN);
-	press(capture, KEY_OK);
-	wait_label(capture, ru ? "Нет сохранённых сетей" : "No saved networks");
-	state.saved[0] = wpa2;
-	state.saved[0].id = 731;
-	state.saved[0].profile_id = 731;
-	state.saved_count = 1;
-	wifi_publish(capture, &state);
-	wait_label(capture, "Twin");
-	press(capture, KEY_OK);
-	serial = wifi_request(capture, FPLINUX_UI_WIFI_CONNECT_SAVED, 731, "");
-	wifi_result(capture, serial, FPLINUX_UI_WIFI_AUTH_FAILED);
-	wait_label(capture, ru ? "Не удалось войти в сеть" :
-				 "Could not join the network");
-	wifi_choose_option(
-		capture, ru ? "Ввести другой пароль" : "Enter another password",
-		0);
-	wait_label(capture, ru ? "Пароль" : "Password");
-	wifi_numeric_key(capture);
-	wifi_submit_editor(capture, 1);
-	serial = wifi_request(capture, FPLINUX_UI_WIFI_CONNECT_SAVED, 731,
+	serial = wifi_request(capture, FPLINUX_UI_WIFI_CONNECT, wpa2.id,
 			      "12345678");
-	assert(capture->wifi_request.save);
-	state.current = wpa2;
-	state.current.profile_id = 731;
+	state.saved[0] = wpa2;
+	state.saved[0].id = state.saved[0].profile_id = 1212;
+	state.current = state.saved[0];
+	state.available[2].profile_id = 1212;
+	state.saved_count = 1;
 	state.link = FPLINUX_UI_WIFI_NO_ADDRESS;
 	wifi_publish(capture, &state);
 	wifi_result(capture, serial, FPLINUX_UI_WIFI_ADDRESS_FAILED);
 	wait_label(capture, ru ? "Не получен IP-адрес" : "No IP address");
-	wait_legends(capture, ru ? "Опции" : "Options", "",
-		     ru ? "Закрыть" : "Close");
 	press(capture, KEY_F13);
-	wait_label(capture, ru ? "Повторить" : "Retry");
 	wait_label(capture, ru ? "Отключить" : "Disconnect");
 	press(capture, KEY_F14);
-	press(capture, KEY_F14);
-	wait_label(capture, ru ? "Сохранённые сети" : "Saved networks");
-	press(capture, KEY_F14);
-	press(capture, KEY_UP);
-	press(capture, KEY_UP);
+	wait_legends(capture, options, retry, ru ? "Закрыть" : "Close");
 	press(capture, KEY_OK);
-	wait_label(capture, ru ? "Свойства" : "Properties");
-	wait_legends(capture, ru ? "Опции" : "Options", "",
-		     ru ? "Назад" : "Back");
-	wifi_choose_option(capture, ru ? "Повторить" : "Retry", 0);
 	serial = wifi_request(capture, FPLINUX_UI_WIFI_RETRY_ADDRESS, 0, "");
+	wait_label(capture, addressing);
 	state.link = FPLINUX_UI_WIFI_CONNECTED;
 	strcpy(state.address, "192.0.2.33");
 	wifi_publish(capture, &state);
 	wifi_result(capture, serial, FPLINUX_UI_WIFI_APPLIED);
-	wait_label(capture, "Twin");
+	wait_label(capture, ru ? "Подключено" : "Connected");
+	wait_legends(capture, options, properties, back);
 	press(capture, KEY_OK);
-	wait_label(capture, ru ? "Свойства" : "Properties");
-	for (unsigned int i = 0; i < 4; ++i)
+	wait_label(capture, properties);
+	for (unsigned int i = 0; i < 4 && !has_label(capture, "192.0.2.33");
+	     ++i)
 		press(capture, KEY_DOWN);
 	wait_label(capture, "192.0.2.33");
-
-	capture->stage = "wifi disconnect and deferred scan";
 	wifi_choose_option(capture, ru ? "Отключить" : "Disconnect", 0);
 	serial = wifi_request(capture, FPLINUX_UI_WIFI_DISCONNECT, 0, "");
-	press(capture, KEY_DOWN);
-	press(capture, KEY_OK);
-	wait_label(capture, ru ? "Доступные сети" : "Available networks");
-	wait_label(capture, ru ? "Ожидание поиска…" : "Waiting to scan…");
-	wait_legends(capture, "", "", ru ? "Назад" : "Back");
-	assert(!has_label(capture,
-			  ru ? "Сетей не найдено" : "No networks found"));
-	assert(!capture->wifi_serial);
-	state.available[0] = wpa2;
-	state.available_count = 1;
-	wifi_publish(capture, &state);
-	wait_label(capture, "Twin");
-	wait_label(capture, ru ? "Ожидание поиска…" : "Waiting to scan…");
-	wait_legends(capture, "", "", ru ? "Назад" : "Back");
-	press(capture, KEY_OK);
-	pump_for(capture, 80);
-	assert(has_label(capture, "Twin"));
-	assert(!has_label(capture, ru ? "Пароль" : "Password"));
-	assert(!capture->wifi_serial);
 	state.link = FPLINUX_UI_WIFI_DISCONNECTED;
 	state.address[0] = '\0';
+	state.available_count = 2;
 	wifi_publish(capture, &state);
 	wifi_result(capture, serial, FPLINUX_UI_WIFI_APPLIED);
-	serial = wifi_request(capture, FPLINUX_UI_WIFI_SCAN, 0, "");
-	wifi_result(capture, serial, FPLINUX_UI_WIFI_APPLIED);
-	press(capture, KEY_F14);
-	press(capture, KEY_DOWN);
-	press(capture, KEY_OK);
-	wait_label(capture, "Twin");
 
-	capture->stage = "wifi connected Forget and adapter loss";
-	state.link = FPLINUX_UI_WIFI_CONNECTED;
-	strcpy(state.address, "192.0.2.33");
-	wifi_publish(capture, &state);
-	pump_for(capture, 80);
-	wifi_choose_option(capture, ru ? "Забыть сеть" : "Forget network", 0);
-	wait_label(capture, ru ? "Забыть сеть и разорвать соединение?" :
-				 "Forget this network and disconnect?");
-	press(capture, KEY_F14);
-	pump_for(capture, 80);
-	assert(!capture->wifi_serial);
-	wifi_choose_option(capture, ru ? "Забыть сеть" : "Forget network", 0);
-	wait_label(capture, ru ? "Забыть сеть и разорвать соединение?" :
-				 "Forget this network and disconnect?");
-	wait_legends(capture, "", ru ? "Забыть" : "Forget",
-		     ru ? "Отмена" : "Cancel");
+	capture->stage = "wifi saved profile outside scan and adapter loss";
+	wifi_choose_option(capture, saved, 1);
+	wait_label(capture, "Twin");
 	press(capture, KEY_OK);
-	serial = wifi_request(capture, FPLINUX_UI_WIFI_FORGET, 731, "");
-	state.link = FPLINUX_UI_WIFI_DISCONNECTED;
-	state.saved_count = 0;
-	state.address[0] = '\0';
-	wifi_publish(capture, &state);
-	wifi_result(capture, serial, FPLINUX_UI_WIFI_APPLIED);
-	wait_label(capture, ru ? "Нет сохранённых сетей" : "No saved networks");
+	serial = wifi_request(capture, FPLINUX_UI_WIFI_CONNECT_SAVED, 1212, "");
+	wifi_result(capture, serial, FPLINUX_UI_WIFI_NETWORK_UNAVAILABLE);
+	wait_label(capture, ru ? "Сеть недоступна" : "Network unavailable");
+	press(capture, KEY_OK);
+	serial = wifi_request(capture, FPLINUX_UI_WIFI_CONNECT_SAVED, 1212, "");
 	state.power = FPLINUX_UI_WIFI_UNAVAILABLE;
 	wifi_publish(capture, &state);
+	wifi_result(capture, serial, FPLINUX_UI_WIFI_APPLIED);
 	wait_label(capture, ru ? "Wi-Fi недоступен" : "Wi-Fi unavailable");
 	press(capture, KEY_F14);
-	wait_label(capture, ru ? "Настройки" : "Settings");
+	pump_for(capture, 80);
 	assert(!has_label(capture, "Wi-Fi"));
-	assert(!capture->wifi_serial);
 	puts("settings-wifi: keyboard station routes followed confirmed state and exact request identities");
 }
 
 int main(int argc, char **argv)
 {
 	struct capture capture = { 0 };
-	const char *conflict_choice = NULL;
 
 	assert(setvbuf(stdout, NULL, _IONBF, 0) == 0);
-	if (argc == 7 && !strncmp(argv[6], "bluetooth-conflict-", 19))
-		conflict_choice = argv[6] + 19;
 	assert(argc == 6 ||
 	       (argc == 7 &&
 		(!strcmp(argv[6], "root-values") ||
@@ -2083,13 +1883,11 @@ int main(int argc, char **argv)
 		 !strcmp(argv[6], "bluetooth-transfers") ||
 		 !strcmp(argv[6], "section-values") ||
 		 !strcmp(argv[6], "sound") || !strcmp(argv[6], "root-sound") ||
-		 !strcmp(argv[6], "about-edges") || !strcmp(argv[6], "wifi") ||
-		 conflict_choice)));
+		 !strcmp(argv[6], "about-edges") || !strcmp(argv[6], "wifi"))));
 	capture.bluetooth = argc == 7 &&
 			    (!strcmp(argv[6], "bluetooth") ||
 			     !strcmp(argv[6], "bluetooth-devices") ||
-			     !strcmp(argv[6], "bluetooth-transfers") ||
-			     conflict_choice);
+			     !strcmp(argv[6], "bluetooth-transfers"));
 	capture.initial_media_unknown = argc == 7 &&
 					!strcmp(argv[6], "root-sound");
 	if (capture.bluetooth) {
@@ -2103,9 +1901,8 @@ int main(int argc, char **argv)
 			bluetooth_transfers(&capture);
 			bluez_fake_stop(capture.bluez);
 			return 0;
-		} else if (conflict_choice)
-			bluetooth_conflict(&capture, conflict_choice);
-		else if (!strcmp(argv[6], "bluetooth-devices"))
+		}
+		if (!strcmp(argv[6], "bluetooth-devices"))
 			bluetooth_devices(&capture);
 		else
 			bluetooth_switch(&capture);

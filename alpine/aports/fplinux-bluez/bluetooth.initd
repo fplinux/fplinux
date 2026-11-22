@@ -11,3 +11,32 @@ depend() {
 	after coldplug udev-postmount
 	need dbus localmount hostname
 }
+
+model_name() (
+	LC_ALL=C
+	export LC_ALL
+
+	[ -r "$1" ] || return 1
+	model=$(head -c 249 "$1" | tr '\000' '\001') || return 1
+	terminator=$(printf '\001')
+	case "$model" in
+	*"$terminator") model=${model%"$terminator"} ;;
+	*) return 1 ;;
+	esac
+	case "$model" in
+	'' | *[![:print:]]* | *\\*) return 1 ;;
+	esac
+	printf '%s\n' "$model"
+)
+
+start_pre() {
+	[ -n "${fplinux_bluetooth_config:-}" ] || return 0
+	command_args="--configfile $fplinux_bluetooth_config"
+	bluetooth_model=$(model_name /proc/device-tree/model) || return 0
+	bluetooth_runtime_config=/run/fplinux-bluetooth.conf
+	{
+		printf '[General]\nName=%s\n\n' "$bluetooth_model"
+		cat "$fplinux_bluetooth_config"
+	} >"$bluetooth_runtime_config" || return 1
+	command_args="--configfile $bluetooth_runtime_config"
+}

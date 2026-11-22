@@ -15,6 +15,7 @@
 #include "fplinux-bluetooth-common.h"
 #include "fplinux-bluetooth-opp.h"
 #include "fplinux-bluetooth-pan.h"
+#include "fplinux-bluetooth-receive.h"
 #include "fplinux-cli.h"
 
 #ifndef FPLINUX_BLUETOOTH_DRIVER_DIR
@@ -200,11 +201,24 @@ static int command_transfer(struct options *options)
 	if (options->command == COMMAND_SEND)
 		status = fplinux_bluetooth_opp_send(
 			options->peer, options->path, &callbacks, &result);
-	else
+	else {
+		int lease;
+		int error =
+			fplinux_bluetooth_receive_claim(&lease, &interrupted);
+		if (error == EBUSY)
+			return fplinux_bluetooth_fail(
+				"Bluetooth receive is busy");
+		if (error != 0)
+			return fplinux_bluetooth_fail(
+				"cannot claim Bluetooth receive: %s",
+				strerror(error));
 		status = fplinux_bluetooth_opp_receive(options->peer,
 						       options->path,
 						       options->seconds,
 						       &callbacks, &result);
+		if (lease >= 0)
+			close(lease);
+	}
 	if (status != 0) {
 		fplinux_bluetooth_fail("%s", result.message);
 		if (!result.published && result.path[0] != '\0')
@@ -385,15 +399,20 @@ int main(int argc, char **argv)
 {
 	struct options options = { 0 };
 	struct sigaction action = { .sa_handler = on_signal };
-	int parse_result = parse_arguments(argc, argv, &options);
-
-	if (parse_result != FPLINUX_CLI_READY)
-		return parse_result;
+	bool worker = argc == 3 &&
+		      strcmp(argv[1], FPLINUX_BLUETOOTH_RECEIVE_WORKER) == 0;
+	if (!worker) {
+		int parse_result = parse_arguments(argc, argv, &options);
+		if (parse_result != FPLINUX_CLI_READY)
+			return parse_result;
+	}
 	sigemptyset(&action.sa_mask);
 	if (sigaction(SIGINT, &action, NULL) < 0 ||
 	    sigaction(SIGTERM, &action, NULL) < 0)
 		return fplinux_bluetooth_fail(
 			"cannot install signal handlers: %s", strerror(errno));
+	if (worker)
+		return fplinux_bluetooth_receive_worker(argv[2], &interrupted);
 	switch (options.command) {
 	case COMMAND_ENABLE:
 		return command_enable(options.if_present);

@@ -203,6 +203,18 @@ msgstr "Громкость"
 msgid "Wi-Fi"
 msgstr "Wi-Fi"
 
+msgid "No network"
+msgstr "Нет сети"
+
+msgid "Connecting…"
+msgstr "Подключение…"
+
+msgid "Getting IP address…"
+msgstr "Получение IP…"
+
+msgid "No IP address"
+msgstr "Нет IP-адреса"
+
 msgid "Save"
 msgstr "Сохранить"
 
@@ -226,6 +238,34 @@ msgstr "Настройка недоступна. Повторите позже."
 
 msgid "Bluetooth"
 msgstr "Bluetooth"
+
+msgid "Incoming file"
+msgstr "Входящий файл"
+
+msgid "Receiving file…"
+msgstr "Приём файла…"
+
+msgid "File received"
+msgstr "Файл получен"
+
+#, c-format
+msgid "%s\nSaved in My files / Bluetooth"
+msgstr "%s\nМои файлы / Bluetooth"
+
+msgid "Transfer failed"
+msgstr "Ошибка передачи"
+
+msgid "Accept"
+msgstr "Принять"
+
+msgid "Decline"
+msgstr "Отклонить"
+
+msgid "Hide"
+msgstr "Скрыть"
+
+msgid "Files"
+msgstr "В файлы"
 
 msgid "On"
 msgstr "Вкл."

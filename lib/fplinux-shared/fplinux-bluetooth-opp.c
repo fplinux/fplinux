@@ -28,6 +28,11 @@
 #define SESSION "org.bluez.obex.Session1"
 #define AGENT "org.bluez.obex.Agent1"
 #define SEND_TIMEOUT_SECONDS 120
+#define AUTHORIZE_TIMEOUT_MS 50000
+#define RECEIVE_IDLE_TIMEOUT_MS 120000
+#define SERVICE_RETRY_MS 1000
+
+static const char agent_path[] = "/org/fplinux/bluetooth/agent";
 
 struct operation {
 	DBusConnection *connection;
@@ -44,23 +49,35 @@ struct operation {
 	bool pending_bytes_known;
 	bool done;
 	bool success;
+	bool receiving;
 	bool owner_lost;
 	bool monitor_installed;
+	int64_t call_deadline_ms;
 	void (*poll)(struct operation *operation);
 };
 
 struct receiver {
 	struct operation operation;
+	const struct fplinux_bluetooth_opp_listener *listener;
+	const char *destination;
 	int directory_fd;
 	int staging_fd;
 	int file_fd;
 	char directory[PATH_MAX];
 	char staging[PATH_MAX];
 	char filename[NAME_MAX + 1];
+	char local[18];
+	char remote[18];
+	char peer_name[256];
+	bool accepted;
 	bool authorized;
 	bool agent_registered;
 	bool object_registered;
 	bool offer_ready;
+	bool release_requested;
+	int64_t authorize_deadline_ms;
+	int64_t transfer_deadline_ms;
+	uint64_t last_bytes;
 	DBusMessage *authorization;
 	char offered_transfer[PATH_MAX];
 };
@@ -129,9 +146,23 @@ static DBusMessage *call(struct operation *operation, DBusMessage *message,
 			fail(operation, ENOMEM, "cannot address D-Bus request");
 		return NULL;
 	}
-	DBusMessage *reply = fplinux_bluetooth_call_cancellable(
-		operation->connection, message, 15000, call_cancelled,
-		operation, &error);
+	int timeout_ms = 15000;
+	if (operation->call_deadline_ms > 0) {
+		int64_t remaining = operation->call_deadline_ms -
+				    fplinux_bluetooth_now_ms();
+		if (remaining < timeout_ms)
+			timeout_ms = remaining > 0 ? (int)remaining : 0;
+	}
+	DBusMessage *reply = NULL;
+	if (timeout_ms == 0) {
+		dbus_message_unref(message);
+		dbus_set_error_const(&error, DBUS_ERROR_NO_REPLY,
+				     "D-Bus operation timed out");
+	} else {
+		reply = fplinux_bluetooth_call_cancellable(
+			operation->connection, message, timeout_ms,
+			call_cancelled, operation, &error);
+	}
 	if (reply == NULL && !optional) {
 		if (is_cancelled(operation))
 			fail(operation, ECANCELED, "interrupted");
@@ -231,7 +262,7 @@ static void apply_status(struct operation *operation, const char *status)
 	if (strcmp(status, "complete") == 0) {
 		operation->done = true;
 		operation->success = true;
-		if (operation->progress.total_known &&
+		if (!operation->receiving && operation->progress.total_known &&
 		    operation->progress.transferred_bytes <
 			    operation->progress.total_bytes)
 			operation->progress.transferred_bytes =
@@ -324,6 +355,8 @@ static DBusHandlerResult monitor(DBusConnection *connection,
 	    dbus_message_iter_get_arg_type(&iter) != DBUS_TYPE_ARRAY)
 		return DBUS_HANDLER_RESULT_NOT_YET_HANDLED;
 	bool pending = operation->transfer[0] == '\0';
+	if (pending && operation->receiving)
+		return DBUS_HANDLER_RESULT_NOT_YET_HANDLED;
 	if (pending && operation->session != NULL) {
 		size_t session_size = strlen(operation->session);
 		if (strncmp(path, operation->session, session_size) != 0 ||
@@ -632,13 +665,15 @@ out:
 	return status;
 }
 
-static void agent_reply(DBusConnection *connection, DBusMessage *reply)
+static bool agent_reply(DBusConnection *connection, DBusMessage *reply)
 {
 	if (reply == NULL)
-		return;
-	dbus_connection_send(connection, reply, NULL);
-	dbus_connection_flush(connection);
+		return false;
+	bool sent = dbus_connection_send(connection, reply, NULL);
 	dbus_message_unref(reply);
+	if (sent)
+		dbus_connection_flush(connection);
+	return sent;
 }
 
 static DBusHandlerResult agent_message(DBusConnection *connection,
@@ -651,9 +686,11 @@ static DBusHandlerResult agent_message(DBusConnection *connection,
 		return DBUS_HANDLER_RESULT_NOT_YET_HANDLED;
 	if (dbus_message_is_method_call(message, AGENT, "Release") ||
 	    dbus_message_is_method_call(message, AGENT, "Cancel")) {
-		operation->done = true;
-		operation->success = false;
-		apply_status(operation, "error");
+		if (dbus_message_has_member(message, "Release"))
+			receiver->release_requested = true;
+		if (receiver->release_requested || receiver->listener == NULL ||
+		    receiver->authorization != NULL)
+			apply_status(operation, "error");
 		agent_reply(connection,
 			    dbus_message_new_method_return(message));
 		return DBUS_HANDLER_RESULT_HANDLED;
@@ -662,6 +699,7 @@ static DBusHandlerResult agent_message(DBusConnection *connection,
 		return DBUS_HANDLER_RESULT_NOT_YET_HANDLED;
 	const char *transfer;
 	if (receiver->authorized || receiver->authorization != NULL ||
+	    operation->done || receiver->release_requested ||
 	    is_cancelled(operation) ||
 	    !dbus_message_get_args(message, NULL, DBUS_TYPE_OBJECT_PATH,
 				   &transfer, DBUS_TYPE_INVALID))
@@ -673,6 +711,8 @@ static DBusHandlerResult agent_message(DBusConnection *connection,
 	/* Property requests must run outside the object-path dispatcher. */
 	receiver->authorization = dbus_message_ref(message);
 	receiver->offer_ready = false;
+	receiver->authorize_deadline_ms =
+		fplinux_bluetooth_now_ms() + AUTHORIZE_TIMEOUT_MS;
 	return DBUS_HANDLER_RESULT_HANDLED;
 reject:
 	agent_reply(connection,
@@ -686,15 +726,28 @@ static bool prepare_offer(struct receiver *receiver)
 {
 	struct operation *operation = &receiver->operation;
 	const char *transfer = receiver->offered_transfer;
-	char session[PATH_MAX], sender[32], suggested[PATH_MAX];
+	char session[PATH_MAX], suggested[PATH_MAX];
 	if (!get_text(operation, transfer, TRANSFER, "Session",
 		      DBUS_TYPE_OBJECT_PATH, session, sizeof(session), true) ||
 	    !get_text(operation, session, SESSION, "Destination",
-		      DBUS_TYPE_STRING, sender, sizeof(sender), true) ||
-	    strcasecmp(sender, operation->progress.peer) != 0 ||
+		      DBUS_TYPE_STRING, receiver->remote,
+		      sizeof(receiver->remote), true) ||
 	    !get_text(operation, transfer, TRANSFER, "Name", DBUS_TYPE_STRING,
 		      suggested, sizeof(suggested), true))
 		return false;
+	if (receiver->listener != NULL) {
+		if (!get_text(operation, session, SESSION, "Source",
+			      DBUS_TYPE_STRING, receiver->local,
+			      sizeof(receiver->local), true) ||
+		    !receiver->listener->peer_allowed(
+			    receiver->local, receiver->remote,
+			    receiver->peer_name, sizeof(receiver->peer_name),
+			    operation->callbacks->data))
+			return false;
+	} else if (strcasecmp(receiver->remote, operation->progress.peer) !=
+		   0) {
+		return false;
+	}
 	const char *name = strrchr(suggested, '/');
 	name = name == NULL ? suggested : name + 1;
 	if (!valid_filename(name))
@@ -712,18 +765,82 @@ static bool prepare_offer(struct receiver *receiver)
 	return true;
 }
 
+static bool offer_allowed(struct receiver *receiver)
+{
+	return receiver->listener == NULL ||
+	       receiver->listener->peer_allowed(
+		       receiver->local, receiver->remote, NULL, 0,
+		       receiver->operation.callbacks->data);
+}
+
+static int open_destination(struct receiver *receiver, bool create)
+{
+	struct operation *operation = &receiver->operation;
+	const char *directory = receiver->destination;
+
+	if (create && mkdir(directory, 0700) < 0 && errno != EEXIST)
+		return fail(operation, errno, "cannot create %s: %s", directory,
+			    strerror(errno));
+	if (realpath(directory, receiver->directory) == NULL)
+		return fail(operation, errno, "cannot resolve %s: %s",
+			    directory, strerror(errno));
+	receiver->directory_fd =
+		open(receiver->directory, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+	if (receiver->directory_fd < 0)
+		return fail(operation, errno,
+			    "cannot open receive directory %s: %s", directory,
+			    strerror(errno));
+	return 0;
+}
+
+static int open_staging(struct receiver *receiver)
+{
+	struct operation *operation = &receiver->operation;
+	if (snprintf(receiver->staging, sizeof(receiver->staging),
+		     "%s/.fplinux-bluetooth-XXXXXX",
+		     receiver->directory) >= (int)sizeof(receiver->staging)) {
+		receiver->staging[0] = '\0';
+		return fail(operation, ENAMETOOLONG,
+			    "receive directory path is too long");
+	}
+	if (mkdtemp(receiver->staging) == NULL) {
+		receiver->staging[0] = '\0';
+		return fail(
+			operation, errno,
+			"cannot create private receive staging directory: %s",
+			strerror(errno));
+	}
+	receiver->staging_fd =
+		open(receiver->staging, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+	if (receiver->staging_fd < 0)
+		return fail(operation, errno,
+			    "cannot open receive staging directory: %s",
+			    strerror(errno));
+	return 0;
+}
+
 static void poll_authorization(struct operation *operation)
 {
 	struct receiver *receiver = (struct receiver *)operation;
 	DBusMessage *message = receiver->authorization;
 	if (message == NULL)
 		return;
-	if (is_cancelled(operation) || operation->done || operation->owner_lost)
+	int64_t now = fplinux_bluetooth_now_ms();
+	if (is_cancelled(operation) || operation->done ||
+	    operation->owner_lost || now >= receiver->authorize_deadline_ms)
 		goto reject;
-	if (!receiver->offer_ready && !prepare_offer(receiver))
+	if (!receiver->offer_ready) {
+		operation->call_deadline_ms = now + 2000;
+		bool prepared = prepare_offer(receiver);
+		operation->call_deadline_ms = 0;
+		if (!prepared)
+			goto reject;
+	}
+	if (!offer_allowed(receiver))
 		goto reject;
 	struct fplinux_bluetooth_opp_offer offer = {
-		.peer = operation->progress.peer,
+		.peer = receiver->listener ? receiver->peer_name :
+					     operation->progress.peer,
 		.filename = receiver->filename,
 		.total_bytes = operation->progress.total_bytes,
 		.total_known = operation->progress.total_known,
@@ -735,6 +852,13 @@ static void poll_authorization(struct operation *operation)
 		return;
 	if (consent != FPLINUX_BLUETOOTH_OPP_ACCEPT || is_cancelled(operation))
 		goto reject;
+	receiver->accepted = true;
+	if ((receiver->directory_fd < 0 &&
+	     open_destination(receiver, true) != 0) ||
+	    open_staging(receiver) != 0) {
+		operation->done = true;
+		goto reject;
+	}
 	struct statvfs space;
 	if (operation->progress.total_known &&
 	    fstatvfs(receiver->staging_fd, &space) == 0 &&
@@ -754,6 +878,12 @@ static void poll_authorization(struct operation *operation)
 		int saved_error = errno;
 		fail(operation, saved_error, "cannot prepare received file: %s",
 		     strerror(saved_error));
+		operation->done = true;
+		goto reject;
+	}
+	if (fplinux_bluetooth_now_ms() >= receiver->authorize_deadline_ms ||
+	    !offer_allowed(receiver) || is_cancelled(operation)) {
+		fail(operation, ECANCELED, "receive authorization expired");
 		operation->done = true;
 		goto reject;
 	}
@@ -779,8 +909,14 @@ static void poll_authorization(struct operation *operation)
 		operation->done = true;
 		goto reject;
 	}
+	if (!agent_reply(operation->connection, reply)) {
+		fail(operation, EIO, "cannot send receive authorization reply");
+		operation->done = true;
+		goto reject;
+	}
 	receiver->authorized = true;
-	agent_reply(operation->connection, reply);
+	receiver->transfer_deadline_ms =
+		fplinux_bluetooth_now_ms() + RECEIVE_IDLE_TIMEOUT_MS;
 	dbus_message_unref(receiver->authorization);
 	receiver->authorization = NULL;
 	report(operation, FPLINUX_BLUETOOTH_OPP_TRANSFERRING);
@@ -792,7 +928,7 @@ reject:
 			    "push is not permitted by this receive window"));
 	dbus_message_unref(receiver->authorization);
 	receiver->authorization = NULL;
-	if (!operation->done && !operation->owner_lost &&
+	if (!receiver->listener && !operation->done && !operation->owner_lost &&
 	    !is_cancelled(operation)) {
 		operation->progress.filename = "";
 		report(operation, FPLINUX_BLUETOOTH_OPP_WAITING);
@@ -813,6 +949,29 @@ static int rename_received(struct receiver *receiver, const char *destination,
 	errno = ENOSYS;
 	return -1;
 #endif
+}
+
+static void receive_conflict_name(char destination[NAME_MAX + 1],
+				  const char *filename, unsigned int number)
+{
+	char suffix[32];
+	int suffix_size = snprintf(suffix, sizeof(suffix), " (%u)", number);
+	const char *end = filename + strlen(filename);
+	const char *extension = strrchr(filename, '.');
+	if (extension == NULL || extension == filename ||
+	    end - extension >= NAME_MAX - suffix_size)
+		extension = end;
+	int stem_size = (int)(extension - filename);
+	int limit = NAME_MAX - suffix_size - (int)(end - extension);
+	if (stem_size > limit) {
+		stem_size = limit;
+		/* D-Bus names are UTF-8. Leave the last character whole. */
+		while (stem_size > 0 &&
+		       ((unsigned char)filename[stem_size] & 0xc0) == 0x80)
+			--stem_size;
+	}
+	snprintf(destination, NAME_MAX + 1, "%.*s%s%s", stem_size, filename,
+		 suffix, extension);
 }
 
 static int publish_received(struct receiver *receiver)
@@ -837,10 +996,18 @@ static int publish_received(struct receiver *receiver)
 			    "cannot inspect received file: %s",
 			    strerror(saved_error));
 	}
+	if (information.st_size < 0 ||
+	    (operation->progress.total_known &&
+	     (uint64_t)information.st_size !=
+		     operation->progress.total_bytes)) {
+		result->path[0] = '\0';
+		return fail(operation, EIO,
+			    "received file size does not match the offer");
+	}
 	operation->progress.transferred_bytes = (uint64_t)information.st_size;
 	operation->progress.total_bytes = (uint64_t)information.st_size;
 	operation->progress.total_known = true;
-	if (is_cancelled(operation))
+	if (is_cancelled(operation) || !offer_allowed(receiver))
 		return fail(operation, ECANCELED, "interrupted");
 	report(operation, FPLINUX_BLUETOOTH_OPP_PUBLISHING);
 	snprintf(destination, sizeof(destination), "%s", receiver->filename);
@@ -852,7 +1019,9 @@ static int publish_received(struct receiver *receiver)
 				"cannot place received file without overwrite: %s",
 				strerror(saved_error));
 		enum fplinux_bluetooth_opp_conflict decision =
-			FPLINUX_BLUETOOTH_OPP_KEEP_EXISTING;
+			receiver->listener ?
+				FPLINUX_BLUETOOTH_OPP_KEEP_BOTH :
+				FPLINUX_BLUETOOTH_OPP_KEEP_EXISTING;
 		if (operation->callbacks != NULL &&
 		    operation->callbacks->conflict != NULL)
 			decision = operation->callbacks->conflict(
@@ -868,22 +1037,10 @@ static int publish_received(struct receiver *receiver)
 			}
 		} else if (decision == FPLINUX_BLUETOOTH_OPP_KEEP_BOTH) {
 			unsigned int number = 1;
-			const char *extension =
-				strrchr(receiver->filename, '.');
-			if (extension == NULL ||
-			    extension == receiver->filename)
-				extension = receiver->filename +
-					    strlen(receiver->filename);
-			int stem_size = (int)(extension - receiver->filename);
 			for (;;) {
-				if (snprintf(destination, sizeof(destination),
-					     "%.*s (%u)%s", stem_size,
-					     receiver->filename, number,
-					     extension) >=
-				    (int)sizeof(destination))
-					return fail(
-						operation, ENAMETOOLONG,
-						"received filename is too long");
+				receive_conflict_name(destination,
+						      receiver->filename,
+						      number);
 				if (rename_received(receiver, destination,
 						    false) == 0)
 					break;
@@ -925,13 +1082,14 @@ static int publish_received(struct receiver *receiver)
 }
 
 static bool agent_method(struct receiver *receiver, const char *member,
-			 const char *agent_path, bool cleanup)
+			 bool cleanup)
 {
+	const char *path = agent_path;
 	DBusMessage *message =
 		method(OBEX_ROOT, "org.bluez.obex.AgentManager1", member);
 	if (message != NULL &&
-	    !dbus_message_append_args(message, DBUS_TYPE_OBJECT_PATH,
-				      &agent_path, DBUS_TYPE_INVALID)) {
+	    !dbus_message_append_args(message, DBUS_TYPE_OBJECT_PATH, &path,
+				      DBUS_TYPE_INVALID)) {
 		dbus_message_unref(message);
 		message = NULL;
 	}
@@ -946,6 +1104,79 @@ static bool agent_method(struct receiver *receiver, const char *member,
 	return true;
 }
 
+static bool register_receiver(struct receiver *receiver)
+{
+	struct operation *operation = &receiver->operation;
+	static const DBusObjectPathVTable vtable = {
+		.message_function = agent_message,
+	};
+	if (!open_bus(operation))
+		return false;
+	if (!dbus_connection_register_object_path(
+		    operation->connection, agent_path, &vtable, receiver)) {
+		fail(operation, ENOMEM,
+		     "cannot register receive authorization agent");
+		return false;
+	}
+	receiver->object_registered = true;
+	if (!agent_method(receiver, "RegisterAgent", false))
+		return false;
+	receiver->agent_registered = true;
+	return true;
+}
+
+static void close_receiver(struct receiver *receiver)
+{
+	struct operation *operation = &receiver->operation;
+	/* Dispatching UnregisterAgent may deliver one last AuthorizePush. */
+	receiver->release_requested = true;
+	if (receiver->agent_registered)
+		agent_method(receiver, "UnregisterAgent", true);
+	if (receiver->object_registered)
+		dbus_connection_unregister_object_path(operation->connection,
+						       agent_path);
+	close_bus(operation);
+	operation->connection = NULL;
+	operation->monitor_installed = false;
+	operation->owner[0] = '\0';
+	operation->owner_lost = false;
+	receiver->agent_registered = false;
+	receiver->object_registered = false;
+	receiver->release_requested = false;
+}
+
+static void close_offer(struct receiver *receiver, bool retain)
+{
+	struct operation *operation = &receiver->operation;
+	if (receiver->authorization != NULL) {
+		agent_reply(
+			operation->connection,
+			dbus_message_new_error(receiver->authorization,
+					       "org.bluez.obex.Error.Rejected",
+					       "receive authorization closed"));
+		dbus_message_unref(receiver->authorization);
+		receiver->authorization = NULL;
+	}
+	if (receiver->file_fd >= 0)
+		close(receiver->file_fd);
+	if (!retain && receiver->staging_fd >= 0 &&
+	    receiver->filename[0] != '\0')
+		unlinkat(receiver->staging_fd, receiver->filename, 0);
+	if (receiver->staging_fd >= 0)
+		close(receiver->staging_fd);
+	if (!retain && receiver->staging[0] != '\0')
+		rmdir(receiver->staging);
+	if (receiver->directory_fd >= 0)
+		close(receiver->directory_fd);
+	if (!retain && !operation->result->published)
+		operation->result->path[0] = '\0';
+	receiver->file_fd = -1;
+	receiver->staging_fd = -1;
+	receiver->directory_fd = -1;
+	receiver->staging[0] = '\0';
+	receiver->filename[0] = '\0';
+}
+
 int fplinux_bluetooth_opp_receive(
 	const char *peer, const char *directory, int seconds,
 	const struct fplinux_bluetooth_opp_callbacks *callbacks,
@@ -955,108 +1186,176 @@ int fplinux_bluetooth_opp_receive(
 	struct receiver receiver = {
 		.operation = { .callbacks = callbacks,
 			       .result = result,
+			       .receiving = true,
 			       .progress = { .peer = peer, .filename = "" },
 			       .poll = poll_authorization },
+		.destination = directory,
 		.directory_fd = -1,
 		.staging_fd = -1,
 		.file_fd = -1,
 	};
 	struct operation *operation = &receiver.operation;
-	static const DBusObjectPathVTable vtable = { .message_function =
-							     agent_message };
-	const char *agent_path = "/org/fplinux/bluetooth/agent";
 	int status = 1;
 	if (seconds < 1 || seconds > 3600 || callbacks == NULL ||
 	    callbacks->authorize == NULL)
 		return fail(
 			operation, EINVAL,
 			"receive requires an authorization callback and a window of 1 to 3600 seconds");
-	if (realpath(directory, receiver.directory) == NULL)
-		return fail(operation, errno, "cannot resolve %s: %s",
-			    directory, strerror(errno));
-	receiver.directory_fd =
-		open(receiver.directory, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
-	if (receiver.directory_fd < 0) {
-		fail(operation, errno, "cannot open receive directory %s: %s",
-		     directory, strerror(errno));
-		goto out;
-	}
-	if (snprintf(receiver.staging, sizeof(receiver.staging),
-		     "%s/.fplinux-bluetooth-XXXXXX",
-		     receiver.directory) >= (int)sizeof(receiver.staging)) {
-		receiver.staging[0] = '\0';
-		fail(operation, ENAMETOOLONG,
-		     "receive directory path is too long");
-		goto out;
-	}
-	if (mkdtemp(receiver.staging) == NULL) {
-		receiver.staging[0] = '\0';
-		fail(operation, errno,
-		     "cannot create private receive staging directory: %s",
-		     strerror(errno));
-		goto out;
-	}
-	receiver.staging_fd =
-		open(receiver.staging, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
-	if (receiver.staging_fd < 0) {
-		fail(operation, errno,
-		     "cannot open receive staging directory: %s",
-		     strerror(errno));
-		goto out;
-	}
+	if (open_destination(&receiver, false) != 0)
+		return status;
 	report(operation, FPLINUX_BLUETOOTH_OPP_CONNECTING);
-	if (!open_bus(operation))
-		goto out;
-	if (!dbus_connection_register_object_path(
-		    operation->connection, agent_path, &vtable, &receiver)) {
-		fail(operation, ENOMEM,
-		     "cannot register receive authorization agent");
-		goto out;
-	}
-	receiver.object_registered = true;
-	if (!agent_method(&receiver, "RegisterAgent", agent_path, false))
-		goto out;
-	receiver.agent_registered = true;
-	if (!operation->done) {
-		report(operation, FPLINUX_BLUETOOTH_OPP_WAITING);
-	}
-	status = wait_for_transfer(operation, seconds, true);
-	if (status == 0)
-		status = publish_received(&receiver);
-out:
-	if (receiver.authorization != NULL) {
-		agent_reply(
-			operation->connection,
-			dbus_message_new_error(receiver.authorization,
-					       "org.bluez.obex.Error.Canceled",
-					       "receive window closed"));
-		dbus_message_unref(receiver.authorization);
-		receiver.authorization = NULL;
+	if (register_receiver(&receiver)) {
+		if (!operation->done)
+			report(operation, FPLINUX_BLUETOOTH_OPP_WAITING);
+		status = wait_for_transfer(operation, seconds, true);
+		if (status == 0)
+			status = publish_received(&receiver);
 	}
 	if (status != 0)
 		cancel_transfer(operation);
-	if (receiver.agent_registered)
-		agent_method(&receiver, "UnregisterAgent", agent_path, true);
-	if (receiver.object_registered)
-		dbus_connection_unregister_object_path(operation->connection,
-						       agent_path);
-	close_bus(operation);
-	if (receiver.file_fd >= 0)
-		close(receiver.file_fd);
 	/* Preserve complete files only when publication failed after transfer. */
 	bool retained = operation->success && !result->published &&
 			result->path[0] != '\0' &&
 			result->outcome != FPLINUX_BLUETOOTH_OPP_CANCELLED;
-	if (!retained && receiver.staging_fd >= 0 &&
-	    receiver.filename[0] != '\0')
-		unlinkat(receiver.staging_fd, receiver.filename, 0);
-	if (receiver.staging_fd >= 0)
-		close(receiver.staging_fd);
-	if (!retained && receiver.staging[0] != '\0')
-		rmdir(receiver.staging);
-	if (receiver.directory_fd >= 0)
-		close(receiver.directory_fd);
-	if (!retained && !result->published)
-		result->path[0] = '\0';
+	close_offer(&receiver, retained);
+	close_receiver(&receiver);
 	return status;
+}
+
+static void finish_offer(struct receiver *receiver, bool valid)
+{
+	struct operation *operation = &receiver->operation;
+	if (valid && receiver->authorized && operation->success) {
+		publish_received(receiver);
+	} else if (receiver->authorized) {
+		cancel_transfer(operation);
+		if (operation->result->message[0] == '\0')
+			fail(operation, EIO,
+			     "incoming Bluetooth transfer ended");
+	}
+	close_offer(receiver, false);
+	if (receiver->offer_ready)
+		receiver->listener->finished(receiver->accepted,
+					     operation->result,
+					     operation->callbacks->data);
+	receiver->offer_ready = false;
+	receiver->accepted = false;
+	receiver->authorized = false;
+	receiver->last_bytes = 0;
+	operation->done = false;
+	operation->success = false;
+	operation->transfer[0] = '\0';
+	operation->status[0] = '\0';
+	operation->progress = (struct fplinux_bluetooth_opp_progress){ 0 };
+	*operation->result = (struct fplinux_bluetooth_opp_result){ 0 };
+}
+
+static int next_offer_timeout(const struct receiver *receiver, int64_t now)
+{
+	int64_t deadline;
+	if (receiver->authorized)
+		deadline = receiver->transfer_deadline_ms;
+	else if (receiver->authorization != NULL)
+		deadline = receiver->authorize_deadline_ms;
+	else
+		return -1;
+	return now < deadline ? (int)(deadline - now) : 0;
+}
+
+void fplinux_bluetooth_opp_listen(
+	const char *directory,
+	const struct fplinux_bluetooth_opp_callbacks *callbacks,
+	const struct fplinux_bluetooth_opp_listener *listener)
+{
+	struct fplinux_bluetooth_opp_result result = { 0 };
+	struct receiver receiver = {
+		.operation = { .callbacks = callbacks,
+			       .result = &result,
+			       .receiving = true },
+		.listener = listener,
+		.destination = directory,
+		.directory_fd = -1,
+		.staging_fd = -1,
+		.file_fd = -1,
+	};
+	struct operation *operation = &receiver.operation;
+	void *data = callbacks->data;
+
+	while (!is_cancelled(operation)) {
+		if (operation->connection == NULL) {
+			if (listener->suspended(false, data)) {
+				listener->registered(false, data);
+				listener->wait(-1, -1, data);
+				continue;
+			}
+			operation->call_deadline_ms =
+				fplinux_bluetooth_now_ms() + 2000;
+			bool registered = register_receiver(&receiver);
+			operation->call_deadline_ms = 0;
+			listener->registered(registered, data);
+			if (!registered) {
+				finish_offer(&receiver, false);
+				close_receiver(&receiver);
+				listener->wait(-1, SERVICE_RETRY_MS, data);
+				continue;
+			}
+		}
+
+		bool connected =
+			dbus_connection_read_write(operation->connection, 0);
+		while (connected &&
+		       dbus_connection_get_dispatch_status(
+			       operation->connection) ==
+			       DBUS_DISPATCH_DATA_REMAINS &&
+		       !is_cancelled(operation))
+			dbus_connection_dispatch(operation->connection);
+		if (!connected || operation->owner_lost ||
+		    receiver.release_requested) {
+			finish_offer(&receiver, false);
+			close_receiver(&receiver);
+			listener->registered(false, data);
+			continue;
+		}
+
+		bool busy = receiver.authorization != NULL ||
+			    receiver.authorized;
+		if (listener->suspended(busy, data)) {
+			close_receiver(&receiver);
+			listener->registered(false, data);
+			continue;
+		}
+		if (is_cancelled(operation))
+			break;
+		poll_authorization(operation);
+		int64_t now = fplinux_bluetooth_now_ms();
+		if (receiver.authorized &&
+		    operation->progress.transferred_bytes >
+			    receiver.last_bytes) {
+			receiver.last_bytes =
+				operation->progress.transferred_bytes;
+			receiver.transfer_deadline_ms =
+				now + RECEIVE_IDLE_TIMEOUT_MS;
+		}
+		if (receiver.authorized &&
+		    (!offer_allowed(&receiver) || operation->owner_lost ||
+		     receiver.release_requested ||
+		     now >= receiver.transfer_deadline_ms))
+			finish_offer(&receiver, false);
+		else if (operation->done || (busy && !receiver.authorized &&
+					     receiver.authorization == NULL))
+			finish_offer(&receiver, true);
+		int fd;
+		if (!dbus_connection_get_unix_fd(operation->connection, &fd)) {
+			finish_offer(&receiver, false);
+			close_receiver(&receiver);
+			listener->registered(false, data);
+			listener->wait(-1, SERVICE_RETRY_MS, data);
+			continue;
+		}
+		if (!is_cancelled(operation))
+			listener->wait(fd, next_offer_timeout(&receiver, now),
+				       data);
+	}
+	finish_offer(&receiver, false);
+	close_receiver(&receiver);
 }

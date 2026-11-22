@@ -1194,6 +1194,14 @@ def test_actual_quick_settings_follow_manager_and_bluez_with_whole_rows(  # noqa
     }
     assert len(states) == 5
 
+    bar_size = width * bars[0] * 2
+    no_address, connected, disconnected = (
+        (tmp_path / f"quick-wifi-{name}.rgb565").read_bytes()[:bar_size]
+        for name in ("no-address", "connected", "disconnected")
+    )
+    assert no_address == disconnected
+    assert connected != disconnected
+
 
 # The soft-key legends of the Settings Bluetooth screens, as left|centre|right.
 APPLICATION_LEGENDS = ("|Open|Back", "|Turn on|Back", "|Turn off|Back", "||", "||Close", "||Back")

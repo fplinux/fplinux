@@ -165,6 +165,8 @@ struct fplinux_session_wireless {
 	uint32_t wifi_cancel;
 	uint32_t wifi_ready;
 	enum fplinux_ui_wifi_result wifi_result;
+	enum fplinux_ui_wifi_link wifi_link;
+	struct fplinux_ui_wifi_network wifi_connected;
 };
 
 static struct fplinux_session_wireless *test_wireless;
@@ -258,14 +260,16 @@ void fplinux_session_wireless_wifi_state(
 			 wireless->state.enabled ? FPLINUX_UI_WIFI_ON :
 						   FPLINUX_UI_WIFI_OFF,
 		.link = wireless->wifi_request ? FPLINUX_UI_WIFI_CONNECTING :
-						 FPLINUX_UI_WIFI_DISCONNECTED,
+						 wireless->wifi_link,
 	};
-	if (wireless->wifi_request)
+	if (state->link != FPLINUX_UI_WIFI_DISCONNECTED)
 		state->current = (struct fplinux_ui_wifi_network){
 			.id = 5,
 			.security = FPLINUX_UI_WIFI_WPA2,
 			.name = "Hidden fixture",
 		};
+	if (state->link == FPLINUX_UI_WIFI_CONNECTED)
+		strcpy(state->address, "192.0.2.4");
 }
 
 int fplinux_session_wireless_wifi_request(
@@ -288,12 +292,15 @@ int fplinux_session_wireless_wifi_request(
 
 bool fplinux_session_wireless_take_wifi_result(
 	struct fplinux_session_wireless *wireless, uint32_t *ticket,
-	enum fplinux_ui_wifi_result *result)
+	enum fplinux_ui_wifi_result *result,
+	struct fplinux_ui_wifi_network *connected)
 {
 	if (!wireless->wifi_ready)
 		return false;
 	*ticket = wireless->wifi_ready;
 	*result = wireless->wifi_result;
+	*connected = wireless->wifi_connected;
+	wireless->wifi_connected = (struct fplinux_ui_wifi_network){ 0 };
 	wireless->wifi_ready = 0;
 	return true;
 }
@@ -4370,6 +4377,7 @@ static void test_wifi_station_requests(struct fixture *fixture)
 	struct peer *launcher = start_launcher(fixture);
 	struct peer *settings;
 	struct fplinux_ui_session_message response;
+	struct fplinux_session_indicator wifi_indicator;
 	const struct fplinux_ui_session_message connect = {
 		.type = FPLINUX_UI_SESSION_WIFI_REQUEST,
 		.serial = 17,
@@ -4427,6 +4435,41 @@ static void test_wifi_station_requests(struct fixture *fixture)
 				FPLINUX_UI_SESSION_WIFI_RESULT, NULL);
 	CHECK(response.serial == cancel.serial &&
 	      response.wifi_result == FPLINUX_UI_WIFI_APPLIED);
+	wifi_indicator = indicator(fixture);
+	CHECK(!wifi_indicator.wifi_name[0]);
+	while (take_message(launcher, FPLINUX_UI_SESSION_WIFI_STATUS, NULL,
+			    &response))
+		;
+	issue(fixture, settings, &connect);
+	test_wireless->wifi_ready = test_wireless->wifi_request;
+	test_wireless->wifi_request = 0;
+	test_wireless->wifi_connected = (struct fplinux_ui_wifi_network){
+		.id = 8,
+		.name = "Hidden fixture",
+		.security = FPLINUX_UI_WIFI_WPA2,
+	};
+	test_wireless->wifi_link = FPLINUX_UI_WIFI_CONNECTED;
+	wireless_notify(test_wireless);
+	response = wait_message(fixture, settings,
+				FPLINUX_UI_SESSION_WIFI_RESULT, NULL);
+	CHECK(response.serial == connect.serial);
+	do {
+		response = wait_message(fixture, launcher,
+					FPLINUX_UI_SESSION_WIFI_STATUS, NULL);
+	} while (response.wifi_status.link != FPLINUX_UI_WIFI_CONNECTED);
+	CHECK(!strcmp(response.wifi_status.name, "Hidden fixture"));
+	wifi_indicator = indicator(fixture);
+	CHECK(wifi_indicator.visible &&
+	      !strcmp(wifi_indicator.wifi_name, "Hidden fixture"));
+	CHECK(fplinux_session_focused_pid(fixture->session) == settings->pid);
+	fixture->now_ms += 2000;
+	wireless_notify(test_wireless);
+	pump(fixture, 16);
+	CHECK(indicator(fixture).visible);
+	fixture->now_ms += 1001;
+	pump(fixture, 16);
+	wifi_indicator = indicator(fixture);
+	CHECK(!wifi_indicator.visible && !wifi_indicator.wifi_name[0]);
 	fplinux_session_home(fixture->session);
 	response = active_for(fixture, launcher, "");
 	acknowledge(fixture, launcher, &response);

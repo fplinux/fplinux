@@ -41,6 +41,7 @@ global:
 	fplinux_ui_view_settings_choice_new;
 	fplinux_ui_program_prefs_open;
 	fplinux_ui_open_file;
+	fplinux_ui_send_file_bluetooth;
 	fplinux_ui_set_storage_handler;
 	fplinux_ui_storage_request;
 	fplinux_utf8_contains_casefold;

@@ -231,6 +231,11 @@ struct settings_app {
 
 	struct fplinux_bluez_adapter *bluetooth;
 	struct fplinux_settings_bluetooth *bluetooth_view;
+	lv_timer_t *bluetooth_send_timer;
+	uint64_t bluetooth_send_deadline;
+	uint32_t bluetooth_send_request;
+	char bluetooth_send_path[FPLINUX_UI_SESSION_PATH_BYTES];
+	bool bluetooth_receive_ready;
 	bool bluetooth_row;
 	struct fplinux_settings_wifi *wifi;
 	bool wifi_row;
@@ -1629,8 +1634,94 @@ static void open_bluetooth(struct settings_app *app)
 	if (!app->bluetooth_view)
 		app->bluetooth_view =
 			fplinux_settings_bluetooth_new(app->ui, app->bluetooth);
-	if (app->bluetooth_view)
+	if (app->bluetooth_view) {
+		fplinux_settings_bluetooth_receive_status(
+			app->bluetooth_view, app->bluetooth_receive_ready);
 		fplinux_settings_bluetooth_show(app->bluetooth_view);
+	}
+}
+
+static struct fplinux_ui_document_result
+send_bluetooth(struct settings_app *app, const char *path)
+{
+	if (!app->bluetooth_view)
+		app->bluetooth_view =
+			fplinux_settings_bluetooth_new(app->ui, app->bluetooth);
+	if (app->bluetooth_view &&
+	    fplinux_settings_bluetooth_send(app->bluetooth_view, path)) {
+		fplinux_settings_bluetooth_receive_status(
+			app->bluetooth_view, app->bluetooth_receive_ready);
+		return (struct fplinux_ui_document_result){
+			.status = FPLINUX_UI_DOCUMENT_ACCEPTED,
+		};
+	}
+	return (struct fplinux_ui_document_result){
+		.status = FPLINUX_UI_DOCUMENT_ERROR,
+		.error = errno ? errno : EIO,
+	};
+}
+
+/* Settings may receive the document before its first BlueZ snapshot. */
+static void bluetooth_send_tick(lv_timer_t *timer)
+{
+	struct settings_app *app = lv_timer_get_user_data(timer);
+	struct fplinux_ui_document_result result;
+
+	if (fplinux_ui_lifecycle(app->ui) != FPLINUX_UI_FOREGROUND) {
+		result = (struct fplinux_ui_document_result){
+			.status = FPLINUX_UI_DOCUMENT_CANCELLED,
+		};
+	} else if (fplinux_bluez_adapter_present(app->bluetooth)) {
+		result = send_bluetooth(app, app->bluetooth_send_path);
+	} else if (fplinux_ui_now_ms() < app->bluetooth_send_deadline) {
+		return;
+	} else {
+		result = (struct fplinux_ui_document_result){
+			.status = FPLINUX_UI_DOCUMENT_ERROR,
+			.error = ENODEV,
+		};
+	}
+	app->bluetooth_send_timer = NULL;
+	lv_timer_delete(timer);
+	fplinux_ui_document_reply(app->ui, app->bluetooth_send_request,
+				  result.status, result.error);
+	app->bluetooth_send_request = 0;
+}
+
+static struct fplinux_ui_document_result
+bluetooth_document(struct fplinux_ui *ui,
+		   const struct fplinux_ui_document_request *request,
+		   void *context)
+{
+	struct settings_app *app = context;
+
+	(void)ui;
+	if (!app->bluetooth)
+		return (struct fplinux_ui_document_result){
+			.status = FPLINUX_UI_DOCUMENT_ERROR,
+			.error = ENODEV,
+		};
+	if (fplinux_bluez_adapter_present(app->bluetooth))
+		return send_bluetooth(app, request->path);
+	if (app->bluetooth_send_timer)
+		return (struct fplinux_ui_document_result){
+			.status = FPLINUX_UI_DOCUMENT_ERROR,
+			.error = EBUSY,
+		};
+	app->bluetooth_send_timer =
+		lv_timer_create(bluetooth_send_tick, 100, app);
+	if (!app->bluetooth_send_timer)
+		return (struct fplinux_ui_document_result){
+			.status = FPLINUX_UI_DOCUMENT_ERROR,
+			.error = ENOMEM,
+		};
+	app->bluetooth_send_request = request->request_id;
+	app->bluetooth_send_deadline = fplinux_ui_now_ms() + 2000;
+	snprintf(app->bluetooth_send_path, sizeof(app->bluetooth_send_path),
+		 "%s", request->path);
+	return (struct fplinux_ui_document_result){
+		.status = FPLINUX_UI_DOCUMENT_WAIT
+	};
 }
 
 static void root_command(struct fplinux_ui *ui, struct fplinux_ui_screen *list,
@@ -2163,6 +2254,15 @@ static void handle_event(struct fplinux_ui *ui,
 		receive_system_levels(app);
 		break;
 	case FPLINUX_UI_EVENT_SESSION:
+		if (!message)
+			break;
+		if (message->type == FPLINUX_UI_SESSION_BLUETOOTH_READY) {
+			app->bluetooth_receive_ready = message->enabled;
+			fplinux_settings_bluetooth_receive_status(
+				app->bluetooth_view,
+				app->bluetooth_receive_ready);
+			break;
+		}
 		if (message->type == FPLINUX_UI_SESSION_WIFI_STATE ||
 		    message->type == FPLINUX_UI_SESSION_WIFI_RESULT) {
 			receive_wifi(app, message);
@@ -2245,6 +2345,7 @@ static void handle_event(struct fplinux_ui *ui,
 							  app->gauge_item,
 							  (int)app->brightness);
 		} else {
+			fplinux_settings_wifi_foreground(app->wifi);
 			recover_choice(app);
 			/* The system bus may have started or restarted since. */
 			if (app->bluetooth)
@@ -2278,23 +2379,13 @@ static void handle_event(struct fplinux_ui *ui,
 		fplinux_settings_bluetooth_event(app->bluetooth_view, event);
 }
 
-static void storage_result(struct fplinux_ui *ui,
-			   const struct fplinux_volume_result *result,
-			   void *context)
-{
-	struct settings_app *app = context;
-
-	(void)ui;
-	if (app->bluetooth_view)
-		fplinux_settings_bluetooth_storage_result(app->bluetooth_view,
-							  result);
-}
-
 static void close_bluetooth(struct settings_app *app)
 {
 	struct fplinux_settings_bluetooth *view = app->bluetooth_view;
 
 	app->bluetooth_view = NULL;
+	if (app->bluetooth_send_timer)
+		lv_timer_delete(app->bluetooth_send_timer);
 	if (view)
 		fplinux_settings_bluetooth_free(view);
 	fplinux_bluez_adapter_close(app->bluetooth);
@@ -2327,7 +2418,7 @@ int main(int argc, char **argv)
 	snprintf(app.locale, sizeof(app.locale), "%s",
 		 fplinux_ui_locale(app.ui));
 	fplinux_ui_set_close_handler(app.ui, prepare_close, &app);
-	fplinux_ui_set_storage_handler(app.ui, storage_result, &app);
+	fplinux_ui_set_document_handler(app.ui, bluetooth_document, &app);
 	app.clock_timer = lv_timer_create(clock_tick, 60000, &app);
 	lv_timer_pause(app.clock_timer);
 	app.bluetooth = fplinux_bluez_adapter_open(

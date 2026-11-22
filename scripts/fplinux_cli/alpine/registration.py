@@ -151,7 +151,12 @@ SHARED_APORT_SOURCES = {
         *CLI_SOURCES,
         *BRIGHTNESS_CLIENT_SOURCES,
     ),
-    "fplinux-bluetooth": (*CLI_SOURCES, *BLUETOOTH_OPP_SOURCES),
+    "fplinux-bluetooth": (
+        *CLI_SOURCES,
+        *BLUEZ_ADAPTER_SOURCES,
+        *BLUETOOTH_OPP_SOURCES,
+        "include/fplinux/fplinux-bluetooth-receive.h",
+    ),
     "fplinux-brand": (
         "alpine/aports/fplinux-icons/svgraster.py",
         "lib/fplinux/fplinux-ui-profile.json",
@@ -261,6 +266,7 @@ SHARED_APORT_SOURCES = {
         *AUDIO_CLIENT_SOURCES,
         *AUDIO_CONTROL_SOURCES,
         *AUDIO_STATUS_SOURCES,
+        "include/fplinux/fplinux-bluetooth-receive.h",
         *DRM_SESSION_SOURCES,
         *STATUS_SCREEN_SOURCES,
         *CLI_SOURCES,

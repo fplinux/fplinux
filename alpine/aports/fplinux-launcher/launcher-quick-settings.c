@@ -97,8 +97,11 @@ static void show_action(struct fplinux_launcher_quick_settings *quick)
 	if (!quick->list)
 		return;
 	if (!quick->editing && row == FPLINUX_LAUNCHER_QUICK_SETTING_WIFI &&
-	    quick->wifi_known && !quick->wifi_pending)
-		action = quick->wifi_on ? _("Turn off") : _("Turn on");
+	    quick->wifi_status.power != FPLINUX_UI_WIFI_UNAVAILABLE &&
+	    !quick->wifi_pending)
+		action = quick->wifi_status.power == FPLINUX_UI_WIFI_ON ?
+				 _("Turn off") :
+				 _("Turn on");
 	if (!quick->editing &&
 	    row == FPLINUX_LAUNCHER_QUICK_SETTING_BLUETOOTH &&
 	    bluetooth_present(quick) &&
@@ -107,6 +110,29 @@ static void show_action(struct fplinux_launcher_quick_settings *quick)
 				 _("Turn off") :
 				 _("Turn on");
 	fplinux_ui_list_set_select_label(quick->list, action);
+}
+
+static const char *
+wifi_detail(const struct fplinux_launcher_quick_settings *quick)
+{
+	if (quick->wifi_pending)
+		return quick->wifi_turning_on ? _("Turning on") :
+						_("Turning off");
+	if (quick->wifi_status.power != FPLINUX_UI_WIFI_ON)
+		return NULL;
+	switch (quick->wifi_status.link) {
+	case FPLINUX_UI_WIFI_DISCONNECTED:
+		return _("No network");
+	case FPLINUX_UI_WIFI_CONNECTING:
+		return _("Connecting…");
+	case FPLINUX_UI_WIFI_ADDRESSING:
+		return _("Getting IP address…");
+	case FPLINUX_UI_WIFI_CONNECTED:
+		return quick->wifi_status.name;
+	case FPLINUX_UI_WIFI_NO_ADDRESS:
+		return _("No IP address");
+	}
+	return NULL;
 }
 
 static void show_rows(struct fplinux_launcher_quick_settings *quick)
@@ -120,7 +146,7 @@ static void show_rows(struct fplinux_launcher_quick_settings *quick)
 		return;
 	rows[count++] = FPLINUX_LAUNCHER_QUICK_SETTING_BRIGHTNESS;
 	rows[count++] = FPLINUX_LAUNCHER_QUICK_SETTING_VOLUME;
-	if (quick->wifi_known)
+	if (quick->wifi_status.power != FPLINUX_UI_WIFI_UNAVAILABLE)
 		rows[count++] = FPLINUX_LAUNCHER_QUICK_SETTING_WIFI;
 	if (bluetooth_present(quick))
 		rows[count++] = FPLINUX_LAUNCHER_QUICK_SETTING_BLUETOOTH;
@@ -151,10 +177,8 @@ static void show_rows(struct fplinux_launcher_quick_settings *quick)
 		const struct row_descriptor *descriptor = &descriptors[row];
 		const char *detail = NULL;
 
-		if (row == FPLINUX_LAUNCHER_QUICK_SETTING_WIFI &&
-		    quick->wifi_pending)
-			detail = quick->wifi_turning_on ? _("Turning on") :
-							  _("Turning off");
+		if (row == FPLINUX_LAUNCHER_QUICK_SETTING_WIFI)
+			detail = wifi_detail(quick);
 		if (row == FPLINUX_LAUNCHER_QUICK_SETTING_BLUETOOTH &&
 		    fplinux_bluez_adapter_pending(quick->bluetooth))
 			detail = quick->bluetooth_turning_on ? _("Turning on") :
@@ -180,7 +204,8 @@ static void show_rows(struct fplinux_launcher_quick_settings *quick)
 							     _("Loading…"));
 		} else {
 			bool on = row == FPLINUX_LAUNCHER_QUICK_SETTING_WIFI ?
-					  quick->wifi_on :
+					  quick->wifi_status.power ==
+						  FPLINUX_UI_WIFI_ON :
 					  fplinux_bluez_adapter_powered(
 						  quick->bluetooth);
 
@@ -382,6 +407,11 @@ bool fplinux_launcher_quick_settings_receive(
 	int value;
 	enum fplinux_ui_setting_kind kind = setting->kind;
 
+	if (message->type == FPLINUX_UI_SESSION_WIFI_STATUS) {
+		quick->wifi_status = message->wifi_status;
+		show_rows(quick);
+		return true;
+	}
 	if (message->type != FPLINUX_UI_SESSION_SETTING &&
 	    message->type != FPLINUX_UI_SESSION_ERROR)
 		return false;
@@ -401,12 +431,8 @@ bool fplinux_launcher_quick_settings_receive(
 	if (row == FPLINUX_LAUNCHER_QUICK_SETTING_WIFI) {
 		if (message->type == FPLINUX_UI_SESSION_SETTING &&
 		    setting->operation == FPLINUX_UI_SETTING_RESULT) {
-			quick->wifi_known = true;
-			quick->wifi_on = setting->value.enabled;
 			quick->wifi_pending = false;
 		} else if (message->type == FPLINUX_UI_SESSION_ERROR) {
-			if (!strcmp(message->reason, "unsupported"))
-				quick->wifi_known = false;
 			if (quick->wifi_pending) {
 				quick->wifi_pending = false;
 				setting_error(quick, descriptor, message);
@@ -516,9 +542,10 @@ void fplinux_launcher_quick_settings_bluetooth_finished(
 static void toggle(struct fplinux_launcher_quick_settings *quick,
 		   enum fplinux_launcher_quick_setting row)
 {
-	if (row == FPLINUX_LAUNCHER_QUICK_SETTING_WIFI && quick->wifi_known &&
+	if (row == FPLINUX_LAUNCHER_QUICK_SETTING_WIFI &&
+	    quick->wifi_status.power != FPLINUX_UI_WIFI_UNAVAILABLE &&
 	    !quick->wifi_pending) {
-		bool value = !quick->wifi_on;
+		bool value = quick->wifi_status.power == FPLINUX_UI_WIFI_OFF;
 
 		quick->wifi_turning_on = value;
 		quick->wifi_pending = send_setting(
@@ -661,8 +688,6 @@ void fplinux_launcher_quick_settings_open(
 	show_rows(quick);
 	fplinux_ui_push(quick->ui, quick->list);
 	view_changed(quick);
-	send_setting(quick, FPLINUX_UI_SETTING_WIFI, FPLINUX_UI_SETTING_GET,
-		     (union fplinux_ui_setting_value){ 0 });
 	if (quick->bluetooth)
 		fplinux_bluez_adapter_connect(quick->bluetooth);
 }

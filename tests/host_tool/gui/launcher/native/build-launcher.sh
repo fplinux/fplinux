@@ -57,7 +57,7 @@ ui_host_compile -pthread -I"$common" -I"$screens_dir" -I"$session" \
 	-I"$root/include" -I"$root/include/fplinux" -I"$ui_host_inputs" \
 	$(pkg-config --cflags wayland-server xkbcommon json-c dbus-1) \
 	"$screens_dir/launcher-session-volume.c" "$common/ui-frame-peer.c" \
-	"$session/session-core.c" "$session/session-child.c" \
+	"$session/session-core.c" "$session/session-child.c" "$session/session-bluetooth.c" \
 	"$session/session-storage.c" "$session/session-audio.c" "$session/session-volume.c" \
 	"$ui_host_shared/fplinux-audio-control.c" "$ui_host_shared/fplinux-audio-status.c" \
 	"$session/session-vibration.c" "$session/session-vibrator.c" \

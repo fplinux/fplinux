@@ -234,6 +234,9 @@ bool fplinux_ui_close_reply(struct fplinux_ui *ui,
  * event, not a successful send. The callback may return WAIT and reply later.
  */
 uint32_t fplinux_ui_open_file(struct fplinux_ui *ui, const char *absolute_path);
+/* Hand a file to Bluetooth Settings and report the handoff as a document result. */
+uint32_t fplinux_ui_send_file_bluetooth(struct fplinux_ui *ui,
+					const char *absolute_path);
 void fplinux_ui_set_document_handler(struct fplinux_ui *ui,
 				     fplinux_ui_document_cb callback,
 				     void *context);

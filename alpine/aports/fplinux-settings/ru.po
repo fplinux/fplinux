@@ -243,8 +243,17 @@ msgstr "Сопряжённые устройства"
 msgid "Send file"
 msgstr "Отправить файл"
 
-msgid "Receive files"
-msgstr "Принять файлы"
+msgid "File reception"
+msgstr "Приём файлов"
+
+msgid "Connections disabled"
+msgstr "Входящие выкл."
+
+msgid "Service unavailable"
+msgstr "Служба недоступна"
+
+msgid "Ready"
+msgstr "Готов"
 
 msgid "File transfer"
 msgstr "Передача файлов"
@@ -260,12 +269,6 @@ msgstr "2 минуты"
 
 msgid "Always visible"
 msgstr "Всегда виден"
-
-msgid "In progress"
-msgstr "Выполняется"
-
-msgid "Idle"
-msgstr "Нет передачи"
 
 msgid "Search"
 msgstr "Поиск"
@@ -424,6 +427,9 @@ msgstr "Слишком длинное имя."
 msgid "Saving name…"
 msgstr "Сохранение имени…"
 
+msgid "Use model name"
+msgstr "Имя модели"
+
 msgid "Pairing"
 msgstr "Сопряжение"
 
@@ -494,43 +500,8 @@ msgstr "Завершение…"
 msgid "Bluetooth operation failed. Try again."
 msgstr "Операция Bluetooth не выполнена. Попробуйте ещё раз."
 
-msgid "No application can open this file type."
-msgstr "Нет приложения для открытия файлов этого типа."
-
-msgid "Cannot open this file."
-msgstr "Не удалось открыть файл."
-
 msgid "Send to"
 msgstr "Отправить на"
-
-msgid "Receive from"
-msgstr "Принять от"
-
-msgid "Receive into"
-msgstr "Папка приёма"
-
-msgid "Incoming file"
-msgstr "Входящий файл"
-
-msgid "Receive"
-msgstr "Принять"
-
-#, c-format
-msgid "Receive %s from %s?"
-msgstr "Принять файл %s от %s?"
-
-msgid "File exists"
-msgstr "Файл существует"
-
-#, c-format
-msgid "%s already exists."
-msgstr "%s уже существует."
-
-msgid "Keep both"
-msgstr "Сохранить оба"
-
-msgid "Replace"
-msgstr "Заменить"
 
 msgid "File"
 msgstr "Файл"
@@ -538,20 +509,8 @@ msgstr "Файл"
 msgid "Transferred"
 msgstr "Передано"
 
-msgid "Location"
-msgstr "Расположение"
-
-msgid "Waiting for a file · 2 minutes"
-msgstr "Ожидание файла · 2 минуты"
-
-msgid "Waiting for consent…"
-msgstr "Ожидание согласия…"
-
 msgid "Transferring…"
 msgstr "Передача…"
-
-msgid "Saving file…"
-msgstr "Сохранение файла…"
 
 #, c-format
 msgid "%llu / %llu bytes"
@@ -570,17 +529,11 @@ msgstr "Отменено"
 msgid "Failed"
 msgstr "Ошибка"
 
-msgid "The file is visible. Saving was not confirmed."
-msgstr "Файл виден. Сохранение не подтверждено."
-
 msgid "No file transfers in this session."
 msgstr "В этом сеансе ещё не было передач."
 
 msgid "Transfer details"
 msgstr "Сведения о передаче"
-
-msgid "Open file"
-msgstr "Открыть файл"
 
 msgid "Stop the current file transfer and close Settings?"
 msgstr "Остановить текущую передачу файлов и закрыть настройки?"
@@ -615,9 +568,6 @@ msgstr "Подключение"
 msgid "Properties"
 msgstr "Свойства"
 
-msgid "Available networks"
-msgstr "Доступные сети"
-
 msgid "Saved networks"
 msgstr "Сохранённые сети"
 
@@ -639,8 +589,8 @@ msgstr "Сетей не найдено"
 msgid "Refresh"
 msgstr "Обновить"
 
-msgid "Add network"
-msgstr "Добавить сеть"
+msgid "Add hidden network"
+msgstr "Добавить скрытую сеть"
 
 msgid "Network name"
 msgstr "Имя сети"
@@ -666,6 +616,9 @@ msgstr "Пароль"
 msgid "Save network"
 msgstr "Сохранить сеть"
 
+msgid "Only once"
+msgstr "Только один раз"
+
 msgid "Enter a network name of up to 32 bytes"
 msgstr "Введите имя сети длиной до 32 байт"
 
@@ -690,11 +643,17 @@ msgstr "Сеть недоступна"
 msgid "Incorrect password"
 msgstr "Неверный пароль"
 
-msgid "Could not join the network"
-msgstr "Не удалось войти в сеть"
+msgid "Connection timed out"
+msgstr "Время подключения истекло"
 
 msgid "Could not save network changes"
 msgstr "Не удалось сохранить изменения сети"
+
+msgid "Connected, but could not save the network"
+msgstr "Подключено. Не удалось сохранить сеть."
+
+msgid "No IP address. Could not save the network."
+msgstr "Не получен IP-адрес. Не удалось сохранить сеть."
 
 msgid "Wi-Fi operation failed"
 msgstr "Ошибка Wi-Fi"
