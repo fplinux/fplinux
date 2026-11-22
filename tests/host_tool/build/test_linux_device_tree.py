@@ -352,6 +352,17 @@ def test_compiled_nand_policy_keeps_chip_discovery_and_fixed_boards_distinct(
     assert declaration.get("raw_page_bytes") == expected_page_bytes
 
 
+def test_konrow_compiled_nand_uses_parallel_reader(tmp_path: Path) -> None:
+    """The parallel reader owns the fixed ID and needs the full parallel pin range."""
+    dtb = _compile_target_dtb(tmp_path, "konrow-senior-280-plus")
+    path = "/soc/nand-controller@21a00000"
+    properties = exact_path_properties(dtb, (path,))[path]
+
+    assert properties["compatible"] == b"fplinux,ums9117-nandc-parallel-ro\0"
+    assert "fplinux,nand-id" not in properties
+    assert len(properties["sprd,pinconf-values"]) == 17 * 4
+
+
 @pytest.fixture
 def nokia110_microsd_dtb(tmp_path: Path) -> Path:
     """Compile the board's DT projections; binding stubs do not validate peripherals."""

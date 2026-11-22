@@ -9,6 +9,9 @@ compatible = "konrow,senior-280-plus"
 
 [nand]
 raw_device = "/dev/ums9117-nand-raw"
+id = 0xba98
+raw_page_bytes = 1088
+ecc_format = "ums9117-bch12"
 
 [display]
 panel = "display/panel.toml"
@@ -74,8 +77,8 @@ session_name = "konrow-senior-280-plus-linux"
 boot_instructions = "Power the phone off, hold 1, then connect USB while keeping 1 pressed."
 
 [device_data]
+parser = "device-data/konrow280plus_device_data.py"
 originals_parser = "device-data/konrow280plus_device_data.py"
-required_groups = []
 
 [audio_profile]
 firmware = [

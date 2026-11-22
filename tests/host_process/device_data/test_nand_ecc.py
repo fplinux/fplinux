@@ -157,6 +157,41 @@ def test_page_crossing_selects_adjacent_sectors_and_skips_physical_oob(
     assert nand.raw == raw
 
 
+def test_compact_pages_keep_erased_sectors_and_remove_native_padding(
+    ecc_module: ModuleType, correction_process: Path
+) -> None:
+    """Correct a span across two 1024-byte main pages with two 512-byte codewords each."""
+    erased = b"\xff" * 512
+    erased_parity = b"\xff" * 21
+    parity = b"P" * 21
+    raw = (
+        _raw_page(b"A" * 512, erased, b"1" * 21, erased_parity)[:-64]
+        + _raw_page(b"B" * 512, b"C" * 512, parity, b"3" * 21)[:-64]
+    )
+    _child_response(
+        correction_process,
+        records=b"\xff" * 1024 + erased_parity + b"B" * 512 + bytes(512) + parity,
+        corrected=b"\xff" * 1024 + b"fixed" + b"b" * 507 + bytes(512),
+    )
+    assert ecc_module.decode_main(raw, 1088, 1022, 7, host_tools=correction_process) == (
+        b"\xff\xfffixed"
+    )
+
+
+def test_compact_page_rejects_corrections_outside_the_physical_sector(
+    ecc_module: ModuleType, correction_process: Path
+) -> None:
+    parity = b"P" * 21
+    raw = _raw_page(b"A" * 512, b"B" * 512, parity, b"2" * 21)[:-64]
+    _child_response(
+        correction_process,
+        records=b"A" * 512 + bytes(512) + parity,
+        corrected=b"A" * 512 + b"\x01" + bytes(511),
+    )
+    with pytest.raises(ValueError, match="codeword padding at 0x0"):
+        ecc_module.decode_main(raw, 1088, 0, 4, host_tools=correction_process)
+
+
 def test_read_inside_one_sector_excludes_a_corrupt_sector_on_the_same_page(
     ecc_module: ModuleType, correction_process: Path
 ) -> None:

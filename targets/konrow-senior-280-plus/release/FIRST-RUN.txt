@@ -40,24 +40,23 @@ Controls in this build:
 
 The side keys provide horizontal navigation. SOS has no assigned action. The torch uses its separate physical switch.
 
-MicroSD access, wired headphone playback, keypad lighting and battery voltage/current readings have worked on this phone. Insert the microSD card before powering on and leave it inserted until the phone is off. This is a data card for the RAM session, not a standalone Linux boot card.
+MicroSD access, wired headphone playback, keypad lighting and battery voltage/current readings have worked on this phone. Insert the microSD card before powering on and leave it inserted until the phone is off. The RAM session uses it as a data card.
 
-Use wired headphones and start at a low volume before increasing it. Playback uses generic levels. The loudspeaker, microphone, automatic headphone detection, vibration and Bluetooth are not enabled. The displayed battery level is an estimate from voltage and current.
+Use wired headphones and start at a low volume before increasing it. This build prepares the headphone playback profile from the phone's NAND backup. The loudspeaker, microphone, automatic headphone detection, vibration and Bluetooth are not enabled. The displayed battery level is an estimate from voltage and current.
 
 The processor temperature sensor and JPEG/rotation hardware are enabled for testing. Camera capture is not enabled.
 
-This build uses a 48 MiB RAM layout. It does not write internal storage.
-NAND access is limited to identifying the chip; raw backup is unavailable.
-No automatic NAND backup is attempted.
+This build uses a 48 MiB RAM layout and reads internal storage without writing
+to it. On first run, wait for the NAND backup and phone-data preparation to
+finish. Disconnect and start the launcher again when prompted.
 
-After Linux starts, open a second terminal on the PC in the extracted folder
-and run this single command, keeping USB connected:
+To reuse a 136 MiB Konrow backup, keep nand.bin and its matching nand.bin.json
+together. From the extracted directory run:
 
-    sh Run.sh nand identify
+    sh Run.sh run konrow-senior-280-plus --from-dump /path/to/nand.bin
 
-It attempts identification once and saves the reader audit before and after
-the attempt in runtime.log, including an I/O error. Send that runtime.log and
-run.json. Do not repeat the command in that session after an error.
+The launcher prepares the profile and continues to the normal connection
+prompt. Keep the NAND backup private.
 
 When SSH opens, run:
 

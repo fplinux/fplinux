@@ -10,7 +10,7 @@ config MACH_KONROW_SENIOR_280_PLUS
 	  Board support for the Konrow Senior 280 Plus, loaded into RAM
 	  over USB with a 48 MiB memory layout. The board provides a USB
 	  session, LCM display, matrix keypad, fixed-session microSD access,
-	  headphone playback, battery measurements and parallel NAND identification.
-	  Internal storage reads, speaker playback and Bluetooth are not enabled.
+	  headphone playback, battery measurements and raw parallel NAND reads.
+	  Speaker playback and Bluetooth are not enabled.
 
 endif

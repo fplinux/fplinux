@@ -12,6 +12,8 @@ PAGE_MAIN_BYTES = 2048
 PHYSICAL_PAGE_COUNT = 65536
 PAGES_PER_BLOCK = 64
 BLOCK_MAIN_BYTES = PAGE_MAIN_BYTES * PAGES_PER_BLOCK
+UMS9117_BCH12_RAW_PAGE_BYTES = (1088, 2176)
+KONROW_NAND_TARGET = "konrow-senior-280-plus"
 GEOMETRY_SIZE_KEYS = (
     "page_main_bytes",
     "oob_bytes",
@@ -86,8 +88,27 @@ def require_declared_chip(
         )
 
 
-def family_page_bytes(geometry: NandGeometry) -> int:
+def require_konrow_geometry(geometry: NandGeometry) -> None:
+    """Require the fitted parallel NAND chip and physical layout used by Konrow."""
+    layout = (
+        geometry.id_bytes,
+        geometry.page_main_bytes,
+        geometry.oob_bytes,
+        geometry.pages_per_block,
+        geometry.block_count,
+    )
+    if layout != ("98ba", 1024, 64, 64, 2048):
+        raise ValueError(
+            f"unsupported NAND geometry for {KONROW_NAND_TARGET}: expected id_bytes=98ba, "
+            "1024 main + 64 OOB bytes per page, 64 pages per block and 2048 blocks"
+        )
+
+
+def family_page_bytes(geometry: NandGeometry, *, target: str) -> int:
     """Return the physical page size of a geometry that device data can interpret."""
+    if target == KONROW_NAND_TARGET:
+        require_konrow_geometry(geometry)
+        return geometry.raw_page_bytes
     layout = (
         geometry.page_main_bytes,
         geometry.pages_per_block,

@@ -4,10 +4,10 @@
  *
  * The driver deliberately exposes no MTD, SPI, arbitrary-command, program or
  * erase path. The first open keeps the READ_ID result for the device lifetime.
- * SPI identities select a fixed physical layout; parallel NAND exposes only
- * identification, without admitting a layout or allowing array reads.
- * Each explicit SPI read checks the NAND identity and feature state before
- * returning bytes, then restores the controller's owned platform state.
+ * SPI identities select a fixed physical layout. Parallel NAND additionally
+ * requires a row-address check before admitting its fixed layout.
+ * Each array read checks the NAND identity and, for SPI, feature state.
+ * The driver restores its owned platform state before returning bytes.
  * Registering the device does not activate or identify the NAND.
  */
 #include <linux/bitops.h>
@@ -77,6 +77,7 @@
 #define UMS9117_NANDC_STATUS_ADDR_HIGH 0x210U
 #define UMS9117_NANDC_STATUS_ADDR_LOW 0x214U
 #define UMS9117_NANDC_INSTRUCTION_RAM 0x220U
+#define UMS9117_NANDC_START_JOB BIT(0)
 
 #define UMS9117_NANDC_AP_AHB_GATE BIT(9)
 #define UMS9117_NANDC_AP_AHB_RESET BIT(7)
@@ -122,6 +123,22 @@
 #define UMS9117_NANDC_DATA_CFG4 0x0000003aU
 #define UMS9117_NANDC_OOB_CFG0 0x00000058U
 #define UMS9117_NANDC_INVALID_DMA_ADDRESS 0xffffffffU
+#define UMS9117_NANDC_PARALLEL_ID_RESULT0_VALUE 0x5590ba98U
+#define UMS9117_NANDC_PARALLEL_ID_RESULT1_LOW 0x1676U
+#define UMS9117_NANDC_PARALLEL_MAIN_BYTES 1024U
+#define UMS9117_NANDC_PARALLEL_OOB_BYTES 64U
+#define UMS9117_NANDC_PARALLEL_RECORD_BYTES \
+	(UMS9117_NANDC_PARALLEL_MAIN_BYTES + UMS9117_NANDC_PARALLEL_OOB_BYTES)
+#define UMS9117_NANDC_PARALLEL_DMA_BYTES 4096U
+#define UMS9117_NANDC_PARALLEL_SPARE_DMA_OFFSET 2048U
+#define UMS9117_NANDC_PARALLEL_BLOCK_COUNT 2048U
+#define UMS9117_NANDC_PARALLEL_PAGE_COUNT \
+	(UMS9117_NANDC_PARALLEL_BLOCK_COUNT * UMS9117_NANDC_PAGES_PER_BLOCK)
+#define UMS9117_NANDC_PARALLEL_ROW_HIGH_BIT BIT(16)
+#define UMS9117_NANDC_PARALLEL_READ_CFG0 0x01000078U
+#define UMS9117_NANDC_PARALLEL_READ_CFG1 0x011f01ffU
+#define UMS9117_NANDC_PARALLEL_READ_CFG2 0x01000004U
+#define UMS9117_NANDC_PARALLEL_READ_START 0x00002001U
 
 enum ums9117_nandc_resource {
 	UMS9117_NANDC_RES_NANDC,
@@ -148,6 +165,7 @@ enum ums9117_nandc_fixed_operation {
 	UMS9117_NANDC_FIXED_PAGE_TO_CACHE,
 	UMS9117_NANDC_FIXED_READ_CACHE_X1,
 	UMS9117_NANDC_FIXED_READ_CACHE_OOB,
+	UMS9117_NANDC_FIXED_PARALLEL_PAGE_READ,
 };
 
 static const char *const ums9117_nandc_resource_names[] = {
@@ -230,7 +248,10 @@ struct ums9117_nandc {
 	u32 last_page;
 	u8 *staging_buffer;
 	void *page_buffer;
+	size_t page_buffer_bytes;
 	dma_addr_t page_dma;
+	u32 parallel_pairs_checked;
+	u32 parallel_distinct_pairs;
 	int last_error;
 	int page_read_error;
 	int lifecycle_restore_error;
@@ -254,6 +275,7 @@ struct ums9117_nandc {
 	bool read_ecc_disabled;
 	bool feature_restore_required;
 	bool nand_feature_restored;
+	bool parallel_nand;
 	bool parallel_id_only;
 	bool read_id_completed;
 };
@@ -288,8 +310,8 @@ static const u32 ums9117_nandc_pinconf_offsets[] = {
 
 static unsigned int ums9117_nandc_pinconf_count(struct ums9117_nandc *nandc)
 {
-	return nandc->parallel_id_only ? UMS9117_NANDC_PARALLEL_PINCONF_COUNT :
-					 UMS9117_NANDC_PINCONF_COUNT;
+	return nandc->parallel_nand ? UMS9117_NANDC_PARALLEL_PINCONF_COUNT :
+				      UMS9117_NANDC_PINCONF_COUNT;
 }
 
 static bool ums9117_nandc_b0_has_owned_ecc(u32 b0)
@@ -301,7 +323,7 @@ static bool ums9117_nandc_b0_has_owned_ecc(u32 b0)
 static bool ums9117_nandc_record_first_error(struct ums9117_nandc *nandc,
 					     int error, const char *stage)
 {
-	if (!nandc->parallel_id_only || nandc->first_error.stage)
+	if (!nandc->parallel_nand || nandc->first_error.stage)
 		return false;
 	nandc->first_error.stage = stage;
 	nandc->first_error.error = error;
@@ -338,6 +360,10 @@ static void ums9117_nandc_record_command_error(struct ums9117_nandc *nandc,
 	if (nandc->last_operation == UMS9117_NANDC_FIXED_RESET)
 		stage = command_started ? "nand-reset-wait" :
 					  "nand-reset-pre-start";
+	else if (nandc->last_operation ==
+		 UMS9117_NANDC_FIXED_PARALLEL_PAGE_READ)
+		stage = command_started ? "parallel-page-read-wait" :
+					  "parallel-page-read-pre-start";
 	else
 		stage = command_started ? "nand-read-id-wait" :
 					  "nand-read-id-pre-start";
@@ -480,7 +506,7 @@ static int ums9117_nandc_check_arm_boot_mode(struct ums9117_nandc *nandc)
 	if (ret)
 		return ret;
 	/* The parallel path is selected explicitly by its DT compatible. */
-	if (!nandc->parallel_id_only &&
+	if (!nandc->parallel_nand &&
 	    (nandc->arm_boot_mode & UMS9117_NANDC_ARM_BOOT_MODE_MASK) !=
 		    UMS9117_NANDC_ARM_BOOT_MODE_EXPECTED)
 		return -ENODEV;
@@ -513,7 +539,7 @@ static int ums9117_nandc_apply_clocks(struct ums9117_nandc *nandc)
 	void __iomem *clock_2x = nandc->regs[UMS9117_NANDC_RES_2X_CLOCK];
 	u32 observed;
 	u32 value;
-	u32 clock_2x_value = nandc->parallel_id_only ?
+	u32 clock_2x_value = nandc->parallel_nand ?
 				     UMS9117_NANDC_PARALLEL_CLOCK_2X_VALUE :
 				     UMS9117_NANDC_CLOCK_2X_VALUE;
 
@@ -521,7 +547,7 @@ static int ums9117_nandc_apply_clocks(struct ums9117_nandc *nandc)
 	nandc->clock_2x_snapshot = readl(clock_2x);
 	nandc->clock_snapshots_valid = true;
 	writel(clock_2x_value, clock_2x);
-	if (nandc->parallel_id_only)
+	if (nandc->parallel_nand)
 		value = nandc->ecc_clock_snapshot |
 			UMS9117_NANDC_CLOCK_ECC_VALUE;
 	else
@@ -676,8 +702,8 @@ static void ums9117_nandc_abort_command(struct ums9117_nandc *nandc)
 
 	writel(BIT(1), regs + UMS9117_NANDC_START);
 	readl(regs + UMS9117_NANDC_START);
-	writel(nandc->parallel_id_only ? UMS9117_NANDC_PARALLEL_INT_CLEAR_W1C :
-					 UMS9117_NANDC_INT_CLEAR_W1C,
+	writel(nandc->parallel_nand ? UMS9117_NANDC_PARALLEL_INT_CLEAR_W1C :
+				      UMS9117_NANDC_INT_CLEAR_W1C,
 	       regs + UMS9117_NANDC_INT);
 	readl(regs + UMS9117_NANDC_INT);
 }
@@ -701,18 +727,18 @@ static int ums9117_nandc_wait(struct ums9117_nandc *nandc)
 	unsigned int busy_polls = UMS9117_NANDC_BUSY_POLL_COUNT;
 	u32 raw;
 	u32 spi_status;
-	u32 fatal_mask = nandc->parallel_id_only ?
+	u32 fatal_mask = nandc->parallel_nand ?
 				 UMS9117_NANDC_PARALLEL_INT_FATAL_RAW :
 				 UMS9117_NANDC_INT_FATAL_RAW;
 
 	for (;;) {
 		raw = readl(regs + UMS9117_NANDC_INT);
-		spi_status = nandc->parallel_id_only ?
+		spi_status = nandc->parallel_nand ?
 				     0 :
 				     readl(regs + UMS9117_NANDC_SPI_STATUS);
 		nandc->last_int_raw = raw;
 		nandc->last_spi_status = spi_status;
-		if (!nandc->parallel_id_only)
+		if (!nandc->parallel_nand)
 			nandc->last_axim_status =
 				readl(regs + UMS9117_NANDC_AXIM_STS);
 		if (raw & fatal_mask) {
@@ -723,7 +749,7 @@ static int ums9117_nandc_wait(struct ums9117_nandc *nandc)
 		}
 		if ((raw & UMS9117_NANDC_INT_DONE_RAW) &&
 		    !(spi_status & UMS9117_NANDC_SPI_BUSY)) {
-			writel(nandc->parallel_id_only ?
+			writel(nandc->parallel_nand ?
 				       UMS9117_NANDC_PARALLEL_INT_CLEAR_W1C :
 				       UMS9117_NANDC_INT_CLEAR_W1C,
 			       regs + UMS9117_NANDC_INT);
@@ -746,24 +772,24 @@ static bool ums9117_nandc_feature_address_allowed(u8 address)
 
 static int ums9117_nandc_run_job(struct ums9117_nandc *nandc,
 				 const u16 *instructions,
-				 unsigned int instruction_count)
+				 unsigned int instruction_count, u32 start)
 {
 	void __iomem *regs = nandc->regs[UMS9117_NANDC_RES_NANDC];
 	u32 raw;
-	u32 fatal_mask = nandc->parallel_id_only ?
+	u32 fatal_mask = nandc->parallel_nand ?
 				 UMS9117_NANDC_PARALLEL_INT_FATAL_RAW :
 				 UMS9117_NANDC_INT_FATAL_RAW;
 	int ret;
 
 	if (nandc->failed)
 		return -EINVAL;
-	writel(nandc->parallel_id_only ? UMS9117_NANDC_PARALLEL_INT_CLEAR_W1C :
-					 UMS9117_NANDC_INT_CLEAR_W1C,
+	writel(nandc->parallel_nand ? UMS9117_NANDC_PARALLEL_INT_CLEAR_W1C :
+				      UMS9117_NANDC_INT_CLEAR_W1C,
 	       regs + UMS9117_NANDC_INT);
 	raw = readl(regs + UMS9117_NANDC_INT);
 	if (raw & (UMS9117_NANDC_INT_DONE_RAW | fatal_mask)) {
 		nandc->last_int_raw = raw;
-		if (!nandc->parallel_id_only) {
+		if (!nandc->parallel_nand) {
 			nandc->last_spi_status =
 				readl(regs + UMS9117_NANDC_SPI_STATUS);
 			nandc->last_axim_status =
@@ -778,7 +804,7 @@ static int ums9117_nandc_run_job(struct ums9117_nandc *nandc,
 					 instruction_count);
 	/* Publish the instruction RAM before starting the controller. */
 	wmb();
-	writel(1, regs + UMS9117_NANDC_START);
+	writel(start, regs + UMS9117_NANDC_START);
 	ret = ums9117_nandc_wait(nandc);
 	if (!ret)
 		nandc->completed_operations++;
@@ -815,7 +841,8 @@ ums9117_nandc_execute_parallel_id(struct ums9117_nandc *nandc,
 	writel(2, regs + UMS9117_NANDC_CFG0);
 	writel(readl(regs + UMS9117_NANDC_CFG4) | BIT(1),
 	       regs + UMS9117_NANDC_CFG4);
-	return ums9117_nandc_run_job(nandc, instructions, instruction_count);
+	return ums9117_nandc_run_job(nandc, instructions, instruction_count,
+				     UMS9117_NANDC_START_JOB);
 }
 
 static int
@@ -838,7 +865,7 @@ ums9117_nandc_execute_fixed(struct ums9117_nandc *nandc,
 
 	if (nandc->failed)
 		return -EINVAL;
-	if (nandc->parallel_id_only)
+	if (nandc->parallel_nand)
 		return ums9117_nandc_execute_parallel_id(nandc, operation);
 	switch (operation) {
 	case UMS9117_NANDC_FIXED_RESET:
@@ -883,7 +910,8 @@ ums9117_nandc_execute_fixed(struct ums9117_nandc *nandc,
 	writel(UMS9117_NANDC_CFG1_SPI, regs + UMS9117_NANDC_CFG1);
 	writel(readl(regs + UMS9117_NANDC_CFG4) | UMS9117_NANDC_CFG4_SPI_ENABLE,
 	       regs + UMS9117_NANDC_CFG4);
-	return ums9117_nandc_run_job(nandc, instructions, instruction_count);
+	return ums9117_nandc_run_job(nandc, instructions, instruction_count,
+				     UMS9117_NANDC_START_JOB);
 }
 
 static int ums9117_nandc_prepare_raw_mode(struct ums9117_nandc *nandc)
@@ -964,7 +992,8 @@ static int ums9117_nandc_page_to_cache(struct ums9117_nandc *nandc, u32 page)
 	writel(readl(regs + UMS9117_NANDC_CFG4) | UMS9117_NANDC_CFG4_SPI_ENABLE,
 	       regs + UMS9117_NANDC_CFG4);
 	return ums9117_nandc_run_job(nandc, instructions,
-				     ARRAY_SIZE(instructions));
+				     ARRAY_SIZE(instructions),
+				     UMS9117_NANDC_START_JOB);
 }
 
 static int ums9117_nandc_wait_page_ready(struct ums9117_nandc *nandc)
@@ -1035,7 +1064,8 @@ ums9117_nandc_read_cache(struct ums9117_nandc *nandc, u16 column, size_t length,
 	nandc->last_feature_address = 0;
 	dma_wmb();
 	ret = ums9117_nandc_run_job(nandc, instructions,
-				    ARRAY_SIZE(instructions));
+				    ARRAY_SIZE(instructions),
+				    UMS9117_NANDC_START_JOB);
 	if (ret)
 		return ret;
 	dma_rmb();
@@ -1065,6 +1095,73 @@ static int ums9117_nandc_read_oob_cache(struct ums9117_nandc *nandc)
 					UMS9117_NANDC_FIXED_READ_CACHE_OOB);
 }
 
+static int ums9117_nandc_read_parallel_page(struct ums9117_nandc *nandc,
+					    u32 row, u8 fill)
+{
+	void __iomem *regs = nandc->regs[UMS9117_NANDC_RES_NANDC];
+	u8 *main = nandc->page_buffer;
+	u8 *main_end = main + UMS9117_NANDC_PARALLEL_MAIN_BYTES;
+	u8 *spare = main + UMS9117_NANDC_PARALLEL_SPARE_DMA_OFFSET;
+	u8 *spare_end = spare + UMS9117_NANDC_PARALLEL_OOB_BYTES;
+	u8 *dma_end = main + nandc->page_buffer_bytes;
+	dma_addr_t spare_dma =
+		nandc->page_dma + UMS9117_NANDC_PARALLEL_SPARE_DMA_OFFSET;
+	const u16 column = UMS9117_NANDC_PARALLEL_MAIN_BYTES;
+	/* Read spare at the main-area boundary, then seek to column zero. */
+	const u16 instructions[] = {
+		0x00cd,
+		((column & 0xffU) << 8) | 0xa0,
+		(column & 0xff00U) | 0xa0,
+		((row & 0xffU) << 8) | 0xa0,
+		(row & 0xff00U) | 0xa0,
+		((row >> 8) & 0xff00U) | 0xa0,
+		0x30cd,
+		0x00b0,
+		0x00d2,
+		0x05cd,
+		0x00a0,
+		0x00a0,
+		0xe0cd,
+		0x00d0,
+		0x00ff,
+	};
+	int ret;
+
+	if (row >= UMS9117_NANDC_PARALLEL_PAGE_COUNT)
+		return -ERANGE;
+	nandc->last_operation = UMS9117_NANDC_FIXED_PARALLEL_PAGE_READ;
+	nandc->last_page = row;
+	memset(main, fill, nandc->page_buffer_bytes);
+	writel(UMS9117_NANDC_PARALLEL_READ_CFG0, regs + UMS9117_NANDC_CFG0);
+	writel(UMS9117_NANDC_PARALLEL_READ_CFG1, regs + UMS9117_NANDC_CFG1);
+	writel(UMS9117_NANDC_PARALLEL_READ_CFG2, regs + UMS9117_NANDC_CFG2);
+	writel(UMS9117_NANDC_DATA_CFG4, regs + UMS9117_NANDC_CFG4);
+	writel(0, regs + UMS9117_NANDC_MAIN_ADDR_HIGH);
+	writel(lower_32_bits(nandc->page_dma),
+	       regs + UMS9117_NANDC_MAIN_ADDR_LOW);
+	writel(0, regs + UMS9117_NANDC_SPARE_ADDR_HIGH);
+	writel(lower_32_bits(spare_dma), regs + UMS9117_NANDC_SPARE_ADDR_LOW);
+	writel(UMS9117_NANDC_INVALID_DMA_ADDRESS,
+	       regs + UMS9117_NANDC_STATUS_ADDR_HIGH);
+	writel(UMS9117_NANDC_INVALID_DMA_ADDRESS,
+	       regs + UMS9117_NANDC_STATUS_ADDR_LOW);
+	dma_wmb();
+	ret = ums9117_nandc_run_job(nandc, instructions,
+				    ARRAY_SIZE(instructions),
+				    UMS9117_NANDC_PARALLEL_READ_START);
+	if (ret)
+		return ret;
+	dma_rmb();
+	if (memchr_inv(main_end, fill, spare - main_end) ||
+	    memchr_inv(spare_end, fill, dma_end - spare_end)) {
+		ums9117_nandc_record_first_error(nandc, -EOVERFLOW,
+						 "parallel-page-dma-overrun");
+		return -EOVERFLOW;
+	}
+	memcpy(main_end, spare, UMS9117_NANDC_PARALLEL_OOB_BYTES);
+	return 0;
+}
+
 static int ums9117_nandc_read_raw_slice(struct ums9117_nandc *nandc, u32 page,
 					size_t offset, size_t length,
 					u8 *destination)
@@ -1078,6 +1175,13 @@ static int ums9117_nandc_read_raw_slice(struct ums9117_nandc *nandc, u32 page,
 	if (page >= nandc->page_count || offset >= nandc->physical_page_bytes ||
 	    length > nandc->physical_page_bytes - offset)
 		return -ERANGE;
+	if (nandc->parallel_nand) {
+		ret = ums9117_nandc_read_parallel_page(nandc, page, 0xa5);
+		if (!ret)
+			memcpy(destination, nandc->page_buffer + offset,
+			       length);
+		return ret;
+	}
 	end = offset + length;
 	nandc->last_page = page;
 	ret = ums9117_nandc_page_to_cache(nandc, page);
@@ -1152,13 +1256,12 @@ static int ums9117_nandc_fail(struct ums9117_nandc *nandc, int error,
 	nandc->failed = true;
 	nandc->last_error = error;
 	int_raw = readl(regs + UMS9117_NANDC_INT);
-	axim_sts = nandc->parallel_id_only ?
-			   0 :
-			   readl(regs + UMS9117_NANDC_AXIM_STS);
-	spi_status = nandc->parallel_id_only ?
+	axim_sts = nandc->parallel_nand ? 0 :
+					  readl(regs + UMS9117_NANDC_AXIM_STS);
+	spi_status = nandc->parallel_nand ?
 			     0 :
 			     readl(regs + UMS9117_NANDC_SPI_STATUS);
-	feature = nandc->parallel_id_only ?
+	feature = nandc->parallel_nand ?
 			  0 :
 			  readl(regs + UMS9117_NANDC_SPI_FEATURE);
 	start = readl(regs + UMS9117_NANDC_START);
@@ -1193,6 +1296,11 @@ static int ums9117_nandc_read_id(struct ums9117_nandc *nandc)
 	void __iomem *regs = nandc->regs[UMS9117_NANDC_RES_NANDC];
 	int ret;
 
+	if (nandc->parallel_nand) {
+		memset(nandc->parallel_id_result, 0,
+		       sizeof(nandc->parallel_id_result));
+		nandc->read_id_completed = false;
+	}
 	ret = ums9117_nandc_execute_fixed(nandc, UMS9117_NANDC_FIXED_RESET, 0);
 	if (ret)
 		return ums9117_nandc_fail(nandc, ret, "fixed NAND reset");
@@ -1201,7 +1309,7 @@ static int ums9117_nandc_read_id(struct ums9117_nandc *nandc)
 					  0);
 	if (ret)
 		return ums9117_nandc_fail(nandc, ret, "fixed NAND read-id");
-	if (nandc->parallel_id_only) {
+	if (nandc->parallel_nand) {
 		/* Raw register words do not establish eight valid ID bytes. */
 		nandc->parallel_id_result[0] =
 			readl(regs + UMS9117_NANDC_PARALLEL_ID_RESULT0);
@@ -1213,6 +1321,14 @@ static int ums9117_nandc_read_id(struct ums9117_nandc *nandc)
 		nandc->id_raw = readl(regs + UMS9117_NANDC_SPI_FEATURE);
 	}
 	return 0;
+}
+
+static bool ums9117_nandc_parallel_id_matches(struct ums9117_nandc *nandc)
+{
+	return nandc->parallel_id_result[0] ==
+		       UMS9117_NANDC_PARALLEL_ID_RESULT0_VALUE &&
+	       (nandc->parallel_id_result[1] & 0xffffU) ==
+		       UMS9117_NANDC_PARALLEL_ID_RESULT1_LOW;
 }
 
 static int ums9117_nandc_read_features(struct ums9117_nandc *nandc)
@@ -1243,6 +1359,13 @@ static int ums9117_nandc_run_diagnostics(struct ums9117_nandc *nandc)
 	ret = ums9117_nandc_read_id(nandc);
 	if (ret)
 		return ret;
+	if (nandc->parallel_nand) {
+		if (ums9117_nandc_parallel_id_matches(nandc))
+			return 0;
+		ums9117_nandc_record_first_error(nandc, -ENODEV,
+						 "unexpected-parallel-nand-id");
+		return -ENODEV;
+	}
 	if (nandc->id_raw != nandc->identity_id_raw)
 		return ums9117_nandc_fail(nandc, -ENODEV, "unexpected NAND id");
 
@@ -1310,8 +1433,8 @@ static int ums9117_nandc_activate(struct ums9117_nandc *nandc)
 						  "NANDC enable/reset");
 		return ret;
 	}
-	/* Parallel identification needs no SPI, page-transfer or ECC recipe. */
-	if (nandc->parallel_id_only)
+	/* The parallel path configures each command without the SPI recipe. */
+	if (nandc->parallel_nand)
 		return 0;
 	ret = ums9117_nandc_apply_fdl_recipe(nandc);
 	if (ret)
@@ -1344,12 +1467,12 @@ static int ums9117_nandc_restore_lifecycle(struct ums9117_nandc *nandc)
 			ums9117_nandc_abort_command(nandc);
 		if (ums9117_nandc_assert_reset(nandc, "restore-reset-assert"))
 			ret = -EIO;
-		if (nandc->gate_enabled && !nandc->parallel_id_only &&
+		if (nandc->gate_enabled && !nandc->parallel_nand &&
 		    readl(regs + UMS9117_NANDC_SPI_STATUS) &
 			    UMS9117_NANDC_SPI_BUSY &&
 		    !ret)
 			ret = -EBUSY;
-		if (nandc->gate_enabled && !nandc->parallel_id_only) {
+		if (nandc->gate_enabled && !nandc->parallel_nand) {
 			nandc->last_axim_status =
 				readl(regs + UMS9117_NANDC_AXIM_STS);
 			if (nandc->last_axim_status && !ret)
@@ -1519,27 +1642,91 @@ ums9117_nandc_select_chip(struct ums9117_nandc *nandc, u32 id_raw)
 	return chip;
 }
 
-/*
- * Keep RESET/READ_ID results for the device lifetime. SPI also reads A0, B0
- * and C0 without writing a feature. Parallel identification, an unknown chip
- * or a declared-ID mismatch leaves geometry unavailable and refuses reads.
- */
-static int ums9117_nandc_identify(struct ums9117_nandc *nandc)
+static int ums9117_nandc_read_stable_parallel_page(struct ums9117_nandc *nandc,
+						   u32 row, u8 *saved)
 {
-	const struct ums9117_nandc_chip *chip;
 	int ret;
 
-	if (nandc->parallel_id_only) {
-		memset(&nandc->first_error, 0, sizeof(nandc->first_error));
-		memset(nandc->parallel_id_result, 0,
-		       sizeof(nandc->parallel_id_result));
-		nandc->read_id_completed = false;
+	ret = ums9117_nandc_read_parallel_page(nandc, row, 0xa5);
+	if (ret)
+		return ret;
+	memcpy(saved, nandc->page_buffer, UMS9117_NANDC_PARALLEL_RECORD_BYTES);
+	/* Different fills detect short DMA transfers even on erased pages. */
+	ret = ums9117_nandc_read_parallel_page(nandc, row, 0x5a);
+	if (ret)
+		return ret;
+	if (memcmp(saved, nandc->page_buffer,
+		   UMS9117_NANDC_PARALLEL_RECORD_BYTES)) {
+		ums9117_nandc_record_first_error(nandc, -EIO,
+						 "parallel-audit-row-unstable");
+		return -EIO;
 	}
+	return 0;
+}
+
+static int ums9117_nandc_audit_parallel_rows(struct ums9117_nandc *nandc)
+{
+	/* Pair the final low row with the final row of the candidate layout. */
+	static const u32 low_rows[] = { 0x81, 0x400, 0x1000, 0xffff };
+	u8 *low = nandc->staging_buffer;
+	u8 *high = low + UMS9117_NANDC_PARALLEL_RECORD_BYTES;
+	unsigned int i;
+	int ret;
+
+	for (i = 0; i < ARRAY_SIZE(low_rows); i++) {
+		ret = ums9117_nandc_read_stable_parallel_page(nandc,
+							      low_rows[i], low);
+		if (ret)
+			return ret;
+		ret = ums9117_nandc_read_stable_parallel_page(
+			nandc,
+			low_rows[i] | UMS9117_NANDC_PARALLEL_ROW_HIGH_BIT,
+			high);
+		if (ret)
+			return ret;
+		nandc->parallel_pairs_checked++;
+		if (memcmp(low, high, UMS9117_NANDC_PARALLEL_RECORD_BYTES))
+			nandc->parallel_distinct_pairs |= BIT(i);
+	}
+	if (!nandc->parallel_distinct_pairs) {
+		ums9117_nandc_record_first_error(nandc, -ENODATA,
+						 "parallel-row-alias-unproven");
+		return -ENODATA;
+	}
+	return 0;
+}
+
+/* Keep identification and admitted geometry for the device lifetime. */
+static int ums9117_nandc_identify(struct ums9117_nandc *nandc)
+{
+	static const struct ums9117_nandc_chip parallel_chip = {
+		.name = "parallel-nand",
+		.page_main_bytes = UMS9117_NANDC_PARALLEL_MAIN_BYTES,
+		.oob_bytes = UMS9117_NANDC_PARALLEL_OOB_BYTES,
+		.pages_per_block = UMS9117_NANDC_PAGES_PER_BLOCK,
+		.block_count = UMS9117_NANDC_PARALLEL_BLOCK_COUNT,
+	};
+	const struct ums9117_nandc_chip *chip = NULL;
+	int ret;
+
 	ret = ums9117_nandc_activate(nandc);
 	if (!ret)
 		ret = ums9117_nandc_read_id(nandc);
-	if (!ret && !nandc->parallel_id_only)
-		ret = ums9117_nandc_read_features(nandc);
+	if (!ret) {
+		if (!nandc->parallel_nand) {
+			ret = ums9117_nandc_read_features(nandc);
+		} else if (!nandc->parallel_id_only) {
+			if (ums9117_nandc_parallel_id_matches(nandc)) {
+				chip = &parallel_chip;
+				ret = ums9117_nandc_audit_parallel_rows(nandc);
+				nandc->page_read_error = ret;
+			} else {
+				ums9117_nandc_record_first_error(
+					nandc, -ENODEV,
+					"unexpected-parallel-nand-id");
+			}
+		}
+	}
 	ret = ums9117_nandc_end_session(nandc, ret, ret != 0);
 	if (ret)
 		return ret;
@@ -1548,9 +1735,8 @@ static int ums9117_nandc_identify(struct ums9117_nandc *nandc)
 	memcpy(nandc->identity_features, nandc->feature_raw,
 	       sizeof(nandc->identity_features));
 	nandc->identity_valid = true;
-	if (nandc->parallel_id_only)
-		return 0;
-	chip = ums9117_nandc_select_chip(nandc, nandc->id_raw);
+	if (!nandc->parallel_nand)
+		chip = ums9117_nandc_select_chip(nandc, nandc->id_raw);
 	if (chip) {
 		nandc->physical_page_bytes =
 			chip->page_main_bytes + chip->oob_bytes;
@@ -1566,12 +1752,46 @@ static int ums9117_nandc_identify(struct ums9117_nandc *nandc)
 static void ums9117_nandc_release_buffers(struct ums9117_nandc *nandc)
 {
 	if (nandc->page_buffer) {
-		dma_free_coherent(nandc->dev, UMS9117_NANDC_PAGE_MAIN_BYTES,
+		dma_free_coherent(nandc->dev, nandc->page_buffer_bytes,
 				  nandc->page_buffer, nandc->page_dma);
 		nandc->page_buffer = NULL;
 	}
 	kvfree(nandc->staging_buffer);
 	nandc->staging_buffer = NULL;
+}
+
+static int ums9117_nandc_allocate_buffers(struct ums9117_nandc *nandc)
+{
+	int ret;
+
+	ret = dma_set_mask_and_coherent(nandc->dev, DMA_BIT_MASK(32));
+	if (ret)
+		return dev_err_probe(nandc->dev, ret,
+				     "NANDC requires 32-bit coherent DMA\n");
+	nandc->page_buffer_bytes = nandc->parallel_nand ?
+					   UMS9117_NANDC_PARALLEL_DMA_BYTES :
+					   UMS9117_NANDC_PAGE_MAIN_BYTES;
+	nandc->page_buffer = dma_alloc_coherent(nandc->dev,
+						nandc->page_buffer_bytes,
+						&nandc->page_dma, GFP_KERNEL);
+	if (!nandc->page_buffer)
+		return -ENOMEM;
+	if (upper_32_bits((u64)nandc->page_dma + nandc->page_buffer_bytes -
+			  1) ||
+	    !IS_ALIGNED(nandc->page_dma, 64U)) {
+		ret = -ERANGE;
+		goto out_release_page;
+	}
+	nandc->staging_buffer = kvzalloc(UMS9117_NANDC_BATCH_BYTES, GFP_KERNEL);
+	if (!nandc->staging_buffer) {
+		ret = -ENOMEM;
+		goto out_release_page;
+	}
+	return 0;
+
+out_release_page:
+	ums9117_nandc_release_buffers(nandc);
+	return ret;
 }
 
 static ssize_t audit_show(struct device *dev, struct device_attribute *attr,
@@ -1581,18 +1801,26 @@ static ssize_t audit_show(struct device *dev, struct device_attribute *attr,
 	const struct ums9117_nandc_error *first = &nandc->first_error;
 	ssize_t ret;
 
-	if (nandc->parallel_id_only) {
+	if (nandc->parallel_nand) {
+		const char *state;
+
 		if (mutex_lock_interruptible(&nandc->io_mutex))
 			return -ERESTARTSYS;
+		state = nandc->io_faulted ? "failed" :
+			nandc->chip	  ? "ready" :
+					    "idle";
 		ret = sysfs_emit(
 			buf,
-			"state=%s read_only=1 identify_only=1\n"
+			"state=%s read_only=1 identify_only=%u\n"
 			"arm_boot_mode=0x%08x id_raw=0x%08x\n"
 			"last_error=%d total_commands=%u\n"
 			"int_raw=0x%08x\n"
-			"raw_registered=%u io_faulted=%u\n"
+			"raw_registered=%u io_faulted=%u runtime_sessions=%u runtime_pages=%llu\n"
 			"lifecycle_restored=%u lifecycle_restore_error=%d\n"
 			"read_id_completed=%u read_id_raw_40=0x%08x read_id_raw_44=0x%08x\n"
+			"parallel_pairs_checked=%u parallel_distinct_pairs=0x%02x\n"
+			"read_error=%d last_page=%u\n"
+			"physical_page_bytes=%u page_count=%u raw_bytes=%llu\n"
 			"first_error=%d first_error_stage=%s first_error_regs_valid=%u\n"
 			"first_error_int=0x%08x first_error_start=0x%08x\n"
 			"first_error_cfg0=0x%08x first_error_cfg1=0x%08x\n"
@@ -1600,14 +1828,20 @@ static ssize_t audit_show(struct device *dev, struct device_attribute *attr,
 			"first_error_timing0=0x%08x first_error_timing1=0x%08x\n"
 			"first_error_readback_valid=%u first_error_address=0x%016llx\n"
 			"first_error_expected=0x%08x first_error_observed=0x%08x first_error_mask=0x%08x\n",
-			nandc->failed ? "failed" : "idle", nandc->arm_boot_mode,
+			state, nandc->parallel_id_only, nandc->arm_boot_mode,
 			nandc->id_raw, nandc->last_error,
 			nandc->completed_operations, nandc->last_int_raw,
 			nandc->raw_registered, nandc->io_faulted,
+			nandc->runtime_sessions_completed,
+			nandc->runtime_pages_completed,
 			nandc->lifecycle_restored,
 			nandc->lifecycle_restore_error,
 			nandc->read_id_completed, nandc->parallel_id_result[0],
-			nandc->parallel_id_result[1], first->error,
+			nandc->parallel_id_result[1],
+			nandc->parallel_pairs_checked,
+			nandc->parallel_distinct_pairs, nandc->page_read_error,
+			nandc->last_page, nandc->physical_page_bytes,
+			nandc->page_count, nandc->raw_bytes, first->error,
 			first->stage ? first->stage : "none", first->regs_valid,
 			first->int_raw, first->start, first->cfg0, first->cfg1,
 			first->cfg2, first->cfg4, first->timing0,
@@ -1652,10 +1886,9 @@ static ssize_t audit_show(struct device *dev, struct device_attribute *attr,
 static DEVICE_ATTR_RO(audit);
 
 /*
- * Host tools parse these key=value lines.  A chip outside the table, or one
- * that differs from the declared ID, keeps its ID bytes and features with zero
- * geometry. The parallel identification path has no SPI feature values.
- * The attribute has no value until an open has identified the device.
+ * Host tools parse these key=value lines after an open identifies the device.
+ * An unsupported chip keeps its identity with zero geometry. SPI feature
+ * values are available only for SPI NAND.
  */
 static ssize_t geometry_show(struct device *dev, struct device_attribute *attr,
 			     char *buf)
@@ -1674,23 +1907,11 @@ static ssize_t geometry_show(struct device *dev, struct device_attribute *attr,
 		ret = -ENODATA;
 		goto out_unlock;
 	}
-	if (nandc->parallel_id_only) {
-		ret = sysfs_emit(buf,
-				 "id_bytes=%02x%02x\n"
-				 "chip=unknown\n"
-				 "page_main_bytes=0\n"
-				 "oob_bytes=0\n"
-				 "pages_per_block=0\n"
-				 "block_count=0\n"
-				 "raw_bytes=0\n"
-				 "geometry_source=unknown\n",
-				 nandc->identity_id_raw & 0xffU,
-				 (nandc->identity_id_raw >> 8) & 0xffU);
-		goto out_unlock;
-	}
 	chip = nandc->chip ? nandc->chip : &unknown_chip;
 	if (!nandc->chip)
 		source = "unknown";
+	else if (nandc->parallel_nand)
+		source = "parallel";
 	else if (nandc->has_declared_id)
 		source = "dt";
 	else
@@ -1703,17 +1924,20 @@ static ssize_t geometry_show(struct device *dev, struct device_attribute *attr,
 			 "pages_per_block=%u\n"
 			 "block_count=%u\n"
 			 "raw_bytes=%llu\n"
-			 "geometry_source=%s\n"
-			 "feature_a0=0x%02x\n"
-			 "feature_b0=0x%02x\n"
-			 "feature_c0=0x%02x\n",
+			 "geometry_source=%s\n",
 			 nandc->identity_id_raw & 0xffU,
 			 (nandc->identity_id_raw >> 8) & 0xffU, chip->name,
 			 chip->page_main_bytes, chip->oob_bytes,
 			 chip->pages_per_block, chip->block_count,
-			 nandc->raw_bytes, source, nandc->identity_features[0],
-			 nandc->identity_features[1],
-			 nandc->identity_features[2]);
+			 nandc->raw_bytes, source);
+	if (!nandc->parallel_nand)
+		ret += sysfs_emit_at(buf, ret,
+				     "feature_a0=0x%02x\n"
+				     "feature_b0=0x%02x\n"
+				     "feature_c0=0x%02x\n",
+				     nandc->identity_features[0],
+				     nandc->identity_features[1],
+				     nandc->identity_features[2]);
 out_unlock:
 	mutex_unlock(&nandc->io_mutex);
 	return ret;
@@ -1778,13 +2002,11 @@ static ssize_t ums9117_nandc_raw_read_iter(struct kiocb *iocb,
 
 	if (!iov_iter_count(to))
 		return 0;
-	if (nandc->parallel_id_only)
-		return -EOPNOTSUPP;
 	if (position < 0)
 		return -EINVAL;
 	/* Identification at open left no geometry for an unsupported chip. */
 	if (!nandc->chip)
-		return -ENODEV;
+		return nandc->parallel_nand ? -EOPNOTSUPP : -ENODEV;
 	if (position >= nandc->raw_bytes)
 		return 0;
 	requested =
@@ -1882,13 +2104,17 @@ static int ums9117_nandc_probe(struct platform_device *pdev)
 	nandc->dev = &pdev->dev;
 	nandc->parallel_id_only = of_device_is_compatible(
 		pdev->dev.of_node, "fplinux,ums9117-nandc-parallel-id");
+	nandc->parallel_nand =
+		nandc->parallel_id_only ||
+		of_device_is_compatible(pdev->dev.of_node,
+					"fplinux,ums9117-nandc-parallel-ro");
 	ret = of_property_read_u32(pdev->dev.of_node, "fplinux,nand-id",
 				   &nandc->declared_id);
 	if (!ret) {
-		if (nandc->parallel_id_only)
+		if (nandc->parallel_nand)
 			return dev_err_probe(
 				&pdev->dev, -EINVAL,
-				"parallel identification has no declared geometry\n");
+				"fplinux,nand-id is only valid for SPI NAND\n");
 		if (!ums9117_nandc_find_chip(nandc->declared_id))
 			return dev_err_probe(&pdev->dev, -ENODEV,
 					     "unsupported NAND identity\n");
@@ -1914,27 +2140,9 @@ static int ums9117_nandc_probe(struct platform_device *pdev)
 		return dev_err_probe(&pdev->dev, ret,
 				     "unexpected ARM boot mode sentinel\n");
 	if (!nandc->parallel_id_only) {
-		ret = dma_set_mask_and_coherent(&pdev->dev, DMA_BIT_MASK(32));
+		ret = ums9117_nandc_allocate_buffers(nandc);
 		if (ret)
-			return dev_err_probe(
-				&pdev->dev, ret,
-				"NANDC requires 32-bit coherent DMA\n");
-		nandc->page_buffer = dma_alloc_coherent(
-			&pdev->dev, UMS9117_NANDC_PAGE_MAIN_BYTES,
-			&nandc->page_dma, GFP_KERNEL);
-		if (!nandc->page_buffer)
-			return -ENOMEM;
-		if (upper_32_bits(nandc->page_dma) ||
-		    !IS_ALIGNED(nandc->page_dma, 64U)) {
-			ret = -ERANGE;
-			goto out_release_page;
-		}
-		nandc->staging_buffer =
-			kvzalloc(UMS9117_NANDC_BATCH_BYTES, GFP_KERNEL);
-		if (!nandc->staging_buffer) {
-			ret = -ENOMEM;
-			goto out_release_page;
-		}
+			return ret;
 	}
 	ret = device_add_group(&pdev->dev, &ums9117_nandc_attr_group);
 	if (ret) {
@@ -2003,6 +2211,7 @@ static void ums9117_nandc_shutdown(struct platform_device *pdev)
 static const struct of_device_id ums9117_nandc_of_match[] = {
 	{ .compatible = "fplinux,ums9117-nandc-ro" },
 	{ .compatible = "fplinux,ums9117-nandc-parallel-id" },
+	{ .compatible = "fplinux,ums9117-nandc-parallel-ro" },
 	{}
 };
 MODULE_DEVICE_TABLE(of, ums9117_nandc_of_match);

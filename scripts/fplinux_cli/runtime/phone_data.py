@@ -275,14 +275,21 @@ def _read_backup(  # noqa: PLR0913 -- NAND output and optional phone feedback ha
 
 
 def _verify_reader_backup(
-    connection: tuple[Any, dict[str, Any]], raw_device: str, expected: NandGeometry, log: RunLog
+    connection: tuple[Any, dict[str, Any]],
+    raw_device: str,
+    expected: NandGeometry,
+    log: RunLog,
+    *,
+    target: str,
 ) -> None:
     """Confirm the fitted chip before using a saved backup to install a card."""
     from .nand_backup import parse_geometry_report, read_geometry_report  # noqa: PLC0415
 
     transport, session = connection
     with log.capture():
-        observed = parse_geometry_report(read_geometry_report(transport, session, raw_device))
+        observed = parse_geometry_report(
+            read_geometry_report(transport, session, raw_device), target=target
+        )
     if replace_fields(observed, chip=expected.chip) != expected:
         fail(
             "The connected NAND geometry differs from the saved backup. "
@@ -452,7 +459,13 @@ def prepare_phone_data(  # noqa: PLR0913 -- preparation inputs and their state o
             _read_backup(connection, runtime, data, log, output=backup, phone_progress=progress)
             record = current_backup(backup, target=runtime["target"], nand=runtime["nand"])
         elif record is not None and retain_reader and connection is not None:
-            _verify_reader_backup(connection, runtime["nand"]["raw_device"], record.geometry, log)
+            _verify_reader_backup(
+                connection,
+                runtime["nand"]["raw_device"],
+                record.geometry,
+                log,
+                target=runtime["target"],
+            )
         if record is None:
             fail("The NAND backup did not satisfy the selected reader contract")
         destination = store / "phone"

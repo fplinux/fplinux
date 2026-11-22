@@ -19,12 +19,12 @@ if TYPE_CHECKING:
     from fplinux_cli.device_data.prepare import DeviceDataSpec, DeviceDataTools
 
 
-def preparation_identity(spec: DeviceDataSpec, tools: DeviceDataTools) -> str:
+def preparation_identity(spec: DeviceDataSpec, tools: DeviceDataTools, *, source_kind: str) -> str:
     """Bind the selected preparation code to its actual optional native ECC decoder."""
     if spec.preparation_recipe is None:
         fail("This phone-data selection has no preparation implementation")
     native = None
-    if spec.nand is not None and "ecc_format" in spec.nand:
+    if source_kind == "physical-nand" and spec.nand is not None and "ecc_format" in spec.nand:
         from .prepare import NAND_ECC_TOOL  # noqa: PLC0415 -- selected native decoder.
 
         if tools.host_tools is None:
@@ -122,7 +122,8 @@ def _prepared_data_matches(
         }:
             return False
         if (
-            value["preparation_recipe"] != preparation_identity(spec, tools)
+            value["preparation_recipe"]
+            != preparation_identity(spec, tools, source_kind=source["kind"])
             or value["geometry"] != geometry
             or value["source"] != source
         ):

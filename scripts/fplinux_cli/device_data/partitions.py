@@ -9,7 +9,6 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from .formats import VBM_HEADER_PREFIX, VBM_MAGIC, redundant_vbm_partitions
-from .nand_geometry import BLOCK_MAIN_BYTES
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -26,10 +25,11 @@ _PARTI_CANDIDATE = re.compile(rb"(?s)(?=[\x02-\x64]\x00\x00\x00.{8}\x00{4}(.{4})
 
 @dataclass(frozen=True)
 class PartitionTable:
-    """The admitted table format and only the extents requested by a consumer."""
+    """The admitted table format, VBM copy locations and requested extents."""
 
     kind: str
     extents: dict[int, tuple[int, int]]
+    vbm_copy_offsets: tuple[int, int] | None = None
 
 
 def discover_partitions(
@@ -55,8 +55,9 @@ def discover_partitions(
     if copies:
         if len(copies) != 2:
             raise ValueError(f"expected two VBM partition-table copies, found {len(copies)}")
-        extents = redundant_vbm_partitions(nand, (copies[0], copies[1]), required)
-        return PartitionTable("VBM", extents)
+        copy_offsets = (copies[0], copies[1])
+        extents = redundant_vbm_partitions(nand, copy_offsets, required)
+        return PartitionTable("VBM", extents, vbm_copy_offsets=copy_offsets)
     return PartitionTable("PartI", _parti_partitions(nand, required))
 
 
@@ -64,7 +65,8 @@ def _parti_partitions(
     nand: NandPartitionReader,
     required: Mapping[int, RequiredPartition],
 ) -> dict[int, tuple[int, int]]:
-    main = nand.main_bytes(0, nand.block_count * BLOCK_MAIN_BYTES)
+    block_main_bytes = nand.block_main_bytes
+    main = nand.main_bytes(0, nand.block_count * block_main_bytes)
     tables: dict[tuple[tuple[int, int, int, int], ...], list[int]] = {}
     for candidate in _PARTI_CANDIDATE.finditer(main):
         position = candidate.start()
@@ -102,7 +104,7 @@ def _parti_partitions(
             )
         if blocks == _PARTI_REMAINDER:
             blocks = nand.block_count - first_block
-        extents[identifier] = (first_block * BLOCK_MAIN_BYTES, blocks * BLOCK_MAIN_BYTES)
+        extents[identifier] = (first_block * block_main_bytes, blocks * block_main_bytes)
     return extents
 
 

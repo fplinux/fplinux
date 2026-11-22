@@ -54,7 +54,7 @@
 };
 
 &nandc {
-	compatible = "fplinux,ums9117-nandc-parallel-id";
+	compatible = "fplinux,ums9117-nandc-parallel-ro";
 	/delete-property/ fplinux,nand-id;
 	sprd,pinconf-values = <
 		0x00102001 0x00102001 0x00102001 0x00102001 0x00102001

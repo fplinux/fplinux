@@ -74,6 +74,21 @@ def load_manifest(runtime_manifest_path: Path, manifest: dict[str, Any]) -> dict
     return RUNNER.validate_runtime_identity(runtime)
 
 
+def test_admits_compact_nand_bch12_runtime(runtime_manifest_path: Path) -> None:
+    """The shipped manifest reader accepts the page size used by parallel NAND."""
+    manifest = runtime_manifest()
+    nand = {
+        "raw_device": "/dev/ums9117-nand-raw",
+        "id": 0xBA98,
+        "raw_page_bytes": 1088,
+        "ecc_format": "ums9117-bch12",
+        "acquisition_recipe": "a" * 64,
+    }
+    manifest["nand"] = nand
+
+    assert load_manifest(runtime_manifest_path, manifest)["nand"] == nand
+
+
 @pytest.fixture
 def emmc_manifest() -> dict[str, Any]:
     """Declare optional radio data alongside mandatory audio for one MMC reader."""

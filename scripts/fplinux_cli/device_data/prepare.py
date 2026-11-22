@@ -23,12 +23,15 @@ from fplinux_cli.device_data.formats import (
 from fplinux_cli.device_data.inputs import capture_phone_data
 from fplinux_cli.device_data.nand_backup import (
     read_backup_bytes,
-    read_backup_geometry,
     read_backup_record,
     save_backup_bytes,
     save_backup_without_receipt,
 )
-from fplinux_cli.device_data.nand_geometry import family_page_bytes, require_declared_chip
+from fplinux_cli.device_data.nand_geometry import (
+    KONROW_NAND_TARGET,
+    family_page_bytes,
+    require_declared_chip,
+)
 from fplinux_cli.device_data.original_files import read_original_files
 
 if TYPE_CHECKING:
@@ -103,6 +106,8 @@ def dump_page_bytes(
     declared_id = None if nand is None else nand.get("id")
     declared_raw_page_bytes = None if nand is None else nand.get("raw_page_bytes")
     if receipt is None:
+        if target == KONROW_NAND_TARGET:
+            fail(f"target {target} requires a NAND backup geometry receipt beside the image")
         if declared_raw_page_bytes is None:
             fail(
                 f"target {target} declares no NAND chip and the backup has no geometry "
@@ -110,7 +115,7 @@ def dump_page_bytes(
             )
         return int(declared_raw_page_bytes)
     try:
-        page_bytes = family_page_bytes(receipt)
+        page_bytes = family_page_bytes(receipt, target=target)
     except ValueError as error:
         fail(f"device-data extraction failed: {error}")
     require_declared_chip(
@@ -184,7 +189,11 @@ def _nand_main_decoder(
 def read_physical_nand(spec: DeviceDataSpec, backup: Path, tools: DeviceDataTools) -> PhysicalNand:
     """Admit a complete backup and its geometry before any parser can consume it."""
     raw = read_backup_bytes(backup)
-    page_bytes = dump_page_bytes(spec.target, spec.nand, read_backup_geometry(backup, raw))
+    record = read_backup_record(backup, raw)
+    if record is not None and spec.target == KONROW_NAND_TARGET and record.target != spec.target:
+        fail("The NAND backup receipt belongs to another phone target")
+    geometry = None if record is None else record.geometry
+    page_bytes = dump_page_bytes(spec.target, spec.nand, geometry)
     main_decoder = None
     correction_bits = 0
     if spec.nand is not None and "ecc_format" in spec.nand:
@@ -195,7 +204,11 @@ def read_physical_nand(spec: DeviceDataSpec, backup: Path, tools: DeviceDataTool
         )
     try:
         return PhysicalNand.from_dump(
-            raw, page_bytes=page_bytes, main_decoder=main_decoder, correction_bits=correction_bits
+            raw,
+            page_bytes=page_bytes,
+            main_decoder=main_decoder,
+            correction_bits=correction_bits,
+            geometry=geometry,
         )
     except ValueError as error:
         fail(f"device-data extraction failed: {error}")
@@ -515,7 +528,7 @@ def _materialize_and_publish(  # noqa: PLR0913 -- admitted source, output and ho
             raw=raw,
             groups=groups,
             admitted=admitted,
-            preparation_recipe=preparation_identity(spec, tools),
+            preparation_recipe=preparation_identity(spec, tools, source_kind=source_kind),
             geometry=geometry,
         )
         return publish_phone_data(staging, destination, replace=replace)

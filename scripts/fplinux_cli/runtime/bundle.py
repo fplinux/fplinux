@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Any, NoReturn
 from fplinux_cli.artifacts.build_manifest import BUILD_MANIFEST_FIELDS
 from fplinux_cli.artifacts.release_identity import RELEASE_FIELDS, require_release_version
 from fplinux_cli.common import canonical_json_bytes, sha256_file
+from fplinux_cli.device_data.nand_geometry import UMS9117_BCH12_RAW_PAGE_BYTES
 from fplinux_cli.runtime.ssh.errors import fail as ssh_fail
 
 if TYPE_CHECKING:
@@ -462,9 +463,10 @@ def validate_nand(value: object, *, platform: str) -> dict[str, Any] | None:
             value, "raw_page_bytes", "runtime NAND raw_page_bytes", bounds=(1, 0xFFFFFFFF)
         )
     if "ecc_format" in value and (
-        value["ecc_format"] != "ums9117-bch12" or value["raw_page_bytes"] != 2176
+        value["ecc_format"] != "ums9117-bch12"
+        or value["raw_page_bytes"] not in UMS9117_BCH12_RAW_PAGE_BYTES
     ):
-        fail("runtime NAND ECC requires ums9117-bch12 with 2176-byte pages")
+        fail("runtime NAND ECC requires ums9117-bch12 with 1088- or 2176-byte pages")
     return value
 
 

@@ -47,7 +47,7 @@ def test_nand_parser_can_make_its_data_optional_for_ram_boot(*, fitted: bool) ->
         ),
         (
             {"id": 0x81C8, "raw_page_bytes": 2112, "ecc_format": "ums9117-bch12"},
-            "2176-byte UMS9117 pages",
+            "1088- or 2176-byte UMS9117 pages",
         ),
         (
             {"id": 0x81C8, "raw_page_bytes": 2176, "ecc_format": "unknown"},

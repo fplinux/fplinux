@@ -9,6 +9,7 @@ from pathlib import PurePosixPath
 from typing import Any
 
 from fplinux_cli.common import fail, load_toml
+from fplinux_cli.device_data.nand_geometry import UMS9117_BCH12_RAW_PAGE_BYTES
 from fplinux_cli.manifests.assets import asset_bundle_paths, load_asset_sources
 from fplinux_cli.manifests.audio import (
     AUDIO_POLICY_FIELDS,
@@ -323,9 +324,12 @@ def load_target(
         if "ecc_format" in nand and (
             nand["ecc_format"] != "ums9117-bch12"
             or config["platform"] != "ums9117"
-            or nand["raw_page_bytes"] != 2176
+            or nand["raw_page_bytes"] not in UMS9117_BCH12_RAW_PAGE_BYTES
         ):
-            fail("target NAND ECC format must be ums9117-bch12 with 2176-byte UMS9117 pages")
+            fail(
+                "target NAND ECC format must be ums9117-bch12 "
+                "with 1088- or 2176-byte UMS9117 pages"
+            )
     platform_name = nonempty_string(config.get("platform"), f"target {target} platform")
     if VALUE_NAME.fullmatch(platform_name) is None:
         fail(f"target {target} has invalid platform: {path}")
@@ -492,15 +496,26 @@ def load_target(
             {"parser", "fitted_prefix", "required_groups"},
             {"originals_parser"},
             {"originals_parser", "required_groups"},
+            {"parser", "originals_parser"},
+            {"parser", "originals_parser", "required_groups"},
         ):
             fail(
                 "target device_data requires one parser with optional required_groups "
                 "and fitted_prefix for NAND"
             )
-        source_field = "originals_parser" if "originals_parser" in device_data else "parser"
-        name = f"target device_data {source_field}"
+        parsers = {}
+        for field in ("parser", "originals_parser"):
+            if field not in device_data:
+                continue
+            name = f"target device_data {field}"
+            validate_path = basename_value if "fitted_prefix" in device_data else relative_value
+            parser = validate_path(device_data[field], name)
+            if not parser.endswith(".py"):
+                fail(f"{name} must be a Python filename")
+            parsers[field] = parser
+        if len(parsers) == 2 and "nand" not in config:
+            fail("target device_data requires one parser unless NAND is declared")
         if "fitted_prefix" in device_data:
-            parser = basename_value(device_data[source_field], name)
             prefix = basename_value(
                 device_data["fitted_prefix"], "target device_data fitted_prefix"
             )
@@ -513,10 +528,6 @@ def load_target(
                 or set(device_data_groups) != fitted_groups
             ):
                 fail("target fitted preparation requires UMS9117 NAND and the fitted groups")
-        else:
-            parser = relative_value(device_data[source_field], name)
-        if not parser.endswith(".py"):
-            fail(f"target device_data {source_field} must be a Python filename")
         required = device_data.get("required_groups", list(device_data_groups))
         if (
             not isinstance(required, list)
@@ -526,11 +537,11 @@ def load_target(
             or len(set(required)) != len(required)
         ):
             fail("target device_data required_groups must name unique declared groups")
-        if "emmc" in config and source_field != "originals_parser":
+        if "emmc" in config and "originals_parser" not in parsers:
             fail("eMMC preparation requires a named-original parser")
         config["device_data"] = {
             **device_data,
-            source_field: parser,
+            **parsers,
             "groups": device_data_groups,
             "required_groups": required,
         }

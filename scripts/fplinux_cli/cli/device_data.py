@@ -113,10 +113,9 @@ def prepare_device_data(  # noqa: PLR0913 -- explicit source, build and loader c
     declaration = config["device_data"]
     if not declaration["groups"]:
         fail(f"device-data preparation is not supported for target {target}")
-    if declaration.get("originals_parser") is not None and "emmc" not in config:
-        if from_originals is None:
-            fail(f"target {target} requires --from-originals MANIFEST.json")
-    elif declaration.get("originals_parser") is None and from_originals is not None:
+    if from_originals is None and "parser" not in declaration and "emmc" not in config:
+        fail(f"target {target} requires --from-originals MANIFEST.json")
+    if from_originals is not None and "originals_parser" not in declaration:
         fail(f"target {target} requires physical NAND data and does not support --from-originals")
     spec = _target_spec(target, config)
     cache = data_root(ROOT)

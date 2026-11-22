@@ -21,6 +21,7 @@ class FakeNandPartitionReader:
     """
 
     correction_bits = 0
+    block_main_bytes = 0x20000
 
     def __init__(
         self,
@@ -41,7 +42,7 @@ class FakeNandPartitionReader:
 
     def main_bytes(self, offset: int, size: int) -> bytes:
         """Read overlapping fragments over the fake NAND's erased main area."""
-        if offset < 0 or size < 0 or offset + size > self._block_count * 0x20000:
+        if offset < 0 or size < 0 or offset + size > self._block_count * self.block_main_bytes:
             message = "fake NAND read exceeds its declared capacity"
             raise ValueError(message)
         output = bytearray(b"\xff" * size)
@@ -56,14 +57,16 @@ class FakeNandPartitionReader:
 
     def raw_page_prefixes(self, size: int) -> Iterator[tuple[int, bytes]]:
         """Expose uncorrected page prefixes from the sparse main-area fixture."""
-        for offset in range(0, self._block_count * 0x20000, 2048):
+        for offset in range(0, self._block_count * self.block_main_bytes, 2048):
             yield offset, self.main_bytes(offset, size)
 
     def partition_bytes(self, extent: tuple[int, int]) -> bytes:
         """Read the complete extent and require clean selected blocks."""
         offset, size = extent
         contents = self.main_bytes(offset, size)
-        for block in range(offset // 0x20000, (offset + size - 1) // 0x20000 + 1):
+        first = offset // self.block_main_bytes
+        last = (offset + size - 1) // self.block_main_bytes
+        for block in range(first, last + 1):
             if block in self._bad_blocks:
                 raise ValueError(f"selected NAND block {block} is marked bad")
         return contents

@@ -99,7 +99,7 @@ def phone_data(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> PhoneData:
     monkeypatch.setattr(
         PhysicalNand,
         "from_dump",
-        lambda raw, *, page_bytes, main_decoder, correction_bits: PhysicalNand(
+        lambda raw, *, page_bytes, main_decoder, correction_bits, **_receipt: PhysicalNand(
             raw, page_bytes, main_decoder, correction_bits
         ),
     )
@@ -451,3 +451,73 @@ def test_dump_missing_contradicting_or_unsupported_geometry_is_refused(
 ) -> None:
     with pytest.raises(SystemExit, match=message):
         prepare.dump_page_bytes(TARGET, nand, receipt)
+
+
+@pytest.mark.parametrize(
+    ("receipt_changes", "error"),
+    [
+        pytest.param({}, None, id="matching-receipt"),
+        pytest.param(None, "requires a NAND backup geometry receipt", id="absent-receipt"),
+        pytest.param(
+            {"target": "demo-phone"}, "belongs to another phone target", id="other-target"
+        ),
+        pytest.param({"id_bytes": "ecba"}, "expected id_bytes=98ba", id="other-chip"),
+        pytest.param(
+            {"page_main_bytes": 2048, "oob_bytes": 128, "block_count": 1024},
+            "expected id_bytes=98ba",
+            id="same-size-spi-geometry",
+        ),
+        pytest.param({"sha256": "f" * 64}, "describes different backup bytes", id="wrong-digest"),
+    ],
+)
+def test_konrow_physical_dump_requires_matching_receipt(
+    tmp_path: Path, receipt_changes: dict[str, object] | None, error: str | None
+) -> None:
+    """Admit this target's physical layout by its receipt even at the ambiguous SPI size."""
+    target = "konrow-senior-280-plus"
+    backup = tmp_path / "nand.bin"
+    with backup.open("wb") as stream:
+        stream.truncate(142606336)
+        stream.seek(1020)
+        stream.write(b"ABCD" + b"O" * 64 + b"EFGH")
+    if receipt_changes is not None:
+        with backup.open("rb") as stream:
+            digest = hashlib.file_digest(stream, "sha256").hexdigest()
+        receipt = {
+            "id_bytes": "98ba",
+            "chip": "test-nand",
+            "page_main_bytes": 1024,
+            "oob_bytes": 64,
+            "pages_per_block": 64,
+            "block_count": 2048,
+            "raw_bytes": 142606336,
+            "target": target,
+            "acquisition_recipe": "a" * 64,
+            "sha256": digest,
+            **receipt_changes,
+        }
+        backup.with_suffix(".bin.json").write_text(json.dumps(receipt), encoding="utf-8")
+    spec = prepare.DeviceDataSpec(
+        target=target,
+        parser=None,
+        groups={},
+        audio=AudioProfileContext(
+            machine_compatible=b"konrow,senior-280-plus",
+            speaker_vibration=False,
+            speaker_from_headphones=False,
+            headfree_headphones_only=False,
+        ),
+        preparation_recipe=None,
+        nand={"id": 0xBA98, "raw_page_bytes": 1088} if receipt_changes is None else None,
+    )
+
+    if error is not None:
+        with pytest.raises(SystemExit, match=error):
+            prepare.read_physical_nand(spec, backup, prepare.DeviceDataTools())
+        return
+
+    nand = prepare.read_physical_nand(spec, backup, prepare.DeviceDataTools())
+
+    assert nand.block_count == 2048
+    assert nand.block_main_bytes == 0x10000
+    assert nand.main_bytes(1020, 8) == b"ABCDEFGH"

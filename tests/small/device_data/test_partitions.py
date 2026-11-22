@@ -166,6 +166,29 @@ class VbmPartitionFormatTests:
 class PartitionDiscoveryTests:
     """Exercise table discovery through sparse main-area reads and table admission."""
 
+    @pytest.mark.parametrize("kind", ["VBM", "PartI"])
+    def test_discovery_uses_physical_erase_block_size(self, kind: str) -> None:
+        """Both formats address 64-KiB blocks in a NAND with 1024-byte main pages."""
+        if kind == "VBM":
+            encoded = vbm_table(((0x10000018, 0x100, 5, 7),))
+            fragments = {0x10000: encoded, 0x20400: encoded}
+        else:
+            fragments = {0x100: parti_table(parti_entries())}
+        contents = b"admitted partition contents"
+        fragments[0x50000] = contents
+        raw = bytearray(b"\xff" * (16 * 64 * 1088))
+        for offset, fragment in fragments.items():
+            raw_offset = offset + offset // 1024 * 64
+            raw[raw_offset : raw_offset + len(fragment)] = fragment
+        nand = device_data.PhysicalNand(bytes(raw), 1088, page_main_bytes=1024)
+
+        table = discover_partitions(nand, {0x10000018: device_data.RequiredPartition("CM4", 256)})
+
+        assert table.kind == kind
+        assert table.extents == {0x10000018: (0x50000, 0x30000)}
+        assert table.vbm_copy_offsets == ((0x10000, 0x20400) if kind == "VBM" else None)
+        assert nand.partition_bytes(table.extents[0x10000018]).startswith(contents)
+
     @pytest.mark.parametrize("offset", [0x840, 0x26120, 0x1FFF0])
     def test_parti_relocation_returns_only_required_extents(self, offset: int) -> None:
         """Word-aligned tables may move, including across an erase-block boundary."""

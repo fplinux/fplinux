@@ -43,6 +43,17 @@ class PhysicalPageFormatTests:
         with pytest.raises(ValueError, match="block 0 is marked bad"):
             device_data.PhysicalNand(bytes(marked), page_bytes).require_good_blocks(0, 2048)
 
+    @pytest.mark.parametrize("marker", [0x11400, 0x11840], ids=["first-page", "second-page"])
+    def test_factory_markers_in_the_second_64_kib_block_are_checked(self, marker: int) -> None:
+        """An extent crossing into the marked 1024+64-byte block is refused."""
+        raw = bytearray(b"\xff" * (2 * 64 * 1088))
+        raw[marker] = 0
+        nand = device_data.PhysicalNand(bytes(raw), 1088, page_main_bytes=1024)
+
+        assert nand.partition_bytes((0xFFFE, 2)) == b"\xff\xff"
+        with pytest.raises(ValueError, match="block 1 is marked bad"):
+            nand.partition_bytes((0xFFFF, 2))
+
     @pytest.mark.parametrize(
         ("page_bytes", "expected_size"),
         [

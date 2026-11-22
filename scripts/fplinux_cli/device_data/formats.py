@@ -8,10 +8,12 @@ from dataclasses import dataclass, field
 from itertools import pairwise
 from typing import TYPE_CHECKING, Protocol
 
-from .nand_geometry import BLOCK_MAIN_BYTES, PAGE_MAIN_BYTES, PAGES_PER_BLOCK, PHYSICAL_PAGE_COUNT
+from .nand_geometry import PAGE_MAIN_BYTES, PAGES_PER_BLOCK, PHYSICAL_PAGE_COUNT
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator, Mapping
+
+    from .nand_geometry import NandGeometry
 
 VBM_HEADER_PREFIX = b"VBM_BOOT\x02\x01\x00\x00"
 VBM_MAGIC = VBM_HEADER_PREFIX[:8]
@@ -38,6 +40,11 @@ class NandPartitionReader(Protocol):
     @property
     def block_count(self) -> int:
         """Return the physical NAND capacity in erase blocks."""
+        ...
+
+    @property
+    def block_main_bytes(self) -> int:
+        """Return the main-area capacity of one physical erase block."""
         ...
 
     @property
@@ -94,11 +101,18 @@ class PhysicalNand:
         default=None, repr=False, compare=False
     )
     correction_bits: int = 0
+    page_main_bytes: int = field(default=PAGE_MAIN_BYTES, kw_only=True)
+    pages_per_block: int = field(default=PAGES_PER_BLOCK, kw_only=True)
 
     @property
     def block_count(self) -> int:
         """Return the number of complete erase blocks in this physical image."""
-        return len(self.raw) // self.page_bytes // PAGES_PER_BLOCK
+        return len(self.raw) // self.page_bytes // self.pages_per_block
+
+    @property
+    def block_main_bytes(self) -> int:
+        """Return main-area bytes per erase block."""
+        return self.page_main_bytes * self.pages_per_block
 
     @classmethod
     def from_dump(
@@ -108,26 +122,41 @@ class PhysicalNand:
         page_bytes: int,
         main_decoder: Callable[[bytes, int, int, int], bytes] | None = None,
         correction_bits: int = 0,
+        geometry: NandGeometry | None = None,
     ) -> PhysicalNand:
         """Require a complete physical backup before interpreting target partitions."""
-        expected_size = PHYSICAL_PAGE_COUNT * page_bytes
+        page_main_bytes = PAGE_MAIN_BYTES
+        pages_per_block = PAGES_PER_BLOCK
+        page_count = PHYSICAL_PAGE_COUNT
+        if geometry is not None:
+            page_main_bytes = geometry.page_main_bytes
+            pages_per_block = geometry.pages_per_block
+            page_count = geometry.block_count * pages_per_block
+        expected_size = page_count * page_bytes
         if len(raw) != expected_size:
             raise ValueError(
                 f"expected a complete {expected_size}-byte physical NAND backup "
-                f"({PAGE_MAIN_BYTES} main + {page_bytes - PAGE_MAIN_BYTES} OOB bytes per page), "
+                f"({page_main_bytes} main + {page_bytes - page_main_bytes} OOB bytes per page), "
                 f"got {len(raw)} bytes"
             )
-        return cls(raw, page_bytes, main_decoder, correction_bits)
+        return cls(
+            raw,
+            page_bytes,
+            main_decoder,
+            correction_bits,
+            page_main_bytes=page_main_bytes,
+            pages_per_block=pages_per_block,
+        )
 
     def raw_page_prefixes(self, size: int) -> Iterator[tuple[int, bytes]]:
         """Inspect prefixes without decoding unrelated sectors or admitting blocks."""
         for page in range(len(self.raw) // self.page_bytes):
             position = page * self.page_bytes
-            yield page * PAGE_MAIN_BYTES, self.raw[position : position + size]
+            yield page * self.page_main_bytes, self.raw[position : position + size]
 
     def main_bytes(self, offset: int, size: int) -> bytes:
         """Read main-area bytes without including the intervening physical OOB."""
-        available = len(self.raw) // self.page_bytes * PAGE_MAIN_BYTES
+        available = len(self.raw) // self.page_bytes * self.page_main_bytes
         if offset < 0 or size < 0 or offset + size > available:
             message = "partition extent is outside the physical NAND backup"
             raise ValueError(message)
@@ -135,8 +164,8 @@ class PhysicalNand:
             return self.main_decoder(self.raw, self.page_bytes, offset, size)
         output = bytearray()
         while size:
-            page, column = divmod(offset, PAGE_MAIN_BYTES)
-            count = min(size, PAGE_MAIN_BYTES - column)
+            page, column = divmod(offset, self.page_main_bytes)
+            count = min(size, self.page_main_bytes - column)
             position = page * self.page_bytes + column
             output.extend(self.raw[position : position + count])
             offset += count
@@ -145,12 +174,13 @@ class PhysicalNand:
 
     def require_good_blocks(self, offset: int, size: int) -> None:
         """Reject selected bad-marked blocks instead of guessing BML replacements."""
-        first = offset // BLOCK_MAIN_BYTES
-        last = (offset + size - 1) // BLOCK_MAIN_BYTES
+        block_main_bytes = self.block_main_bytes
+        first = offset // block_main_bytes
+        last = (offset + size - 1) // block_main_bytes
         for block in range(first, last + 1):
             for page_in_block in (0, 1):
-                page = block * PAGES_PER_BLOCK + page_in_block
-                if self.raw[page * self.page_bytes + PAGE_MAIN_BYTES] != 0xFF:
+                page = block * self.pages_per_block + page_in_block
+                if self.raw[page * self.page_bytes + self.page_main_bytes] != 0xFF:
                     raise ValueError(
                         f"unsupported bad-block mapping: selected NAND block {block} is marked bad"
                     )
@@ -238,8 +268,8 @@ def redundant_vbm_partitions(
 
     return {
         entry.identifier: (
-            entry.first_block * BLOCK_MAIN_BYTES,
-            (entry.last_block - entry.first_block + 1) * BLOCK_MAIN_BYTES,
+            entry.first_block * nand.block_main_bytes,
+            (entry.last_block - entry.first_block + 1) * nand.block_main_bytes,
         )
         for entry in admitted.values()
     }

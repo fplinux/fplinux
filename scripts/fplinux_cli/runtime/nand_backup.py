@@ -17,9 +17,11 @@ from fplinux_cli.device_data.nand_backup import (
 )
 from fplinux_cli.device_data.nand_geometry import (
     GEOMETRY_SIZE_KEYS,
+    KONROW_NAND_TARGET,
     NandGeometry,
     require_consistent_geometry,
     require_declared_chip,
+    require_konrow_geometry,
 )
 
 if TYPE_CHECKING:
@@ -62,8 +64,8 @@ class SshTransport(Protocol):
 type SessionFactory = Callable[[], tuple[SshTransport, dict[str, Any]]]
 
 
-def parse_geometry_report(report: str) -> NandGeometry:
-    """Admit the reader's key=value report only for an identified, consistent chip."""
+def parse_geometry_report(report: str, *, target: str) -> NandGeometry:
+    """Admit an identified chip and its physical layout for the selected target."""
     values: dict[str, str] = {}
     for line in report.splitlines():
         key, separator, value = line.partition("=")
@@ -74,11 +76,14 @@ def parse_geometry_report(report: str) -> NandGeometry:
     missing = _GEOMETRY_REPORT_KEYS - feature_keys - set(values)
     if missing:
         fail(f"NAND geometry report lacks: {', '.join(sorted(missing))}")
+    source = values["geometry_source"]
     features = set(values) & feature_keys
+    if source == "parallel" and features:
+        fail("parallel NAND geometry report contains SPI features")
     if features and features != feature_keys:
         missing_features = feature_keys - features
         fail(f"NAND geometry report lacks: {', '.join(sorted(missing_features))}")
-    if values["geometry_source"] == "unknown":
+    if source == "unknown":
         feature_report = "".join(
             f" {key}={values[key]}" for key in _SPI_FEATURE_KEYS if key in values
         )
@@ -86,10 +91,12 @@ def parse_geometry_report(report: str) -> NandGeometry:
             f"the running kernel does not identify this NAND chip: "
             f"id_bytes={values['id_bytes']}{feature_report}; raw NAND reads are unavailable"
         )
-    if not features:
+    if source != "parallel" and not features:
         fail(f"NAND geometry report lacks: {', '.join(_SPI_FEATURE_KEYS)}")
-    if values["geometry_source"] not in {"dt", "table"}:
-        fail(f"NAND geometry report has an invalid geometry_source: {values['geometry_source']}")
+    if source not in {"dt", "table", "parallel"}:
+        fail(f"NAND geometry report has an invalid geometry_source: {source}")
+    if (source == "parallel") != (target == KONROW_NAND_TARGET):
+        fail(f"NAND geometry report source {source!r} does not match target {target}")
     for key in GEOMETRY_SIZE_KEYS:
         if _DECIMAL.fullmatch(values[key]) is None:
             fail(f"NAND geometry report has a non-decimal {key}: {values[key]!r}")
@@ -102,7 +109,13 @@ def parse_geometry_report(report: str) -> NandGeometry:
         block_count=int(values["block_count"]),
         raw_bytes=int(values["raw_bytes"]),
     )
-    return require_consistent_geometry(geometry, "NAND geometry report")
+    require_consistent_geometry(geometry, "NAND geometry report")
+    if source == "parallel":
+        try:
+            require_konrow_geometry(geometry)
+        except ValueError as error:
+            fail(str(error))
+    return geometry
 
 
 def read_geometry_report(ssh: SshTransport, session: dict[str, Any], raw_device: str) -> str:
@@ -139,7 +152,7 @@ def backup_nand(  # noqa: PLR0913 -- the reader and the declared chip are distin
     """Acquire one exact session and publish a complete physical NAND image and its receipt."""
     require_backup_destination(output, acquisition_recipe)
     ssh, session = connect()
-    geometry = parse_geometry_report(read_geometry_report(ssh, session, raw_device))
+    geometry = parse_geometry_report(read_geometry_report(ssh, session, raw_device), target=target)
     require_declared_chip(
         geometry,
         target=target,

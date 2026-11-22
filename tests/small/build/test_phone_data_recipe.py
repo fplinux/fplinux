@@ -180,7 +180,7 @@ def test_acquisition_recipe_tracks_reader_contract_changes(
         phone_data_inputs.dtb.write_bytes(nand_tree(resource=0x402F0000))
     elif change == "interface":
         phone_data_inputs.dtb.write_bytes(
-            nand_tree(compatible=b"fplinux,ums9117-nandc-parallel-id\0")
+            nand_tree(compatible=b"fplinux,ums9117-nandc-parallel-ro\0")
         )
     else:
         phone_data_inputs.config["nand"]["raw_page_bytes"] = 2176

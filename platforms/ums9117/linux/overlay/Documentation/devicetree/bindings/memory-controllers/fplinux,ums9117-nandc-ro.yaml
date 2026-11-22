@@ -11,7 +11,7 @@ maintainers:
 
 description: |
   This node describes the platform resources needed for fixed-command read-only
-  access through the UMS9117 NANDC SPI path. The driver registers
+  access through UMS9117 NANDC. The driver registers
   /dev/ums9117-nand-raw. Its first open identifies the fitted SPI NAND from
   the manufacturer and device bytes of READ ID and keeps the result until the
   device is removed. Supported chips have 2048-byte pages, 64 pages per block,
@@ -43,6 +43,12 @@ description: |
   owned platform state are also restored. Hardware is activated only for
   explicit opens and reads.
 
+  The fplinux,ums9117-nandc-parallel-ro compatible admits the six-byte READ ID
+  98 BA 90 55 76 16 and requires stable reads that distinguish rows above and
+  below the 16-bit row boundary. The physical stream has 2048 blocks of 64
+  pages, each containing 1024 main bytes followed by 64 OOB bytes. The driver
+  checks the full ID for each read session and skips ECC correction.
+
   The fplinux,ums9117-nandc-parallel-id compatible provides only fixed RESET
   and READ ID operations for parallel NAND. It reports the manufacturer and
   device bytes, with unknown geometry and without SPI feature fields. Array
@@ -52,7 +58,9 @@ allOf:
   - if:
       properties:
         compatible:
-          const: fplinux,ums9117-nandc-parallel-id
+          enum:
+            - fplinux,ums9117-nandc-parallel-id
+            - fplinux,ums9117-nandc-parallel-ro
     then:
       properties:
         fplinux,nand-id: false
@@ -85,6 +93,7 @@ properties:
     enum:
       - fplinux,ums9117-nandc-ro
       - fplinux,ums9117-nandc-parallel-id
+      - fplinux,ums9117-nandc-parallel-ro
 
   fplinux,nand-id:
     $ref: /schemas/types.yaml#/definitions/uint32
