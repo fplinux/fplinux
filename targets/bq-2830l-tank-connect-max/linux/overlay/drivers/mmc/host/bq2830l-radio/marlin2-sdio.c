@@ -30,7 +30,7 @@
 #define MARLIN2_SDIO_READY_INTERRUPT BIT(0)
 #define MARLIN2_CHIP_ID_ADDRESS 0x603003fc
 #define MARLIN2_BLUETOOTH_DIRECT_ADDRESS 0x51004000
-#define MARLIN2_BQ_CHIP_ID 0x23490001
+#define MARLIN2_CHIP_ID 0x23490001
 #define MARLIN2_SDIO_PRIORITY_ADDRESS 0x60300150
 #define MARLIN2_CPU_RESET_ADDRESS 0x40060288
 #define MARLIN2_WIFI_AHB_ADDRESS 0x60300004
@@ -49,10 +49,16 @@
 #define MARLIN2_READY_TIMEOUT_MS 30000U
 #define MARLIN2_READY_POLL_MS 20U
 
-static const u8 marlin2_image_sha256[SHA256_DIGEST_SIZE] = {
+static const u8 bq2830l_image_sha256[SHA256_DIGEST_SIZE] = {
 	0x5f, 0xdd, 0x81, 0xda, 0x4e, 0x8e, 0xf9, 0xa5, 0x20, 0xdc, 0xb1,
 	0xd6, 0x15, 0x43, 0xb0, 0xe6, 0x2c, 0xb2, 0x58, 0xbe, 0x8b, 0x7a,
 	0x89, 0x66, 0xff, 0xd6, 0x48, 0xbc, 0xcc, 0x3d, 0x56, 0x90,
+};
+
+static const u8 itel_neo_r60_image_sha256[SHA256_DIGEST_SIZE] = {
+	0x45, 0x3f, 0x52, 0xe2, 0x04, 0xaa, 0x12, 0x11, 0xc9, 0x9e, 0xf8,
+	0x1e, 0xc6, 0x65, 0x34, 0x0c, 0xff, 0xff, 0x91, 0x7a, 0x0d, 0xa7,
+	0xea, 0x84, 0xf4, 0x6a, 0x18, 0xf6, 0xd8, 0xb0, 0x26, 0x1e,
 };
 
 struct marlin2_interrupt_state {
@@ -196,7 +202,8 @@ static int update_word(struct sdio_func *func, u32 address, u32 clear, u32 set)
 	return write_word(func, address, (value & ~clear) | set);
 }
 
-static int request_boot_data(struct device *dev, const struct firmware **image,
+static int request_boot_data(struct device *dev, const u8 *image_sha256,
+			     const struct firmware **image,
 			     const struct firmware **calibration)
 {
 	u8 digest[SHA256_DIGEST_SIZE];
@@ -213,7 +220,7 @@ static int request_boot_data(struct device *dev, const struct firmware **image,
 	if ((*image)->size != MARLIN2_IMAGE_BYTES)
 		return -EINVAL;
 	sha256((*image)->data, (*image)->size, digest);
-	if (memcmp(digest, marlin2_image_sha256, sizeof(digest)))
+	if (memcmp(digest, image_sha256, sizeof(digest)))
 		return -EBADMSG;
 	ret = device_property_read_string(dev, "calibration-name", &name);
 	if (ret)
@@ -407,20 +414,35 @@ static int marlin2_sdio_probe(struct sdio_func *func,
 	};
 	struct marlin2_interrupt_state interrupts = {};
 	struct marlin2_sdio_runtime *runtime = NULL;
-	bool persistent = bq2830l_radio_runtime_requested(func);
 	const struct firmware *calibration = NULL;
 	const struct firmware *image = NULL;
+	const u8 *image_digest;
 	struct mmc_host *host = func->card->host;
+	struct device *parent = host->parent->parent;
 	unsigned long deadline;
 	unsigned int saved_quirks;
 	u8 direct_enabled;
 	u8 *buffer = NULL;
+	bool itel_probe;
+	bool persistent;
 	int cleanup_ret;
 	int ret;
 
-	if (func->num != 1 ||
+	if (!parent || func->num != 1)
+		return -ENODEV;
+	itel_probe = of_device_is_compatible(
+		parent->of_node, "fplinux,itel-neo-r60-marlin2-probe");
+	if (!itel_probe &&
+	    !of_device_is_compatible(parent->of_node, "bq,2830l-radio"))
+		return -ENODEV;
+	result.identify_only =
+		itel_probe &&
+		of_device_is_compatible(func->dev.of_node,
+					"fplinux,marlin2-sdio-identify");
+	if (!result.identify_only &&
 	    !of_device_is_compatible(func->dev.of_node, "sprd,marlin2-sdio"))
 		return -ENODEV;
+	persistent = !itel_probe && bq2830l_radio_runtime_requested(func);
 	deadline = bq2830l_radio_deadline(func);
 	if (persistent) {
 		runtime =
@@ -430,9 +452,16 @@ static int marlin2_sdio_probe(struct sdio_func *func,
 			goto out_report;
 		}
 	}
-	ret = request_boot_data(&func->dev, &image, &calibration);
-	if (ret)
-		goto out_report;
+	if (!result.identify_only) {
+		image_digest = itel_probe ? itel_neo_r60_image_sha256 :
+					    bq2830l_image_sha256;
+		ret = request_boot_data(&func->dev, image_digest, &image,
+					&calibration);
+		if (ret)
+			goto out_report;
+	} else {
+		result.phase = MARLIN2_BOOT_CHIP_ID;
+	}
 	if (func->max_blksize < MARLIN2_SDIO_BLOCK_BYTES ||
 	    host->max_blk_size < MARLIN2_SDIO_BLOCK_BYTES ||
 	    host->max_req_size < MARLIN2_SDIO_BLOCK_BYTES ||
@@ -441,10 +470,12 @@ static int marlin2_sdio_probe(struct sdio_func *func,
 		ret = -EPROTONOSUPPORT;
 		goto out_report;
 	}
-	buffer = kmalloc(MARLIN2_SDIO_BLOCK_BYTES, GFP_KERNEL);
-	if (!buffer) {
-		ret = -ENOMEM;
-		goto out_report;
+	if (!result.identify_only) {
+		buffer = kmalloc(MARLIN2_SDIO_BLOCK_BYTES, GFP_KERNEL);
+		if (!buffer) {
+			ret = -ENOMEM;
+			goto out_report;
+		}
 	}
 	sdio_claim_host(func);
 	saved_quirks = func->card->quirks;
@@ -463,8 +494,14 @@ static int marlin2_sdio_probe(struct sdio_func *func,
 	ret = read_word(func, MARLIN2_CHIP_ID_ADDRESS, &result.chip_id[1]);
 	if (ret)
 		goto out_disable;
+	if (result.identify_only) {
+		if (result.chip_id[0] != result.chip_id[1] ||
+		    !result.chip_id[0] || result.chip_id[0] == U32_MAX)
+			ret = -ENODEV;
+		goto out_disable;
+	}
 	if (result.chip_id[0] != result.chip_id[1] ||
-	    result.chip_id[0] != MARLIN2_BQ_CHIP_ID) {
+	    result.chip_id[0] != MARLIN2_CHIP_ID) {
 		ret = -ENODEV;
 		goto out_disable;
 	}
@@ -494,7 +531,10 @@ static int marlin2_sdio_probe(struct sdio_func *func,
 		result.packet_error = marlin2_packet_get_info_locked(
 			func, bq2830l_radio_rx_request(func),
 			jiffies_to_msecs(jiffies), deadline, &result.packet);
-		result.phase = MARLIN2_BOOT_COMPLETE;
+		if (itel_probe && result.packet_error)
+			ret = result.packet_error;
+		else
+			result.phase = MARLIN2_BOOT_COMPLETE;
 	}
 	if (!ret && persistent) {
 		runtime->interrupts = interrupts;
@@ -516,8 +556,10 @@ out_report:
 	release_firmware(image);
 	bq2830l_radio_report(func, ret, &result);
 	if (ret)
-		return dev_err_probe(&func->dev, ret,
-				     "failed to boot radio firmware\n");
+		return dev_err_probe(&func->dev, ret, "%s\n",
+				     result.identify_only ?
+					     "failed to identify radio" :
+					     "failed to boot radio firmware");
 	return 0;
 }
 

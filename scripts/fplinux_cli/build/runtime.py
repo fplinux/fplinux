@@ -207,6 +207,8 @@ def preparation_source_files(
         selected.extend(_RADIO_MODULES)
     if config["platform"] == "ums9117":
         selected.append("device_data/nv_volume.py")
+        if "wcn-firmware" in groups:
+            selected.append("device_data/marlin2.py")
         if {"bluetooth", "fm-radio", "wcn-firmware"} & groups.keys():
             selected.append("device_data/running_nv.py")
     files = {

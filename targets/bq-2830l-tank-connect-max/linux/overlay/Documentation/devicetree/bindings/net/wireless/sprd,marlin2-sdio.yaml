@@ -13,10 +13,27 @@ description:
   A fixed SDIO function with firmware loaded into volatile memory. The board
   owns its power and reset controls. Its configuration and calibration are
   provided together as a firmware-loader file prepared from the phone's data.
+  The identification-only variant reads the chip ID without loading firmware.
+
+allOf:
+  - if:
+      properties:
+        compatible:
+          const: sprd,marlin2-sdio
+    then:
+      required:
+        - firmware-name
+        - calibration-name
+    else:
+      properties:
+        firmware-name: false
+        calibration-name: false
 
 properties:
   compatible:
-    const: sprd,marlin2-sdio
+    enum:
+      - sprd,marlin2-sdio
+      - fplinux,marlin2-sdio-identify
 
   reg:
     maxItems: 1
@@ -32,8 +49,6 @@ properties:
 required:
   - compatible
   - reg
-  - firmware-name
-  - calibration-name
 
 additionalProperties: false
 

@@ -18,6 +18,7 @@ from fplinux_cli.device_data.formats import (
     nv_checksum,
     redundant_vbm_partitions,
 )
+from fplinux_cli.device_data.marlin2 import RADIO_RECORD_SIZES, prepare_radio_calibration
 from fplinux_cli.device_data.running_nv import read_running_nv_record
 
 if TYPE_CHECKING:
@@ -36,10 +37,8 @@ _REQUIRED_PARTITIONS = {
     _PROTECT_NV: RequiredPartition("ProtectNV", 0x100),
     _WCN_CODE: RequiredPartition("External radio code", 0x100),
 }
-_RADIO_RECORD_SIZES = {409: 888, 417: 3292}
 _WCN_IMAGE_BYTES = 592896
 _WCN_IMAGE_SHA256 = "5fdd81da4e8ef9a520dcb1d61543b0e62cb258be8b7a8966ffd648bccc3d5690"
-_RADIO_CONFIG_BYTES = 616
 _RADIO_IMAGE_NAME = "bq-2830l-tank-connect-max-wcn.bin"
 _RADIO_CALIBRATION_NAME = "bq-2830l-tank-connect-max-wcn-calibration.bin"
 _RADIO_MAC_NAME = "bq-2830l-tank-connect-max-wcn-mac.bin"
@@ -77,27 +76,6 @@ def prepare_radio_mac(partition: bytes) -> bytes:
         message = "ambiguous RunningNV Wi-Fi addresses"
         raise ValueError(message)
     return next(iter(addresses))
-
-
-def prepare_radio_calibration(
-    downloaded: Mapping[int, bytes], protected: Mapping[int, bytes]
-) -> bytes:
-    """Retain matching fitted configuration and already calibrated radio records."""
-    for identifier, size in _RADIO_RECORD_SIZES.items():
-        record = downloaded.get(identifier)
-        if record is None or len(record) != size:
-            raise ValueError(f"radio NV{identifier} is missing or has the wrong size")
-        if protected.get(identifier) != record:
-            raise ValueError(f"radio NV{identifier} differs between fixed copies")
-    configuration = downloaded[409]
-    calibration = downloaded[417]
-    if configuration[0] != 2 or calibration[0] != 2:
-        message = "unsupported radio configuration or calibration version"
-        raise ValueError(message)
-    if calibration[1] != 1:
-        message = "radio record is not already calibrated"
-        raise ValueError(message)
-    return configuration[:_RADIO_CONFIG_BYTES] + calibration
 
 
 def prepare_bluetooth_pskey(configuration: bytes, settings: bytes) -> bytes:
@@ -163,7 +141,7 @@ def prepare_device_data(
 ) -> DeviceDataPreparation:
     """Retain matching fixed data, saved Wi-Fi identity and current Bluetooth settings."""
     partitions = redundant_vbm_partitions(nand, _VBM_COPY_OFFSETS, _REQUIRED_PARTITIONS)
-    required_sizes = {**AUDIO_RECORD_SIZES, **_RADIO_RECORD_SIZES}
+    required_sizes = {**AUDIO_RECORD_SIZES, **RADIO_RECORD_SIZES}
     downloaded = fixed_nv_records(nand.partition_bytes(partitions[_DOWNLOADED_NV]), required_sizes)
     protected = fixed_nv_records(nand.partition_bytes(partitions[_PROTECT_NV]), required_sizes)
     bluetooth_settings = read_running_nv_record(

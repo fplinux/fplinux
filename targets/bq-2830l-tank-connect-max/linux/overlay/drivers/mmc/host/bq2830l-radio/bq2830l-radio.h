@@ -40,6 +40,7 @@ struct marlin2_boot_result {
 	bool calibration_verified;
 	bool ready;
 	bool packet_attempted;
+	bool identify_only;
 };
 
 void bq2830l_radio_report(struct sdio_func *func, int error,

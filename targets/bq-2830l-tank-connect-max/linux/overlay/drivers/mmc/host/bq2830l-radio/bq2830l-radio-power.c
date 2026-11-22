@@ -36,6 +36,7 @@
 #define BQ2830L_AUX0_GATE_CLEAR 0x2004
 #define BQ2830L_AUX0_GATE BIT(2)
 #define BQ2830L_WCN_VOLTAGE_UV 1587500
+#define ITEL_NEO_R60_RADIO_TIMEOUT_MS 120000U
 
 static const struct {
 	u32 offset;
@@ -70,6 +71,7 @@ struct bq2830l_radio {
 	struct marlin2_fm *fm;
 	/* HCI setup may take cleanup_lock while start waits for its work. */
 	struct mutex bluetooth_lock;
+	bool itel_probe;
 	bool shutting_down;
 	bool runtime_requested;
 	/* Serializes child creation/removal and restoration of hardware state. */
@@ -77,6 +79,7 @@ struct bq2830l_radio {
 	/* Protects the result shared by the SDIO probe, cleanup and sysfs. */
 	spinlock_t result_lock;
 	u32 saved_pins[ARRAY_SIZE(bq2830l_radio_pins)];
+	u32 probe_pad_value;
 	struct marlin2_boot_result boot;
 	unsigned long deadline;
 	u16 vendor;
@@ -200,9 +203,12 @@ static int apply_radio_pins(struct bq2830l_radio *radio)
 	}
 	radio->pins_saved = true;
 	for (index = 0; index < ARRAY_SIZE(bq2830l_radio_pins); index++) {
-		ret = regmap_write(radio->pins,
-				   bq2830l_radio_pins[index].offset,
-				   bq2830l_radio_pins[index].value);
+		u32 offset = bq2830l_radio_pins[index].offset;
+		u32 value = bq2830l_radio_pins[index].value;
+
+		if (radio->itel_probe && offset == 0x464)
+			value = radio->probe_pad_value;
+		ret = regmap_write(radio->pins, offset, value);
 		if (ret)
 			return ret;
 	}
@@ -339,7 +345,9 @@ void bq2830l_radio_report(struct sdio_func *func, int error,
 	unsigned long flags;
 
 	if (!parent ||
-	    !of_device_is_compatible(parent->of_node, "bq,2830l-radio"))
+	    (!of_device_is_compatible(parent->of_node, "bq,2830l-radio") &&
+	     !of_device_is_compatible(parent->of_node,
+				      "fplinux,itel-neo-r60-marlin2-probe")))
 		return;
 	radio = dev_get_drvdata(parent);
 	spin_lock_irqsave(&radio->result_lock, flags);
@@ -417,6 +425,14 @@ static ssize_t result_show(struct device *dev, struct device_attribute *attr,
 			      radio->boot.chip_id[1],
 			      boot_phase_name(radio->boot.phase),
 			      radio->boot.image_bytes);
+	if (radio->boot.identify_only) {
+		size += sysfs_emit_at(
+			buf, size,
+			" identify_only=1 cleanup_done=%u sdio_cleanup_error=%d\n",
+			radio->cleanup_done, radio->boot.cleanup_error);
+		spin_unlock_irqrestore(&radio->result_lock, flags);
+		return size;
+	}
 	size += sysfs_emit_at(buf, size,
 			      " image_verified=%u calibration_verified=%u",
 			      radio->boot.image_verified,
@@ -484,9 +500,14 @@ static ssize_t result_show(struct device *dev, struct device_attribute *attr,
 		radio->boot.packet.info.max_multicast_addresses);
 	size += sysfs_emit_at(
 		buf, size,
-		" wifi_wnm_ft_support=%u wifi_extended_features=0x%08x\n",
+		" wifi_wnm_ft_support=%u wifi_extended_features=0x%08x",
 		radio->boot.packet.info.wnm_ft_support,
 		radio->boot.packet.info.extended_features);
+	if (radio->itel_probe)
+		size += sysfs_emit_at(buf, size,
+				      " identify_only=0 cleanup_done=%u",
+				      radio->cleanup_done);
+	size += sysfs_emit_at(buf, size, "\n");
 	spin_unlock_irqrestore(&radio->result_lock, flags);
 	return size;
 }
@@ -515,11 +536,29 @@ static const struct attribute_group bq2830l_radio_group = {
 	.attrs = bq2830l_radio_attrs,
 };
 
+static struct attribute *itel_radio_probe_attrs[] = {
+	&dev_attr_result.attr,
+	&dev_attr_boot.attr,
+	NULL,
+};
+
+static const struct attribute_group itel_radio_probe_group = {
+	.attrs = itel_radio_probe_attrs,
+};
+
+static const struct attribute_group *radio_group(struct device *dev)
+{
+	const struct bq2830l_radio *radio = dev_get_drvdata(dev);
+
+	return radio->itel_probe ? &itel_radio_probe_group :
+				   &bq2830l_radio_group;
+}
+
 static void remove_radio_group(void *context)
 {
 	struct device *dev = context;
 
-	device_remove_group(dev, &bq2830l_radio_group);
+	device_remove_group(dev, radio_group(dev));
 }
 
 static int power_on_radio(struct bq2830l_radio *radio)
@@ -532,6 +571,12 @@ static int power_on_radio(struct bq2830l_radio *radio)
 	ret = apply_radio_pins(radio);
 	if (ret)
 		return ret;
+	if (radio->itel_probe) {
+		ret = regulator_enable(radio->wifipa);
+		if (ret)
+			return ret;
+		radio->wifipa_enabled = true;
+	}
 	ret = clk_prepare_enable(radio->aux0);
 	if (ret)
 		return ret;
@@ -545,6 +590,24 @@ static int power_on_radio(struct bq2830l_radio *radio)
 	if (ret)
 		return ret;
 	radio->rail_enabled = true;
+	if (radio->itel_probe) {
+		ret = gpiod_direction_output(radio->enable, 0);
+		if (ret)
+			return ret;
+		msleep(100);
+		gpiod_set_value_cansleep(radio->enable, 1);
+		ret = gpiod_direction_output(radio->reset, 1);
+		if (ret) {
+			gpiod_set_value_cansleep(radio->enable, 0);
+			return ret;
+		}
+		radio->controls_ready = true;
+		fsleep(2000);
+		gpiod_set_value_cansleep(radio->reset, 0);
+		fsleep(2000);
+		msleep(20);
+		return 0;
+	}
 	ret = regulator_enable(radio->wifipa);
 	if (ret)
 		return ret;
@@ -569,13 +632,17 @@ static int power_on_radio(struct bq2830l_radio *radio)
 static int start_radio_locked(struct bq2830l_radio *radio)
 {
 	struct device *dev = radio->dev;
+	unsigned int timeout_ms = BQ2830L_RADIO_TIMEOUT_MS;
 	unsigned long flags;
 	int ret;
 
 	if (radio->active)
 		return -EBUSY;
 	radio->active = true;
-	radio->deadline = jiffies + msecs_to_jiffies(BQ2830L_RADIO_TIMEOUT_MS);
+	/* The itel's one-bit SDIO bus reads the entire image back at 400 kHz. */
+	if (radio->itel_probe)
+		timeout_ms = ITEL_NEO_R60_RADIO_TIMEOUT_MS;
+	radio->deadline = jiffies + msecs_to_jiffies(timeout_ms);
 	spin_lock_irqsave(&radio->result_lock, flags);
 	memset(&radio->boot, 0, sizeof(radio->boot));
 	radio->vendor = 0;
@@ -820,6 +887,8 @@ static int bq2830l_radio_probe(struct platform_device *pdev)
 	if (!radio)
 		return -ENOMEM;
 	radio->dev = dev;
+	radio->itel_probe = of_device_is_compatible(
+		dev->of_node, "fplinux,itel-neo-r60-marlin2-probe");
 	radio->status = -EAGAIN;
 	radio->cleanup_done = true;
 	mutex_init(&radio->cleanup_lock);
@@ -833,10 +902,19 @@ static int bq2830l_radio_probe(struct platform_device *pdev)
 	if (IS_ERR(radio->aon))
 		return dev_err_probe(dev, PTR_ERR(radio->aon),
 				     "AON registers unavailable\n");
-	radio->pins = syscon_regmap_lookup_by_phandle(dev->of_node, "bq,pins");
+	radio->pins = syscon_regmap_lookup_by_phandle(
+		dev->of_node,
+		radio->itel_probe ? "fplinux,probe-pins" : "bq,pins");
 	if (IS_ERR(radio->pins))
 		return dev_err_probe(dev, PTR_ERR(radio->pins),
 				     "pin registers unavailable\n");
+	if (radio->itel_probe) {
+		ret = device_property_read_u32(dev, "fplinux,probe-pad-0464",
+					       &radio->probe_pad_value);
+		if (ret)
+			return dev_err_probe(dev, ret,
+					     "radio pad setting unavailable\n");
+	}
 	radio->enable = devm_gpiod_get(dev, "enable", GPIOD_ASIS);
 	if (IS_ERR(radio->enable))
 		return dev_err_probe(dev, PTR_ERR(radio->enable),
@@ -874,6 +952,8 @@ static int bq2830l_radio_probe(struct platform_device *pdev)
 	ret = devm_add_action_or_reset(dev, unregister_consumers, radio);
 	if (ret)
 		return ret;
+	if (radio->itel_probe)
+		goto add_group;
 #if IS_ENABLED(CONFIG_BQ2830L_WLAN)
 	{
 		radio->wlan = marlin2_wlan_register(dev, &wlan_radio_ops, radio,
@@ -894,7 +974,8 @@ static int bq2830l_radio_probe(struct platform_device *pdev)
 		return dev_err_probe(dev, ret, "FM interface unavailable\n");
 	}
 #endif
-	ret = device_add_group(dev, &bq2830l_radio_group);
+add_group:
+	ret = device_add_group(dev, radio_group(dev));
 	if (ret)
 		return ret;
 	return devm_add_action_or_reset(dev, remove_radio_group, dev);
@@ -912,6 +993,7 @@ static void bq2830l_radio_shutdown(struct platform_device *pdev)
 
 static const struct of_device_id bq2830l_radio_of_match[] = {
 	{ .compatible = "bq,2830l-radio" },
+	{ .compatible = "fplinux,itel-neo-r60-marlin2-probe" },
 	{},
 };
 MODULE_DEVICE_TABLE(of, bq2830l_radio_of_match);

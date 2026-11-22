@@ -66,8 +66,7 @@ session_name = "itel-neo-r60-plus-linux"
 boot_instructions = "Power the phone off, hold the left soft key and call key together, then connect USB while keeping both keys pressed."
 
 [device_data]
-parser = "itel_device_data.py"
-fitted_prefix = "itel-neo-r60-plus"
+parser = "device-data/itel_device_data.py"
 
 [bluetooth]
 firmware = [
@@ -85,6 +84,12 @@ firmware = [
 [fm_radio]
 firmware = [
   { source = "itel-neo-r60-plus-fm-config.bin", destination = "fplinux/itel-neo-r60-plus-fm-config.bin", size = 128 },
+]
+
+[wcn_firmware]
+firmware = [
+  { source = "itel-neo-r60-plus-wcn.bin", destination = "ums9117/itel-neo-r60-plus-wcn.bin", size = 592896, sha256 = "453f52e204aa1211c99ef81ec665340cffff917a0da7ea84f46a18f6d8b0261e" },
+  { source = "itel-neo-r60-plus-wcn-calibration.bin", destination = "ums9117/itel-neo-r60-plus-wcn-calibration.bin", size = 3908 },
 ]
 
 [microsd.bootstrap]

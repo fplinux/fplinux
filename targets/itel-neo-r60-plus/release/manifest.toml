@@ -18,4 +18,4 @@ runtime_files = [
   "host/fplinux-usb-keyboard",
   "runtime-manifest.json",
 ]
-documents = []
+documents = ["release/RADIO-PROBE.txt"]

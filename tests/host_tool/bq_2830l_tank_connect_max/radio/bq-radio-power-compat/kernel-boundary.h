@@ -66,7 +66,7 @@ typedef pthread_mutex_t spinlock_t;
 	}
 
 struct device_node {
-	int unused;
+	const char *compatible;
 };
 struct device {
 	struct device *parent;
@@ -330,6 +330,7 @@ bool mod_delayed_work(struct workqueue_struct *, struct delayed_work *,
 int device_add_group(struct device *, const struct attribute_group *);
 void device_remove_group(struct device *, const struct attribute_group *);
 int device_property_read_string(struct device *, const char *, const char **);
+int device_property_read_u32(struct device *, const char *, u32 *);
 int request_firmware_direct(const struct firmware **, const char *,
 			    struct device *);
 void release_firmware(const struct firmware *);

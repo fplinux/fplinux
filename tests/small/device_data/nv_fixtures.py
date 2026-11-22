@@ -41,3 +41,10 @@ def running_nv() -> bytes:
             struct.pack("<HHHHI", 0xFD6E, 0xE4E4, 404, 252, 1) + b"C" * 252,
         )
     )
+
+
+def radio_records() -> dict[int, bytes]:
+    """Create synthetic version-two records with recognizable opaque payloads."""
+    configuration = b"\x02" + b"C" * 615 + b"unused configuration tail".ljust(272, b"T")
+    calibration = b"\x02\x01" + b"K" * 3290
+    return {409: configuration, 417: calibration}

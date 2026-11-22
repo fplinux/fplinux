@@ -23,6 +23,14 @@ struct sdio_device {
 	u8 downloaded[512];
 	unsigned int downloaded_address;
 	int downloaded_bytes;
+	unsigned int firmware_requests;
+	bool itel_image;
+	unsigned int chip_reads;
+	u32 chip_id;
+	bool chip_id_changes;
+	unsigned int word_writes;
+	unsigned int packet_requests;
+	int packet_error;
 	int enable_error;
 	int ready_error;
 	int public_restore_error;
@@ -205,6 +213,7 @@ int request_firmware_direct(const struct firmware **firmware, const char *name,
 			    struct device *dev)
 {
 	static const u8 image_data[592896];
+	static const u8 itel_image_data[592896] = { 1 };
 	static const u8 calibration_data[3908] = {
 		[0] = 2,
 		[616] = 2,
@@ -214,13 +223,18 @@ int request_firmware_direct(const struct firmware **firmware, const char *name,
 		.data = image_data,
 		.size = sizeof(image_data),
 	};
+	static const struct firmware itel_image = {
+		.data = itel_image_data,
+		.size = sizeof(itel_image_data),
+	};
 	static const struct firmware calibration = {
 		.data = calibration_data,
 		.size = sizeof(calibration_data),
 	};
 
+	device.firmware_requests++;
 	if (!strcmp(name, "image"))
-		*firmware = &image;
+		*firmware = device.itel_image ? &itel_image : &image;
 	else if (!strcmp(name, "calibration"))
 		*firmware = &calibration;
 	else
@@ -240,14 +254,21 @@ void sha256(const u8 *data, size_t bytes, u8 *digest)
 		0x2c, 0xb2, 0x58, 0xbe, 0x8b, 0x7a, 0x89, 0x66,
 		0xff, 0xd6, 0x48, 0xbc, 0xcc, 0x3d, 0x56, 0x90,
 	};
+	static const u8 itel_digest[32] = {
+		0x45, 0x3f, 0x52, 0xe2, 0x04, 0xaa, 0x12, 0x11,
+		0xc9, 0x9e, 0xf8, 0x1e, 0xc6, 0x65, 0x34, 0x0c,
+		0xff, 0xff, 0x91, 0x7a, 0x0d, 0xa7, 0xea, 0x84,
+		0xf4, 0x6a, 0x18, 0xf6, 0xd8, 0xb0, 0x26, 0x1e,
+	};
 
 	assert(bytes == 592896);
-	memcpy(digest, accepted_digest, sizeof(accepted_digest));
+	memcpy(digest, data[0] ? itel_digest : accepted_digest,
+	       sizeof(accepted_digest));
 }
 
 bool of_device_is_compatible(void *node, const char *name)
 {
-	return !strcmp(name, "sprd,marlin2-sdio");
+	return node && !strcmp(node, name);
 }
 
 int dev_err_probe(struct device *dev, int error, const char *format, ...)
@@ -326,7 +347,9 @@ u32 sdio_readl(struct sdio_func *func, unsigned int address, int *error)
 	*error = 0;
 	switch (selected_address()) {
 	case 0x603003fc:
-		return 0x23490001;
+		device.chip_reads++;
+		return device.chip_id +
+		       (device.chip_id_changes && device.chip_reads == 2);
 	case 0x60300150:
 	case 0x40060288:
 	case 0x60300004:
@@ -345,6 +368,7 @@ void sdio_writel(struct sdio_func *func, u32 value, unsigned int address,
 {
 	assert(device.claimed && device.enabled);
 	assert(address == 0x0f);
+	device.word_writes++;
 	if (selected_address() == 0x70040000)
 		device.calibration_ack = value;
 	*error = 0;
@@ -406,7 +430,11 @@ int marlin2_packet_get_info_locked(struct sdio_func *func,
 				   struct marlin2_packet_result *result)
 {
 	assert(device.claimed && device.enabled);
-	return -EOPNOTSUPP;
+	assert(device.calibration_ack == 0xbbbbbbbb);
+	device.packet_requests++;
+	result->request_sent = true;
+	result->response_received = !device.packet_error;
+	return device.packet_error;
 }
 
 static void prepare_boot(struct sdio_func *func)
@@ -414,6 +442,8 @@ static void prepare_boot(struct sdio_func *func)
 	free(device.runtime_allocation);
 	memset(&device, 0, sizeof(device));
 	device.booting = true;
+	device.chip_id = 0x23490001;
+	device.packet_error = -EOPNOTSUPP;
 	device.direct_interrupts = 0x40;
 	device.public_interrupts = 0x80;
 	func->card->quirks = 0x20;
@@ -457,6 +487,62 @@ static void check_probe_restoration(struct sdio_func *func)
 	assert(device.public_restores == 1 && device.direct_restores == 1);
 	assert(device.disables == 1);
 	assert(func->card->quirks == 0x20 && !device.claimed);
+}
+
+static void check_identification(struct sdio_func *func, bool id_changes)
+{
+	prepare_boot(func);
+	device.chip_id = 0x23490002;
+	device.chip_id_changes = id_changes;
+	assert(marlin2_sdio_driver.probe(func, NULL) ==
+	       (id_changes ? -ENODEV : 0));
+	assert(device.reported_error == (id_changes ? -ENODEV : 0));
+	assert(device.reported_boot.phase == MARLIN2_BOOT_CHIP_ID);
+	assert(device.reported_boot.identify_only);
+	assert(device.chip_reads == 2);
+	assert(device.reported_boot.chip_id[0] == 0x23490002);
+	assert(device.reported_boot.chip_id[1] == 0x23490002U + id_changes);
+	assert(!device.firmware_requests && !device.word_writes);
+	assert(!device.downloaded_bytes && !device.reported_boot.image_bytes);
+	assert(device.public_interrupts == 0x80 &&
+	       device.direct_interrupts == 0x40);
+	assert(!device.enabled && device.disables == 1 && !device.claimed);
+	assert(func->card->quirks == 0x20);
+}
+
+static void check_itel_rejects_bq_image(struct sdio_func *func)
+{
+	prepare_boot(func);
+	assert(marlin2_sdio_driver.probe(func, NULL) == -EBADMSG);
+	assert(device.reported_error == -EBADMSG);
+	assert(device.reported_boot.phase == MARLIN2_BOOT_FIRMWARE_REQUEST);
+	assert(device.firmware_requests == 1 && !device.chip_reads);
+	assert(!device.downloaded_bytes && !device.word_writes);
+	assert(!device.enabled && !device.disables && !device.claimed);
+}
+
+static void check_itel_firmware_probe(struct sdio_func *func, int packet_error)
+{
+	const struct marlin2_boot_result *result = &device.reported_boot;
+
+	prepare_boot(func);
+	device.itel_image = true;
+	device.packet_error = packet_error;
+	assert(marlin2_sdio_driver.probe(func, NULL) == packet_error);
+	assert(device.reported_error == packet_error);
+	assert(result->phase ==
+	       (packet_error ? MARLIN2_BOOT_GET_INFO : MARLIN2_BOOT_COMPLETE));
+	assert(device.firmware_requests == 2 && device.chip_reads == 2);
+	assert(result->image_bytes == 592896 && result->image_verified);
+	assert(result->calibration_verified && result->ready);
+	assert(device.packet_requests == 1 && result->packet_attempted);
+	assert(result->packet_error == packet_error);
+	assert(result->packet.response_received == !packet_error);
+	assert(!result->cleanup_error && !sdio_get_drvdata(func));
+	assert(device.public_interrupts == 0x80 &&
+	       device.direct_interrupts == 0x40);
+	assert(!device.enabled && device.disables == 1 && !device.claimed);
+	assert(func->card->quirks == 0x20);
 }
 
 static void check_completed_probe_cleanup_error(struct sdio_func *func)
@@ -532,14 +618,22 @@ static void check_runtime_remove(struct sdio_func *func)
 
 int main(int argc, char **argv)
 {
+	struct device radio = { .of_node = "bq,2830l-radio" };
+	struct device host_device = { .parent = &radio };
 	struct mmc_host host = {
 		.max_req_size = 512,
 		.max_seg_size = 512,
 		.max_blk_count = 1,
 		.max_blk_size = 512,
+		.parent = &host_device,
 	};
 	struct mmc_card card = { .host = &host };
-	struct sdio_func func = { .card = &card, .num = 1, .max_blksize = 512 };
+	struct sdio_func func = {
+		.card = &card,
+		.num = 1,
+		.max_blksize = 512,
+		.dev.of_node = "sprd,marlin2-sdio",
+	};
 	u8 frame[672];
 
 	if (argc == 2 && !strcmp(argv[1], "cleanup")) {
@@ -547,6 +641,22 @@ int main(int argc, char **argv)
 		check_completed_probe_cleanup_error(&func);
 		check_runtime_remove(&func);
 		puts("Marlin2 SDIO cleanup host cases passed");
+		return 0;
+	}
+	if (argc == 2 && !strcmp(argv[1], "identify")) {
+		radio.of_node = "fplinux,itel-neo-r60-marlin2-probe";
+		func.dev.of_node = "fplinux,marlin2-sdio-identify";
+		check_identification(&func, false);
+		check_identification(&func, true);
+		puts("Marlin2 identification host cases passed");
+		return 0;
+	}
+	if (argc == 2 && !strcmp(argv[1], "itel-boot")) {
+		radio.of_node = "fplinux,itel-neo-r60-marlin2-probe";
+		check_itel_rejects_bq_image(&func);
+		check_itel_firmware_probe(&func, 0);
+		check_itel_firmware_probe(&func, -ETIMEDOUT);
+		puts("itel Marlin2 firmware probe host cases passed");
 		return 0;
 	}
 	if (argc != 1)

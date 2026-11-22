@@ -8,6 +8,9 @@ from typing import TYPE_CHECKING
 
 import pytest
 from fplinux_cli.common import ROOT
+from fplinux_cli.device_data.marlin2 import prepare_radio_calibration
+
+from tests.small.device_data.nv_fixtures import radio_records
 
 if TYPE_CHECKING:
     from types import ModuleType
@@ -25,21 +28,12 @@ def radio_parser() -> ModuleType:
     return module
 
 
-def radio_records() -> dict[int, bytes]:
-    """Create synthetic version-two records with recognizable opaque payloads."""
-    configuration = b"\x02" + b"C" * 615 + b"unused configuration tail".ljust(272, b"T")
-    calibration = b"\x02\x01" + b"K" * 3290
-    return {409: configuration, 417: calibration}
-
-
-def test_calibration_retains_only_the_cp_configuration_prefix_and_full_record(
-    radio_parser: ModuleType,
-) -> None:
+def test_calibration_retains_only_the_cp_configuration_prefix_and_full_record() -> None:
     """The CP input retains opaque bytes and excludes the unrelated configuration tail."""
     downloaded = radio_records()
     protected = downloaded.copy()
 
-    result = radio_parser.prepare_radio_calibration(downloaded, protected)
+    result = prepare_radio_calibration(downloaded, protected)
 
     assert result == b"\x02" + b"C" * 615 + b"\x02\x01" + b"K" * 3290
     assert len(result) == 3908
@@ -47,16 +41,14 @@ def test_calibration_retains_only_the_cp_configuration_prefix_and_full_record(
 
 
 @pytest.mark.parametrize("identifier", [409, 417])
-def test_disagreeing_fixed_radio_records_are_rejected(
-    radio_parser: ModuleType, identifier: int
-) -> None:
+def test_disagreeing_fixed_radio_records_are_rejected(identifier: int) -> None:
     """A mismatched opaque byte cannot be silently selected from either fixed copy."""
     downloaded = radio_records()
     protected = downloaded.copy()
     protected[identifier] = protected[identifier][:-1] + b"!"
 
     with pytest.raises(ValueError, match="differs between fixed copies"):
-        radio_parser.prepare_radio_calibration(downloaded, protected)
+        prepare_radio_calibration(downloaded, protected)
 
 
 @pytest.mark.parametrize(
@@ -68,7 +60,7 @@ def test_disagreeing_fixed_radio_records_are_rejected(
     ],
 )
 def test_radio_format_and_uncalibrated_records_are_rejected(
-    radio_parser: ModuleType, identifier: int, offset: int, value: int, error: str
+    identifier: int, offset: int, value: int, error: str
 ) -> None:
     """Unsupported formats and a record requesting fresh calibration are not admitted."""
     downloaded = radio_records()
@@ -77,17 +69,17 @@ def test_radio_format_and_uncalibrated_records_are_rejected(
     downloaded[identifier] = bytes(record)
 
     with pytest.raises(ValueError, match=error):
-        radio_parser.prepare_radio_calibration(downloaded, downloaded.copy())
+        prepare_radio_calibration(downloaded, downloaded.copy())
 
 
 @pytest.mark.parametrize("identifier", [409, 417])
-def test_incomplete_radio_record_is_rejected(radio_parser: ModuleType, identifier: int) -> None:
+def test_incomplete_radio_record_is_rejected(identifier: int) -> None:
     """Truncated input cannot produce a shorter CP transfer with otherwise valid flags."""
     downloaded = radio_records()
     downloaded[identifier] = downloaded[identifier][:-1]
 
     with pytest.raises(ValueError, match="missing or has the wrong size"):
-        radio_parser.prepare_radio_calibration(downloaded, downloaded.copy())
+        prepare_radio_calibration(downloaded, downloaded.copy())
 
 
 def wifi_address_record() -> bytes:
