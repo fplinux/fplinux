@@ -49,7 +49,7 @@ A phone port is a small, complete description of one exact phone model, called a
 | `platforms/<soc>/` | SoC support shared by its phones: processor and interrupt integration, controller drivers, SoC Devicetree nodes and the fixed RAM-loader flow. |
 | `targets/<phone>/` | One phone: board wiring and memory, panel, keymap, bootstrap inputs, values passed to the loader and device-data declarations. |
 | `alpine/` | Phone userspace: one Alpine package recipe per component, the root-filesystem package policy and OpenRC services. |
-| `common/` | Target-neutral launch scripts for individual builds and Linux USB rules. |
+| `common/` | Shared Linux USB rules for starting a phone. |
 
 `lib/fplinux/` owns the UI library and its components. `lib/fplinux-shared/` holds common code compiled directly into its consumers. Shared headers live in `include/fplinux/`. Each component declares its own C dialect and runtime requirements.
 

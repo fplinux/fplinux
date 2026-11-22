@@ -11,7 +11,7 @@ from pathlib import Path
 
 def main() -> None:
     """Keep the terminal across checkout exec and select no behavior inside the runtime."""
-    mode, source_path, checkout_path, bundle_path, action = sys.argv[1:]
+    mode, source_path, checkout_path, bundle_path, action, *options = sys.argv[1:]
     master, terminal = pty.openpty()
     try:
         os.dup2(terminal, 0)
@@ -28,9 +28,9 @@ def main() -> None:
             if action == "prepare":
                 runner.prepare_target("nokia-ta1618", replace=True)
             else:
-                runner.run_target("nokia-ta1618")
+                runner.run_target("nokia-ta1618", loader_trace="--loader-trace" in options)
             return
-        arguments = [sys.executable, "-I", str(Path(bundle_path) / "fplinux.py"), action]
+        arguments = [sys.executable, "-I", str(Path(bundle_path) / "fplinux.py"), action, *options]
         if action == "prepare":
             arguments.append("--replace")
         os.execv(sys.executable, arguments)

@@ -245,7 +245,7 @@ def _publish_staged_bundle(  # noqa: PLR0913 -- artifact and receipt roles stay 
     for name, source in host_tools.items():
         copy_file(source, release / "host" / name, executable=True)
     for relative, source in runtime_source_files(target, target_config).items():
-        copy_file(source, release / relative, executable=relative in {"fplinux.py", "Run.sh"})
+        copy_file(source, release / relative, executable=relative == "fplinux.py")
     if device_data_descriptor(target, target_config) is not None:
         generated_parser = fitted_parser(target, target_config)
         if generated_parser is not None:

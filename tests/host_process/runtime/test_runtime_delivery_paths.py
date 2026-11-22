@@ -58,8 +58,11 @@ class RuntimeDelivery:
         """Return only the controlled external endpoint's state."""
         return self.bundle / "boundary"
 
-    def run(self, action: str = "run") -> subprocess.CompletedProcess[str]:
+    def run(
+        self, action: str = "run", *, loader_trace: bool = False
+    ) -> subprocess.CompletedProcess[str]:
         """Enter the real selector or delivered entry with an owned input terminal."""
+        trace = ["--loader-trace"] if loader_trace else []
         return run_process(
             [
                 sys.executable,
@@ -70,6 +73,7 @@ class RuntimeDelivery:
                 str(self.checkout),
                 str(self.bundle),
                 action,
+                *trace,
             ],
             name=f"{self.mode} runtime lifecycle",
             cwd=self.bundle.parent,
@@ -282,7 +286,7 @@ def test_first_prepare_then_boot_and_reconnect_share_the_selected_runtime(
     (delivery.boundary / "linux-usb").rmdir()
     (delivery.boundary / "bootrom").touch()
 
-    second = delivery.run()
+    second = delivery.run(loader_trace=True)
 
     assert second.returncode == 0, second.stderr
     assert "Opening SSH." in second.stdout
@@ -310,6 +314,12 @@ def test_first_prepare_then_boot_and_reconnect_share_the_selected_runtime(
     assert len(fresh_boot_clocks) == 2
     assert fresh_boot_clocks[:1] == reader_clock_commands
     assert re.fullmatch(r"fplinux-clock [1-9][0-9]*", fresh_boot_clocks[1])
+    loader_options = delivery.boundary / "ram-loader-options.jsonl"
+    loads = loader_options.read_text()
+    assert [json.loads(line) for line in loads.splitlines()] == [
+        ["--wait", "0"],
+        ["--verbose", "1"],
+    ]
 
     third = delivery.run()
 
@@ -321,7 +331,7 @@ def test_first_prepare_then_boot_and_reconnect_share_the_selected_runtime(
     assert session_path.read_bytes() == session_bytes
     assert delivery.shells() == [session, session]
     assert clock_path.read_text() == clock_commands
-    assert (delivery.boundary / "ram-loads").read_text() == "loaded\nloaded\n"
+    assert loader_options.read_text() == loads
     assert not (delivery.boundary / "capsules/3.cpio").exists()
     assert (delivery.boundary / "reader-commands").read_text() == reader_commands
     assert progress_path.read_text() == progress_commands
@@ -355,7 +365,7 @@ def test_first_prepare_then_boot_and_reconnect_share_the_selected_runtime(
     assert not (delivery.data / "phone").exists()
     assert (delivery.boundary / "reader-commands").read_text() == reader_commands
     assert progress_path.read_text() == progress_commands
-    assert (delivery.boundary / "ram-loads").read_text() == "loaded\nloaded\n"
+    assert loader_options.read_text() == loads
 
 
 def test_two_extracted_archives_share_raw_backup_and_reprepare_only_for_changed_recipe(

@@ -134,9 +134,6 @@ def build_archive_inputs(
         "fplinux",
         "third-party-licenses/musl/COPYRIGHT",
         "common/60-fplinux.rules",
-        "common/Run.sh",
-        "common/Run.cmd",
-        "common/Run-debug.cmd",
         "include/fplinux/fplinux-cli.h",
         "lib/fplinux-shared/fplinux-cli.c",
     ]
@@ -204,7 +201,6 @@ def build_archive_inputs(
             if relative
             in {
                 "fplinux.py",
-                "Run.sh",
                 "host/spd_dump",
                 "host/libc_server",
                 "host/fplinux-usb-keyboard",
@@ -218,7 +214,7 @@ def build_archive_inputs(
             bundle,
             relative,
             source_path.read_bytes(),
-            mode=0o755 if relative in {"fplinux.py", "Run.sh"} else 0o644,
+            mode=0o755 if relative == "fplinux.py" else 0o644,
         )
     if generated_parser is not None:
         relative, contents = generated_parser

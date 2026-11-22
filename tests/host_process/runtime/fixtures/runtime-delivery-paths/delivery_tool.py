@@ -120,8 +120,8 @@ def main() -> None:
         if not image.is_relative_to(data):
             message = "controlled RAM loader received an image outside its private phone store"
             raise SystemExit(message)
-        with (boundary / "ram-loads").open("a", encoding="ascii") as stream:
-            stream.write("loaded\n")
+        with (boundary / "ram-loader-options.jsonl").open("a", encoding="ascii") as stream:
+            stream.write(json.dumps(sys.argv[1:3]) + "\n")
         print("controlled RAM loader output", flush=True)
     elif tool == "libc_server.exe":
         capsules = boundary / "capsules"

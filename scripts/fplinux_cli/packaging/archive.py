@@ -297,7 +297,7 @@ def project_bundle(  # noqa: PLR0913 -- the host and admitted build inputs stay 
         read_bundle_members(bundle, records, ["runtime-manifest.json"])["runtime-manifest.json"]
     )
     names = set(release["bundle_files"]) | runtime["sha256"].keys()
-    names.difference_update({"Run.sh", "Run.cmd", "Run-debug.cmd", "device-data.cpio"})
+    names.discard("device-data.cpio")
     if host == "linux":
         names = {
             name

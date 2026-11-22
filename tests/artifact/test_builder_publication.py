@@ -495,6 +495,11 @@ class BuilderPublicationTests:
             == hashlib.sha256(b'SUBSYSTEM=="usb"\n').hexdigest()
         )
         assert (published / "fplinux.py").read_bytes() == b"#!/usr/bin/env python3\n"
+        assert manifest["files"]["fplinux.py"]["mode"] == 0o755
+        for launcher in ("Run.sh", "Run.cmd", "Run-debug.cmd"):
+            assert not (published / launcher).exists()
+            assert launcher not in manifest["files"]
+            assert launcher not in runtime["sha256"]
         assert (published / "platforms/demo/host/adapter.py").read_bytes() == b"ADAPTER = 'demo'\n"
         assert not (published / "runner").exists()
 
