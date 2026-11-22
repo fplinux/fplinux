@@ -1,0 +1,135 @@
+Skip the stack map search for every verified instruction.
+
+Before each instruction the verifier asks check_current_target() for the
+stack map at its bci, and the answer was found by a search: the cache for
+the first 512 bytes of a method, a binary search past it. Most instructions
+have no stack map, and a method of several kilobytes searched the maps for
+every instruction past 512 bytes. The caller, bytecode_prolog(), already
+walks the stack maps in step with the instructions to check their order.
+
+When the stack maps of the method have increasing bcis, which
+populate_stackmap_cache() checks, an instruction has a stack map exactly
+when bytecode_prolog() has just passed one, and the index is the one it
+passed: the maps before it were passed at smaller bcis and the ones after it
+have larger bcis than the next one, which is not smaller than the bci. Hand
+that index (or none) to check_current_target(), which now returns at once
+for an instruction without a map that follows control flow, and otherwise
+matches the frame exactly as before. An instruction without a map that
+follows an unconditional transfer still fails with the same error, and
+methods with unordered or repeated maps keep the search.
+
+Also hash symbol names four characters per loop iteration. The value is the
+same recurrence, so symbols in the ROM table and in the heap table are found
+as before.
+
+Loading every class of three games with the JIT off took 2.9 to 3.9 percent
+fewer instructions, the verifier functions 11 to 12 percent fewer; the classes
+loaded at start-up alone took 1.4 percent fewer.
+
+--- a/cldc/src/vm/share/verifier/VerifierFrame.hpp
++++ b/cldc/src/vm/share/verifier/VerifierFrame.hpp
+@@ -98,6 +98,22 @@
+                            ve_seq_bad_type JVM_NO_CHECK_AT_BOTTOM);
+   }
+ 
++  // Like check_current_target(), for a stack map found by the caller: its
++  // index is stackmap_index, or negative if the method has none at
++  // current_bci.
++  void check_current_target(Method *method, int current_bci, int stackmap_index,
++                            bool noControlFlow JVM_TRAPS) {
++    GUARANTEE(stackmap_index == get_stackmap_index_for_offset(current_bci),
++              "the stack map found by the caller must be the one searched for");
++    if (stackmap_index < 0 && !noControlFlow) {
++      // Neither a stack map to take over nor one to match the frame against.
++      return;
++    }
++    check_stackmap_at(method, current_bci, stackmap_index,
++                      SM_MERGE | (noControlFlow ? SM_EXIST : SM_CHECK),
++                      ve_seq_bad_type JVM_NO_CHECK_AT_BOTTOM);
++  }
++
+   void check_handler_target(Method *method, int target_bci JVM_TRAPS) {
+     check_stackmap_match(method, target_bci, SM_CHECK | SM_EXIST, 
+                          ve_target_bad_type JVM_NO_CHECK_AT_BOTTOM);
+@@ -112,6 +128,11 @@
+   void check_stackmap_match(Method *method, int target_bci, int flags, 
+                             ErrorMsgTag err JVM_TRAPS);
+ 
++  // The part of check_stackmap_match() that follows the search for the stack
++  // map: stackmap_index is its index, or negative if there is none.
++  void check_stackmap_at(Method *method, int target_bci, int stackmap_index,
++                         int flags, ErrorMsgTag err JVM_TRAPS);
++
+ private:
+   // get virtual private stack pointer
+   int vstackpointer() { return _vstackpointer; }
+--- a/cldc/src/vm/share/verifier/VerifierFrame.cpp
++++ b/cldc/src/vm/share/verifier/VerifierFrame.cpp
+@@ -454,7 +454,6 @@
+                                          int flags,
+                                          ErrorMsgTag err JVM_TRAPS) {
+   int stackmap_index;
+-  (void)err;
+   if (((juint)target_bci) < ((juint)Verifier::stackmap_cache_max())) {
+     stackmap_index = Universe::verifier_stackmap_cache()->int_at(target_bci);
+     GUARANTEE(stackmap_index == get_stackmap_index_for_offset(target_bci),
+@@ -463,6 +462,14 @@
+     stackmap_index = get_stackmap_index_for_offset(target_bci);
+   }
+ 
++  check_stackmap_at(method, target_bci, stackmap_index, flags,
++                    err JVM_NO_CHECK_AT_BOTTOM);
++}
++
++void VerifierFrame::check_stackmap_at(Method *method, int target_bci,
++                                      int stackmap_index, int flags,
++                                      ErrorMsgTag err JVM_TRAPS) {
++  (void)err;
+   if (stackmap_index < 0) {
+     if (flags & SM_EXIST) {
+       // Need stackmap but couldn't find it
+--- a/cldc/src/vm/share/verifier/VerifyMethodCodes.cpp
++++ b/cldc/src/vm/share/verifier/VerifyMethodCodes.cpp
+@@ -315,10 +315,12 @@
+   // Check that stackmaps are ordered according to offset and that every
+   // offset in stackmaps points to the beginning of an instruction.
+   const int mybci = bci();
++  int stackmap_index = -1;       // The stack map at this instruction, if met.
+   if (_current_stackmap_index < _num_stackmaps) {
+     int next_stackmap_bci =
+       frame()->get_stackmap_entry_offset(_current_stackmap_index);
+     if (next_stackmap_bci == mybci) {
++      stackmap_index = _current_stackmap_index;
+       _current_stackmap_index += 2;             // This offset is good.
+     } else if (next_stackmap_bci < mybci) {
+       VFY_ERROR(ve_bad_stackmap);               // bci should have met offset.
+@@ -326,7 +328,14 @@
+   }
+ 
+   // Make sure that we have an appropriate stack map for this instruction
+-  frame()->check_current_target(method(), mybci, no_control_flow() JVM_CHECK);
++  if (Verifier::stackmaps_sorted()) {
++    // Stack maps with increasing bcis are met in order, so the instruction has
++    // one exactly when it has just met one: no search is needed.
++    frame()->check_current_target(method(), mybci, stackmap_index,
++                                  no_control_flow() JVM_CHECK);
++  } else {
++    frame()->check_current_target(method(), mybci, no_control_flow() JVM_CHECK);
++  }
+ 
+ #ifndef PRODUCT
+   if (TraceVerifier || TraceVerifierByteCodes) {
+--- a/cldc/src/vm/share/handles/SymbolTable.cpp
++++ b/cldc/src/vm/share/handles/SymbolTable.cpp
+@@ -30,6 +30,11 @@
+ juint SymbolTable::hash(utf8 s, int length) {
+   juint value = 0;
+   utf8 end = s + length;
++  // The same recurrence as below, four characters per iteration.
++  for (; end - s >= 4; s += 4) {
++    const unsigned char* const p = (const unsigned char*)s;
++    value = ((((value * 31 + p[0]) * 31 + p[1]) * 31 + p[2]) * 31 + p[3]);
++  }
+   while (s < end) {
+     // Be careful with the casting of s (which is a signed char).
+     // Compilers may handle the sign extensions differently!

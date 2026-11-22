@@ -59,6 +59,9 @@ run_jit_fixture() (
 
 mkdir -p "${work}"
 build_jar jit "${here}/jit.mf"
+# Classes with hand-made stack maps for the verifier check below.
+python3 "${here}/make-verify-classes.py" "${work}/jit/preverified/fplinux/fixtures/jit"
+"${jdk}/bin/jar" uf "${work}/jit.jar" -C "${work}/jit/preverified" fplinux/fixtures/jit
 run_jit_fixture '' 1 "${work}/jit-interpreted.txt"
 run_jit_fixture 1 0 "${work}/jit-compiled.txt"
 for output in "${work}/jit-interpreted.txt" "${work}/jit-compiled.txt"; do
@@ -135,6 +138,24 @@ for kind in LongMath FloatBits; do
 	' "${trace}" || {
 		cat "${trace}" >&2
 		fail "JIT did not compile all ${kind} methods"
+	}
+done
+
+# Stack maps past the 512 bytes of a method that the verifier keeps in its
+# cache (make-verify-classes.py): one class is accepted; a class with no map
+# for the instruction after a return, and classes whose maps are out of order
+# or repeated, are rejected. The number in the message is the check that
+# rejected the class: 10 is a missing map after a transfer of control, 33 a map
+# out of order.
+run_jit_fixture '' 0 "${work}/verify-maps.txt" fplinux.fixtures.jit.VerifyMapsMIDlet
+for expected in \
+	'PM-VERIFY VerifyLong accepted 1 2 3' \
+	'PM-VERIFY VerifyNoMap rejected java.lang.Error: ClassFormatError:  10' \
+	'PM-VERIFY VerifyUnordered rejected java.lang.Error: ClassFormatError:  33' \
+	'PM-VERIFY VerifyDuplicate rejected java.lang.Error: ClassFormatError:  33'; do
+	grep -Fqx "${expected}" "${work}/verify-maps.txt" || {
+		cat "${work}/verify-maps.txt" >&2
+		fail "the verifier did not give '${expected}'"
 	}
 done
 
