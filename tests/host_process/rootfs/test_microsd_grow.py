@@ -27,6 +27,10 @@ SLOTTED_MOUNTS = (
     "43 39 179:2 / /media/other rw - ext4 /dev/mmcblk0p2 rw\n"
 )
 SWAPS = "Filename Type Size Used Priority\n/dev/zram0 partition 65532 3312 -2\n"
+SHARED_MOUNTS = (
+    "44 40 179:9 / /run/fplinux-shared-card/fat rw,nosuid,nodev,noexec - vfat /dev/alias rw\n"
+    "45 39 179:9 /SHARED /mnt/card rw,nosuid,nodev,noexec - vfat /dev/alias rw\n"
+)
 
 
 @dataclass(frozen=True)
@@ -45,6 +49,7 @@ class CardContext:
         growpart_status: int = 0,
         resize2fs_status: int = 0,
         mount_status: int = 0,
+        umount_status: int = 0,
         stop_status: int = 0,
         super_readonly: bool = True,
     ) -> subprocess.CompletedProcess[str]:
@@ -58,6 +63,7 @@ class CardContext:
                 "FPLINUX_GROWPART_STATUS": str(growpart_status),
                 "FPLINUX_RESIZE2FS_STATUS": str(resize2fs_status),
                 "FPLINUX_MOUNT_STATUS": str(mount_status),
+                "FPLINUX_UMOUNT_STATUS": str(umount_status),
                 "FPLINUX_STOP_STATUS": str(stop_status),
                 "FPLINUX_SUPER_READONLY": str(super_readonly).lower(),
             }
@@ -86,7 +92,7 @@ def card(tmp_path: Path) -> CardContext:
     boundary = tmp_path / "system-card-boundary"
     shutil.copyfile(FIXTURES / "system-card-boundary.sh", boundary)
     boundary.chmod(0o755)
-    for name in ("awk", "cat", "mount", "poweroff", "rc-service", "sync"):
+    for name in ("awk", "cat", "mount", "poweroff", "rc-service", "sync", "umount"):
         (tmp_path / name).symlink_to(boundary)
 
     mountinfo = tmp_path / "mountinfo"
@@ -328,3 +334,56 @@ def test_usb_poweroff_refuses_storage_that_becomes_busy_after_preparation(
     assert result.returncode != 0
     assert "Unmount the system card filesystem at /media/boot" in result.stderr
     assert "poweroff:" not in card.recorded_calls()
+
+
+@pytest.mark.parametrize("operation", ["prepare-poweroff", "shutdown"])
+def test_shutdown_disconnects_shared_files_before_remounting_ext4(
+    card: CardContext, operation: str
+) -> None:
+    card.mountinfo.write_text(SLOTTED_MOUNTS + SHARED_MOUNTS, encoding="utf-8")
+
+    result = card.run(operation)
+
+    assert result.returncode == 0, result.stderr
+    calls = card.recorded_calls()
+    if operation == "prepare-poweroff":
+        assert result.stdout == "readonly /run/fplinux-card\n"
+        assert calls.pop(0) == "rc-service:fplinux-session stop"
+    assert calls == [
+        "sync:",
+        "umount:/mnt/card",
+        "umount:/run/fplinux-shared-card/fat",
+        "mount:-o remount,ro /dev/mmcblk1p2 /run/fplinux-card",
+    ]
+
+
+def test_usb_shutdown_refuses_a_different_fat_subtree_at_the_shared_path(
+    card: CardContext,
+) -> None:
+    card.mountinfo.write_text(
+        SLOTTED_MOUNTS + SHARED_MOUNTS.replace("/SHARED /mnt/card", "/other /mnt/card"),
+        encoding="utf-8",
+    )
+
+    result = card.run("prepare-poweroff")
+
+    assert result.returncode != 0
+    assert "Unmount the system card filesystem at /mnt/card" in result.stderr
+    assert card.recorded_calls() == []
+
+
+def test_usb_shutdown_reports_busy_shared_files_without_unmounting_backing(
+    card: CardContext,
+) -> None:
+    card.mountinfo.write_text(SLOTTED_MOUNTS + SHARED_MOUNTS, encoding="utf-8")
+
+    result = card.run("prepare-poweroff", umount_status=32)
+
+    assert result.returncode != 0
+    assert "Cannot disconnect shared files" in result.stderr
+    assert result.stdout == ""
+    assert card.recorded_calls() == [
+        "rc-service:fplinux-session stop",
+        "sync:",
+        "umount:/mnt/card",
+    ]

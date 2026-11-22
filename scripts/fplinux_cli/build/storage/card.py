@@ -204,9 +204,7 @@ def build(  # noqa: PLR0913 -- each selected source and artifact stay explicit.
     try:
         ramdisk_payload = ramdisk.read_bytes()
         ramdisk_offset, hash_offset = locate_fit_ramdisk(fit.read_bytes(), ramdisk_payload)
-        prefix_digest = sd.write_boot_prefix(
-            shared_ext4, prefix, storage=storage, cold_boot=cold_boot
-        )
+        boot = sd.write_boot_prefix(shared_ext4, prefix, storage=storage, cold_boot=cold_boot)
         root_digest = sd.compress_card_region(shared_ext4, root, storage["root_size"])
         write_card_rootfs_layer(board_rootfs, shared_rootfs, board)
         write_apk_state(board_rootfs, apk_state)
@@ -224,7 +222,9 @@ def build(  # noqa: PLR0913 -- each selected source and artifact stay explicit.
                 "root_offset": storage["root_offset"],
                 "root_size": storage["root_size"],
                 "disk_signature": storage["disk_signature"],
-                "boot_sha256": prefix_digest,
+                "boot_prefix_size": boot.size,
+                "boot_sha256": boot.sha256,
+                "boot_file_sha256": sha256_file(cold_boot.stage0),
                 "root_sha256": root_digest,
                 "fit_filename": target_config["fit"]["filename"],
                 "fit_ramdisk_offset": ramdisk_offset,

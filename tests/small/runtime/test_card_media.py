@@ -74,7 +74,9 @@ def card_kit(tmp_path: Path) -> Path:
         "boot_size": 67_108_864,
         "root_offset": 68_157_440,
         "root_size": 67_108_864,
+        "boot_prefix_size": 3_145_728,
         "boot_sha256": "a" * 64,
+        "boot_file_sha256": "c" * 64,
         "root_sha256": "b" * 64,
         "fit_filename": "FPLINUX.ITB",
         "fit_ramdisk_offset": fit.index(ramdisk),
@@ -101,6 +103,18 @@ def test_card_layout_requires_an_unsigned_mbr_disk_signature(
         record["disk_signature"] = signature
     layout_path.write_text(json.dumps(record), encoding="utf-8")
     with pytest.raises(CardKitError, match="invalid disk_signature"):
+        read_card_layout(card_kit)
+
+
+@pytest.mark.parametrize("prefix_size", [1048576, 3145729, 69206016])
+def test_card_layout_rejects_a_prefix_outside_the_aligned_boot_range(
+    card_kit: Path, prefix_size: int
+) -> None:
+    layout_path = card_kit / "layout.json"
+    record = json.loads(layout_path.read_text(encoding="utf-8"))
+    record["boot_prefix_size"] = prefix_size
+    layout_path.write_text(json.dumps(record), encoding="utf-8")
+    with pytest.raises(CardKitError, match="invalid boot_prefix_size"):
         read_card_layout(card_kit)
 
 

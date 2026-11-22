@@ -81,26 +81,56 @@ remount_card_readonly() {
 	confirm_card_readonly
 }
 
-require_inactive_card_storage() {
+check_card_storage() {
 	# Compare device numbers so a mounted partition cannot be hidden by a /dev alias.
-	awk -v disk="$disk" -v root_device="$device" '
+	shared_mounts=$(awk -v disk="$disk" -v root_device="$device" -v mode="$1" '
 		FNR == NR {
-			if ($4 == disk || $4 ~ ("^" disk "p[0-9]+$")) parts[$1 ":" $2] = 1
+			if ($4 == disk || $4 ~ ("^" disk "p[0-9]+$")) parts[$1 ":" $2] = $4
 			next
 		}
 		FNR == 1 { mountinfo = 1 }
+		$5 == "/mnt/card" { bind_paths++ }
+		$5 == "/run/fplinux-shared-card/fat" { fat_paths++ }
 		($3 in parts) && $3 != root_device {
-			print "Unmount the system card filesystem at " $5 " before shutdown"
+			if (mode == "shared" && parts[$3] == disk "p1") {
+				options = "," $6 ","
+				for (i = 7; i <= NF - 3; i++) {
+					if ($i != "-") continue
+					if ($(i + 1) != "vfat" ||
+					    options !~ /,nodev,/ || options !~ /,nosuid,/ ||
+					    options !~ /,noexec,/) break
+					if ($5 == "/run/fplinux-shared-card/fat" && $4 == "/") {
+						fat_source = $(i + 2)
+						fat_id = $1
+					} else if ($5 == "/mnt/card" && tolower($4) == "/shared") {
+						bind_source = $(i + 2)
+						bind_id = $1
+					}
+					break
+				}
+				if (fat_id == $1 || bind_id == $1) next
+			}
+			print "Unmount the system card filesystem at " $5 " before shutdown" > "/dev/stderr"
 			busy = 1
 		}
 		END {
 			if (!mountinfo || !(root_device in parts)) {
-				print "Cannot verify which system card partitions are mounted"
+				print "Cannot verify which system card partitions are mounted" > "/dev/stderr"
 				exit 1
 			}
+			if ((fat_id && fat_paths != 1) ||
+			    (bind_id && (bind_paths != 1 || !fat_id ||
+					bind_id == fat_id || bind_source != fat_source))) {
+				print "Cannot verify the shared system-card mounts" > "/dev/stderr"
+				exit 1
+			}
+			if (!busy) print (bind_id != ""), (fat_id != "")
 			exit busy
 		}
-	' /proc/partitions /proc/self/mountinfo >&2 || exit 1
+	' /proc/partitions /proc/self/mountinfo) || exit 1
+	IFS=' ' read -r shared_bind shared_fat <<-EOF
+		$shared_mounts
+	EOF
 	# The standard zram swap has no backing filesystem. A swapfile can use any card alias.
 	awk '
 		NR == 1 && $1 == "Filename" { header = 1; next }
@@ -116,6 +146,16 @@ require_inactive_card_storage() {
 	' /proc/swaps >&2 || exit 1
 }
 
+unmount_shared_storage() {
+	if [ "$shared_bind" = 1 ]; then
+		umount /mnt/card || fail "Cannot disconnect shared files"
+	fi
+	if [ "$shared_fat" = 1 ]; then
+		umount /run/fplinux-shared-card/fat || fail "Cannot unmount the shared system-card partition"
+	fi
+	check_card_storage inactive
+}
+
 case "$#:${1-}" in
 0: | 1:shutdown | 1:prepare-poweroff | 1:poweroff) ;;
 *) fail "Usage: microsd-grow [shutdown|prepare-poweroff|poweroff]" ;;
@@ -125,18 +165,25 @@ find_card_mount
 resolve_partition
 case "${1-}" in
 shutdown)
+	check_card_storage shared
 	# OpenRC already handles Qin's directly mounted ext4 root.
-	if [ "$mountpoint" = / ] || card_mount_is_readonly; then
+	if [ "$shared_fat" = 0 ] && { [ "$mountpoint" = / ] || card_mount_is_readonly; }; then
 		exit 0
 	fi
 	sync || exit $?
+	unmount_shared_storage
+	if [ "$mountpoint" = / ] || card_mount_is_readonly; then
+		exit 0
+	fi
 	remount_card_readonly
 	exit $?
 	;;
 prepare-poweroff)
-	require_inactive_card_storage
+	check_card_storage shared
 	rc-service fplinux-session stop >&2 || fail "Cannot stop the graphical session"
+	check_card_storage shared
 	sync || fail "Cannot synchronize the system card"
+	unmount_shared_storage
 	if card_mount_is_readonly; then
 		confirm_card_readonly
 	else
@@ -146,7 +193,7 @@ prepare-poweroff)
 	exit 0
 	;;
 poweroff)
-	require_inactive_card_storage
+	check_card_storage inactive
 	confirm_card_readonly
 	exec poweroff
 	;;

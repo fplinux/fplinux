@@ -103,6 +103,12 @@ msgstr "Подключить"
 msgid "Connected"
 msgstr "Подключено"
 
+msgid "Disconnect shared files"
+msgstr "Отключить общие файлы"
+
+msgid "Disconnecting…"
+msgstr "Отключение…"
+
 msgid "Connecting…"
 msgstr "Подключение…"
 
@@ -123,6 +129,9 @@ msgstr "Домашняя папка"
 
 msgid "Memory card"
 msgstr "Карта памяти"
+
+msgid "Shared files"
+msgstr "Общие файлы"
 
 msgid "My files"
 msgstr "Мои файлы"

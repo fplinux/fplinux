@@ -50,6 +50,8 @@ struct capture {
 	/* A refresh held until the scenario chooses its result and delivery. */
 	bool hold_refresh;
 	uint32_t refresh_serial;
+	bool hold_eject;
+	uint32_t eject_serial;
 	uint32_t eject_volume;
 	/* A connection answered later, so that Files waits for it. */
 	uint32_t connect_serial;
@@ -106,6 +108,20 @@ static void reply_storage(struct capture *capture, uint32_t serial)
 	assert(fplinux_ui_session_send(capture->session, &reply));
 }
 
+static void set_mounted_card(struct capture *capture,
+			     struct fplinux_volume *volume)
+{
+	struct statx metadata;
+
+	volume->state = FPLINUX_VOLUME_MOUNTED;
+	assert(snprintf(volume->path, sizeof(volume->path), "%s/card",
+			capture->directory) < (int)sizeof(volume->path));
+	assert(statx(AT_FDCWD, volume->path, 0, STATX_MNT_ID, &metadata) == 0);
+	assert(metadata.stx_mask & STATX_MNT_ID);
+	assert(metadata.stx_mnt_id && metadata.stx_mnt_id <= UINT32_MAX);
+	volume->mount_id = (uint32_t)metadata.stx_mnt_id;
+}
+
 static void connect_card(struct capture *capture)
 {
 	for (size_t i = 0; i < capture->volumes.count; i++) {
@@ -114,9 +130,13 @@ static void connect_card(struct capture *capture)
 		if (volume->id == capture->connect_volume) {
 			/* Session discovery assigns a new ID after a mount change. */
 			volume->id += 100;
-			volume->state = FPLINUX_VOLUME_MOUNTED;
-			volume->mount_id = 1;
-			strcpy(volume->path, "/nonexistent-card");
+			if (volume->shared_system_files) {
+				set_mounted_card(capture, volume);
+			} else {
+				volume->state = FPLINUX_VOLUME_MOUNTED;
+				volume->mount_id = 1;
+				strcpy(volume->path, "/nonexistent-card");
+			}
 		}
 	}
 }
@@ -162,7 +182,12 @@ static void pump(struct capture *capture)
 						volume->path[0] = '\0';
 					}
 				}
-				reply_storage(capture, message.serial);
+				if (capture->hold_eject) {
+					assert(!capture->eject_serial);
+					capture->eject_serial = message.serial;
+				} else {
+					reply_storage(capture, message.serial);
+				}
 			} else {
 				assert(message.volume_operation ==
 				       FPLINUX_VOLUME_REFRESH);
@@ -391,10 +416,12 @@ static void option(struct capture *capture, const char *text)
 
 static void refresh_places_action(struct capture *capture)
 {
-	if (!strcmp(capture->left, "Refresh"))
+	const char *refresh = word(capture, "Refresh", "Обновить");
+
+	if (!strcmp(capture->left, refresh))
 		press(capture, KEY_COMPOSE);
 	else
-		option(capture, "Refresh");
+		option(capture, refresh);
 }
 
 static void save_frame(struct capture *capture, const char *name)
@@ -895,20 +922,91 @@ static void places_without_system_cards(struct capture *capture)
 static void set_card(struct capture *capture)
 {
 	struct fplinux_volume *volume = &capture->volumes.volumes[0];
-	struct statx metadata;
 
 	capture->volumes = (struct fplinux_volume_snapshot){ .count = 1 };
 	volume->id = 11;
-	volume->state = FPLINUX_VOLUME_MOUNTED;
 	strcpy(volume->label, "Documents");
-	assert(snprintf(volume->path, sizeof(volume->path), "%s/card",
-			capture->directory) < (int)sizeof(volume->path));
-	assert(statx(AT_FDCWD, volume->path, 0, STATX_MNT_ID, &metadata) == 0);
-	assert(metadata.stx_mask & STATX_MNT_ID);
-	assert(metadata.stx_mnt_id && metadata.stx_mnt_id <= UINT32_MAX);
-	volume->mount_id = (uint32_t)metadata.stx_mnt_id;
+	set_mounted_card(capture, volume);
 	refresh_places_action(capture);
 	wait_conflict_list(capture, "Connected", 2, 0);
+}
+
+static void shared_card(struct capture *capture, bool picker)
+{
+	const char *files = word(capture, "Files", "Файлы");
+	const char *shared = word(capture, "Shared files", "Общие файлы");
+	const char *connected = word(capture, "Connected",
+				     picker ? "Подключено" : "Подключены");
+	struct fplinux_volume *volume = &capture->volumes.volumes[1];
+
+	capture->volumes = (struct fplinux_volume_snapshot){
+		.count = 2,
+		.home_persistent = true,
+		.volumes = {
+			{
+				.id = 7,
+				.state = FPLINUX_VOLUME_PROTECTED,
+				.protection = FPLINUX_VOLUME_SYSTEM_ROOT,
+				.label = "FPLROOT",
+			},
+			{
+				.id = 11,
+				.shared_system_files = true,
+				.label = "FPLBOOT",
+			},
+		},
+	};
+	set_mounted_card(capture, volume);
+	refresh_places_action(capture);
+	wait_conflict_list(capture, shared, 2, 0);
+	assert(has_label(capture, connected));
+	assert(has_label(capture, word(capture, "On the memory card",
+				       "На карте памяти")));
+	assert(!has_label(capture,
+			  word(capture, "Memory card", "Карта памяти")));
+	move_to(capture, 1);
+	press(capture, KEY_ENTER);
+	wait_conflict_list(capture, shared, 1, 0);
+	assert(has_label(capture, "games"));
+	press(capture, KEY_ENTER);
+	wait_conflict_list(capture, "game.jar", 1, 0);
+	assert(has_label(capture, "games"));
+	press(capture, KEY_ESC);
+	wait_conflict_list(capture, shared, 1, 0);
+	press(capture, KEY_ESC);
+	wait_conflict_list(capture, files, 2, 1);
+
+	capture->hold_eject = true;
+	open_menu(capture);
+	assert(!menu_has(capture,
+			 word(capture, "Safely eject", "Безопасно извлечь")));
+	select_option(capture, word(capture, "Disconnect shared files",
+				    "Отключить общие файлы"));
+	wait_label(capture, word(capture, "Disconnecting…", "Отключение…"),
+		   false);
+	assert(has_label(capture, shared));
+	assert(capture->eject_serial && capture->eject_volume == 11);
+	reply_storage(capture, capture->eject_serial);
+	wait_label(capture,
+		   word(capture, "Select to connect",
+			"Выберите для подключения"),
+		   false);
+	assert(has_label(capture, shared));
+	assert(has_label(capture, word(capture, "On the memory card",
+				       "На карте памяти")));
+	if (picker) {
+		press(capture, KEY_ENTER);
+		wait_label(capture, connected, false);
+		assert(capture->connect_volume == 111);
+		press(capture, KEY_ENTER);
+		wait_conflict_list(capture, shared, 1, 0);
+		press(capture, KEY_ENTER);
+		wait_conflict_list(capture, "game.jar", 1, 0);
+		press(capture, KEY_ENTER);
+		wait_label(capture, "Picker closed", false);
+		activate(capture, false, 119);
+	}
+	close_and_reap(capture);
 }
 
 static void deliver_refresh(struct capture *capture)
@@ -1322,7 +1420,11 @@ int main(int argc, char **argv)
 		assert(pipe(capture.read_gate) == 0);
 	start(&capture, argv);
 	if (argc == 10) {
-		if (!strcmp(argv[9], "picker-error"))
+		if (!strcmp(argv[9], "shared-card") ||
+		    !strcmp(argv[9], "picker-shared-card"))
+			shared_card(&capture,
+				    !strcmp(argv[9], "picker-shared-card"));
+		else if (!strcmp(argv[9], "picker-error"))
 			picker_error(&capture);
 		else if (!strcmp(argv[9], "picker-card"))
 			picker_removed_card(&capture);

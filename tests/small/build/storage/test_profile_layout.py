@@ -161,7 +161,7 @@ class ProfileLayoutRenderTests:
         assert ("root=") not in (ram_bootargs)
         assert ("rootfstype=") not in (ram_bootargs)
 
-        sections = self._genimage_sections(profile_layout.genimage_config(storage, cold_boot=True))
+        sections = self._genimage_sections(profile_layout.genimage_config(storage))
         disk = sections["image FPLINUX.img/hdimage"]
         assert (disk["partition-table-type"]) == ('"mbr"')
         assert (disk["disk-signature"]) == ("0x46504c58")
@@ -174,6 +174,7 @@ class ProfileLayoutRenderTests:
         assert ({name: boot[name] for name in ("partition-type", "offset", "size")}) == (
             {"partition-type": "0x0c", "offset": "1048576", "size": "33554432"}
         )
+        assert boot["image"] == '"FPLINUX.vfat"'
         assert (root_partition) == (
             {
                 "partition-type": "0x83",
@@ -182,12 +183,6 @@ class ProfileLayoutRenderTests:
                 "size": "67108864",
                 "fill": "true",
             }
-        )
-        boot_image = "image " + boot["image"].strip('"')
-        assert (sections[boot_image]["size"]) == ("33554432")
-        assert (sections[boot_image + "/vfat"]["label"]) == ('"FPLBOOT"')
-        assert sections[boot_image + '/vfat/file "fpbin_t117/fpmain.bin"']["image"] == (
-            '"cold-stage0.bin"'
         )
 
     def test_base_defconfig_cannot_override_generated_profile_placement(

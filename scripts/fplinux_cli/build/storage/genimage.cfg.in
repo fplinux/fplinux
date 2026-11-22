@@ -8,7 +8,7 @@ image @IMAGE@ {
 
 	partition boot {
 		partition-type = 0x0c
-		image = "FPLINUX.vfat"
+		image = "@BOOT_IMAGE@"
 		offset = @BOOT_OFFSET@
 		size = @BOOT_SIZE@
 	}
@@ -19,18 +19,5 @@ image @IMAGE@ {
 		offset = @ROOT_OFFSET@
 		size = @ROOT_SIZE@
 		fill = true
-	}
-}
-
-image FPLINUX.vfat {
-	temporary = true
-	empty = true
-	size = @BOOT_SIZE@
-
-	vfat {
-		label = "@BOOT_LABEL@"
-		extraargs = "-F 32 --invariant -i @DISK_SIGNATURE@"
-
-@BOOT_FILES@
 	}
 }

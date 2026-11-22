@@ -14,6 +14,7 @@ if TYPE_CHECKING:
 
 # The ARM zImage decompressor needs its BSS, stack and 64 KiB heap after the file.
 ZIMAGE_WORKSPACE_BYTES = 0x00100000
+BOOT_IMAGE_NAME = "FPLINUX.vfat"
 
 
 def boot_layout_header(layout: Mapping[str, int]) -> bytes:
@@ -149,25 +150,19 @@ memory@{layout["ram_base"]:x} {{
 """.encode("ascii")
 
 
-def genimage_config(storage: Mapping[str, Any], *, cold_boot: bool = False) -> bytes:
-    """Return one deterministic MBR/FAT/ext4 genimage configuration."""
+def genimage_config(storage: Mapping[str, Any]) -> bytes:
+    """Place the prepared FAT and ext4 inputs at their fixed MBR extents."""
     template = Path(__file__).with_name("genimage.cfg.in").read_text(encoding="ascii")
-    boot_files = (
-        '\t\tfile "fpbin_t117/fpmain.bin" {\n\t\t\timage = "cold-stage0.bin"\n\t\t}'
-        if cold_boot
-        else ""
-    )
     return substitute_template(
         template,
         {
             "IMAGE": storage["filename"],
             "DISK_SIGNATURE": f"{storage['disk_signature']:08x}",
+            "BOOT_IMAGE": BOOT_IMAGE_NAME,
             "BOOT_OFFSET": str(storage["boot_offset"]),
             "BOOT_SIZE": str(storage["boot_size"]),
-            "BOOT_LABEL": storage["boot_label"],
             "ROOT_FILENAME": storage["root_filename"],
             "ROOT_OFFSET": str(storage["root_offset"]),
             "ROOT_SIZE": str(storage["root_size"]),
-            "BOOT_FILES": boot_files,
         },
     ).encode("ascii")

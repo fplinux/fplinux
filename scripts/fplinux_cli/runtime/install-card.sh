@@ -23,7 +23,7 @@ if [ "$#" -eq 2 ] && [ "$1" = prepare-access ]; then
 	exit 0
 fi
 
-[ "$#" -eq 18 ] || fail "Invalid release card writer arguments"
+[ "$#" -eq 20 ] || fail "Invalid release card writer arguments"
 device=$1
 cid=$2
 staging=$3
@@ -31,17 +31,19 @@ boot_start=$4
 boot_mib=$5
 root_start=$6
 root_mib=$7
-boot_hash=$8
-root_hash=$9
-target=${10}
-build_id=${11}
-board_hash=${12}
-personal_hash=${13}
-checksums_hash=${14}
-fit_hash=${15}
-defaults_hash=${16}
-apk_checksums_hash=${17}
-host_key_body=${18}
+boot_prefix_mib=$8
+boot_hash=$9
+boot_file_hash=${10}
+root_hash=${11}
+target=${12}
+build_id=${13}
+board_hash=${14}
+personal_hash=${15}
+checksums_hash=${16}
+fit_hash=${17}
+defaults_hash=${18}
+apk_checksums_hash=${19}
+host_key_body=${20}
 
 case "$device" in
 /dev/mmcblk[0-9] | /dev/mmcblk[0-9][0-9]) ;;
@@ -51,13 +53,14 @@ case "$cid" in
 '' | *[!0-9a-f]*) fail "Invalid SD card CID" ;;
 esac
 [ "${#cid}" -eq 32 ] || fail "Invalid SD card CID"
-for mib in "$boot_start" "$boot_mib" "$root_start" "$root_mib"; do
+for mib in "$boot_start" "$boot_mib" "$root_start" "$root_mib" "$boot_prefix_mib"; do
 	case "$mib" in
 	'' | 0* | *[!0-9]*) fail "Invalid release card layout" ;;
 	esac
 	[ "${#mib}" -le 4 ] || fail "Invalid release card layout"
 done
 [ "$((boot_start + boot_mib))" -eq "$root_start" ] &&
+	[ "$boot_prefix_mib" -gt "$boot_start" ] && [ "$boot_prefix_mib" -le "$root_start" ] &&
 	[ "$((root_start + root_mib))" -le 4096 ] || fail "Invalid release card layout"
 case "$target" in
 '' | [!a-z0-9]* | *[!a-z0-9-]*) fail "Invalid system card target" ;;
@@ -71,10 +74,11 @@ slot=/sys/block/${device##*/}
 boot_partition=${device}p1
 root_partition=${device}p2
 minimum_sectors=$(((root_start + root_mib) * 2048))
+write_mib=$((boot_prefix_mib + root_mib))
 
 card_progress() {
 	/usr/libexec/fplinux/preparation --stage "$1" \
-		--completed "$(($2 * 1048576))" --total "$((minimum_sectors * 512))" \
+		--completed "$(($2 * 1048576))" --total "$((write_mib * 1048576))" \
 		/run/fplinux-preparation-status 2>/dev/null || :
 }
 
@@ -183,6 +187,17 @@ mount_root() {
 		fail "Cannot mount the system card partition"
 }
 
+verify_boot_files() {
+	mounted=$work/mount
+	busybox mount -t vfat -o ro,nosuid,nodev,noexec "$boot_partition" "$mounted" ||
+		fail "Cannot mount the SD card boot partition for verification"
+	[ -f "$mounted/fpbin_t117/fpmain.bin" ] &&
+		check_digest "$mounted/fpbin_t117/fpmain.bin" "$boot_file_hash" ||
+		fail "The SD card autonomous boot file does not match the release"
+	[ -d "$mounted/Shared" ] || fail "The SD card lacks the Shared directory"
+	unmount_partition
+}
+
 unmount_partition() {
 	busybox umount "$mounted" || fail "Cannot unmount the SD card; keep the phone on"
 	mounted=
@@ -262,26 +277,28 @@ check_card
 card_writing=1
 card_progress card-writing 0
 start_stream busybox xzcat "$staging/boot.xz"
-consume_stream busybox dd of="$device" bs=1048576 count="$root_start" iflag=fullblock conv=notrunc status=none ||
+consume_stream busybox dd of="$device" bs=1048576 count="$boot_prefix_mib" iflag=fullblock conv=notrunc status=none ||
 	fail "Cannot write the boot image to the SD card"
-card_progress card-writing "$root_start"
+card_progress card-writing "$boot_prefix_mib"
 check_card
 start_stream busybox xzcat "$staging/root.ext4.xz"
 consume_stream busybox dd of="$device" bs=1048576 seek="$root_start" count="$root_mib" iflag=fullblock conv=notrunc status=none ||
 	fail "Cannot write the ext4 image to the SD card"
 busybox sync
-card_progress card-writing "$((root_start + root_mib))"
+card_progress card-writing "$write_mib"
 check_card
 busybox blockdev --flushbufs "$device" || fail "Cannot flush the SD card before readback"
 card_progress card-verifying 0
-start_stream busybox dd if="$device" bs=1048576 count="$root_start" status=none
+start_stream busybox dd if="$device" bs=1048576 count="$boot_prefix_mib" status=none
 check_stream_digest "$boot_hash" || fail "The SD card boot bytes do not match the release"
-card_progress card-verifying "$root_start"
+card_progress card-verifying "$boot_prefix_mib"
 start_stream busybox dd if="$device" bs=1048576 skip="$root_start" count="$root_mib" status=none
 check_stream_digest "$root_hash" || fail "The SD card ext4 bytes do not match the release"
-card_progress card-verifying "$((root_start + root_mib))"
+card_progress card-verifying "$write_mib"
 
 busybox blockdev --rereadpt "$device" || fail "Cannot reread the SD card partition table"
+check_partitions
+verify_boot_files
 check_partitions
 mount_root rw,noexec
 slot_root=$mounted/system/a/root

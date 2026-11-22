@@ -202,19 +202,27 @@ def test_files_repeated_conflict_reuses_draft_and_cancel_releases_open_protectio
     assert not list(files.glob(".fplinux-copy-*"))
 
 
-def run_scenario(files_native: Path, home: Path, scenario: str, *, name: str) -> str:
-    """Run one native scenario at 240x320 in English and return its report."""
+def run_scenario(
+    files_native: Path,
+    home: Path,
+    scenario: str,
+    *,
+    name: str,
+    app: str = "files",
+    locale: str = "en",
+) -> str:
+    """Run one native scenario at 240x320 and return its report."""
     result = run_process(
         [
             str(files_native / "files-screens"),
-            str(files_native / "files"),
+            str(files_native / app),
             str(HERE / "native/keyboard.xkb"),
             str(home / "session.sock"),
             str(home),
             "240",
             "320",
             "dark",
-            "en",
+            locale,
             scenario,
         ],
         name=name,
@@ -323,6 +331,32 @@ def test_files_places_keep_selected_card_and_menu_when_storage_answers(
         "changes; card root has its place name\n"
     )
     assert (card / "card-note.txt").read_bytes() == b"On the card"
+
+
+@pytest.mark.parametrize(
+    ("app", "scenario"), [("files", "shared-card"), ("picker-app", "picker-shared-card")]
+)
+@pytest.mark.parametrize("locale", ["en", "ru"])
+def test_system_card_shared_files_can_browse_and_disconnect_without_ejecting_system_card(
+    files_native: Path, tmp_path: Path, app: str, scenario: str, locale: str
+) -> None:
+    shared_folder = tmp_path / "card/games"
+    shared_folder.mkdir(parents=True)
+    game = shared_folder / "game.jar"
+    game.write_bytes(b"Shared file")
+
+    run_scenario(
+        files_native,
+        tmp_path,
+        scenario,
+        name=f"{app} shared system-card files ({locale})",
+        app=app,
+        locale=locale,
+    )
+
+    assert game.read_bytes() == b"Shared file"
+    if app == "picker-app":
+        assert (tmp_path / "result").read_text(encoding="utf-8") == f"selected:{game}\n"
 
 
 @pytest.mark.parametrize("entry", ["refresh", "open"])

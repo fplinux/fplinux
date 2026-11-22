@@ -1327,6 +1327,7 @@ static void check_volumes(int sender, int receiver)
 		"{\"type\":\"STORAGE_RESULT\",\"serial\":1,\"volume_error\":0,\"home_persistent\":false,\"volumes\":[{},{},{},{},{}]}",
 		"{\"type\":\"STORAGE_RESULT\",\"serial\":1,\"volume_error\":-1,\"home_persistent\":false,\"volumes\":[]}",
 		"{\"type\":\"STORAGE_RESULT\",\"serial\":1,\"volume_error\":0,\"volumes\":[]}",
+		"{\"type\":\"STORAGE_RESULT\",\"serial\":1,\"volume_error\":0,\"home_persistent\":true,\"volumes\":[{\"id\":5,\"mount_id\":0,\"state\":0,\"protection\":0,\"read_only\":false,\"shared_system_files\":1,\"label\":\"FPLBOOT\",\"path\":\"\"}]}",
 		"{\"type\":\"READY\",\"volumes\":[]}",
 	};
 	struct fplinux_ui_session_message message;
@@ -1343,6 +1344,7 @@ static void check_volumes(int sender, int receiver)
 					.id = UINT32_MAX,
 					.mount_id = 31,
 					.state = FPLINUX_VOLUME_MOUNTED,
+					.shared_system_files = true,
 					.label = "Карта one 'quoted'",
 					.path = "/mnt/card",
 				}},
@@ -1368,11 +1370,20 @@ static void check_volumes(int sender, int receiver)
 			      UINT32_MAX &&
 		      message.volume_result.snapshot.volumes[0].mount_id ==
 			      31 &&
+		      message.volume_result.snapshot.volumes[0]
+			      .shared_system_files &&
 		      !strcmp(message.volume_result.snapshot.volumes[0].label,
 			      "Карта one 'quoted'") &&
 		      !strcmp(message.volume_result.snapshot.volumes[0].path,
 			      "/mnt/card"),
 	      "a busy result retains the complete mounted volume snapshot");
+	check(receive_raw(
+		      sender, receiver,
+		      "{\"type\":\"STORAGE_RESULT\",\"serial\":2,\"volume_error\":0,\"home_persistent\":true,\"volumes\":[{\"id\":5,\"mount_id\":0,\"state\":0,\"protection\":0,\"read_only\":false,\"shared_system_files\":true,\"label\":\"FPLBOOT\",\"path\":\"\"}]}",
+		      &message) == 1 &&
+		      message.volume_result.snapshot.volumes[0]
+			      .shared_system_files,
+	      "the shared role is present before the volume is connected");
 	check(receive_raw(
 		      sender, receiver,
 		      "{\"type\":\"STORAGE_RESULT\",\"serial\":10,\"volume_error\":0,\"home_persistent\":false,\"volumes\":[]}",

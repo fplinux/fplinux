@@ -109,8 +109,6 @@ def _select_card(
         return matching[0]
     if len(cards) != 1 or confirm is None:
         fail(f"Select the card with {option} CID")
-    if not confirm(cards[0]):
-        fail("Card installation cancelled" if action == "install" else f"Card {action} cancelled")
     return cards[0]
 
 
@@ -152,7 +150,9 @@ def _writer_arguments(layout: CardLayout) -> tuple[str, ...]:
         str(layout.boot_size // _MIB),
         str(layout.root_offset // _MIB),
         str(layout.root_size // _MIB),
+        str(layout.boot_prefix_size // _MIB),
         layout.boot_sha256,
+        layout.boot_file_sha256,
         layout.root_sha256,
         layout.target,
         layout.release_id,
@@ -300,6 +300,13 @@ def _install_card(  # noqa: PLR0913 -- the kit and consent inputs stay explicit.
     card = _select_card(cards, erase_card, confirm, action="install")
     if card.bytes < layout.capacity_bytes:
         fail("The selected SD card is too small")
+    log.message(f"Shared files (FAT32 partition): {layout.boot_size // _MIB} MiB")
+    log.message(
+        f"FPLinux (ext4 partition): {layout.root_size // _MIB} MiB initially, "
+        f"{(card.bytes - layout.root_offset) // _MIB} MiB after first-boot expansion"
+    )
+    if erase_card is None and (confirm is None or not confirm(card)):
+        fail("Card installation cancelled")
     with preparation_progress(connection, log, initial="card-sending"):
         _write_card(connection, card, bundle, layout=layout, firmware=firmware, log=log)
 
@@ -319,6 +326,8 @@ def _change_card(  # noqa: PLR0913 -- selected assets, consent and transport sta
     from .card_update import rollback_card, update_card  # noqa: PLC0415 -- write actions only.
 
     card = _select_card(_list_cards(connection, log), cid, confirm, action=action)
+    if cid is None and (confirm is None or not confirm(card)):
+        fail(f"Card {action} cancelled")
     if card.bytes < layout.capacity_bytes:
         fail("The selected SD card is too small")
     if build_id is not None:

@@ -290,7 +290,7 @@ def _profile_storage(value: object, name: str) -> dict[str, Any]:
         alignment=1024 * 1024,
     )
     if root_offset + root_size > 0x100000000:
-        fail(f"{name} image exceeds the 32-bit MBR addressable range")
+        fail(f"{name} initial system image exceeds 4 GiB")
     boot_label = nonempty_string(storage.get("boot_label"), f"{name} boot_label")
     if len(boot_label) > 11 or not boot_label.isascii():
         fail(f"{name} boot_label must be at most 11 ASCII characters")

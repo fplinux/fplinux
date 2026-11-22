@@ -26,7 +26,7 @@ The Qin ZIP starts FPLinux in RAM. For a Qin system card, use the [manual image 
 
 Leave the microSD card in the powered-off phone. Open `Run.cmd` on Windows or `sh Run.sh` on Linux from the extracted [Release ZIP](/fplinux/guides/standalone-archive/). Choose your phone and **Install on microSD**. Connect only when prompted. The launcher displays the card it found and asks before erasing it.
 
-FPLinux prepares the phone data on the PC and reuses a compatible saved backup. The installer writes the system and your phone's data from the same RAM session and reads the written files back for verification. It installs the [initial applications](/fplinux/guides/packages/) from the release's signed catalogue before making the card bootable. Wait for the success message and power off the phone before booting the card. This operation erases the entire selected microSD.
+FPLinux prepares the phone data on the PC and reuses a compatible saved backup. The installer shows the space for shared files and the system, then writes and verifies the system and your phone's data from the same RAM session. It installs the [initial applications](/fplinux/guides/packages/) from the release's signed catalogue before making the card bootable. Wait for the success message and power off the phone before booting the card. This operation erases the entire selected microSD.
 
 The installer also sets up SSH for your user account on the installing PC. Save the connection command it prints. The private client key and the card's SSH host key pin are saved together with `ssh_config` under `$XDG_DATA_HOME/fplinux/cards/` on Linux (`~/.local/share/fplinux/cards/` by default) or `%LOCALAPPDATA%\FPLinux\cards\` on Windows. Each installation has its own directory under the target ID and card CID. The files stay available after you close the launcher or reboot the computer.
 
@@ -128,9 +128,9 @@ The build directory printed after `output:` contains `FPLINUX.img.xz`, a compres
 
 | Profile | Partition | Initial size | Filesystem | Label | Contents |
 | --- | --- | --- | --- | --- | --- |
-| `microsd-uboot` | 1 | 64 MiB | FAT32 | `FPLBOOT` | `FPLINUX.ITB` boot image |
-| `microsd-uboot` | 2 | 64 MiB | ext4 | `FPLROOT` | the system, mounted as `/` |
-| `microsd-root` | 1 | 64 MiB | FAT32 | `FPLDATA` | empty |
+| `microsd-uboot` | 1 | 2 GiB | FAT32 | `FPLBOOT` | shared files and the autonomous boot entry |
+| `microsd-uboot` | 2 | 64 MiB | ext4 | `FPLROOT` | system slots and their boot images |
+| `microsd-root` | 1 | 64 MiB | FAT32 | `FPLDATA` | shared files |
 | `microsd-root` | 2 | 512 MiB | ext4 | `FPLROOT` | the system, mounted as `/` |
 
 On the first boot, Linux extends partition 2 and its filesystem to the end of the card. Later boots leave a full-size partition unchanged.
@@ -171,7 +171,13 @@ When [reconnecting](/fplinux/use/connect/) or [checking the running build](/fpli
 
 Everything on the ext4 root survives a cold start: installed [packages](/fplinux/guides/packages/), Bluetooth pairing records and your files. Files in RAM filesystems such as `/tmp` do not.
 
-With `microsd-uboot`, keep `FPLBOOT` for the boot image. Do not mount it as application storage at `/mnt/card`.
+## Shared files
+
+Open **Files → Places → Shared files** to connect the FAT32 data folder of the installed system card. Only the `Shared` folder is exposed at `/mnt/card`. Files in **My files**, installed apps and settings remain on ext4.
+
+The stock firmware can open the same `Shared` folder if it supports the system card's partition layout. Shut down before switching systems. If the stock firmware asks to format the card, cancel the prompt. Leave the boot files outside `Shared` in place. Updates and rollbacks preserve the shared folder.
+
+To disconnect the folder in FPLinux, close the apps that use it and choose **Disconnect shared files** in Places. The card stays in the phone while FPLinux runs.
 
 ## Shut down
 

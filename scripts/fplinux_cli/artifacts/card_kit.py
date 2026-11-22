@@ -65,7 +65,9 @@ class CardLayout:
     root_offset: int
     root_size: int
     disk_signature: int
+    boot_prefix_size: int
     boot_sha256: str
+    boot_file_sha256: str
     root_sha256: str
     fit_ramdisk_offset: int
     fit_ramdisk_size: int
@@ -116,7 +118,9 @@ def read_card_layout(card_dir: Path) -> CardLayout:
         root_offset=_layout_integer(record, "root_offset", alignment=_MIB),
         root_size=_layout_integer(record, "root_size", alignment=_MIB),
         disk_signature=disk_signature,
+        boot_prefix_size=_layout_integer(record, "boot_prefix_size", alignment=_MIB),
         boot_sha256=_layout_digest(record, "boot_sha256"),
+        boot_file_sha256=_layout_digest(record, "boot_file_sha256"),
         root_sha256=_layout_digest(record, "root_sha256"),
         fit_ramdisk_offset=_layout_integer(record, "fit_ramdisk_offset", alignment=4),
         fit_ramdisk_size=_layout_integer(record, "fit_ramdisk_size", alignment=512),
@@ -124,6 +128,8 @@ def read_card_layout(card_dir: Path) -> CardLayout:
     )
     if layout.boot_offset + layout.boot_size != layout.root_offset:
         raise CardKitError("Card layout must place ext4 immediately after FAT")
+    if not layout.boot_offset < layout.boot_prefix_size <= layout.root_offset:
+        raise CardKitError("Card layout has an invalid boot_prefix_size")
     if layout.capacity_bytes > 0x100000000:
         raise CardKitError("Card layout exceeds the supported system image size")
     if (

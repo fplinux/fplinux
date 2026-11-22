@@ -29,6 +29,12 @@ rc-service)
 poweroff)
 	printf 'poweroff:%s\n' "$*" >>"${FPLINUX_GROW_CALLS:?}"
 	;;
+umount)
+	printf 'umount:%s\n' "$*" >>"${FPLINUX_GROW_CALLS:?}"
+	[ "${FPLINUX_UMOUNT_STATUS:?}" -eq 0 ] || exit "$FPLINUX_UMOUNT_STATUS"
+	awk -v target="$1" '$5 != target' "${FPLINUX_CARD_FILES:?}/mountinfo" >"$FPLINUX_CARD_FILES/unmounted" &&
+		mv "$FPLINUX_CARD_FILES/unmounted" "$FPLINUX_CARD_FILES/mountinfo"
+	;;
 mount)
 	printf 'mount:%s\n' "$*" >>"${FPLINUX_GROW_CALLS:?}"
 	[ "${FPLINUX_MOUNT_STATUS:?}" -eq 0 ] || exit "$FPLINUX_MOUNT_STATUS"

@@ -30,6 +30,8 @@ struct fplinux_session_storage_config {
 	const char *swaps;
 	const char *mountpoint;
 	const char *home_path;
+	const char *shared_card_path;
+	const char *compatible;
 	uid_t uid;
 	gid_t gid;
 	const struct fplinux_session_storage_io *io;

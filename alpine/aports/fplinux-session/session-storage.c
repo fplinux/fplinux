@@ -7,12 +7,14 @@
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <inttypes.h>
 #include <limits.h>
 #include <pthread.h>
 #include <spawn.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <sys/mount.h>
 #include <sys/stat.h>
 #include <sys/sysmacros.h>
@@ -28,7 +30,9 @@ struct storage_volume {
 	char cid[128];
 	char location[PATH_MAX];
 	dev_t number;
+	dev_t system_partition;
 	unsigned long mount_id;
+	unsigned long backing_mount_id;
 	bool has_partitions;
 	bool mounted;
 	struct fplinux_session_storage_probe probe;
@@ -41,6 +45,9 @@ struct fplinux_session_storage {
 	char swaps[PATH_MAX];
 	char mountpoint[PATH_MAX];
 	char home_path[PATH_MAX];
+	char shared_card_path[PATH_MAX];
+	char backing_path[PATH_MAX];
+	char compatible[PATH_MAX];
 	uid_t uid;
 	gid_t gid;
 	struct fplinux_session_storage_io io;
@@ -58,6 +65,7 @@ struct fplinux_session_storage {
 	size_t count;
 	bool home_persistent;
 	bool mountpoint_occupied;
+	bool shared_card_occupied;
 	struct storage_volume volumes[FPLINUX_VOLUME_MAX];
 	struct fplinux_volume_result result;
 };
@@ -153,6 +161,55 @@ static bool partition_name(const char *disk, const char *name)
 	return true;
 }
 
+static bool read_sector_attribute(struct fplinux_session_storage *storage,
+				  const char *partition, const char *name,
+				  uint64_t *value)
+{
+	char text[32], tail;
+
+	return read_attribute(storage, partition, name, text, sizeof(text)) &&
+	       text[strspn(text, "0123456789")] == '\0' &&
+	       sscanf(text, "%" SCNu64 "%c", value, &tail) == 1;
+}
+
+static bool partition_geometry(struct fplinux_session_storage *storage,
+			       const struct storage_volume *volume,
+			       const char *partition, const char *index,
+			       uint64_t *start, uint64_t *size)
+{
+	char path[PATH_MAX], parent[PATH_MAX], resolved[PATH_MAX], number[16];
+
+	return make_path(path, sizeof(path), storage->sys_block, partition) &&
+	       realpath(path, resolved) &&
+	       make_path(parent, sizeof(parent), volume->location, partition) &&
+	       !strcmp(resolved, parent) &&
+	       read_attribute(storage, partition, "partition", number,
+			      sizeof(number)) &&
+	       !strcmp(number, index) &&
+	       read_sector_attribute(storage, partition, "start", start) &&
+	       read_sector_attribute(storage, partition, "size", size) && *size;
+}
+
+static dev_t system_partition(struct fplinux_session_storage *storage,
+			      const struct storage_volume *volume)
+{
+	char second[NAME_MAX + 1];
+	uint64_t first_start, first_size, second_start, second_size;
+	dev_t number;
+
+	if (snprintf(second, sizeof(second), "%sp2", volume->disk) >=
+		    (int)sizeof(second) ||
+	    !partition_geometry(storage, volume, volume->device, "1",
+				&first_start, &first_size) ||
+	    !partition_geometry(storage, volume, second, "2", &second_start,
+				&second_size) ||
+	    first_start != 2048 || second_start <= first_start ||
+	    second_start - first_start != first_size ||
+	    !read_number(storage, second, &number) || number == volume->number)
+		return 0;
+	return number;
+}
+
 static bool belongs_to_card(struct fplinux_session_storage *storage,
 			    const struct storage_volume *volume, dev_t number)
 {
@@ -222,22 +279,173 @@ static bool option_present(const char *options, const char *option)
 	return false;
 }
 
+struct storage_mount {
+	dev_t number;
+	unsigned long id;
+	const char *root;
+	const char *path;
+	const char *options;
+	const char *filesystem;
+	const char *source;
+};
+
+struct card_mounts {
+	bool root_on_card;
+	bool system_slot;
+	bool system_direct;
+	bool system_backing;
+	bool system_data;
+	bool other;
+	bool read_only;
+	unsigned long plain_id;
+	unsigned long bind_id;
+	unsigned long backing_id;
+};
+
+static bool qin_compatible(const struct fplinux_session_storage *storage)
+{
+	static const char qin[] = "xiaomi,qin1s-plus";
+	FILE *file = fopen(storage->compatible, "re");
+	char *name = NULL;
+	size_t capacity = 0;
+	ssize_t length;
+	bool found = false;
+
+	if (!file)
+		return false;
+	while ((length = getdelim(&name, &capacity, '\0', file)) >= 0) {
+		if (length == (ssize_t)sizeof(qin) &&
+		    !memcmp(name, qin, sizeof(qin))) {
+			found = true;
+			break;
+		}
+	}
+	free(name);
+	fclose(file);
+	return found;
+}
+
+static bool private_path_valid(const char *path)
+{
+	struct stat status;
+
+	/* Mounting vfat replaces the visible permissions on the mountpoint. */
+	return lstat(path, &status) == 0 && S_ISDIR(status.st_mode) &&
+	       status.st_uid == geteuid() && (status.st_mode & 0777) == 0700;
+}
+
+static bool shared_mount_valid(const struct fplinux_session_storage *storage,
+			       const struct storage_volume *volume,
+			       const struct storage_mount *mount)
+{
+	size_t device_root_length = strlen(storage->dev_root);
+
+	return mount->id && !strcmp(mount->filesystem, "vfat") &&
+	       option_present(mount->options, "nodev") &&
+	       option_present(mount->options, "nosuid") &&
+	       option_present(mount->options, "noexec") &&
+	       !strncmp(mount->source, storage->dev_root, device_root_length) &&
+	       mount->source[device_root_length] == '/' &&
+	       !strcmp(mount->source + device_root_length + 1, volume->device);
+}
+
+static void inspect_card_mount(const struct fplinux_session_storage *storage,
+			       const struct storage_volume *volume,
+			       struct card_mounts *card,
+			       const struct storage_mount *mount)
+{
+	bool system_ext4 = volume->system_partition &&
+			   volume->system_partition == mount->number &&
+			   !strcmp(mount->filesystem, "ext4");
+
+	if (!strcmp(mount->path, "/")) {
+		card->root_on_card = true;
+		if (system_ext4) {
+			card->system_slot =
+				!strcmp(mount->root, "/system/a/root") ||
+				!strcmp(mount->root, "/system/b/root");
+			card->system_direct = !strcmp(mount->root, "/");
+		}
+	} else if (system_ext4 && !strcmp(mount->path, "/run/fplinux-card") &&
+		   !strcmp(mount->root, "/")) {
+		card->system_backing = true;
+	} else if (system_ext4 && !strncmp(mount->root, "/data/", 6) &&
+		   !strcmp(mount->root + 5, mount->path)) {
+		/* cardroot-init binds the persistent directories at these paths. */
+		card->system_data = true;
+	} else if (mount->number == volume->number &&
+		   !strcmp(mount->path, storage->mountpoint) &&
+		   !strcmp(mount->root, "/")) {
+		card->plain_id = mount->id;
+		card->read_only |= option_present(mount->options, "ro");
+	} else if (mount->number == volume->number &&
+		   shared_mount_valid(storage, volume, mount)) {
+		if (!strcmp(mount->path, storage->backing_path) &&
+		    !strcmp(mount->root, "/"))
+			card->backing_id = mount->id;
+		else if (!strcmp(mount->path, storage->mountpoint) &&
+			 !strcasecmp(mount->root, "/Shared"))
+			card->bind_id = mount->id;
+		else
+			card->other = true;
+		card->read_only |= option_present(mount->options, "ro");
+	} else {
+		card->other = true;
+	}
+}
+
+static void set_card_mount_state(struct storage_volume *volume,
+				 const struct card_mounts *card,
+				 bool shared_system_files, size_t public_mounts,
+				 size_t private_mounts)
+{
+	volume->public.shared_system_files = shared_system_files;
+	if (shared_system_files) {
+		volume->public.protection = FPLINUX_VOLUME_UNPROTECTED;
+		if (card->other || card->plain_id ||
+		    (card->backing_id && private_mounts != 1) ||
+		    (card->bind_id &&
+		     (public_mounts != 1 || !card->backing_id ||
+		      card->bind_id == card->backing_id))) {
+			volume->public.protection = FPLINUX_VOLUME_OTHER_MOUNT;
+			return;
+		}
+		volume->backing_mount_id = card->backing_id;
+		volume->mount_id = card->bind_id;
+	} else if (card->root_on_card) {
+		volume->public.protection = FPLINUX_VOLUME_SYSTEM_ROOT;
+	} else if (!volume->public.protection &&
+		   (card->other || card->system_backing || card->system_data ||
+		    card->backing_id || card->bind_id ||
+		    (card->plain_id && public_mounts != 1))) {
+		volume->public.protection = FPLINUX_VOLUME_OTHER_MOUNT;
+	} else {
+		volume->mount_id = card->plain_id;
+	}
+	volume->mounted = volume->mount_id != 0;
+	volume->public.read_only |= card->read_only;
+}
+
 static int inspect_mounts(struct fplinux_session_storage *storage,
 			  struct storage_volume *volumes, size_t count)
 {
+	struct card_mounts cards[FPLINUX_VOLUME_MAX] = { 0 };
 	char *line = NULL;
 	size_t capacity = 0, home_mount_length = 0;
+	size_t root_mounts = 0, system_backing_mounts = 0;
+	size_t public_mounts = 0, private_mounts = 0;
 	FILE *file = fopen(storage->mountinfo, "re");
 	int error = 0;
 
 	storage->mountpoint_occupied = false;
+	storage->shared_card_occupied = false;
 	storage->home_persistent = false;
 	if (!file)
 		return errno;
 	while (getline(&line, &capacity, file) >= 0) {
-		char *fields[6], *save = NULL, *separator, *filesystem;
+		struct storage_mount mount;
+		char *fields[6], *save = NULL, *separator, *source;
 		unsigned int device_major, device_minor;
-		unsigned long mount_id;
 		char tail;
 		bool valid = true;
 
@@ -247,55 +455,71 @@ static int inspect_mounts(struct fplinux_session_storage *storage,
 			break;
 		}
 		*separator = '\0';
-		filesystem = strtok_r(separator + 3, " ", &save);
+		mount.filesystem = strtok_r(separator + 3, " ", &save);
+		source = strtok_r(NULL, " ", &save);
 		for (size_t i = 0; i < 6; ++i) {
 			fields[i] = strtok_r(i ? NULL : line, " ", &save);
 			if (!fields[i])
 				valid = false;
 		}
-		if (!valid || !filesystem ||
-		    sscanf(fields[0], "%lu%c", &mount_id, &tail) != 1 ||
+		if (!valid || !mount.filesystem || !source ||
+		    sscanf(fields[0], "%lu%c", &mount.id, &tail) != 1 ||
 		    sscanf(fields[2], "%u:%u%c", &device_major, &device_minor,
 			   &tail) != 2) {
 			error = EIO;
 			break;
 		}
+		decode_path(fields[3]);
 		decode_path(fields[4]);
-		if (path_contains(fields[4], storage->home_path) &&
-		    strlen(fields[4]) >= home_mount_length) {
-			home_mount_length = strlen(fields[4]);
+		decode_path(source);
+		mount.number = makedev(device_major, device_minor);
+		mount.root = fields[3];
+		mount.path = fields[4];
+		mount.options = fields[5];
+		mount.source = source;
+		if (path_contains(mount.path, storage->home_path) &&
+		    strlen(mount.path) >= home_mount_length) {
+			home_mount_length = strlen(mount.path);
 			storage->home_persistent =
-				!strcmp(filesystem, "ext4") ||
-				!strcmp(filesystem, "vfat");
+				!strcmp(mount.filesystem, "ext4") ||
+				!strcmp(mount.filesystem, "vfat");
 		}
-		if (!strcmp(fields[4], storage->mountpoint))
-			storage->mountpoint_occupied = true;
-		for (size_t i = 0; i < count; ++i) {
-			struct storage_volume *volume = &volumes[i];
-			dev_t number = makedev(device_major, device_minor);
-
-			if (!belongs_to_card(storage, volume, number))
-				continue;
-			if (!strcmp(fields[4], "/")) {
-				volume->public.protection =
-					FPLINUX_VOLUME_SYSTEM_ROOT;
-			} else if (number == volume->number &&
-				   !strcmp(fields[4], storage->mountpoint) &&
-				   !strcmp(fields[3], "/")) {
-				volume->mounted = true;
-				volume->mount_id = mount_id;
-				volume->public.read_only |=
-					option_present(fields[5], "ro");
-			} else if (!volume->public.protection) {
-				volume->public.protection =
-					FPLINUX_VOLUME_OTHER_MOUNT;
-			}
-		}
+		if (!strcmp(mount.path, "/"))
+			++root_mounts;
+		if (!strcmp(mount.path, "/run/fplinux-card"))
+			++system_backing_mounts;
+		if (path_contains(storage->mountpoint, mount.path))
+			++public_mounts;
+		if (path_contains(storage->shared_card_path, mount.path))
+			++private_mounts;
+		for (size_t i = 0; i < count; ++i)
+			if (belongs_to_card(storage, &volumes[i], mount.number))
+				inspect_card_mount(storage, &volumes[i],
+						   &cards[i], &mount);
 	}
 	if (ferror(file))
 		error = errno ? errno : EIO;
 	free(line);
 	fclose(file);
+	if (error)
+		return error;
+	storage->mountpoint_occupied = public_mounts != 0;
+	storage->shared_card_occupied = private_mounts != 0;
+	for (size_t i = 0; i < count; ++i) {
+		struct card_mounts *card = &cards[i];
+		bool shared_system_files =
+			root_mounts == 1 &&
+			((card->system_slot && card->system_backing &&
+			  system_backing_mounts == 1) ||
+			 (card->system_direct && !system_backing_mounts &&
+			  qin_compatible(storage)));
+
+		if (card->backing_id &&
+		    !private_path_valid(storage->shared_card_path))
+			card->other = true;
+		set_card_mount_state(&volumes[i], card, shared_system_files,
+				     public_mounts, private_mounts);
+	}
 	return error;
 }
 
@@ -468,7 +692,11 @@ static bool same_medium(const struct storage_volume *left,
 			const struct storage_volume *right)
 {
 	return left->number == right->number &&
+	       left->system_partition == right->system_partition &&
 	       left->mount_id == right->mount_id &&
+	       left->backing_mount_id == right->backing_mount_id &&
+	       left->public.shared_system_files ==
+		       right->public.shared_system_files &&
 	       !strcmp(left->location, right->location) &&
 	       !strcmp(left->cid, right->cid);
 }
@@ -502,6 +730,7 @@ static int scan(struct fplinux_session_storage *storage)
 			read_only[8];
 		struct dirent *partition;
 		DIR *partitions;
+		size_t partition_count = 0;
 		bool has_first = false;
 
 		if (!disk_name(entry->d_name) ||
@@ -536,6 +765,7 @@ static int scan(struct fplinux_session_storage *storage)
 			if (!partition_name(volume->disk, partition->d_name))
 				continue;
 			volume->has_partitions = true;
+			++partition_count;
 			if (!strcmp(partition->d_name, first))
 				has_first = true;
 		}
@@ -566,6 +796,10 @@ static int scan(struct fplinux_session_storage *storage)
 					  volume->probe.label);
 			if (!strcmp(volume->probe.label, "FPLBOOT"))
 				volume->public.protection = FPLINUX_VOLUME_BOOT;
+			if (!error && has_first && partition_count == 2 &&
+			    !strcmp(volume->probe.filesystem, "vfat"))
+				volume->system_partition =
+					system_partition(storage, volume);
 		}
 		++count;
 	}
@@ -619,13 +853,105 @@ static int discover(struct fplinux_session_storage *storage)
 	return error;
 }
 
+static int ensure_directory(const char *path, mode_t mode)
+{
+	struct stat status;
+
+	if (lstat(path, &status) < 0) {
+		if (errno != ENOENT)
+			return errno;
+		if (mkdir(path, mode) < 0 && errno != EEXIST)
+			return errno;
+		if (lstat(path, &status) < 0)
+			return errno;
+	}
+	return S_ISDIR(status.st_mode) ? 0 : ENOTDIR;
+}
+
+static int mount_filesystem(struct fplinux_session_storage *storage,
+			    const struct storage_volume *volume,
+			    const char *device, const char *path)
+{
+	char options[128] = "";
+	unsigned long flags = MS_NODEV | MS_NOSUID | MS_NOEXEC;
+	int error;
+
+	if (!strcmp(volume->probe.filesystem, "vfat"))
+		snprintf(options, sizeof(options),
+			 "uid=%lu,gid=%lu,dmask=0022,fmask=0133,utf8=1",
+			 (unsigned long)storage->uid,
+			 (unsigned long)storage->gid);
+	if (volume->public.read_only)
+		flags |= MS_RDONLY;
+	error = storage->io.mount(storage->io.context, device, path,
+				  volume->probe.filesystem, flags, options);
+	if (error == EROFS && !(flags & MS_RDONLY))
+		error = storage->io.mount(storage->io.context, device, path,
+					  volume->probe.filesystem,
+					  flags | MS_RDONLY, options);
+	return error;
+}
+
+static int connect_shared_card(struct fplinux_session_storage *storage,
+			       const struct storage_volume *volume,
+			       const char *device)
+{
+	char shared[PATH_MAX];
+	bool mount_backing = !volume->backing_mount_id;
+	int error = 0;
+
+	if (!make_path(shared, sizeof(shared), storage->backing_path, "Shared"))
+		return errno;
+	if (mount_backing) {
+		if (storage->shared_card_occupied)
+			return EBUSY;
+		error = ensure_directory(storage->shared_card_path, 0700);
+		if (error)
+			return error;
+		if (!private_path_valid(storage->shared_card_path))
+			return EACCES;
+		error = ensure_directory(storage->backing_path, 0700);
+		if (!error)
+			error = mount_filesystem(storage, volume, device,
+						 storage->backing_path);
+		if (error)
+			return error;
+	}
+	error = ensure_directory(shared, 0755);
+	if (!error)
+		error = storage->io.mount(storage->io.context, shared,
+					  storage->mountpoint, NULL, MS_BIND,
+					  NULL);
+	if (error && mount_backing)
+		storage->io.unmount(storage->io.context, storage->backing_path);
+	return error;
+}
+
+static int eject_volume(struct fplinux_session_storage *storage,
+			const struct storage_volume *volume)
+{
+	bool shared = volume->public.shared_system_files;
+	int error;
+
+	if (!volume->mounted && !volume->backing_mount_id)
+		return ENODEV;
+	error = storage->io.sync(storage->io.context,
+				 shared ? storage->backing_path :
+					  storage->mountpoint);
+	if (!error && volume->mounted)
+		error = storage->io.unmount(storage->io.context,
+					    storage->mountpoint);
+	if (!error && shared)
+		error = storage->io.unmount(storage->io.context,
+					    storage->backing_path);
+	return error;
+}
+
 static int operate(struct fplinux_session_storage *storage,
 		   enum fplinux_volume_operation operation, uint32_t volume_id)
 {
 	struct storage_volume *volume = NULL;
-	char device[PATH_MAX], options[128];
-	struct stat status;
-	unsigned long flags = MS_NODEV | MS_NOSUID | MS_NOEXEC;
+	char device[PATH_MAX];
 	int error = discover(storage);
 
 	if (error || operation == FPLINUX_VOLUME_REFRESH)
@@ -637,48 +963,23 @@ static int operate(struct fplinux_session_storage *storage,
 		return ESTALE;
 	if (volume->public.protection)
 		return EPERM;
-	if (operation == FPLINUX_VOLUME_EJECT) {
-		if (!volume->mounted)
-			return ENODEV;
-		error = storage->io.sync(storage->io.context,
-					 storage->mountpoint);
-		if (!error)
-			error = storage->io.unmount(storage->io.context,
-						    storage->mountpoint);
-		return error;
-	}
+	if (operation == FPLINUX_VOLUME_EJECT)
+		return eject_volume(storage, volume);
 	if (volume->mounted)
 		return 0;
 	if (volume->public.state != FPLINUX_VOLUME_AVAILABLE)
 		return EOPNOTSUPP;
 	if (storage->mountpoint_occupied)
 		return EBUSY;
-	if (mkdir(storage->mountpoint, 0755) < 0 && errno != EEXIST)
-		return errno;
-	if (lstat(storage->mountpoint, &status) < 0)
-		return errno;
-	if (!S_ISDIR(status.st_mode))
-		return ENOTDIR;
 	if (!make_path(device, sizeof(device), storage->dev_root,
 		       volume->device))
 		return errno;
-	options[0] = '\0';
-	if (!strcmp(volume->probe.filesystem, "vfat"))
-		snprintf(options, sizeof(options),
-			 "uid=%lu,gid=%lu,dmask=0022,fmask=0133,utf8=1",
-			 (unsigned long)storage->uid,
-			 (unsigned long)storage->gid);
-	if (volume->public.read_only)
-		flags |= MS_RDONLY;
-	error = storage->io.mount(storage->io.context, device,
-				  storage->mountpoint, volume->probe.filesystem,
-				  flags, options);
-	if (error == EROFS && !(flags & MS_RDONLY))
-		error = storage->io.mount(storage->io.context, device,
-					  storage->mountpoint,
-					  volume->probe.filesystem,
-					  flags | MS_RDONLY, options);
-	return error;
+	error = ensure_directory(storage->mountpoint, 0755);
+	if (error)
+		return error;
+	if (volume->public.shared_system_files)
+		return connect_shared_card(storage, volume, device);
+	return mount_filesystem(storage, volume, device, storage->mountpoint);
 }
 
 static void *storage_worker(void *context)
@@ -750,7 +1051,17 @@ struct fplinux_session_storage *fplinux_session_storage_create(
 		       config->mountpoint ? config->mountpoint : "/mnt/card") ||
 	    !copy_text(storage->home_path, sizeof(storage->home_path),
 		       config->home_path ? config->home_path :
-					   "/home/fplinux")) {
+					   "/home/fplinux") ||
+	    !copy_text(storage->shared_card_path,
+		       sizeof(storage->shared_card_path),
+		       config->shared_card_path ? config->shared_card_path :
+						  "/run/fplinux-shared-card") ||
+	    !make_path(storage->backing_path, sizeof(storage->backing_path),
+		       storage->shared_card_path, "fat") ||
+	    !copy_text(storage->compatible, sizeof(storage->compatible),
+		       config->compatible ?
+			       config->compatible :
+			       "/sys/firmware/devicetree/base/compatible")) {
 		free(storage);
 		return NULL;
 	}

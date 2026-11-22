@@ -84,6 +84,7 @@ struct files_folder {
 	struct fplinux_files_directory directory;
 	int descriptor;
 	uint32_t volume_id;
+	bool shared_system_files;
 	bool read_only;
 	bool system;
 	char path[FPLINUX_FILES_PATH_MAX];
@@ -172,6 +173,11 @@ static const char *base_name(const char *path)
 	const char *separator = strrchr(path, '/');
 
 	return separator && separator[1] ? separator + 1 : path;
+}
+
+static const char *volume_name(bool shared_system_files)
+{
+	return shared_system_files ? _("Shared files") : _("Memory card");
 }
 
 /* Raw bytes remain the operation's name; only presentation escapes them. */
@@ -438,6 +444,14 @@ static void show_help(struct files_app *app)
 	fplinux_ui_form_append_string(
 		screen, NULL,
 		_("My files are in your home directory. Safely eject a memory card from Places before removing it."));
+	for (size_t i = 0; i < app->volumes.count; i++) {
+		if (!app->volumes.volumes[i].shared_system_files)
+			continue;
+		fplinux_ui_form_append_string(
+			screen, NULL,
+			_("Disconnect shared files in Places. Shut down before removing the system card."));
+		break;
+	}
 	add_command(app, screen, COMMAND_BACK, FPLINUX_UI_COMMAND_BACK, NULL,
 		    0);
 	fplinux_ui_screen_set_listener(screen, back_command, NULL, app);
@@ -673,12 +687,14 @@ static struct fplinux_ui_screen *build_folder(struct files_folder *folder)
 	struct files_app *app = folder->app;
 	struct fplinux_ui_screen *screen;
 	char title[FPLINUX_FILES_NAME_MAX * 4 + 1];
-	const char *label =
-		!strcmp(folder->path, app->home) ? _("My files") :
-		!strcmp(folder->path, "/")	 ? _("System files") :
-		folder->volume_id && !strcmp(folder->path, folder->root) ?
-					     _("Memory card") :
-					     base_name(folder->path);
+	const char *label = base_name(folder->path);
+
+	if (!strcmp(folder->path, app->home))
+		label = _("My files");
+	else if (!strcmp(folder->path, "/"))
+		label = _("System files");
+	else if (folder->volume_id && !strcmp(folder->path, folder->root))
+		label = volume_name(folder->shared_system_files);
 
 	free(folder->rows);
 	folder->rows =
@@ -736,16 +752,12 @@ static bool read_folder(struct files_app *app, const char *path,
 			bool system, const char *focus,
 			enum folder_target target)
 {
+	const struct fplinux_volume *volume = NULL;
 	struct files_folder *folder;
-	uint32_t mount_id = 0;
 
 	if (volume_id) {
-		const struct fplinux_volume *volume =
-			mounted_volume(app, volume_id);
-
-		if (volume)
-			mount_id = volume->mount_id;
-		if (!mount_id) {
+		volume = mounted_volume(app, volume_id);
+		if (!volume || !volume->mount_id) {
 			errno = ENODEV;
 			return false;
 		}
@@ -756,6 +768,7 @@ static bool read_folder(struct files_app *app, const char *path,
 	folder->app = app;
 	folder->descriptor = -1;
 	folder->volume_id = volume_id;
+	folder->shared_system_files = volume && volume->shared_system_files;
 	folder->read_only = read_only;
 	folder->system = system;
 	snprintf(folder->path, sizeof(folder->path), "%s", path);
@@ -765,7 +778,7 @@ static bool read_folder(struct files_app *app, const char *path,
 	folder->position.row = SIZE_MAX;
 	folder->position.first = SIZE_MAX;
 	if (fplinux_files_job_read(&app->job, path, !strcmp(path, app->home),
-				   mount_id) < 0) {
+				   volume ? volume->mount_id : 0) < 0) {
 		int error = errno;
 
 		free_folder(folder);
@@ -1414,7 +1427,6 @@ static void job_event(struct fplinux_ui *ui, int fd, short events,
 		mutation_finished(app, status.error);
 }
 
-/* The system's own cards can be neither opened nor connected nor ejected. */
 static bool shows_volume(const struct fplinux_volume *volume)
 {
 	return volume->state != FPLINUX_VOLUME_PROTECTED;
@@ -1468,12 +1480,15 @@ static const char *home_detail(const struct fplinux_volume_snapshot *snapshot)
 
 static const char *volume_detail(const struct fplinux_volume *volume)
 {
-	return volume->state == FPLINUX_VOLUME_AVAILABLE ?
-		       _("Select to connect") :
-	       volume->state == FPLINUX_VOLUME_UNSUPPORTED ?
-		       _("Unsupported format") :
-	       volume->read_only ? _("Read-only") :
-				   _("Connected");
+	if (volume->state == FPLINUX_VOLUME_AVAILABLE)
+		return _("Select to connect");
+	if (volume->state == FPLINUX_VOLUME_UNSUPPORTED)
+		return _("Unsupported format");
+	if (volume->read_only)
+		return _("Read-only");
+	if (volume->shared_system_files)
+		return fplinux_gettext_context("shared files\004Connected");
+	return _("Connected");
 }
 
 static bool request_storage(struct files_app *app,
@@ -1490,17 +1505,20 @@ static bool request_storage(struct files_app *app,
 	return app->storage_request != 0;
 }
 
-/* Connecting and ejecting keep Places until the session answers. */
+/* A storage operation keeps Places until the session answers. */
 static void change_volume(struct files_app *app,
-			  enum fplinux_volume_operation operation, uint32_t id)
+			  enum fplinux_volume_operation operation,
+			  const struct fplinux_volume *volume)
 {
-	if (!request_storage(app, operation, id))
+	const char *progress = _("Connecting…");
+
+	if (!request_storage(app, operation, volume->id))
 		return;
-	app->storage_waiting = begin_wait(app, _("Memory card"),
-					  operation == FPLINUX_VOLUME_EJECT ?
-						  _("Ejecting…") :
-						  _("Connecting…"),
-					  false);
+	if (operation == FPLINUX_VOLUME_EJECT)
+		progress = volume->shared_system_files ? _("Disconnecting…") :
+							 _("Ejecting…");
+	app->storage_waiting = begin_wait(
+		app, volume_name(volume->shared_system_files), progress, false);
 }
 
 static void places_command(struct fplinux_ui *ui,
@@ -1523,7 +1541,7 @@ static void places_command(struct fplinux_ui *ui,
 		change_volume(app,
 			      id == COMMAND_EJECT ? FPLINUX_VOLUME_EJECT :
 						    FPLINUX_VOLUME_CONNECT,
-			      volume->id);
+			      volume);
 	} else if (id == FPLINUX_UI_SELECT_COMMAND) {
 		if (!row) {
 			open_folder(app, app->home, app->home, 0, false, false,
@@ -1535,7 +1553,7 @@ static void places_command(struct fplinux_ui *ui,
 					    false, NULL, FOLDER_CHILD);
 			else if (volume->state == FPLINUX_VOLUME_AVAILABLE)
 				change_volume(app, FPLINUX_VOLUME_CONNECT,
-					      volume->id);
+					      volume);
 			else
 				show_error(app, EOPNOTSUPP);
 		}
@@ -1563,7 +1581,11 @@ static void places_focused(struct fplinux_ui *ui,
 			 FPLINUX_UI_COMMAND_OK, _("Connect"), 0);
 	else if (volume->state == FPLINUX_VOLUME_MOUNTED)
 		add_item(app, screen, row, COMMAND_EJECT,
-			 FPLINUX_UI_COMMAND_ITEM, _("Safely eject"), 0);
+			 FPLINUX_UI_COMMAND_ITEM,
+			 volume->shared_system_files ?
+				 _("Disconnect shared files") :
+				 _("Safely eject"),
+			 0);
 }
 
 static void set_place(struct files_app *app, struct fplinux_ui_screen *screen,
@@ -1592,7 +1614,8 @@ static void fill_places(struct files_app *app, struct fplinux_ui_screen *screen)
 
 		if (!shows_volume(volume))
 			continue;
-		set_place(app, screen, row++, _("Memory card"),
+		set_place(app, screen, row++,
+			  volume_name(volume->shared_system_files),
 			  volume_detail(volume), "card");
 	}
 	while (fplinux_ui_list_size(screen) > row)
@@ -1669,6 +1692,7 @@ static bool places_unchanged(struct files_app *app)
 		if (!old || !next)
 			return old == next;
 		if (old->id != next->id ||
+		    old->shared_system_files != next->shared_system_files ||
 		    strcmp(volume_detail(old), volume_detail(next)))
 			return false;
 	}

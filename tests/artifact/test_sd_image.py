@@ -148,6 +148,7 @@ class SdImageTests:
             boot_sector = stream.read(512)
             assert (boot_sector[71:82].rstrip()) == (b"FPLBOOT")
             assert (boot_sector[82:90]) == (b"FAT32   ")
+            assert struct.unpack_from("<I", boot_sector, 32)[0] == 131072
             stream.seek(ROOT_OFFSET)
             assert (stream.read(ROOT_SIZE)) == (sd_inputs.rootfs.read_bytes())
         directory = subprocess.run(
@@ -157,6 +158,7 @@ class SdImageTests:
             timeout=120,
         )
         assert b"fplinux.itb" not in directory.stdout.lower()
+        assert b"::/Shared/\n" in directory.stdout
         if autonomous:
             extracted_stage0 = sd_inputs.root / "extracted-stage0.bin"
             subprocess.run(
@@ -172,7 +174,7 @@ class SdImageTests:
             )
             assert extracted_stage0.read_bytes() == stage0_bytes
 
-    def test_ram_linux_profile_contains_exact_ext4_root_and_an_empty_fat_partition(
+    def test_ram_linux_profile_contains_exact_ext4_root_and_shared_directory(
         self, sd_inputs: SdInputs
     ) -> None:
         """A USB-loaded kernel receives the same card layout without a card boot payload."""
@@ -194,41 +196,52 @@ class SdImageTests:
             check=True,
             timeout=120,
         )
-        assert directory.stdout == ""
+        assert directory.stdout == "::/Shared/\n"
 
-    def test_card_prefix_contains_cold_entry_and_leaves_fit_absent(
-        self, sd_inputs: SdInputs
+    @pytest.mark.parametrize("boot_sectors", [131072, 4194304], ids=["64MiB", "2GiB"])
+    def test_compact_prefix_preserves_fat_geometry_and_boot_file_on_a_used_card(
+        self, sd_inputs: SdInputs, boot_sectors: int
     ) -> None:
-        """A staged full card layout cannot boot before the final FIT is installed."""
+        """The installer writes allocated boot bytes and leaves the unused FAT tail alone."""
         reader = sd_inputs.root / "reader.bin"
         stage0 = sd_inputs.root / "resident.bin"
         reader_payload = bytes(range(256)) * 3
-        stage0_payload = b"independent card-resident entry\n"
+        stage0_payload = b"independent card-resident entry\n".ljust(2 * 1024**2, b"\0")
         reader.write_bytes(reader_payload)
         stage0.write_bytes(stage0_payload)
         prefix = sd_inputs.root / "boot.xz"
-        digest = sd_image.write_boot_prefix(
+        root_start = 2048 + boot_sectors
+        boot = sd_image.write_boot_prefix(
             sd_inputs.rootfs,
             prefix,
-            storage=STORAGE,
+            storage={**STORAGE, "boot_size": boot_sectors * 512, "root_offset": root_start * 512},
             cold_boot=ColdSdBootstrap(reader, stage0),
         )
         raw = sd_inputs.root / "boot.raw"
         with raw.open("wb") as stream:
             subprocess.run(["xz", "-dc", str(prefix)], stdout=stream, check=True, timeout=120)
-        assert raw.stat().st_size == 68157440
-        assert digest == sha256_file(raw)
-        with raw.open("rb") as stream:
+        assert boot.size == raw.stat().st_size
+        assert boot.size <= 8 * 1024**2
+        assert boot.sha256 == sha256_file(raw)
+        with raw.open("r+b") as stream:
             mbr = stream.read(512)
             assert mbr[:440] == reader_payload[:440]
             assert mbr[510:512] == b"\x55\xaa"
-            assert struct.unpack_from("<II", mbr, 470) == (133120, 131072)
+            assert struct.unpack_from("<I", mbr, 440)[0] == 0x46504C58
+            assert struct.unpack_from("<II", mbr, 454) == (2048, boot_sectors)
+            assert struct.unpack_from("<II", mbr, 470) == (root_start, 131072)
             assert stream.read(256) == reader_payload[512:]
+            stream.seek(1048576)
+            assert struct.unpack_from("<I", stream.read(512), 32)[0] == boot_sectors
+            stream.seek(boot.size)
+            stream.write(b"\xa5" * (2 * 1024**2))
+            stream.truncate(root_start * 512 + 64 * 1024**2)
         fat = f"{raw}@@{BOOT_OFFSET}"
         directory = subprocess.run(
             ["mdir", "-b", "-i", fat, "::"], capture_output=True, check=True, timeout=120
         )
         assert b"fplinux.itb" not in directory.stdout.lower()
+        assert b"::/Shared/\n" in directory.stdout
         extracted = sd_inputs.root / "checked-resident.bin"
         subprocess.run(
             ["mcopy", "-i", fat, "::fpbin_t117/fpmain.bin", str(extracted)],
@@ -267,15 +280,15 @@ class SdImageTests:
         assert sd_files.output.read_bytes() == before
 
     def test_failed_build_preserves_previous_output(self, sd_files: SdInputs) -> None:
-        """An injected genimage failure cannot replace previous output bytes."""
+        """An injected FAT image tool failure cannot replace previous output bytes."""
         before = b"previous published output\n"
         sd_files.output.write_bytes(before)
         failed = subprocess.CompletedProcess(
-            ["genimage"], returncode=2, stderr="injected genimage failure\n"
+            ["mkdosfs"], returncode=2, stderr="injected mkdosfs failure\n"
         )
         with (
             mock.patch("fplinux_cli.build.storage.sd.subprocess.run", return_value=failed),
-            pytest.raises(sd_image.SdImageError, match="injected genimage failure"),
+            pytest.raises(sd_image.SdImageError, match="injected mkdosfs failure"),
         ):
             sd_files.build()
         assert sd_files.output.read_bytes() == before

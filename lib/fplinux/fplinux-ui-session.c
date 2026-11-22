@@ -1994,8 +1994,9 @@ static bool get_volume(struct json_object *object,
 		       struct fplinux_volume *volume)
 {
 	static const char *const fields[] = {
-		"id",	     "mount_id", "state", "protection",
-		"read_only", "label",	 "path",
+		"id",	      "mount_id",  "state",
+		"protection", "read_only", "shared_system_files",
+		"label",      "path",
 	};
 	struct json_object *field;
 	int state = 0, protection = 0;
@@ -2011,6 +2012,8 @@ static bool get_volume(struct json_object *object,
 	    !get_int(object, "state", &state) ||
 	    !get_int(object, "protection", &protection) ||
 	    !get_bool(object, "read_only", &volume->read_only) ||
+	    !get_bool(object, "shared_system_files",
+		      &volume->shared_system_files) ||
 	    !get_string(object, "label", volume->label,
 			sizeof(volume->label)) ||
 	    !get_string(object, "path", volume->path, sizeof(volume->path)))
@@ -2097,6 +2100,9 @@ static void add_volume_result(struct json_object *object,
 		json_object_object_add(
 			entry, "read_only",
 			json_object_new_boolean(volume->read_only));
+		json_object_object_add(
+			entry, "shared_system_files",
+			json_object_new_boolean(volume->shared_system_files));
 		json_object_object_add(entry, "label",
 				       json_object_new_string(volume->label));
 		json_object_object_add(entry, "path",

@@ -29,6 +29,7 @@ class Volume:
     label: str
     path: str
     mount_id: int
+    shared_system_files: bool
 
 
 @dataclass(frozen=True)
@@ -103,6 +104,34 @@ def add_card(  # noqa: PLR0913
     return selected
 
 
+def add_system_card(tree: Path, root: str = "slot") -> None:
+    add_card(tree, label="FPLDATA" if root == "qin" else "FPLBOOT")
+    disk = tree / "sys/mmcblk0"
+    first, second = disk / "mmcblk0p1", disk / "mmcblk0p2"
+    (tree / "sys/mmcblk0p1").rename(first)
+    second.mkdir()
+    for partition in (first, second):
+        (tree / "sys" / partition.name).symlink_to(partition.relative_to(disk.parent))
+    (first / "start").write_text("2048\n")
+    (first / "size").write_text("131072\n")
+    (second / "dev").write_text("179:2\n")
+    (second / "partition").write_text("2\n")
+    (second / "start").write_text("133120\n")
+    (second / "size").write_text("135168\n")
+    if root == "qin":
+        mounts = "20 0 179:2 / / rw - ext4 /dev/root rw\n"
+        (tree / "compatible").write_bytes(b"xiaomi,qin1s-plus\0sprd,sc9820e\0")
+    else:
+        mounts = (
+            "20 0 179:2 /system/b/root / rw - ext4 /dev/mmcblk0p2 rw\n"
+            "21 20 0:1 / /run rw - tmpfs tmpfs rw\n"
+            "22 21 179:2 / /run/fplinux-card rw - ext4 /dev/mmcblk0p2 rw\n"
+            "23 20 179:2 /data/home/fplinux /home/fplinux rw - ext4 /dev/mmcblk0p2 rw\n"
+        )
+    (tree / "system-mounts").write_text(mounts)
+    (tree / "mountinfo").write_text(mounts)
+
+
 def invoke(peer: Path, tree: Path, *actions: str) -> list[Result]:
     process = run_process(
         [str(peer), str(tree), *actions],
@@ -126,6 +155,7 @@ def invoke(peer: Path, tree: Path, *actions: str) -> list[Result]:
                     fields[5],
                     fields[6],
                     int(fields[7]),
+                    bool(int(fields[8])),
                 )
             )
     return results
@@ -172,6 +202,7 @@ def test_supported_card_connects_with_app_access_and_preserves_ext4_permissions(
     )
     assert initial.error == repeated.error == connected.error == 0
     assert initial.volumes[0].state == 0
+    assert not initial.volumes[0].shared_system_files
     assert initial.volumes[0].mount_id == 0
     assert initial.volumes[0].identifier == repeated.volumes[0].identifier
     assert connected.volumes[0].identifier != initial.volumes[0].identifier
@@ -279,6 +310,119 @@ def test_other_mounted_partition_blocks_connect_and_eject(
     assert initial.volumes[0].protection == 4
     assert initial.volumes[0].path == ""
     assert connect.error == eject.error == errno.EPERM
+    assert effects(storage_tree) == []
+
+
+@pytest.mark.parametrize("root", ["slot", "qin"])
+def test_system_card_connect_exposes_only_shared_and_keeps_fat_private(
+    storage_peer: Path, storage_tree: Path, root: str
+) -> None:
+    add_system_card(storage_tree, root)
+    initial, mounted, busy, _, ejected = invoke(
+        storage_peer, storage_tree, "refresh", "connect", "busy-eject", "unbusy", "eject"
+    )
+    assert initial.error == mounted.error == ejected.error == 0
+    assert [snapshot.volumes[0].state for snapshot in (initial, mounted, busy, ejected)] == [
+        0,
+        1,
+        1,
+        0,
+    ]
+    assert all(
+        snapshot.volumes[0].shared_system_files for snapshot in (initial, mounted, busy, ejected)
+    )
+    assert mounted.volumes[0].path == str(storage_tree / "card data")
+    assert mounted.volumes[0].mount_id == 31
+    assert not ejected.volumes[0].path
+    assert ejected.volumes[0].mount_id == 0
+    assert busy.error == errno.EBUSY
+    assert busy.volumes[0] == mounted.volumes[0]
+    assert (storage_tree / "private").stat().st_mode & 0o777 == 0o700
+    assert (storage_tree / "private/fat/Shared").is_dir()
+    assert effects(storage_tree) == [
+        f"mount {storage_tree}/dev/mmcblk0p1 vfat rw uid=1000,gid=1000,dmask=0022,fmask=0133,utf8=1",
+        "bind Shared",
+        "sync shared",
+        "unmount bind",
+        "sync shared",
+        "unmount bind",
+        "unmount backing",
+    ]
+    assert (storage_tree / "mountinfo").read_text() == (storage_tree / "system-mounts").read_text()
+
+
+@pytest.mark.parametrize("mismatch", ["geometry", "backing", "compatible"])
+def test_system_root_with_unverified_layout_keeps_first_partition_protected(
+    storage_peer: Path, storage_tree: Path, mismatch: str
+) -> None:
+    add_system_card(storage_tree, "qin" if mismatch == "compatible" else "slot")
+    if mismatch == "geometry":
+        (storage_tree / "sys/mmcblk0p1/start").write_text("4096\n")
+    elif mismatch == "backing":
+        mountinfo = storage_tree / "mountinfo"
+        mountinfo.write_text(
+            mountinfo.read_text().replace(
+                "22 21 179:2 / /run/fplinux-card", "22 21 8:2 / /run/fplinux-card"
+            )
+        )
+    else:
+        (storage_tree / "compatible").write_bytes(b"xiaomi,qin1s-plus-other\0")
+    initial, connect = invoke(storage_peer, storage_tree, "refresh", "connect")
+    assert initial.volumes[0].state == 3
+    assert initial.volumes[0].protection == 1
+    assert not initial.volumes[0].shared_system_files
+    assert not initial.volumes[0].path
+    assert connect.error == errno.EPERM
+    assert effects(storage_tree) == []
+
+
+@pytest.mark.parametrize("in_use", ["swap", "orphan-bind", "foreign-mount"])
+def test_system_files_refuse_active_swap_and_foreign_mounts(
+    storage_peer: Path, storage_tree: Path, in_use: str
+) -> None:
+    add_system_card(storage_tree)
+    if in_use == "swap":
+        with (storage_tree / "swaps").open("a") as stream:
+            stream.write(f"{storage_tree}/dev/mmcblk0p1 partition 4096 0 -2\n")
+    else:
+        root = "/Shared" if in_use == "orphan-bind" else "/"
+        target = str(storage_tree / "card data").replace(" ", "\\040")
+        with (storage_tree / "mountinfo").open("a") as stream:
+            stream.write(
+                f"31 20 179:1 {root} {target} rw,nosuid,nodev,noexec "
+                f"- vfat {storage_tree}/dev/mmcblk0p1 rw\n"
+            )
+    initial, connect, eject = invoke(storage_peer, storage_tree, "refresh", "connect", "eject")
+    assert initial.volumes[0].shared_system_files
+    assert initial.volumes[0].state == 3
+    assert initial.volumes[0].protection == (2 if in_use == "swap" else 4)
+    assert not initial.volumes[0].path
+    assert connect.error == eject.error == errno.EPERM
+    assert effects(storage_tree) == []
+
+
+def test_failed_shared_bind_releases_private_fat_mount(
+    storage_peer: Path, storage_tree: Path
+) -> None:
+    add_system_card(storage_tree)
+    (storage_tree / "bind-error").write_text(f"{errno.EIO}\n")
+    _, connect = invoke(storage_peer, storage_tree, "refresh", "connect")
+    assert connect.error == errno.EIO
+    assert connect.volumes[0].shared_system_files
+    assert connect.volumes[0].state == 0
+    assert not connect.volumes[0].path
+    assert effects(storage_tree)[1:] == ["bind Shared", "unmount backing"]
+    assert (storage_tree / "mountinfo").read_text() == (storage_tree / "system-mounts").read_text()
+
+
+def test_system_files_refuse_backing_parent_accessible_to_apps(
+    storage_peer: Path, storage_tree: Path
+) -> None:
+    add_system_card(storage_tree)
+    (storage_tree / "private").mkdir(mode=0o755)
+    _, connect = invoke(storage_peer, storage_tree, "refresh", "connect")
+    assert connect.error == errno.EACCES
+    assert not connect.volumes[0].path
     assert effects(storage_tree) == []
 
 

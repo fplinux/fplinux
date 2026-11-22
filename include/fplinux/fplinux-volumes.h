@@ -32,6 +32,8 @@ struct fplinux_volume {
 	enum fplinux_volume_state state;
 	enum fplinux_volume_protection protection;
 	bool read_only;
+	/* The application path exposes Shared on the active system card. */
+	bool shared_system_files;
 	char label[FPLINUX_VOLUME_LABEL_BYTES];
 	/* Only mounted data volumes have an application-accessible path. */
 	char path[FPLINUX_VOLUME_PATH_BYTES];

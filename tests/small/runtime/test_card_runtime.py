@@ -47,10 +47,12 @@ def bundle(tmp_path: Path) -> Path:
         "release_id": RELEASE,
         "boot_offset": MIB,
         "disk_signature": 0x46504C58,
-        "boot_size": MIB,
-        "root_offset": 2 * MIB,
+        "boot_size": 2 * MIB,
+        "root_offset": 3 * MIB,
         "root_size": MIB,
+        "boot_prefix_size": 2 * MIB,
         "boot_sha256": "a" * 64,
+        "boot_file_sha256": "c" * 64,
         "root_sha256": "b" * 64,
         "fit_filename": "FPLINUX.ITB",
         "fit_ramdisk_offset": 64,
@@ -210,7 +212,13 @@ def test_card_actions_report_capacity_and_only_install_calls_writer(
     )
 
     assert result == 0
-    assert messages == [f"SD card {CID} (4 MiB) at /dev/mmcblk0"]
+    expected_messages = [f"SD card {CID} (4 MiB) at /dev/mmcblk0"]
+    if not inspect_only:
+        expected_messages += [
+            "Shared files (FAT32 partition): 2 MiB",
+            "FPLinux (ext4 partition): 1 MiB initially, 1 MiB after first-boot expansion",
+        ]
+    assert messages == expected_messages
     assert visits == ([] if inspect_only else [CID])
     assert progress_commands == (
         []
@@ -318,11 +326,17 @@ def test_card_install_rejects_before_sending_or_writing_to_the_card(
     expected_error: str,
 ) -> None:
     session = {"session": "authenticated reader"}
-    log = SimpleNamespace(message=lambda _message: None, capture=nullcontext)
+    messages: list[str] = []
+    log = SimpleNamespace(message=messages.append, capture=nullcontext)
     confirmations: list[str] = []
     remote_commands: list[str] = []
 
     def confirm(selected: card.SdCard) -> bool:
+        assert "Shared files (FAT32 partition): 2 MiB" in messages
+        ext4_capacity = (
+            "FPLinux (ext4 partition): 1 MiB initially, 1 MiB after first-boot expansion"
+        )
+        assert ext4_capacity in messages
         confirmations.append(selected.cid)
         return False
 
@@ -416,8 +430,19 @@ def test_card_writer_streams_the_repository_and_preserves_the_bound_ssh_keys(
         arguments = shlex.split(command)
         assert arguments[:2] == ["sh", f"{remote_staging}/install-card.sh"]
         assert arguments[2:5] == ["/dev/mmcblk0", CID, remote_staging]
-        assert arguments[5:13] == ["1", "1", "2", "1", "a" * 64, "b" * 64, TARGET, RELEASE]
-        assert arguments[13:-1] == [
+        assert arguments[5:15] == [
+            "1",
+            "2",
+            "3",
+            "1",
+            "2",
+            "a" * 64,
+            "c" * 64,
+            "b" * 64,
+            TARGET,
+            RELEASE,
+        ]
+        assert arguments[15:-1] == [
             hashlib.sha256(uploaded[f"{remote_staging}/{name}"]).hexdigest()
             for name in (
                 "board.tar",

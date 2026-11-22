@@ -75,6 +75,9 @@ msgstr "В меню «Опции» доступны действия с файл
 msgid "My files are in your home directory. Safely eject a memory card from Places before removing it."
 msgstr "«Мои файлы» находятся в домашней папке. Перед извлечением карты выберите безопасное извлечение в списке мест."
 
+msgid "Disconnect shared files in Places. Shut down before removing the system card."
+msgstr "В списке мест можно отключить общие файлы. Перед извлечением системной карты выключите телефон."
+
 msgid "Details"
 msgstr "Сведения"
 
@@ -233,6 +236,9 @@ msgstr "%d%% · %s / %s"
 msgid "Safely eject"
 msgstr "Безопасно извлечь"
 
+msgid "Disconnect shared files"
+msgstr "Отключить общие файлы"
+
 msgid "Connect"
 msgstr "Подключить"
 
@@ -241,6 +247,9 @@ msgstr "Подключение…"
 
 msgid "Ejecting…"
 msgstr "Извлечение…"
+
+msgid "Disconnecting…"
+msgstr "Отключение…"
 
 msgid "Move to"
 msgstr "Переместить в"
@@ -269,8 +278,15 @@ msgstr "Только чтение"
 msgid "Connected"
 msgstr "Подключена"
 
+msgctxt "shared files"
+msgid "Connected"
+msgstr "Подключены"
+
 msgid "Memory card"
 msgstr "Карта памяти"
+
+msgid "Shared files"
+msgstr "Общие файлы"
 
 msgid "Close Files?"
 msgstr "Закрыть «Файлы»?"

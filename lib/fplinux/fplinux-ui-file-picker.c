@@ -74,10 +74,16 @@ struct fplinux_ui_file_picker {
 
 static void show_places(struct fplinux_ui_file_picker *picker);
 static void read_folder(struct fplinux_ui_file_picker *picker, const char *path,
-			uint32_t volume_id, uint32_t mount_id);
+			const struct fplinux_volume *volume);
 static void request_storage(struct fplinux_ui_file_picker *picker,
 			    enum fplinux_volume_operation operation,
-			    uint32_t id);
+			    const struct fplinux_volume *volume);
+
+static const char *volume_name(const struct fplinux_volume *volume)
+{
+	return volume->shared_system_files ? _("Shared files") :
+					     _("Memory card");
+}
 
 static const struct fplinux_volume *
 mounted_volume(const struct fplinux_ui_file_picker *picker, uint32_t id)
@@ -347,16 +353,13 @@ static void folder_command(struct fplinux_ui *ui,
 		return;
 	}
 	if (entry->kind == FPLINUX_FILES_KIND_DIRECTORY) {
-		uint32_t mount_id = 0;
+		const struct fplinux_volume *volume =
+			mounted_volume(picker, folder->volume_id);
 
-		for (size_t i = 0; i < picker->volumes.count; i++) {
-			if (picker->volumes.volumes[i].id == folder->volume_id)
-				mount_id = picker->volumes.volumes[i].mount_id;
-		}
-		if (folder->volume_id && !mount_id)
+		if (folder->volume_id && !volume)
 			show_error(picker, ENODEV);
 		else
-			read_folder(picker, path, folder->volume_id, mount_id);
+			read_folder(picker, path, volume);
 	} else if (!valid_utf8(path)) {
 		show_error(picker, EILSEQ);
 	} else {
@@ -369,13 +372,15 @@ static void read_present(struct fplinux_ui *ui, void *context)
 {
 	struct fplinux_ui_file_picker *picker = context;
 	struct picker_folder *folder = picker->pending;
+	const struct fplinux_volume *volume =
+		mounted_volume(picker, folder->volume_id);
 	struct fplinux_ui_screen *screen;
 	char title[NAME_MAX * 4 + 1];
 	const char *name;
 
 	picker->waiting = false;
 	picker->pending = NULL;
-	if (folder->volume_id && !mounted_volume(picker, folder->volume_id)) {
+	if (folder->volume_id && !volume) {
 		free_folder(folder);
 		show_places(picker);
 		show_error(picker, ENODEV);
@@ -393,7 +398,7 @@ static void read_present(struct fplinux_ui *ui, void *context)
 			picker->card_read_failed = true;
 			if (!picker->storage_request)
 				request_storage(picker, FPLINUX_VOLUME_REFRESH,
-						0);
+						NULL);
 			if (!picker->storage_request) {
 				picker->card_read_failed = false;
 				show_error(picker, error);
@@ -403,11 +408,12 @@ static void read_present(struct fplinux_ui *ui, void *context)
 		}
 		return;
 	}
-	name = !strcmp(folder->path, picker->home) ?
-		       _("My files") :
-	       folder->volume_id && !picker->folder ?
-		       _("Memory card") :
-		       strrchr(folder->path, '/') + 1;
+	if (!strcmp(folder->path, picker->home))
+		name = _("My files");
+	else if (volume && !picker->folder)
+		name = volume_name(volume);
+	else
+		name = strrchr(folder->path, '/') + 1;
 	display_name(name, title, sizeof(title));
 	if (folder->count)
 		screen = fplinux_ui_list_new_virtual(ui, title,
@@ -450,20 +456,24 @@ static void cancel_read(struct fplinux_ui *ui, void *context)
 }
 
 static void read_folder(struct fplinux_ui_file_picker *picker, const char *path,
-			uint32_t volume_id, uint32_t mount_id)
+			const struct fplinux_volume *volume)
 {
 	struct picker_folder *folder;
 	int error;
 
 	if (picker->running || picker->waiting)
 		return;
+	if (volume && !volume->mount_id) {
+		show_error(picker, ENODEV);
+		return;
+	}
 	folder = calloc(1, sizeof(*folder));
 	if (!folder) {
 		show_error(picker, ENOMEM);
 		return;
 	}
 	folder->fd = -1;
-	folder->volume_id = volume_id;
+	folder->volume_id = volume ? volume->id : 0;
 	snprintf(folder->path, sizeof(folder->path), "%s", path);
 	if (!fplinux_ui_wait_begin(picker->ui, _("Reading folder"),
 				   _("Please wait…"), cancel_read, picker)) {
@@ -473,7 +483,7 @@ static void read_folder(struct fplinux_ui_file_picker *picker, const char *path,
 	}
 	picker->waiting = true;
 	picker->pending = folder;
-	picker->read_mount_id = mount_id;
+	picker->read_mount_id = volume ? volume->mount_id : 0;
 	atomic_store(&picker->cancelled, false);
 	error = pthread_create(&picker->thread, NULL, read_worker, picker);
 	if (error) {
@@ -560,11 +570,13 @@ static void fill_places(struct fplinux_ui_file_picker *picker)
 	}
 	for (row = 1; (volume = place_volume(picker, &picker->volumes, row));
 	     row++) {
+		const char *name = volume_name(volume);
+
 		if (row < fplinux_ui_list_size(screen))
-			fplinux_ui_list_set(screen, row, _("Memory card"),
+			fplinux_ui_list_set(screen, row, name,
 					    volume_detail(volume));
 		else {
-			fplinux_ui_list_append(screen, _("Memory card"),
+			fplinux_ui_list_append(screen, name,
 					       volume_detail(volume));
 			fplinux_ui_list_set_icon(
 				screen, row,
@@ -602,7 +614,9 @@ static void places_focused(struct fplinux_ui *ui,
 	} else if (volume->state == FPLINUX_VOLUME_MOUNTED) {
 		command.id = PICKER_EJECT;
 		command.type = FPLINUX_UI_COMMAND_ITEM;
-		command.label = _("Safely eject");
+		command.label = volume->shared_system_files ?
+					_("Disconnect shared files") :
+					_("Safely eject");
 	} else {
 		return;
 	}
@@ -654,25 +668,27 @@ static void update_places_later(lv_timer_t *timer)
 
 static void request_storage(struct fplinux_ui_file_picker *picker,
 			    enum fplinux_volume_operation operation,
-			    uint32_t id)
+			    const struct fplinux_volume *volume)
 {
+	const char *progress = _("Connecting…");
+
 	if (picker->storage_request)
 		return;
-	picker->storage_request =
-		fplinux_ui_storage_request(picker->ui, operation, id);
+	picker->storage_request = fplinux_ui_storage_request(
+		picker->ui, operation, volume ? volume->id : 0);
 	if (!picker->storage_request && errno != EOPNOTSUPP &&
 	    !picker->card_read_failed) {
 		show_error(picker, errno);
 		return;
 	}
-	if (picker->storage_request && operation != FPLINUX_VOLUME_REFRESH)
-		picker->storage_waiting =
-			fplinux_ui_wait_begin(
-				picker->ui, _("Memory card"),
-				operation == FPLINUX_VOLUME_CONNECT ?
-					_("Connecting…") :
-					_("Ejecting…"),
-				NULL, picker) != NULL;
+	if (!picker->storage_request || !volume)
+		return;
+	if (operation == FPLINUX_VOLUME_EJECT)
+		progress = volume->shared_system_files ? _("Disconnecting…") :
+							 _("Ejecting…");
+	picker->storage_waiting =
+		fplinux_ui_wait_begin(picker->ui, volume_name(volume), progress,
+				      NULL, picker) != NULL;
 }
 
 static void places_command(struct fplinux_ui *ui,
@@ -691,7 +707,7 @@ static void places_command(struct fplinux_ui *ui,
 		return;
 	}
 	if (id == PICKER_REFRESH) {
-		request_storage(picker, FPLINUX_VOLUME_REFRESH, 0);
+		request_storage(picker, FPLINUX_VOLUME_REFRESH, NULL);
 		return;
 	}
 	if (id == PICKER_CONNECT || id == PICKER_EJECT) {
@@ -700,17 +716,17 @@ static void places_command(struct fplinux_ui *ui,
 					id == PICKER_CONNECT ?
 						FPLINUX_VOLUME_CONNECT :
 						FPLINUX_VOLUME_EJECT,
-					volume->id);
+					volume);
 		return;
 	}
 	if (id != FPLINUX_UI_SELECT_COMMAND)
 		return;
 	if (!row) {
-		read_folder(picker, picker->home, 0, 0);
+		read_folder(picker, picker->home, NULL);
 	} else if (volume && volume->state == FPLINUX_VOLUME_MOUNTED) {
-		read_folder(picker, volume->path, volume->id, volume->mount_id);
+		read_folder(picker, volume->path, volume);
 	} else if (volume && volume->state == FPLINUX_VOLUME_AVAILABLE) {
-		request_storage(picker, FPLINUX_VOLUME_CONNECT, volume->id);
+		request_storage(picker, FPLINUX_VOLUME_CONNECT, volume);
 	} else {
 		show_error(picker, EOPNOTSUPP);
 	}
@@ -858,7 +874,7 @@ struct fplinux_ui_file_picker *fplinux_ui_file_picker_open(
 					   picker);
 	if (!fplinux_ui_push(ui, picker->places))
 		goto failed;
-	request_storage(picker, FPLINUX_VOLUME_REFRESH, 0);
+	request_storage(picker, FPLINUX_VOLUME_REFRESH, NULL);
 	return picker;
 
 failed:

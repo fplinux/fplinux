@@ -62,7 +62,6 @@ int main(void)
 	struct application app = { 0 };
 	struct fplinux_ui_file_picker_options options = {
 		.mode = FPLINUX_UI_FILE_PICKER_FILE,
-		.title = "Files",
 		.extensions = extensions,
 	};
 	struct fplinux_ui_screen *base;
