@@ -361,7 +361,7 @@ int main(int argc, char **argv)
 	};
 	struct fplinux_session_storage *storage;
 	char sys_block[PATH_MAX], dev_root[PATH_MAX], swaps[PATH_MAX],
-		home[PATH_MAX], compatible[PATH_MAX];
+		home[PATH_MAX], os_release[PATH_MAX];
 
 	assert(argc >= 3);
 	assert(strlen(argv[1]) < sizeof(fixture.root));
@@ -375,7 +375,7 @@ int main(int argc, char **argv)
 	path_join(fixture.shared_card, fixture.root, "private");
 	path_join(fixture.backing, fixture.shared_card, "fat");
 	path_join(fixture.shared, fixture.backing, "Shared");
-	path_join(compatible, fixture.root, "compatible");
+	path_join(os_release, fixture.root, "os-release");
 	config.sys_block = sys_block;
 	config.dev_root = dev_root;
 	config.swaps = swaps;
@@ -383,7 +383,7 @@ int main(int argc, char **argv)
 	config.mountpoint = fixture.mountpoint;
 	config.mountinfo = fixture.mountinfo;
 	config.shared_card_path = fixture.shared_card;
-	config.compatible = compatible;
+	config.os_release = os_release;
 	config.io = &io;
 	assert(pthread_mutex_init(&fixture.mutex, NULL) == 0);
 	assert(pthread_cond_init(&fixture.condition, NULL) == 0);

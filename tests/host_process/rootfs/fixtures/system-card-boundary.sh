@@ -13,7 +13,7 @@ awk | cat)
 		/proc/swaps) argument=${FPLINUX_CARD_FILES:?}/swaps ;;
 		/sys/dev/block/179:10/uevent) argument=${FPLINUX_CARD_FILES:?}/uevent ;;
 		/sys/class/block/mmcblk1/device/type) argument=${FPLINUX_CARD_FILES:?}/type ;;
-		/sys/firmware/devicetree/base/compatible) argument=${FPLINUX_CARD_FILES:?}/compatible ;;
+		/etc/os-release) argument=${FPLINUX_CARD_FILES:?}/os-release ;;
 		esac
 		set -- "$@" "$argument"
 	done

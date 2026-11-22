@@ -82,6 +82,7 @@ class AlpineSourceContext:
         display_brightness: dict[str, Any] | None = None,
         *,
         root_kind: str = "initramfs",
+        card_profile: str | None = None,
         release_id: str = "012345abcdef",
         release_version: str = "1.0.0",
     ) -> str:
@@ -94,6 +95,7 @@ class AlpineSourceContext:
             release=ReleaseContext(release_id, release_version, None, release_id + "0" * 52),
             display_brightness=display_brightness,
             root_kind=root_kind,
+            card_profile=card_profile,
         )
 
 

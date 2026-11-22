@@ -54,10 +54,13 @@ def test_prune_retains_qin_system_root_variants_and_expires_changed_inputs(
             (),
             firmware_inputs=selected["wcn-firmware"],
             root_kind=root_kind,
+            card_profile="microsd-root",
         )
 
     first = selected_recipe()
-    bare = rootfs_recipe(environment_recipe, signing_key, (), root_kind=root_kind)
+    bare = rootfs_recipe(
+        environment_recipe, signing_key, (), root_kind=root_kind, card_profile="microsd-root"
+    )
     assert first != bare
     for recipe in (first, bare):
         output = rootfs_state.rootfs_output(cache, recipe)
@@ -67,12 +70,13 @@ def test_prune_retains_qin_system_root_variants_and_expires_changed_inputs(
 
     target = {
         "platform": "sc9820e",
+        "profile": "microsd-root",
         "linux": {"root": {"kind": root_kind}},
         "device_data": {"groups": qin_firmware.groups},
     }
     with (
         mock.patch.object(prune_alpine, "discover_targets", return_value=(qin_firmware.target,)),
-        mock.patch.object(prune_alpine, "discover_profiles", return_value=("default",)),
+        mock.patch.object(prune_alpine, "discover_profiles", return_value=("microsd-root",)),
         mock.patch.object(prune_alpine, "load_target", return_value=target),
         mock.patch.object(prune_alpine, "load_platform", return_value={}),
         mock.patch.object(prune_alpine, "selected_base_packages", return_value=()),
@@ -114,7 +118,9 @@ def test_prune_retains_qin_system_root_variants_and_expires_changed_inputs(
         source = alpine_source.root / "scripts/fplinux_cli/build/environment.py"
         source.write_bytes(b"changed build environment\n")
         updated = selected_recipe()
-        updated_bare = rootfs_recipe(environment_recipe, signing_key, (), root_kind=root_kind)
+        updated_bare = rootfs_recipe(
+            environment_recipe, signing_key, (), root_kind=root_kind, card_profile="microsd-root"
+        )
         assert {updated, updated_bare}.isdisjoint({bare, changed})
         for recipe in (updated, updated_bare):
             output = rootfs_state.rootfs_output(cache, recipe)

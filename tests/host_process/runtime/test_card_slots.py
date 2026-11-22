@@ -167,12 +167,14 @@ def test_update_replaces_only_the_inactive_slot_after_checking_candidate_identit
     assert saved_fit.read_bytes() == b"FIT for 0123456789ab"
     assert active.read_bytes() == b"a\n"
 
-    release.write_text(f"BUILD_ID={_B}\n", encoding="ascii")
+    new_release = f"BUILD_ID={_B}\nFPLINUX_SYSTEM_CARD_PROFILE=microsd-uboot\n"
+    release.write_text(new_release, encoding="ascii")
     result = run_process(publish, name="publish the prepared pair", timeout=10)
     assert result.returncode == 0, result.stderr
     assert active.read_bytes() == b"b\n"
     assert (card / "system/a/FPLINUX.ITB").read_bytes() == f"FIT for {_A}".encode()
     assert (card / "system/b/base-world").read_bytes() == b"alpine-base\n"
+    assert (card / "system/b/root/etc/os-release").read_bytes() == new_release.encode("ascii")
     assert saved_fit.read_bytes() == f"FIT for {_B}".encode()
     assert not candidate.exists()
 

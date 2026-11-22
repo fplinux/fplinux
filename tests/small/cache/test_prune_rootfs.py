@@ -93,10 +93,12 @@ class RootfsPruneTests:
             firmware_inputs: tuple[firmware_inputs.FirmwareInput, ...],
             display_brightness: dict[str, object] | None,
             root_kind: str,
+            card_profile: str | None,
         ) -> str:
             assert release == current_release_context()
             assert not applications
             assert (root_kind) == ("initramfs")
+            assert card_profile is None
             assert (firmware_inputs) == (())
             assert (display_brightness) == (
                 target_configs["first" if packages == first_packages else "second"].get(
@@ -265,14 +267,16 @@ class RootfsPruneTests:
                         "size": 8,
                     }
                 ]
-                if profile == "host"
+                if profile == "microsd-root"
                 else []
             )
             return {
                 "platform": "platform",
                 "profile": profile,
                 "build_type": build_type,
-                "linux": {"root": {"kind": "external" if profile == "host" else "initramfs"}},
+                "linux": {
+                    "root": {"kind": "external" if profile == "microsd-root" else "initramfs"}
+                },
                 "device_data": {
                     "groups": (
                         {
@@ -287,7 +291,7 @@ class RootfsPruneTests:
         def selected_packages(
             _platform: dict[str, object], config: dict[str, object]
         ) -> tuple[str, ...]:
-            return ("package-host",) if config["profile"] == "host" else ("package-base",)
+            return ("package-host",) if config["profile"] == "microsd-root" else ("package-base",)
 
         def rootfs_recipe(  # noqa: PLR0913 -- match the rootfs recipe's significant inputs.
             _image: str,
@@ -299,11 +303,13 @@ class RootfsPruneTests:
             firmware_inputs: tuple[firmware_inputs.FirmwareInput, ...],
             display_brightness: dict[str, object] | None,
             root_kind: str,
+            card_profile: str | None,
         ) -> str:
             assert release == current_release_context()
             assert not applications
             assert (display_brightness) is None
             assert (root_kind) == ("external" if packages == ("package-host",) else "initramfs")
+            assert card_profile == ("microsd-root" if packages == ("package-host",) else None)
             recipes: dict[tuple[str, ...], str] = {
                 ("package-base",): default_recipe,
                 ("package-host",): profile_recipe,
@@ -319,7 +325,7 @@ class RootfsPruneTests:
 
         with (
             patch_prune_discovery("discover_targets", return_value=("phone",)),
-            patch_prune_discovery("discover_profiles", return_value=("default", "host")),
+            patch_prune_discovery("discover_profiles", return_value=("default", "microsd-root")),
             mock.patch.object(prune_alpine, "load_target", side_effect=target_config),
             mock.patch.object(prune_alpine, "load_platform", return_value={}),
             mock.patch.object(
@@ -415,6 +421,7 @@ class RootfsPruneTests:
         captured = firmware_inputs.capture_external_device_data("phone", groups)
         environment_recipe = environment_artifact_recipe_digest("a" * 64, "b" * 64)
         signing_key = alpine_signing.signing_key_identity(cache)
+        profile = "microsd-root" if root_kind == "external" else "default"
 
         def recipe_for(*selected_groups: str) -> str:
             selected = tuple(item for group in selected_groups for item in captured[group])
@@ -425,6 +432,7 @@ class RootfsPruneTests:
                 release=current_release_context(),
                 firmware_inputs=selected,
                 root_kind=root_kind,
+                card_profile=profile if root_kind == "external" else None,
             )
 
         without_firmware = recipe_for()
@@ -444,12 +452,13 @@ class RootfsPruneTests:
 
         with (
             patch_prune_discovery("discover_targets", return_value=("phone",)),
-            patch_prune_discovery("discover_profiles", return_value=("default",)),
+            patch_prune_discovery("discover_profiles", return_value=(profile,)),
             mock.patch.object(
                 prune_alpine,
                 "load_target",
                 return_value={
                     "platform": "platform",
+                    "profile": profile,
                     "linux": {"root": {"kind": root_kind}},
                     "device_data": {"groups": groups},
                 },

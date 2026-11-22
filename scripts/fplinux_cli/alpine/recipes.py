@@ -80,10 +80,15 @@ def alpine_rootfs_recipe(  # noqa: PLR0913 -- each selected rootfs input is caus
     firmware_inputs: Sequence[FirmwareInput] = (),
     display_brightness: dict[str, Any] | None = None,
     root_kind: str = "initramfs",
+    card_profile: str | None = None,
 ) -> str:
     """Hash every input that can affect one selected Alpine root filesystem."""
     if root_kind not in {"initramfs", "external"}:
         fail("Alpine root kind must be initramfs or external")
+    if card_profile is not None and (
+        root_kind != "external" or card_profile not in {"microsd-root", "microsd-uboot"}
+    ):
+        fail("Alpine system card profile requires an external microsd-root or microsd-uboot root")
     _sha256(environment_recipe, "environment recipe")
     _sha256(signing_key_sha256, "package signing public key")
     base = _canonical_packages(packages, root)
@@ -111,6 +116,7 @@ def alpine_rootfs_recipe(  # noqa: PLR0913 -- each selected rootfs input is caus
         "firmware": [firmware.recipe_record() for firmware in firmware_inputs],
         "display_brightness": display_brightness,
         "root_kind": root_kind,
+        "card_profile": card_profile,
         "ram_bootstrap": (
             _source_file(root / "alpine/ramroot-init.sh", root)
             if root_kind == "initramfs"

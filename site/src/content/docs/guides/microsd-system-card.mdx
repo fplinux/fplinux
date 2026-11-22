@@ -175,6 +175,8 @@ Everything on the ext4 root survives a cold start: installed [packages](/fplinux
 
 Open **Files → Places → Shared files** to connect the FAT32 data folder of the installed system card. Only the `Shared` folder is exposed at `/mnt/card`. Files in **My files**, installed apps and settings remain on ext4.
 
+Files verifies that the FAT32 partition and the running ext4 root are on the same system card before offering the folder.
+
 The stock firmware can open the same `Shared` folder if it supports the system card's partition layout. Shut down before switching systems. If the stock firmware asks to format the card, cancel the prompt. Leave the boot files outside `Shared` in place. Updates and rollbacks preserve the shared folder.
 
 To disconnect the folder in FPLinux, close the apps that use it and choose **Disconnect shared files** in Places. The card stays in the phone while FPLinux runs.

@@ -88,7 +88,8 @@ def main() -> None:
             if card_packages is None or device_data:
                 fail("release card build requires a supported profile without device data")
         external_root = target_config["linux"]["root"]["kind"] == "external"
-        slotted_card = target_config["profile"] == "microsd-uboot"
+        card_profile = target_config["profile"] if external_root else None
+        slotted_card = card_profile == "microsd-uboot"
         rootfs_delivery = firmware_inputs.rootfs_receives_firmware(
             root_kind=target_config["linux"]["root"]["kind"],
         )
@@ -139,6 +140,7 @@ def main() -> None:
                 firmware=firmware,
                 display_brightness=target_config.get("display_brightness"),
                 root_kind="external",
+                card_profile=card_profile,
                 external_image=None if slotted_card else target_config["image"],
                 external_output=None if slotted_card else work / "rootfs-image",
             )
@@ -162,13 +164,14 @@ def main() -> None:
             )
         if card_packages is not None:
             card_rootfs, _, card_recipe, _ = build_rootfs(
-                args.jobs, card_packages, root_kind="external"
+                args.jobs, card_packages, root_kind="external", card_profile=card_profile
             )
             card_board_rootfs, _, _, _ = build_rootfs(
                 args.jobs,
                 rootfs_packages,
                 display_brightness=target_config.get("display_brightness"),
                 root_kind="external",
+                card_profile=card_profile,
             )
         if external_root:
             early_payload = create_device_data_initramfs(

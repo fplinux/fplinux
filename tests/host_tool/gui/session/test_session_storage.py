@@ -70,6 +70,7 @@ def storage_tree(tmp_path: Path) -> Path:
     (tmp_path / "dev").mkdir()
     (tmp_path / "mountinfo").write_text("1 0 0:1 / / rw - tmpfs tmpfs rw\n")
     (tmp_path / "swaps").write_text("Filename\tType\tSize\tUsed\tPriority\n")
+    write_profiles(tmp_path)
     return tmp_path
 
 
@@ -104,8 +105,13 @@ def add_card(  # noqa: PLR0913
     return selected
 
 
+def write_profiles(tree: Path, *profiles: str) -> None:
+    fields = "".join(f"FPLINUX_SYSTEM_CARD_PROFILE={profile}\n" for profile in profiles)
+    (tree / "os-release").write_text(f"NAME=FPLinux\n{fields}", encoding="ascii")
+
+
 def add_system_card(tree: Path, root: str = "slot") -> None:
-    add_card(tree, label="FPLDATA" if root == "qin" else "FPLBOOT")
+    add_card(tree, label="FPLDATA" if root == "direct" else "FPLBOOT")
     disk = tree / "sys/mmcblk0"
     first, second = disk / "mmcblk0p1", disk / "mmcblk0p2"
     (tree / "sys/mmcblk0p1").rename(first)
@@ -118,9 +124,8 @@ def add_system_card(tree: Path, root: str = "slot") -> None:
     (second / "partition").write_text("2\n")
     (second / "start").write_text("133120\n")
     (second / "size").write_text("135168\n")
-    if root == "qin":
+    if root == "direct":
         mounts = "20 0 179:2 / / rw - ext4 /dev/root rw\n"
-        (tree / "compatible").write_bytes(b"xiaomi,qin1s-plus\0sprd,sc9820e\0")
     else:
         mounts = (
             "20 0 179:2 /system/b/root / rw - ext4 /dev/mmcblk0p2 rw\n"
@@ -313,11 +318,19 @@ def test_other_mounted_partition_blocks_connect_and_eject(
     assert effects(storage_tree) == []
 
 
-@pytest.mark.parametrize("root", ["slot", "qin"])
+@pytest.mark.parametrize(
+    ("root", "profiles"),
+    [
+        pytest.param("slot", (), id="unmarked-slot"),
+        pytest.param("slot", ("microsd-uboot",), id="slotted-profile"),
+        pytest.param("direct", ("microsd-root",), id="direct-profile"),
+    ],
+)
 def test_system_card_connect_exposes_only_shared_and_keeps_fat_private(
-    storage_peer: Path, storage_tree: Path, root: str
+    storage_peer: Path, storage_tree: Path, root: str, profiles: tuple[str, ...]
 ) -> None:
     add_system_card(storage_tree, root)
+    write_profiles(storage_tree, *profiles)
     initial, mounted, busy, _, ejected = invoke(
         storage_peer, storage_tree, "refresh", "connect", "busy-eject", "unbusy", "eject"
     )
@@ -351,11 +364,11 @@ def test_system_card_connect_exposes_only_shared_and_keeps_fat_private(
     assert (storage_tree / "mountinfo").read_text() == (storage_tree / "system-mounts").read_text()
 
 
-@pytest.mark.parametrize("mismatch", ["geometry", "backing", "compatible"])
+@pytest.mark.parametrize("mismatch", ["geometry", "backing", "direct-with-backing"])
 def test_system_root_with_unverified_layout_keeps_first_partition_protected(
     storage_peer: Path, storage_tree: Path, mismatch: str
 ) -> None:
-    add_system_card(storage_tree, "qin" if mismatch == "compatible" else "slot")
+    add_system_card(storage_tree, "direct" if mismatch == "direct-with-backing" else "slot")
     if mismatch == "geometry":
         (storage_tree / "sys/mmcblk0p1/start").write_text("4096\n")
     elif mismatch == "backing":
@@ -366,13 +379,48 @@ def test_system_root_with_unverified_layout_keeps_first_partition_protected(
             )
         )
     else:
-        (storage_tree / "compatible").write_bytes(b"xiaomi,qin1s-plus-other\0")
+        write_profiles(storage_tree, "microsd-root")
+        with (storage_tree / "mountinfo").open("a") as stream:
+            stream.write("22 20 8:2 / /run/fplinux-card rw - ext4 /dev/unrelated rw\n")
     initial, connect = invoke(storage_peer, storage_tree, "refresh", "connect")
     assert initial.volumes[0].state == 3
     assert initial.volumes[0].protection == 1
     assert not initial.volumes[0].shared_system_files
     assert not initial.volumes[0].path
     assert connect.error == errno.EPERM
+    assert effects(storage_tree) == []
+
+
+@pytest.mark.parametrize(
+    ("root", "profiles"),
+    [
+        pytest.param("direct", (), id="unmarked-direct-root"),
+        pytest.param("direct", ("microsd-uboot",), id="slotted-profile-with-direct-root"),
+        pytest.param("slot", ("microsd-root",), id="direct-profile-with-slotted-root"),
+        pytest.param("slot", ("invalid",), id="unknown-profile"),
+        pytest.param("slot", ('"microsd-uboot"',), id="quoted-profile"),
+        pytest.param("slot", ("microsd-uboot", "microsd-uboot"), id="duplicate-profile"),
+        pytest.param("slot", None, id="unreadable-profile"),
+    ],
+)
+def test_system_root_with_unverified_profile_keeps_first_partition_protected(
+    storage_peer: Path,
+    storage_tree: Path,
+    root: str,
+    profiles: tuple[str, ...] | None,
+) -> None:
+    add_system_card(storage_tree, root)
+    if profiles is None:
+        (storage_tree / "os-release").unlink()
+    else:
+        write_profiles(storage_tree, *profiles)
+
+    initial, connect, eject = invoke(storage_peer, storage_tree, "refresh", "connect", "eject")
+    assert initial.volumes[0].state == 3
+    assert initial.volumes[0].protection == 1
+    assert not initial.volumes[0].shared_system_files
+    assert not initial.volumes[0].path
+    assert connect.error == eject.error == errno.EPERM
     assert effects(storage_tree) == []
 
 

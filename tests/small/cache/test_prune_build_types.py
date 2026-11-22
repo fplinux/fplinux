@@ -119,6 +119,7 @@ def test_cleanup_retains_release_and_debug_rootfs_layers_and_apks(
             card_packages,
             release=release,
             root_kind="external",
+            card_profile="microsd-uboot",
         )
         retained[f"{build_type} shared microSD rootfs"] = _publish_rootfs(cache, card_recipe)
         board_recipe = alpine_rootfs_recipe(
@@ -128,6 +129,7 @@ def test_cleanup_retains_release_and_debug_rootfs_layers_and_apks(
             release=release,
             display_brightness=card.get("display_brightness"),
             root_kind="external",
+            card_profile="microsd-uboot",
         )
         retained[f"{build_type} board microSD rootfs"] = _publish_rootfs(cache, board_recipe)
 

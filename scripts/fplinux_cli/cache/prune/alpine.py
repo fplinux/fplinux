@@ -69,6 +69,7 @@ def _current_rootfs_recipes(cache: Path) -> frozenset[str] | None:
                 device_data_groups,
             )
             root_kind = target_config["linux"]["root"]["kind"]
+            card_profile = target_config["profile"] if root_kind == "external" else None
             firmware = (
                 firmware_inputs.rootfs_firmware_inputs(device_data)
                 if firmware_inputs.rootfs_receives_firmware(root_kind=root_kind)
@@ -96,6 +97,7 @@ def _current_rootfs_recipes(cache: Path) -> frozenset[str] | None:
                         card_base_packages,
                         release=release,
                         root_kind="external",
+                        card_profile=card_profile,
                     )
                 )
                 recipes.add(
@@ -106,6 +108,7 @@ def _current_rootfs_recipes(cache: Path) -> frozenset[str] | None:
                         release=release,
                         display_brightness=target_config.get("display_brightness"),
                         root_kind="external",
+                        card_profile=card_profile,
                     )
                 )
             firmware_selections = (firmware, ()) if firmware else ((),)
@@ -119,6 +122,7 @@ def _current_rootfs_recipes(cache: Path) -> frozenset[str] | None:
                     firmware_inputs=selected_firmware,
                     display_brightness=target_config.get("display_brightness"),
                     root_kind=root_kind,
+                    card_profile=card_profile,
                 )
                 recipes.add(layered_rootfs_recipe(recipe, ram_base_recipe))
     except OSError, ValueError, SystemExit:

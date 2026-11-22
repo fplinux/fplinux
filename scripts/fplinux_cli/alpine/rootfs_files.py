@@ -32,15 +32,17 @@ _INITRAMFS_RUNTIME = (
 )
 
 
-def _stamp_release(root: Path, release: ReleaseContext) -> None:
+def _stamp_release(root: Path, release: ReleaseContext, *, card_profile: str | None) -> None:
     """Stamp the composed image after package installation, leaving APKs reusable."""
     path = require_file(root / "etc/os-release")
     lines = [
         line
         for line in path.read_text(encoding="utf-8").splitlines()
-        if not line.startswith(("VERSION_ID=", "BUILD_ID="))
+        if not line.startswith(("VERSION_ID=", "BUILD_ID=", "FPLINUX_SYSTEM_CARD_PROFILE="))
     ]
     lines.extend((f"VERSION_ID={release.release_version}", f"BUILD_ID={release.release_id}"))
+    if card_profile is not None:
+        lines.append(f"FPLINUX_SYSTEM_CARD_PROFILE={card_profile}")
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 

@@ -230,6 +230,7 @@ def build_rootfs(  # noqa: PLR0913 -- rootfs content and optional image output s
     firmware: Sequence[firmware_inputs.FirmwareInput] = (),
     display_brightness: dict[str, Any] | None = None,
     root_kind: Literal["initramfs", "external"] = "initramfs",
+    card_profile: str | None = None,
     external_image: dict[str, Any] | None = None,
     external_output: Path | None = None,
     ram_base_packages: tuple[str, ...] | None = None,
@@ -254,6 +255,7 @@ def build_rootfs(  # noqa: PLR0913 -- rootfs content and optional image output s
         firmware_inputs=firmware,
         display_brightness=display_brightness,
         root_kind=root_kind,
+        card_profile=card_profile,
     )
     recipe = rootfs_state.layered_rootfs_recipe(recipe, ram_base_recipe)
     overlap = set(packages) & set(applications)
@@ -451,7 +453,7 @@ def build_rootfs(  # noqa: PLR0913 -- rootfs content and optional image output s
             firmware_inputs.install_firmware_inputs(root, firmware)
             _install_default_soundfont(root, root_kind=root_kind)
             _install_display_brightness(root, display_brightness)
-            _stamp_release(root, release)
+            _stamp_release(root, release, card_profile=card_profile)
             _verify_alpine_rootfs(
                 root,
                 installed_packages,

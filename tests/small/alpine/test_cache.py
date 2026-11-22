@@ -606,6 +606,23 @@ class AlpineCacheTests:
             alpine_rootfs_state.trusted_receipt_identity(rebuilt, changed)
         )
 
+    def test_system_card_profile_change_invalidates_external_root_receipt(
+        self, alpine_source: AlpineSourceContext
+    ) -> None:
+        direct = alpine_source.recipe(root_kind="external", card_profile="microsd-root")
+        cache = alpine_source.directory / "cache"
+        output = alpine_rootfs_state.rootfs_output(cache, direct)
+        output.mkdir(parents=True)
+        (output / "rootfs.cpio").write_bytes(b"composed direct system root\n")
+        alpine_rootfs_state.write_receipt(output, direct)
+
+        assert alpine_rootfs_state.receipt_matches(
+            output, alpine_source.recipe(root_kind="external", card_profile="microsd-root")
+        )
+        assert not alpine_rootfs_state.receipt_matches(
+            output, alpine_source.recipe(root_kind="external", card_profile="microsd-uboot")
+        )
+
     def test_receipt_matches_only_exact_rootfs_bytes(
         self, alpine_source: AlpineSourceContext
     ) -> None:

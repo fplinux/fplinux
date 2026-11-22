@@ -47,7 +47,7 @@ struct fplinux_session_storage {
 	char home_path[PATH_MAX];
 	char shared_card_path[PATH_MAX];
 	char backing_path[PATH_MAX];
-	char compatible[PATH_MAX];
+	char os_release[PATH_MAX];
 	uid_t uid;
 	gid_t gid;
 	struct fplinux_session_storage_io io;
@@ -302,27 +302,49 @@ struct card_mounts {
 	unsigned long backing_id;
 };
 
-static bool qin_compatible(const struct fplinux_session_storage *storage)
+enum system_card_profile {
+	SYSTEM_CARD_UNDECLARED,
+	SYSTEM_CARD_DIRECT,
+	SYSTEM_CARD_SLOTTED,
+	SYSTEM_CARD_INVALID,
+};
+
+static enum system_card_profile read_card_profile(const char *path)
 {
-	static const char qin[] = "xiaomi,qin1s-plus";
-	FILE *file = fopen(storage->compatible, "re");
-	char *name = NULL;
+	static const char key[] = "FPLINUX_SYSTEM_CARD_PROFILE=";
+	enum system_card_profile profile = SYSTEM_CARD_UNDECLARED;
+	FILE *file = fopen(path, "re");
+	char *line = NULL;
 	size_t capacity = 0;
 	ssize_t length;
-	bool found = false;
 
 	if (!file)
-		return false;
-	while ((length = getdelim(&name, &capacity, '\0', file)) >= 0) {
-		if (length == (ssize_t)sizeof(qin) &&
-		    !memcmp(name, qin, sizeof(qin))) {
-			found = true;
+		return SYSTEM_CARD_INVALID;
+	while ((length = getline(&line, &capacity, file)) >= 0) {
+		const char *value;
+
+		if (strncmp(line, key, sizeof(key) - 1))
+			continue;
+		if (line[length - 1] == '\n')
+			line[--length] = '\0';
+		value = line + sizeof(key) - 1;
+		if (profile != SYSTEM_CARD_UNDECLARED ||
+		    strlen(line) != (size_t)length)
+			profile = SYSTEM_CARD_INVALID;
+		else if (!strcmp(value, "microsd-root"))
+			profile = SYSTEM_CARD_DIRECT;
+		else if (!strcmp(value, "microsd-uboot"))
+			profile = SYSTEM_CARD_SLOTTED;
+		else
+			profile = SYSTEM_CARD_INVALID;
+		if (profile == SYSTEM_CARD_INVALID)
 			break;
-		}
 	}
-	free(name);
+	if (!feof(file))
+		profile = SYSTEM_CARD_INVALID;
+	free(line);
 	fclose(file);
-	return found;
+	return profile;
 }
 
 static bool private_path_valid(const char *path)
@@ -435,6 +457,7 @@ static int inspect_mounts(struct fplinux_session_storage *storage,
 	size_t root_mounts = 0, system_backing_mounts = 0;
 	size_t public_mounts = 0, private_mounts = 0;
 	FILE *file = fopen(storage->mountinfo, "re");
+	enum system_card_profile profile;
 	int error = 0;
 
 	storage->mountpoint_occupied = false;
@@ -505,14 +528,17 @@ static int inspect_mounts(struct fplinux_session_storage *storage,
 		return error;
 	storage->mountpoint_occupied = public_mounts != 0;
 	storage->shared_card_occupied = private_mounts != 0;
+	profile = read_card_profile(storage->os_release);
 	for (size_t i = 0; i < count; ++i) {
 		struct card_mounts *card = &cards[i];
 		bool shared_system_files =
 			root_mounts == 1 &&
 			((card->system_slot && card->system_backing &&
-			  system_backing_mounts == 1) ||
+			  system_backing_mounts == 1 &&
+			  (profile == SYSTEM_CARD_SLOTTED ||
+			   profile == SYSTEM_CARD_UNDECLARED)) ||
 			 (card->system_direct && !system_backing_mounts &&
-			  qin_compatible(storage)));
+			  profile == SYSTEM_CARD_DIRECT));
 
 		if (card->backing_id &&
 		    !private_path_valid(storage->shared_card_path))
@@ -1058,10 +1084,9 @@ struct fplinux_session_storage *fplinux_session_storage_create(
 						  "/run/fplinux-shared-card") ||
 	    !make_path(storage->backing_path, sizeof(storage->backing_path),
 		       storage->shared_card_path, "fat") ||
-	    !copy_text(storage->compatible, sizeof(storage->compatible),
-		       config->compatible ?
-			       config->compatible :
-			       "/sys/firmware/devicetree/base/compatible")) {
+	    !copy_text(storage->os_release, sizeof(storage->os_release),
+		       config->os_release ? config->os_release :
+					    "/etc/os-release")) {
 		free(storage);
 		return NULL;
 	}

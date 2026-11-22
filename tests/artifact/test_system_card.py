@@ -7,7 +7,9 @@ import tarfile
 from typing import TYPE_CHECKING
 
 import pytest
+from fplinux_cli.alpine import rootfs_files
 from fplinux_cli.alpine.rootfs_state import ROOTFS_NAME, write_receipt
+from fplinux_cli.artifacts.release_identity import ReleaseContext
 from fplinux_cli.build.storage.card import build_partition, write_apk_state
 from fplinux_cli.common import sha256_file
 from fplinux_cli.manifests.targets import load_target
@@ -20,7 +22,10 @@ if TYPE_CHECKING:
 _TARGET = "nokia-ta1618"
 _OTHER_TARGET = "inoi-240-modern-4g"
 _RECIPE = "a" * 64
-_OS_RELEASE = b"NAME=FPLinux\nBUILD_ID=abcdef134578\n"
+_OS_RELEASE = (
+    b"NAME=FPLinux\nVERSION_ID=1.0.0\nBUILD_ID=abcdef134578\n"
+    b"FPLINUX_SYSTEM_CARD_PROFILE=microsd-uboot\n"
+)
 _NOTE = b"persistent note with exact bytes\n"
 _BASE_WORLD = b"fplinux-session\nfplinux-settings\n"
 _WORLD = _BASE_WORLD + b"fplinux-clocks\n"
@@ -39,7 +44,12 @@ def packaged_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         "lib/firmware/ums9117",
     ):
         (source / directory).mkdir(parents=True, exist_ok=True)
-    (source / "etc/os-release").write_bytes(_OS_RELEASE)
+    (source / "etc/os-release").write_bytes(b"NAME=FPLinux\n")
+    profile = load_target(_TARGET, "microsd-uboot")
+    release = ReleaseContext("abcdef134578", "1.0.0", None, "abcdef134578" + "0" * 52)
+    rootfs_files._stamp_release(  # noqa: SLF001 -- compose bytes before the ext4 writer.
+        source, release, card_profile=profile["profile"]
+    )
     (source / "etc/apk/arch").write_bytes(b"armv7\n")
     (source / "etc/apk/world").write_bytes(_WORLD)
     (source / "etc/fplinux/base-world").write_bytes(_BASE_WORLD)

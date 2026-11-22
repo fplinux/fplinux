@@ -37,10 +37,17 @@ def test_composed_rootfs_stamps_version_and_build_id(tmp_path: Path) -> None:
     release.parent.mkdir()
     release.write_bytes(b'NAME=FPLinux\nVERSION_ID=1\nBUILD_ID="old"\n')
     first = ReleaseContext("012345abcdef", "1.0.0", None, "012345abcdef" + "0" * 52)
-    alpine_rootfs_files._stamp_release(tmp_path, first)  # noqa: SLF001 -- inspect composed image bytes.
-    assert release.read_bytes() == b"NAME=FPLinux\nVERSION_ID=1.0.0\nBUILD_ID=012345abcdef\n"
+    alpine_rootfs_files._stamp_release(  # noqa: SLF001 -- inspect composed image bytes.
+        tmp_path, first, card_profile="microsd-root"
+    )
+    assert release.read_bytes() == (
+        b"NAME=FPLinux\nVERSION_ID=1.0.0\nBUILD_ID=012345abcdef\n"
+        b"FPLINUX_SYSTEM_CARD_PROFILE=microsd-root\n"
+    )
     next_release = ReleaseContext("abcdef012345", "1.0.1", None, "abcdef012345" + "0" * 52)
-    alpine_rootfs_files._stamp_release(tmp_path, next_release)  # noqa: SLF001 -- compose the next release.
+    alpine_rootfs_files._stamp_release(  # noqa: SLF001 -- compose the next release.
+        tmp_path, next_release, card_profile=None
+    )
     assert release.read_bytes() == b"NAME=FPLinux\nVERSION_ID=1.0.1\nBUILD_ID=abcdef012345\n"
 
 

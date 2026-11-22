@@ -11,6 +11,8 @@ from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any
 
 import pytest
+from fplinux_cli.alpine import rootfs_files
+from fplinux_cli.artifacts.release_identity import ReleaseContext
 from fplinux_cli.build.storage import ext4 as ext4_root
 from fplinux_cli.common import sha256_file
 from fplinux_cli.manifests.targets import load_target
@@ -108,6 +110,22 @@ class Ext4RootTests:
         assert (checked.returncode) == (0), checked.stderr or checked.stdout
         assert (ext4_inputs.dump_os_release(image)) == (ext4_inputs.os_release.read_bytes())
         assert ext4_root.cache_hit(ext4_inputs.output, plan)
+
+    def test_direct_card_ext4_contains_the_composed_system_card_profile(
+        self, ext4_inputs: Ext4Inputs
+    ) -> None:
+        profile = load_target("xiaomi-qin-1s-plus", "microsd-root")
+        release = ReleaseContext("abcdef134578", "1.0.0", None, "abcdef134578" + "0" * 52)
+        rootfs_files._stamp_release(  # noqa: SLF001 -- compose bytes before the ext4 writer.
+            ext4_inputs.source, release, card_profile=profile["profile"]
+        )
+
+        image = replace(ext4_inputs, spec=profile["image"]).build()
+
+        assert ext4_inputs.dump_os_release(image) == (
+            b'NAME="FPLinux"\nID=fplinux\nVERSION_ID=1.0.0\nBUILD_ID=abcdef134578\n'
+            b"FPLINUX_SYSTEM_CARD_PROFILE=microsd-root\n"
+        )
 
     def test_uboot_card_can_grow_without_relocating_group_descriptors(
         self, ext4_inputs: Ext4Inputs

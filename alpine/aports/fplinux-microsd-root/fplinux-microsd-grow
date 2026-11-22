@@ -25,23 +25,29 @@ read_ext4_mount() {
 }
 
 find_card_mount() {
+	card_profile=$(awk '
+		/^FPLINUX_SYSTEM_CARD_PROFILE=/ {
+			if (seen++) exit 1
+			print
+		}
+	' /etc/os-release) || fail "Cannot read the system-card profile"
 	mountpoint=/
 	read_ext4_mount "$mountpoint" || fail "Cannot identify the system-card root mount"
 	root_options=$mount_options
-	case "$fs_root" in
-	/system/[ab]/root)
+	case "$card_profile:$fs_root" in
+	:/system/[ab]/root | FPLINUX_SYSTEM_CARD_PROFILE=microsd-uboot:/system/[ab]/root)
+		# Existing slot roots without a profile still need matching mount evidence.
 		root_device=$device
 		mountpoint=/run/fplinux-card
 		read_ext4_mount "$mountpoint" && [ "$fs_root" = / ] && [ "$device" = "$root_device" ] ||
 			fail "The backing system-card mount does not match the running slot"
 		;;
-	/)
-		cat /sys/firmware/devicetree/base/compatible | tr '\000' '\n' |
-			grep -qx 'xiaomi,qin1s-plus' ||
-			fail "This system requires a mounted system-card slot"
+	FPLINUX_SYSTEM_CARD_PROFILE=microsd-root:/)
+		awk '$5 == "/run/fplinux-card" { exit 1 }' /proc/self/mountinfo ||
+			fail "The mounted system-card backing path conflicts with a direct root"
 		;;
 	*)
-		fail "Cannot identify the system-card root mount"
+		fail "The system-card profile does not match the running root"
 		;;
 	esac
 }
@@ -166,7 +172,7 @@ resolve_partition
 case "${1-}" in
 shutdown)
 	check_card_storage shared
-	# OpenRC already handles Qin's directly mounted ext4 root.
+	# OpenRC already handles a directly mounted ext4 root.
 	if [ "$shared_fat" = 0 ] && { [ "$mountpoint" = / ] || card_mount_is_readonly; }; then
 		exit 0
 	fi
