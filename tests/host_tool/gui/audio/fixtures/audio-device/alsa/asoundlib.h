@@ -42,15 +42,6 @@ typedef struct snd_ctl_event {
 #define SND_CTL_ELEM_TYPE_BOOLEAN 1
 #define SND_CTL_ELEM_TYPE_INTEGER 2
 
-typedef struct snd_ctl_card_info {
-	int unused;
-} snd_ctl_card_info_t;
-#define snd_ctl_card_info_alloca(pointer)                  \
-	do {                                               \
-		static snd_ctl_card_info_t test_card_info; \
-		*(pointer) = &test_card_info;              \
-	} while (0)
-
 typedef struct _snd_pcm snd_pcm_t;
 typedef long snd_pcm_sframes_t;
 typedef struct snd_pcm_hw_params {
@@ -74,8 +65,6 @@ typedef struct snd_pcm_sw_params {
 #define SND_PCM_STREAM_PLAYBACK 0
 #define SND_PCM_NONBLOCK 1
 
-int snd_ctl_card_info(snd_ctl_t *ctl, snd_ctl_card_info_t *info);
-const char *snd_ctl_card_info_get_driver(const snd_ctl_card_info_t *info);
 void snd_ctl_elem_info_set_interface(snd_ctl_elem_info_t *info,
 				     snd_ctl_elem_iface_t iface);
 void snd_ctl_elem_info_set_name(snd_ctl_elem_info_t *info, const char *name);

@@ -112,6 +112,7 @@ class Service:
         cleanup: ExitStack,
         *,
         headphones_only: bool = False,
+        options: tuple[str, ...] = (),
     ) -> None:
         """Start the daemon with caller-owned sockets and PCM evidence."""
         self.directory = directory
@@ -130,7 +131,7 @@ class Service:
         else:
             environment.pop("FPLINUX_TEST_HEADPHONES_ONLY", None)
         self.process = subprocess.Popen(
-            [str(programs[0]), "--dir", str(directory)],
+            [str(programs[0]), "--dir", str(directory), *options],
             env=environment,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -272,6 +273,24 @@ def headphones_only_service(
 ) -> Iterator[Service]:
     with ExitStack() as cleanup:
         yield Service(service_directory, programs, cleanup, headphones_only=True)
+
+
+def test_board_options_select_mix_rate_and_fixed_speaker(
+    service_directory: Path, programs: tuple[Path, Path]
+) -> None:
+    """The daemon reports its configured rate and a speaker without a mixer switch."""
+    with ExitStack() as cleanup:
+        configured = Service(
+            service_directory,
+            programs,
+            cleanup,
+            headphones_only=True,
+            options=("--rate", "44100", "--fixed-speaker"),
+        )
+        with configured.socket("status.sock") as diagnostic:
+            state = audio_wire.status(diagnostic)
+        assert state["rate"] == 44100
+        assert state["speaker"] == 1
 
 
 def test_foreground_pcm_interrupts_background_and_user_pause_survives_alarm(

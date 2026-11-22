@@ -243,24 +243,16 @@ int fplinux_audio_device_alarm(struct fplinux_audio_device *device, bool active)
 
 int fplinux_audio_device_init(struct fplinux_audio_device *device)
 {
-	snd_ctl_card_info_t *info;
 	struct pollfd fd;
 	bool fm_enabled = false;
 	int result;
 
-	device->rate = FPLINUX_AUDIO_MIXER_RATE;
 	device->control_fd = -1;
 	device->radio_fd = -1;
 	device->fm_muted = true;
 	result = snd_ctl_open(&device->control, "default", SND_CTL_NONBLOCK);
 	if (result < 0)
 		return result;
-	snd_ctl_card_info_alloca(&info);
-	if (snd_ctl_card_info(device->control, info) >= 0 &&
-	    !strcmp(snd_ctl_card_info_get_driver(info), "SC9820E audio")) {
-		device->rate = 44100;
-		device->fixed_speaker = true;
-	}
 	device->headphone_id = control_id(device->control,
 					  "Headphone Playback Switch",
 					  SND_CTL_ELEM_IFACE_MIXER);

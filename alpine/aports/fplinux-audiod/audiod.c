@@ -51,7 +51,15 @@
 /* An underrun burst ends after a second of output without one. */
 #define NEVER UINT64_MAX
 
-enum { OPTION_DIR, OPTION_DEVICE, OPTION_PERIOD, OPTION_BUFFER, OPTION_STATUS };
+enum {
+	OPTION_DIR,
+	OPTION_DEVICE,
+	OPTION_PERIOD,
+	OPTION_BUFFER,
+	OPTION_RATE,
+	OPTION_FIXED_SPEAKER,
+	OPTION_STATUS,
+};
 
 enum {
 	POLL_SIGNAL,
@@ -72,6 +80,7 @@ struct options {
 	const char *directory;
 	unsigned int period;
 	unsigned int buffer;
+	unsigned int rate;
 };
 
 struct audio_service {
@@ -187,6 +196,12 @@ static const char *parse_option(size_t option, const char *value, void *data)
 				   &options->buffer) ||
 	     options->buffer % FRAME_STEP))
 		return "--buffer-frames must be a multiple of 480";
+	if (option == OPTION_RATE &&
+	    (!fplinux_cli_unsigned(value, 44100, FPLINUX_AUDIO_MIXER_RATE,
+				   &options->rate) ||
+	     (options->rate != 44100 &&
+	      options->rate != FPLINUX_AUDIO_MIXER_RATE)))
+		return "--rate must be 44100 or 48000";
 	return NULL;
 }
 
@@ -926,6 +941,13 @@ int main(int argc, char **argv)
 		[OPTION_BUFFER] = { .name = "buffer-frames",
 				    .metavar = "N",
 				    .help = "Keep N frames in the card." },
+		[OPTION_RATE] = { .name = "rate",
+				  .metavar = "HZ",
+				  .help = "Use a 44100 or 48000 Hz mix rate." },
+		[OPTION_FIXED_SPEAKER] = {
+			.name = "fixed-speaker",
+			.help = "Use a speaker without an ALSA playback switch.",
+		},
 		[OPTION_STATUS] = { .name = "status",
 				    .help = "Print the running service's read-only state." },
 	};
@@ -933,6 +955,7 @@ int main(int argc, char **argv)
 		.directory = FPLINUX_AUDIO_DIR,
 		.period = PERIOD_FRAMES,
 		.buffer = BUFFER_FRAMES,
+		.rate = FPLINUX_AUDIO_MIXER_RATE,
 	};
 	struct fplinux_cli cli = {
 		.program = "fplinux-audiod",
@@ -963,7 +986,9 @@ int main(int argc, char **argv)
 	if (arguments[OPTION_STATUS].count) {
 		if (arguments[OPTION_DEVICE].count ||
 		    arguments[OPTION_PERIOD].count ||
-		    arguments[OPTION_BUFFER].count)
+		    arguments[OPTION_BUFFER].count ||
+		    arguments[OPTION_RATE].count ||
+		    arguments[OPTION_FIXED_SPEAKER].count)
 			return fplinux_cli_error(&cli,
 						 "--status accepts only --dir");
 		return show_status(options.directory);
@@ -978,6 +1003,8 @@ int main(int argc, char **argv)
 				DEVICE,
 		.period = options.period,
 		.buffer = options.buffer,
+		.rate = options.rate,
+		.fixed_speaker = arguments[OPTION_FIXED_SPEAKER].count != 0,
 	};
 	/* The service logger reads standard output through a pipe. */
 	setvbuf(stdout, NULL, _IOLBF, 0);

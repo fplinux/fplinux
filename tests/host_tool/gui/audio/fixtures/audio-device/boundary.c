@@ -65,19 +65,6 @@ static struct test_control *find(const snd_ctl_elem_id_t *id)
 	return NULL;
 }
 
-int snd_ctl_card_info(snd_ctl_t *ctl, snd_ctl_card_info_t *info)
-{
-	(void)ctl;
-	(void)info;
-	return 0;
-}
-
-const char *snd_ctl_card_info_get_driver(const snd_ctl_card_info_t *info)
-{
-	(void)info;
-	return getenv("JACK_TEST_QIN") ? "SC9820E audio" : "ums9117-pcm";
-}
-
 void snd_ctl_elem_info_set_interface(snd_ctl_elem_info_t *info,
 				     snd_ctl_elem_iface_t iface)
 {

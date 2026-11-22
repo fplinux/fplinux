@@ -27,7 +27,6 @@ int fplinux_audio_device_init(struct fplinux_audio_device *device)
 		       0600);
 	events = open(getenv("FPLINUX_TEST_EVENTS"),
 		      O_WRONLY | O_CREAT | O_TRUNC, 0600);
-	device->rate = 48000;
 	if (mkfifo(getenv("FPLINUX_TEST_JACK"), 0600) < 0)
 		return -errno;
 	device->control_fd = open(getenv("FPLINUX_TEST_JACK"),

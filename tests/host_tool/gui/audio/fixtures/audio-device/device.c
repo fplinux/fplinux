@@ -6,7 +6,11 @@
 
 int main(void)
 {
-	struct fplinux_audio_device device = { 0 };
+	bool fixed_speaker = getenv("JACK_TEST_QIN") != NULL;
+	struct fplinux_audio_device device = {
+		.rate = fixed_speaker ? 44100 : 48000,
+		.fixed_speaker = fixed_speaker,
+	};
 	int result = fplinux_audio_device_init(&device);
 
 	printf("init=%d rate=%u speaker=%u headphones=%u\n", result,
