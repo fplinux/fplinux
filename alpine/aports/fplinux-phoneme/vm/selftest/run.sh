@@ -159,6 +159,25 @@ for expected in \
 	}
 done
 
+# An exception from the inlined array access reaches the caller's handler.
+for mode in '' 1; do
+	output="${work}/jit-inline-${mode:-0}.txt"
+	run_jit_fixture "${mode}" 0 "${output}" fplinux.fixtures.jit.JitInlineMIDlet
+	grep -Fqx 'PM-JIT-INLINE handler caught=8571 null=2858 sum=132861' "${output}" || {
+		cat "${output}" >&2
+		fail "inlined exceptions did not reach the handler with JIT=${mode:-0}"
+	}
+done
+run_jit_fixture 1 1 "${work}/jit-inline-trace.txt" fplinux.fixtures.jit.JitInlineMIDlet
+awk '
+	/Compiling / { handler = $NF ~ /\/JitInlineMIDlet\.handler$/ }
+	handler && /<done [1-9][0-9]*>/ { seen = 1 }
+	END { exit !seen }
+' "${work}/jit-inline-trace.txt" || {
+	cat "${work}/jit-inline-trace.txt" >&2
+	fail "JIT did not compile the caller with an inlined exception"
+}
+
 build_jar hello "${here}/hello.mf"
 build_jar vectors "${here}/vectors.mf"
 cp "${here}/vectors-hotspot.expected" "${work}/vectors-expected.txt"

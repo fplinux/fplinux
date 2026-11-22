@@ -1,0 +1,27 @@
+Look up the handler of the root method for exceptions thrown by inlined code.
+
+A null pointer or an array bound check in compiled code jumps to a shared
+thrower, without a handler lookup, when the method has no handler for the
+exception. The check took the bci of the compiler that was running, which is
+the bci in the inlined method while a call is inlined. The inlined method has
+no handlers; the exception goes to the handler of the root method that covers
+the call, and the check has to ask about that bci. With the bci inside the
+inlined method it often found no handler: an inlined method that threw such an
+exception in a try block, for example `int get(int[] a, int i) { return a[i]; }`,
+let the exception pass the handler of its caller.
+
+--- a/cldc/src/vm/share/compiler/CodeGenerator.cpp
++++ b/cldc/src/vm/share/compiler/CodeGenerator.cpp
+@@ -688,9 +688,11 @@
+   GUARANTEE(rte == ThrowExceptionStub::rte_null_pointer ||
+             rte == ThrowExceptionStub::rte_array_index_out_of_bounds,"sanity");
+ 
++  // Inlined methods have no handlers of their own. An exception they throw
++  // goes to the handler of the root method that covers the inlined call.
+   const int handler_bci = m->exception_handler_bci_for(
+     ThrowExceptionStub::exception_class(rte),
+-    Compiler::current()->bci() JVM_NO_CHECK);
++    Compiler::root()->bci() JVM_NO_CHECK);
+   return handler_bci == -1;
+ }
+ 
