@@ -122,14 +122,8 @@ public class DirectUtils {
             if (count == 0) {
                 return;
             }
-            int[] argb = new int[count];
-            for (int row = 0; row < height; row++) {
-                for (int col = 0; col < width; col++) {
-                    argb[row * width + col] =
-                        NokiaPixels.fromShort(pixels[offset + row * stride + col],
-                                              format);
-                }
-            }
+            int[] argb = NokiaPixels.fromShorts(pixels, offset, stride, width,
+                                                height, format);
             NokiaPixels.draw(graphics, argb, 0, width, x, y, width, height,
                              transform, transparency);
         }

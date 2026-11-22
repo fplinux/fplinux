@@ -72,48 +72,60 @@ final class NokiaPixels {
                             Graphics.TOP | Graphics.LEFT);
     }
 
-    private static int expandFour(int channel) {
-        return (channel & 15) * 17;
-    }
-
-    private static int expandFive(int channel) {
-        int value = channel & 31;
-        return value << 3 | value >>> 2;
-    }
-
-    private static int expandSix(int channel) {
-        int value = channel & 63;
-        return value << 2 | value >>> 4;
-    }
-
-    static int fromShort(int value, int format) {
-        int alpha = 255;
-        int red, green, blue;
-        switch (format) {
-            case DirectGraphics.TYPE_USHORT_4444_ARGB:
-            case DirectGraphics.TYPE_USHORT_444_RGB:
-                if (format == DirectGraphics.TYPE_USHORT_4444_ARGB) {
-                    alpha = expandFour(value >>> 12);
-                }
-                red = expandFour(value >>> 8);
-                green = expandFour(value >>> 4);
-                blue = expandFour(value);
-                break;
-            case DirectGraphics.TYPE_USHORT_565_RGB:
-                red = expandFive(value >>> 11);
-                green = expandSix(value >>> 5);
-                blue = expandFive(value);
-                break;
-            default:
-                if (format == DirectGraphics.TYPE_USHORT_1555_ARGB) {
-                    alpha = (value & 0x8000) == 0 ? 0 : 255;
-                }
-                red = expandFive(value >>> 10);
-                green = expandFive(value >>> 5);
-                blue = expandFive(value);
-                break;
+    /**
+     * Converts a checked region of 16-bit pixels to ARGB rows. A channel of
+     * n bits is widened to 8 by repeating its top bits below it; each pixel
+     * is converted in one expression, so a row costs no calls.
+     */
+    static int[] fromShorts(short[] pixels, int offset, int stride, int width,
+                            int height, int format) {
+        int[] argb = new int[width * height];
+        int target = 0;
+        for (int row = 0; row < height; row++) {
+            int source = offset + row * stride;
+            int end = target + width;
+            switch (format) {
+                case DirectGraphics.TYPE_USHORT_4444_ARGB:
+                    // Nibbles spread one per byte, then each n becomes n * 17.
+                    while (target < end) {
+                        int value = pixels[source++];
+                        argb[target++] = ((value & 0xf000) << 12 |
+                            (value & 0xf00) << 8 | (value & 0xf0) << 4 |
+                            value & 0xf) * 0x11;
+                    }
+                    break;
+                case DirectGraphics.TYPE_USHORT_444_RGB:
+                    while (target < end) {
+                        int value = pixels[source++];
+                        argb[target++] = 0xff000000 | ((value & 0xf00) << 8 |
+                            (value & 0xf0) << 4 | value & 0xf) * 0x11;
+                    }
+                    break;
+                case DirectGraphics.TYPE_USHORT_565_RGB:
+                    while (target < end) {
+                        int value = pixels[source++];
+                        int red = value >> 8 & 0xf8;
+                        int green = value >> 3 & 0xfc;
+                        int blue = value << 3 & 0xf8;
+                        argb[target++] = 0xff000000 | (red | red >> 5) << 16 |
+                            (green | green >> 6) << 8 | blue | blue >> 5;
+                    }
+                    break;
+                default:
+                    boolean masked = format == DirectGraphics.TYPE_USHORT_1555_ARGB;
+                    while (target < end) {
+                        int value = pixels[source++];
+                        int alpha = masked && (value & 0x8000) == 0 ? 0 : 0xff000000;
+                        int red = value >> 7 & 0xf8;
+                        int green = value >> 2 & 0xf8;
+                        int blue = value << 3 & 0xf8;
+                        argb[target++] = alpha | (red | red >> 5) << 16 |
+                            (green | green >> 5) << 8 | blue | blue >> 5;
+                    }
+                    break;
+            }
         }
-        return alpha << 24 | red << 16 | green << 8 | blue;
+        return argb;
     }
 
     static short toShort(int argb, int format) {
