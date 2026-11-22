@@ -491,4 +491,28 @@ END {
 ' "${work}/scheduler-log.txt" ||
 	fail "early VM slice changed the pending Java deadline"
 
-echo "phoneME self-test: PASS (vectors, hello, local JAD, RMS, files, canvas, Form, List/Alert LF, headless media, Bluetooth availability, JAR directory entries and Java deadlines)"
+# System.gc(): a weak reference to an unreachable object is cleared whether
+# the object is young or old, freeMemory() reflects a collection once the
+# heap is nearly full, and a call that cannot free anything a program can
+# observe is skipped.
+build_jar gc "${here}/gc.mf"
+for heap in 4096 8192; do
+	for mode in '' 1; do
+		output="${work}/gc-${heap}-${mode:-0}.txt"
+		if ! FPLINUX_PHONEME_JIT=${mode} "${qemu_arm}" -L "${sysroot}" "${headless}" \
+			--system-classes "${classes}" --heap-kib "${heap}" --timeout-ms 30000 \
+			"${work}/gc.jar" >"${output}" 2>&1; then
+			cat "${output}" >&2
+			fail "System.gc() fixture failed with heap ${heap} KiB and JIT=${mode:-0}"
+		fi
+		for expected in 'PM-GC weak-young=8/8' 'PM-GC weak-old=8/8' \
+			'PM-GC free-after-low-memory=true' 'PM-GC idle-call-skipped=true'; do
+			grep -Fqx "${expected}" "${output}" || {
+				cat "${output}" >&2
+				fail "System.gc() fixture: no '${expected}' with heap ${heap} KiB and JIT=${mode:-0}"
+			}
+		done
+	done
+done
+
+echo "phoneME self-test: PASS (vectors, hello, local JAD, RMS, files, canvas, Form, List/Alert LF, headless media, Bluetooth availability, JAR directory entries, Java deadlines and System.gc())"

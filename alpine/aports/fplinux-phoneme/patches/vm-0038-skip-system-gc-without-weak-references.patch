@@ -1,0 +1,81 @@
+Skip System.gc() while no weak reference holds an object and memory is free.
+
+Games call System.gc() several times a second, many before every image they
+load, and each call ran a full collection, which took several percent of the
+processor time. A collection changes what a program can observe only through
+the weak references it clears and the memory it frees. So the call returns at
+once while a quarter of the heap is free and no weak reference holds an
+object, apart from the JAR file parsers that the VM caches weakly and
+reopens when it loses one. A weak reference to an unreachable object, young
+or old, is cleared as before; with less free memory the whole heap is
+collected, because some games compare freeMemory() after System.gc() with a
+few kilobytes. Finalizers of dead weak references wait for the next
+allocation-triggered collection. Builds with soft references collect as
+before.
+
+--- a/cldc/src/vm/share/memory/ObjectHeap.cpp
++++ b/cldc/src/vm/share/memory/ObjectHeap.cpp
+@@ -902,6 +902,22 @@
+ #endif
+ }
+ 
++static bool found_weak_referent;
++
++static void note_weak_referent(OopDesc** p) {
++  // The VM caches parsers of JAR files weakly; losing one only means that
++  // the file is opened again.
++  if (!(*p)->is_jar_file_parser()) {
++    found_weak_referent = true;
++  }
++}
++
++bool ObjectHeap::has_weak_referents() {
++  found_weak_referent = false;
++  weak_refs_do(note_weak_referent);
++  return found_weak_referent;
++}
++
+ #if USE_SOFT_REFERENCES
+ inline void ObjectHeap::soft_refs_do(void do_oop(OopDesc**)) {
+ #if ENABLE_ISOLATES
+--- a/cldc/src/vm/share/memory/ObjectHeap.hpp
++++ b/cldc/src/vm/share/memory/ObjectHeap.hpp
+@@ -377,6 +377,11 @@
+   static void unregister_strong_reference(const int ref_index);
+   static void unregister_weak_reference(const int ref_index);
+ 
++  // True if a collection could clear a reference that a Java program can
++  // observe: a weak reference holding an object, other than the parsers
++  // that the VM itself caches weakly.
++  static bool has_weak_referents();
++
+   static int register_global_ref_object(Oop* referent,
+                                         ReferenceType type JVM_TRAPS);
+   static void unregister_global_ref_object(const int ref_index);
+--- a/cldc/src/vm/share/natives/Natives.cpp
++++ b/cldc/src/vm/share/natives/Natives.cpp
+@@ -705,6 +705,24 @@
+     }
+   }
+ #else
++#if !USE_SOFT_REFERENCES
++  // Games call System.gc() several times a second, many before every image
++  // they load, and each call ran a full collection. A collection changes what
++  // a program can observe only through the weak references it clears and the
++  // memory it frees. So skip it while no weak reference holds an object and
++  // a quarter of the heap is free; with less free memory some games compare
++  // freeMemory() after System.gc() with a few kilobytes.
++  {
++    OopDesc** const allocation_end = ObjectHeap::disable_allocation_trap();
++    ObjectHeap::accumulate_current_task_memory_usage();
++    const jlong free = ObjectHeap::available_for_current_task();
++    ObjectHeap::enable_allocation_trap(allocation_end);
++    if (free >= jlong(ObjectHeap::total_memory() / 4) &&
++        !ObjectHeap::has_weak_referents()) {
++      return;
++    }
++  }
++#endif
+   ObjectHeap::full_collect(JVM_SINGLE_ARG_NO_CHECK_AT_BOTTOM);
+ #endif /* ENABLE_FREQUENT_FORCED_GC_SUPPRESSION */
+ }
