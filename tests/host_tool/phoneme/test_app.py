@@ -56,6 +56,7 @@ def phoneme_app(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
                 str(ROOT / "lib/fplinux/fplinux-utf8.c"),
                 *gettext_link_flags(),
                 "-Wl,--wrap=fsync",
+                "-Wl,--wrap=statfs",
                 "-Wl,--wrap=fplinux_ui_state_dir",
                 "-Wl,--wrap=fplinux_ui_prefs_open",
                 "-lz",
@@ -68,12 +69,17 @@ def phoneme_app(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
 
 
 def write_suite(
-    path: Path, *, multiple: bool = False, icon: bool = False, missing_class: bool = False
+    path: Path,
+    *,
+    multiple: bool = False,
+    icon: bool = False,
+    missing_class: bool = False,
+    suite_name: str = "Example suite",
 ) -> None:
     """Create a normal ZIP with MIDP manifest fields and literal class entries."""
     icon_name = "icon.png" if icon else ""
     manifest = (
-        "MIDlet-Name: Example suite\r\nMIDlet-Vendor: Example maker\r\nMIDlet-Version: 1.0\r\n"
+        f"MIDlet-Name: {suite_name}\r\nMIDlet-Vendor: Example maker\r\nMIDlet-Version: 1.0\r\n"
         f"MIDlet-1: First, {icon_name}, example.First\r\n"
     )
     if multiple:
@@ -245,6 +251,178 @@ def test_document_lifecycle_preserves_user_decisions_and_vm(
         assert not preferences.exists()
     else:
         assert "recent-documents=" in preferences.read_text(encoding="utf-8")
+
+
+def launched_heap_kib(
+    phoneme_app: Path,
+    jar: Path,
+    root: Path,
+    *,
+    filesystem: str,
+    scenario: str = "single",
+    selection: str | None = None,
+) -> int:
+    env = os.environ | {
+        "HOME": str(root),
+        "LC_ALL": "C",
+        "FPLINUX_PM_TEST_SCENARIO": scenario,
+        "FPLINUX_PM_TEST_JAR": str(jar),
+        "FPLINUX_PM_TEST_ROOT": str(root),
+        "FPLINUX_PM_TEST_ROOT_FS": filesystem,
+    }
+    if selection is not None:
+        env["FPLINUX_PM_TEST_HEAP_SELECTION"] = selection
+    result = run_process(
+        [str(phoneme_app)],
+        name=f"phoneME Java memory ({scenario}, {selection or filesystem})",
+        env=env,
+        timeout=10,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    sizes = [
+        line.removeprefix("heap-kib=")
+        for line in result.stdout.splitlines()
+        if line.startswith("heap-kib=")
+    ]
+    assert len(sizes) == 1, result.stdout
+    return int(sizes[0])
+
+
+@pytest.mark.parametrize(
+    ("filesystem", "heap_kib"),
+    [("overlay", 4096), ("ext4", 8192), ("unavailable", 4096)],
+)
+def test_java_heap_default_follows_system_root(
+    phoneme_app: Path, tmp_path: Path, filesystem: str, heap_kib: int
+) -> None:
+    jar = tmp_path / "game.jar"
+    write_suite(jar)
+
+    assert launched_heap_kib(phoneme_app, jar, tmp_path, filesystem=filesystem) == heap_kib
+
+
+@pytest.mark.parametrize(
+    ("selection", "filesystem", "heap_kib"),
+    [("4 MiB", "ext4", 4096), ("8 MiB", "overlay", 8192), ("16 MiB", "overlay", 16384)],
+)
+def test_global_java_memory_choice_persists_for_new_launches(
+    phoneme_app: Path, tmp_path: Path, selection: str, filesystem: str, heap_kib: int
+) -> None:
+    jar = tmp_path / "game.jar"
+    write_suite(jar)
+
+    assert (
+        launched_heap_kib(
+            phoneme_app,
+            jar,
+            tmp_path,
+            filesystem=filesystem,
+            scenario="heap-settings-global",
+            selection=selection,
+        )
+        == heap_kib
+    )
+    assert launched_heap_kib(phoneme_app, jar, tmp_path, filesystem=filesystem) == heap_kib
+
+
+def test_global_java_memory_use_default_restores_system_root_policy(
+    phoneme_app: Path, tmp_path: Path
+) -> None:
+    jar = tmp_path / "game.jar"
+    write_suite(jar)
+    (tmp_path / "preferences").write_text("heap=16\n", encoding="utf-8")
+
+    assert (
+        launched_heap_kib(
+            phoneme_app,
+            jar,
+            tmp_path,
+            filesystem="ext4",
+            scenario="heap-settings-global",
+            selection="Use default",
+        )
+        == 8192
+    )
+    assert launched_heap_kib(phoneme_app, jar, tmp_path, filesystem="overlay") == 4096
+
+
+def test_program_java_memory_selection_and_reset_take_effect_on_relaunch(
+    phoneme_app: Path, tmp_path: Path
+) -> None:
+    jar = tmp_path / "game.jar"
+    other_jar = tmp_path / "other.jar"
+    write_suite(jar)
+    write_suite(other_jar, suite_name="Other suite")
+    (tmp_path / "preferences").write_text("heap=8\n", encoding="utf-8")
+
+    assert (
+        launched_heap_kib(
+            phoneme_app,
+            jar,
+            tmp_path,
+            filesystem="overlay",
+            scenario="heap-settings-program",
+            selection="16 MiB",
+        )
+        == 8192
+    )
+    assert launched_heap_kib(phoneme_app, jar, tmp_path, filesystem="overlay") == 16384
+    assert launched_heap_kib(phoneme_app, other_jar, tmp_path, filesystem="overlay") == 8192
+
+    assert (
+        launched_heap_kib(
+            phoneme_app,
+            jar,
+            tmp_path,
+            filesystem="overlay",
+            scenario="heap-settings-program",
+            selection="Use default",
+        )
+        == 16384
+    )
+    assert launched_heap_kib(phoneme_app, jar, tmp_path, filesystem="overlay") == 8192
+    assert (
+        launched_heap_kib(
+            phoneme_app,
+            jar,
+            tmp_path,
+            filesystem="ext4",
+            scenario="heap-settings-global",
+            selection="4 MiB",
+        )
+        == 4096
+    )
+
+
+@pytest.mark.parametrize("value", ["7", "large"])
+def test_invalid_stored_global_java_memory_uses_system_root_default(
+    phoneme_app: Path, tmp_path: Path, value: str
+) -> None:
+    jar = tmp_path / "game.jar"
+    write_suite(jar)
+    (tmp_path / "preferences").write_text(f"heap={value}\n", encoding="utf-8")
+
+    assert launched_heap_kib(phoneme_app, jar, tmp_path, filesystem="ext4") == 8192
+
+
+def test_invalid_stored_program_java_memory_uses_global_choice(
+    phoneme_app: Path, tmp_path: Path
+) -> None:
+    jar = tmp_path / "game.jar"
+    write_suite(jar)
+    (tmp_path / "preferences").write_text("heap=8\n", encoding="utf-8")
+    launched_heap_kib(
+        phoneme_app,
+        jar,
+        tmp_path,
+        filesystem="overlay",
+        scenario="heap-settings-program",
+        selection="16 MiB",
+    )
+    (program_preferences,) = tmp_path.glob("programs/*/preferences")
+    program_preferences.write_text("heap=7\n", encoding="utf-8")
+
+    assert launched_heap_kib(phoneme_app, jar, tmp_path, filesystem="overlay") == 8192
 
 
 @pytest.mark.parametrize(

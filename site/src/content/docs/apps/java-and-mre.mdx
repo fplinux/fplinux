@@ -33,6 +33,10 @@ If saving fails, the chosen value remains applied and Settings shows **Unsaved**
 
 ## Java programs
 
+PhoneME defaults to a 4 MiB Java heap when FPLinux boots in RAM and 8 MiB when it boots from a system microSD card.
+
+Open **Settings → Java memory** to choose 4, 8 or 16 MiB for all Java programs. **Use default** restores the value for the current boot mode. **This program → Java memory** can override the shared setting or inherit it with **Use default**. Close and reopen the program to apply a memory change.
+
 In phoneME, **Settings → JIT** selects **Interpreter** or **JIT (experimental)**. The default is Interpreter. **This program → JIT** can override the default for the current Java program or restore it with **Use default**. Close and reopen the program to apply a VM mode change. To change a game's mode before opening it again, focus it in **Recent** and choose **Options → VM mode**.
 
 In a session configured to launch phoneME with the `FPLINUX_PHONEME_FPS_LIMIT` environment variable, a positive integer paces an isolated `callSerially()` callback that repeatedly queues itself on the same foreground Canvas. Repaints and input can continue during the wait. If another callback joins the queue, both run in their original order as soon as the event dispatcher can deliver them. Pacing is off when the variable is unset or zero.

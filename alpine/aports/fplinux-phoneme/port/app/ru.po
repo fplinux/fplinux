@@ -79,8 +79,20 @@ msgstr "Размер"
 msgid "VM mode"
 msgstr "Режим ВМ"
 
+msgid "Java memory"
+msgstr "Память Java"
+
 msgid "Use default"
 msgstr "По умолчанию"
+
+msgid "4 MiB"
+msgstr "4 МиБ"
+
+msgid "8 MiB"
+msgstr "8 МиБ"
+
+msgid "16 MiB"
+msgstr "16 МиБ"
 
 msgid "On"
 msgstr "Вкл."
@@ -99,6 +111,9 @@ msgstr "Перезапуск"
 
 msgid "The VM mode takes effect when the program starts again."
 msgstr "Режим ВМ изменится при следующем запуске программы."
+
+msgid "The change takes effect when the program starts again."
+msgstr "Изменение вступит в силу при следующем запуске программы."
 
 msgid "Continue"
 msgstr "Продолжить"

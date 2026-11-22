@@ -28,13 +28,16 @@
 #include <fplinux/fplinux-ui.h>
 #include <libintl.h>
 #include <limits.h>
+#include <linux/magic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/vfs.h>
 #include <time.h>
 #include <unistd.h>
 
 #define _(text) gettext(text)
+#define N_(text) text
 /* A MIDlet icon is a small PNG; larger ones are not shown. */
 #define ICON_MAX_BYTES (64u * 1024u)
 #define MESSAGE_BYTES 1024
@@ -51,13 +54,25 @@ enum command {
 
 enum { AUX_RECENT = 1, AUX_SETTINGS };
 
-enum { SETTING_SIZE = 2, SETTING_VM_MODE };
+enum { SETTING_SIZE = 2, SETTING_VM_MODE, SETTING_HEAP_SIZE };
 
 enum pm_vm_mode {
 	PM_VM_USE_DEFAULT = -1,
 	PM_VM_INTERPRETER,
 	PM_VM_JIT,
 };
+
+/* The first choice inherits the global setting or the system default. */
+static const struct {
+	unsigned int mib;
+	const char *label;
+} heap_choices[] = {
+	{ 0, N_("Use default") },
+	{ 4, N_("4 MiB") },
+	{ 8, N_("8 MiB") },
+	{ 16, N_("16 MiB") },
+};
+#define HEAP_CHOICE_COUNT (sizeof(heap_choices) / sizeof(heap_choices[0]))
 
 struct pm_app {
 	struct fplinux_ui *ui;
@@ -451,6 +466,40 @@ static void vm_finished(struct pm_app *app, bool started)
 	show_final_alert(app, _("MIDlet stopped"), text);
 }
 
+static unsigned int default_heap_kib(void)
+{
+	struct statfs root;
+
+	/* Both system-card boot paths mount ext4 at /. */
+	if (statfs("/", &root) == 0 && root.f_type == EXT4_SUPER_MAGIC)
+		return 8192u;
+	return FPLINUX_PM_VM_HEAP_KIB_DEFAULT;
+}
+
+static size_t heap_choice_for_mib(long long mib)
+{
+	for (size_t i = 1; i < HEAP_CHOICE_COUNT; ++i)
+		if (heap_choices[i].mib == mib)
+			return i;
+	return 0;
+}
+
+static size_t heap_setting(const struct fplinux_ui_prefs *prefs)
+{
+	return heap_choice_for_mib(fplinux_ui_prefs_get_int(prefs, "heap", 0));
+}
+
+static unsigned int effective_heap_kib(const struct pm_app *app)
+{
+	size_t choice = heap_setting(app->program_prefs);
+
+	if (choice == 0)
+		choice = heap_setting(app->prefs);
+	if (choice == 0)
+		return default_heap_kib();
+	return heap_choices[choice].mib * 1024U;
+}
+
 static void start_vm(struct pm_app *app)
 {
 	struct fplinux_pm_vm_config config = {
@@ -458,6 +507,7 @@ static void start_vm(struct pm_app *app)
 		.descriptor = app->suite.descriptor,
 		.descriptor_size = app->suite.descriptor_size,
 		.midlet_class = app->midlet->class_name,
+		.heap_kib = effective_heap_kib(app),
 		.enable_jit = jit_enabled(app),
 		.storage_dir = app->storage,
 		.wakeup = vm_wakeup,
@@ -1112,6 +1162,40 @@ static struct fplinux_ui_screen *vm_mode_choice_new(struct pm_app *app,
 	return list;
 }
 
+static const char *heap_status(const struct pm_app *app, bool program)
+{
+	size_t choice = heap_setting(program ? app->program_prefs : app->prefs);
+
+	if (!program && choice == 0)
+		choice = heap_choice_for_mib(default_heap_kib() / 1024U);
+	return _(heap_choices[choice].label);
+}
+
+static bool store_heap_choice(struct fplinux_ui_prefs *prefs, size_t selected)
+{
+	if (selected == 0)
+		return fplinux_ui_prefs_remove(prefs, "heap");
+	return fplinux_ui_prefs_set_int(prefs, "heap",
+					heap_choices[selected].mib);
+}
+
+static struct fplinux_ui_screen *heap_choice_new(struct pm_app *app,
+						 bool program)
+{
+	struct fplinux_ui_screen *list = fplinux_ui_list_new(
+		app->ui, _("Java memory"), FPLINUX_UI_LIST_EXCLUSIVE);
+	size_t selected =
+		heap_setting(program ? app->program_prefs : app->prefs);
+
+	if (!list)
+		return NULL;
+	for (size_t i = 0; i < HEAP_CHOICE_COUNT; ++i)
+		fplinux_ui_list_append(list, _(heap_choices[i].label), NULL);
+	fplinux_ui_list_set_selected(list, selected, true);
+	fplinux_ui_list_set_focused(list, selected);
+	return list;
+}
+
 static void close_recent_vm_mode(struct pm_app *app)
 {
 	fplinux_ui_prefs_close(app->program_prefs);
@@ -1209,6 +1293,13 @@ static void show_settings(struct pm_app *app, bool program)
 				 FPLINUX_UI_LIST_ICON_IMAGE);
 	fplinux_ui_list_set_trailing_value(
 		screen, row, jit_status(vm_mode_setting(app, program)));
+	row = fplinux_ui_list_append(screen, _("Java memory"), NULL);
+	fplinux_ui_list_set_icon(screen, row,
+				 fplinux_ui_glyph(app->ui, "settings",
+						  FPLINUX_UI_GLYPH_ROW),
+				 FPLINUX_UI_LIST_ICON_IMAGE);
+	fplinux_ui_list_set_trailing_value(screen, row,
+					   heap_status(app, program));
 	if (program)
 		add_command(app, screen, COMMAND_RESET,
 			    FPLINUX_UI_COMMAND_SCREEN, _("Reset"), "refresh");
@@ -1251,8 +1342,11 @@ static void save_settings(struct pm_app *app, bool reset, size_t selected)
 	unsigned int size = app->program_settings ? app->program_size :
 						    app->default_size;
 	bool jit_before = jit_enabled(app);
-	bool vm_only = !reset && app->setting_row == SETTING_VM_MODE;
+	unsigned int heap_before = effective_heap_kib(app);
+	bool launch_only = !reset && (app->setting_row == SETTING_VM_MODE ||
+				      app->setting_row == SETTING_HEAP_SIZE);
 	bool ok = prefs != NULL;
+	bool heap_changed;
 
 	if (!ok)
 		errno = EIO;
@@ -1261,10 +1355,13 @@ static void save_settings(struct pm_app *app, bool reset, size_t selected)
 		size = app->default_size;
 		ok = ok && fplinux_ui_view_settings_reset(prefs) &&
 		     fplinux_ui_prefs_remove(prefs, "canvas-size") &&
-		     fplinux_ui_prefs_remove(prefs, "jit");
-	} else if (vm_only) {
+		     fplinux_ui_prefs_remove(prefs, "jit") &&
+		     fplinux_ui_prefs_remove(prefs, "heap");
+	} else if (app->setting_row == SETTING_VM_MODE) {
 		ok = ok &&
 		     store_vm_mode(prefs, app->program_settings, selected);
+	} else if (app->setting_row == SETTING_HEAP_SIZE) {
+		ok = ok && store_heap_choice(prefs, selected);
 	} else {
 		if (app->setting_row == FPLINUX_UI_VIEW_SCALE)
 			settings.scale = selected;
@@ -1282,7 +1379,7 @@ static void save_settings(struct pm_app *app, bool reset, size_t selected)
 			ok = ok && fplinux_ui_prefs_set_int(
 					   prefs, "canvas-size", size);
 	}
-	if (ok && !vm_only) {
+	if (ok && !launch_only) {
 		fplinux_pm_keys_cancel(FPLINUX_UI_KEY_PHONE);
 		fplinux_pm_keys_cancel(FPLINUX_UI_KEY_KEYBOARD);
 		if (app->program_settings) {
@@ -1309,14 +1406,20 @@ static void save_settings(struct pm_app *app, bool reset, size_t selected)
 		fplinux_pm_canvas_view_changed();
 	}
 	show_settings(app, app->program_settings);
+	heap_changed = heap_before != effective_heap_kib(app);
 	if (save_preferences(app, prefs, ok, app->program_settings) &&
 	    app->lifecycle.phase != FPLINUX_PM_PHASE_PICKING &&
 	    app->lifecycle.phase != FPLINUX_PM_PHASE_EXITED &&
-	    jit_before != jit_enabled(app)) {
-		struct fplinux_ui_screen *alert = fplinux_ui_alert_new(
-			app->ui, FPLINUX_UI_ALERT_INFO, _("Restart program"),
-			_("The VM mode takes effect when the program starts again."),
-			0);
+	    (heap_changed || jit_before != jit_enabled(app))) {
+		const char *message = _(
+			"The VM mode takes effect when the program starts again.");
+		struct fplinux_ui_screen *alert;
+
+		if (heap_changed)
+			message = _(
+				"The change takes effect when the program starts again.");
+		alert = fplinux_ui_alert_new(app->ui, FPLINUX_UI_ALERT_INFO,
+					     _("Restart program"), message, 0);
 
 		if (alert)
 			fplinux_ui_push(app->ui, alert);
@@ -1334,6 +1437,8 @@ static void settings_changed(struct fplinux_ui *ui,
 		choices = 7;
 	else if (app->setting_row == SETTING_VM_MODE && !app->program_settings)
 		choices = 2;
+	else if (app->setting_row == SETTING_HEAP_SIZE)
+		choices = HEAP_CHOICE_COUNT;
 	if (list != app->settings_choice || selected >= choices)
 		return;
 	app->settings_choice = NULL;
@@ -1366,6 +1471,8 @@ static void open_settings_choice(struct pm_app *app)
 		}
 	} else if (app->setting_row == SETTING_VM_MODE)
 		list = vm_mode_choice_new(app, app->program_settings);
+	else if (app->setting_row == SETTING_HEAP_SIZE)
+		list = heap_choice_new(app, app->program_settings);
 	else
 		return;
 	if (!list)

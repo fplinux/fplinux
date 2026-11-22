@@ -10,10 +10,12 @@
 #include <fplinux/fplinux-ui-file-picker.h>
 #include <fplinux/fplinux-ui-prefs.h>
 #include <fplinux/fplinux-volumes.h>
+#include <linux/magic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/vfs.h>
 
 #include "fplinux-pm-app.h"
 #include "fplinux-pm-vm.h"
@@ -689,6 +691,8 @@ bool fplinux_pm_vm_start(const struct fplinux_pm_vm_config *config)
 	assert(S_ISDIR(directory.st_mode) &&
 	       (directory.st_mode & 0777) == 0700);
 	printf("storage %s\n", config->storage_dir);
+	if (getenv("FPLINUX_PM_TEST_ROOT_FS"))
+		printf("heap-kib=%u\n", config->heap_kib);
 	if (!strcmp(scenario, "single"))
 		assert(!config->enable_jit);
 	if (!strncmp(scenario, "vm-settings-", 12))
@@ -718,6 +722,22 @@ bool fplinux_pm_vm_start(const struct fplinux_pm_vm_config *config)
 	vm_state = !strcmp(scenario, "start-failure") ? FPLINUX_PM_VM_EXITED :
 							FPLINUX_PM_VM_RUNNING;
 	return vm_state == FPLINUX_PM_VM_RUNNING;
+}
+
+int __wrap_statfs(const char *path, struct statfs *root)
+{
+	const char *filesystem = getenv("FPLINUX_PM_TEST_ROOT_FS");
+
+	assert(!strcmp(path, "/"));
+	if (filesystem && !strcmp(filesystem, "unavailable")) {
+		errno = EIO;
+		return -1;
+	}
+	*root = (struct statfs){ 0 };
+	root->f_type = filesystem && !strcmp(filesystem, "ext4") ?
+			       EXT4_SUPER_MAGIC :
+			       OVERLAYFS_SUPER_MAGIC;
+	return 0;
 }
 
 int fplinux_pm_vm_slice(void)
@@ -907,6 +927,25 @@ static void choose_vm_mode(const char *current, const char *mode)
 	choose_value(named_row(mode));
 }
 
+static void choose_java_memory(const char *value)
+{
+	select_row(named_row("Java memory"));
+	assert(!strcmp(fplinux_ui_current(&runtime)->title, "Java memory"));
+	choose_value(named_row(value));
+}
+
+static void open_program_settings(struct fplinux_ui *ui)
+{
+	struct fplinux_ui_event activation = {
+		.type = FPLINUX_UI_EVENT_ACTIVATION,
+		.activation = FPLINUX_UI_ACTIVATION_OPEN,
+	};
+
+	runtime.event(ui, &activation, runtime.context);
+	select_row(named_row("Settings"));
+	select_row(named_row("This program"));
+}
+
 static void open_global_settings(void)
 {
 	select_row(3);
@@ -1024,6 +1063,22 @@ int fplinux_ui_run(struct fplinux_ui *ui)
 		select_row(named_row("JIT"));
 		choose_vm_mode("Interpreter", "JIT (experimental)");
 		assert(!fplinux_ui_current(ui)->alert && !starts);
+		command(FPLINUX_UI_COMMAND_BACK);
+	}
+	if (!strcmp(scenario, "heap-settings-global")) {
+		const char *selection =
+			getenv("FPLINUX_PM_TEST_HEAP_SELECTION");
+
+		assert(selection);
+		select_row(named_row("Settings"));
+		choose_java_memory(selection);
+		screen = fplinux_ui_current(ui);
+		assert(!screen->alert && !starts);
+		if (strcmp(selection, "Use default")) {
+			size_t row = named_row("Java memory");
+
+			assert(!strcmp(screen->details[row], selection));
+		}
 		command(FPLINUX_UI_COMMAND_BACK);
 	}
 	if (!strcmp(scenario, "vm-settings-recent-default")) {
@@ -1148,16 +1203,21 @@ int fplinux_ui_run(struct fplinux_ui *ui)
 	if (!strcmp(scenario, "chooser-start"))
 		assert(!strcmp(running_class, "example.Second"));
 	if (!strcmp(scenario, "vm-settings-override")) {
-		struct fplinux_ui_event activation = {
-			.type = FPLINUX_UI_EVENT_ACTIVATION,
-			.activation = FPLINUX_UI_ACTIVATION_OPEN,
-		};
-
-		runtime.event(ui, &activation, runtime.context);
-		select_row(named_row("Settings"));
-		select_row(named_row("This program"));
+		open_program_settings(ui);
 		select_row(named_row("JIT"));
 		choose_vm_mode("Use default", "Interpreter");
+		screen = fplinux_ui_current(ui);
+		assert(screen->alert &&
+		       !strcmp(screen->title, "Restart program"));
+		assert(starts == 1 && !destroys);
+	}
+	if (!strcmp(scenario, "heap-settings-program")) {
+		const char *selection =
+			getenv("FPLINUX_PM_TEST_HEAP_SELECTION");
+
+		assert(selection);
+		open_program_settings(ui);
+		choose_java_memory(selection);
 		screen = fplinux_ui_current(ui);
 		assert(screen->alert &&
 		       !strcmp(screen->title, "Restart program"));
