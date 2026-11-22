@@ -13,6 +13,7 @@ from fplinux_cli.build.device_tree import (
 )
 from fplinux_cli.build.runtime import fitted_parser, preparation_source_files
 from fplinux_cli.common import canonical_json_bytes, fail, sha256_bytes, sha256_file
+from fplinux_cli.device_data.nand_geometry import NAND_ACQUISITION_FIELDS
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -238,9 +239,7 @@ def acquisition_recipe(
     except DeviceTreeError as error:
         fail(f"NAND acquisition device tree is invalid: {error}")
     record = {
-        "reader": {
-            key: nand[key] for key in ("raw_device", "id", "raw_page_bytes") if key in nand
-        },
+        "reader": {key: nand[key] for key in NAND_ACQUISITION_FIELDS if key in nand},
         "host": {relative: sha256_file(source_root / relative) for relative in host_sources},
         "kernel": {relative: sha256_file(linux_source / relative) for relative in _NAND_SOURCES},
         "device_tree": tree,

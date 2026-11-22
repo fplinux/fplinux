@@ -28,9 +28,9 @@ from fplinux_cli.device_data.nand_backup import (
     save_backup_without_receipt,
 )
 from fplinux_cli.device_data.nand_geometry import (
-    KONROW_NAND_TARGET,
-    family_page_bytes,
-    require_declared_chip,
+    nand_interface,
+    require_declared_geometry,
+    require_spi_dump_geometry,
 )
 from fplinux_cli.device_data.original_files import read_original_files
 
@@ -103,10 +103,10 @@ def dump_page_bytes(
     receipt: NandGeometry | None,
 ) -> int:
     """Take physical page size from the backup receipt or the target's declared chip."""
-    declared_id = None if nand is None else nand.get("id")
+    interface = nand_interface(nand)
     declared_raw_page_bytes = None if nand is None else nand.get("raw_page_bytes")
     if receipt is None:
-        if target == KONROW_NAND_TARGET:
+        if interface == "parallel":
             fail(f"target {target} requires a NAND backup geometry receipt beside the image")
         if declared_raw_page_bytes is None:
             fail(
@@ -114,18 +114,13 @@ def dump_page_bytes(
                 "receipt; save it with ./fplinux nand backup, which writes PATH.json beside it"
             )
         return int(declared_raw_page_bytes)
-    try:
-        page_bytes = family_page_bytes(receipt, target=target)
-    except ValueError as error:
-        fail(f"device-data extraction failed: {error}")
-    require_declared_chip(
-        receipt,
-        target=target,
-        declared_id=declared_id,
-        declared_raw_page_bytes=declared_raw_page_bytes,
-        source="NAND backup receipt",
-    )
-    return page_bytes
+    if interface == "spi":
+        try:
+            require_spi_dump_geometry(receipt)
+        except ValueError as error:
+            fail(f"device-data extraction failed: {error}")
+    require_declared_geometry(receipt, target=target, nand=nand, source="NAND backup receipt")
+    return receipt.raw_page_bytes
 
 
 def _load_source_module(path: Path, name: str, description: str) -> ModuleType:
@@ -190,7 +185,11 @@ def read_physical_nand(spec: DeviceDataSpec, backup: Path, tools: DeviceDataTool
     """Admit a complete backup and its geometry before any parser can consume it."""
     raw = read_backup_bytes(backup)
     record = read_backup_record(backup, raw)
-    if record is not None and spec.target == KONROW_NAND_TARGET and record.target != spec.target:
+    if (
+        record is not None
+        and nand_interface(spec.nand) == "parallel"
+        and record.target != spec.target
+    ):
         fail("The NAND backup receipt belongs to another phone target")
     geometry = None if record is None else record.geometry
     page_bytes = dump_page_bytes(spec.target, spec.nand, geometry)

@@ -97,9 +97,9 @@ This command builds the selected reader bundle when needed, then extracts only t
 
 ### Backup layout and receipts
 
-Preparation accepts 2048 main bytes per page, 64 pages per block and 65536 pages in total, with each page's main bytes followed by its OOB bytes. It determines the layout from the target's chip declaration or the backup receipt, never from file length alone. When both declarations are present, they must agree.
+SPI NAND preparation accepts 2048 main bytes per page, 64 pages per block and 65536 pages in total. Konrow Senior 280 Plus uses parallel NAND with 1024 main bytes and 64 OOB bytes per page, 64 pages per block and 2048 blocks. Both formats store each page's main bytes followed by its OOB bytes. Preparation checks the saved geometry against the target's declaration when both are available.
 
-A target that declares its NAND chip accepts an explicitly selected raw backup without a receipt. In that case, there is no saved digest to check the complete backup against. The developer preparation command keeps such an import without an acquisition receipt; a later automatic RAM launch may need a new live backup. Keep the receipt from `nand backup` whenever it is available.
+Parallel NAND preparation requires a receipt from the same target. SPI NAND preparation accepts an explicitly selected raw backup without a receipt when the target declares its NAND chip. In that case, there is no saved digest to check the complete backup against. The developer preparation command keeps such an import without an acquisition receipt. A later automatic RAM launch may need a new live backup. Keep the receipt from `nand backup` whenever it is available.
 
 ## Prepare data from original files
 
@@ -161,9 +161,9 @@ The identify command records the reader's audit before and after its single iden
 
 Both commands need a phone that is running a build of `<target>`. They open the phone's read-only NAND reader, which identifies the fitted chip. Select the profile and build type of the running session; `TYPE` is `release` or `debug`. Saving to the same path replaces the previous backup.
 
-`nand identify` prints the reader's report unchanged, one `key=value` line each for `id_bytes`, `chip`, `page_main_bytes`, `oob_bytes`, `pages_per_block`, `block_count`, `raw_bytes`, `geometry_source`, `feature_a0`, `feature_b0` and `feature_c0`. For a chip that the running kernel does not identify, it shows `chip=unknown`, zero geometry values and `geometry_source=unknown`, together with the chip's ID bytes and feature register values.
+`nand identify` prints the reader's report unchanged, one `key=value` line each for `id_bytes`, `chip`, `page_main_bytes`, `oob_bytes`, `pages_per_block`, `block_count`, `raw_bytes` and `geometry_source`. The SPI reader reports `dt` or `table` as its geometry source and includes `feature_a0`, `feature_b0` and `feature_c0`. The parallel reader reports `parallel` and omits the SPI feature fields. For an unidentified chip, the report includes the chip ID, `chip=unknown`, zero geometry values and `geometry_source=unknown`.
 
-`nand backup` stops before reading any page when the running kernel does not identify the chip, or when the chip or its page size differs from the one the target declares. The expected image size comes from the reported geometry. The command checks that the complete stream has that size, computes its SHA-256 digest and only then puts the file in place, with mode `0600`. It then writes the geometry receipt `PATH.json` beside it, also with mode `0600`. Once the complete stream is checked, it removes any old receipt before replacing the backup. If writing the new receipt fails, the complete new backup remains without a receipt; a target that declares its NAND chip can still use it for device-data preparation. The receipt is a JSON object with these fields:
+`nand backup` stops before reading any page when the running kernel cannot identify the chip or the report disagrees with the target's interface, declared chip or declared layout. The expected image size comes from the reported geometry. The command checks that the complete stream has that size, computes its SHA-256 digest and only then puts the file in place, with mode `0600`. It then writes the geometry receipt `PATH.json` beside it, also with mode `0600`. Once the complete stream is checked, it removes any old receipt before replacing the backup. If writing the new receipt fails, the complete new backup remains without a receipt. The [backup layout rules](#backup-layout-and-receipts) govern whether that backup can be used for preparation. The receipt records the following fields.
 
 | Field | Value |
 | --- | --- |

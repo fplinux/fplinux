@@ -9,8 +9,13 @@ compatible = "konrow,senior-280-plus"
 
 [nand]
 raw_device = "/dev/ums9117-nand-raw"
+interface = "parallel"
 id = 0xba98
 raw_page_bytes = 1088
+page_main_bytes = 1024
+oob_bytes = 64
+pages_per_block = 64
+block_count = 2048
 ecc_format = "ums9117-bch12"
 
 [display]

@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING, Any, NoReturn
 from fplinux_cli.artifacts.build_manifest import BUILD_MANIFEST_FIELDS
 from fplinux_cli.artifacts.release_identity import RELEASE_FIELDS, require_release_version
 from fplinux_cli.common import canonical_json_bytes, sha256_file
-from fplinux_cli.device_data.nand_geometry import UMS9117_BCH12_RAW_PAGE_BYTES
+from fplinux_cli.device_data.nand_geometry import validate_nand_declaration
 from fplinux_cli.runtime.ssh.errors import fail as ssh_fail
 
 if TYPE_CHECKING:
@@ -442,31 +442,16 @@ def validate_nand(value: object, *, platform: str) -> dict[str, Any] | None:
     """Admit the read-only reader contract even when no preparation is required."""
     if value is None:
         return None
-    fields = {"raw_device", "id", "raw_page_bytes", "acquisition_recipe"}
-    if not isinstance(value, dict) or set(value) not in (
-        {"raw_device", "acquisition_recipe"},
-        fields,
-        fields | {"ecc_format"},
-    ):
-        fail("runtime NAND reader requires raw_device and optionally id with raw_page_bytes")
-    require_recipe(value["acquisition_recipe"], "runtime NAND acquisition_recipe")
+    if not isinstance(value, dict):
+        fail("runtime NAND reader must be an object")
+    require_recipe(value.get("acquisition_recipe"), "runtime NAND acquisition_recipe")
     if platform != "ums9117":
         fail("this platform does not support the runtime NAND reader")
-    if (
-        not isinstance(value["raw_device"], str)
-        or re.fullmatch(r"/dev/[A-Za-z0-9][A-Za-z0-9._-]*", value["raw_device"]) is None
-    ):
-        fail("runtime NAND raw_device must name one device directly under /dev")
-    if "id" in value:
-        require_integer(value, "id", "runtime NAND id", bounds=(0, 0xFFFF))
-        require_integer(
-            value, "raw_page_bytes", "runtime NAND raw_page_bytes", bounds=(1, 0xFFFFFFFF)
-        )
-    if "ecc_format" in value and (
-        value["ecc_format"] != "ums9117-bch12"
-        or value["raw_page_bytes"] not in UMS9117_BCH12_RAW_PAGE_BYTES
-    ):
-        fail("runtime NAND ECC requires ums9117-bch12 with 1088- or 2176-byte pages")
+    declaration = {key: member for key, member in value.items() if key != "acquisition_recipe"}
+    try:
+        validate_nand_declaration(declaration, platform=platform, name="runtime NAND")
+    except ValueError as error:
+        fail(str(error))
     return value
 
 

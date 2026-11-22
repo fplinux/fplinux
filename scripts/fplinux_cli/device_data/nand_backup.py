@@ -22,7 +22,7 @@ from fplinux_cli.device_data.nand_geometry import (
     GEOMETRY_SIZE_KEYS,
     NandGeometry,
     require_consistent_geometry,
-    require_declared_chip,
+    require_declared_geometry,
 )
 
 if TYPE_CHECKING:
@@ -122,12 +122,8 @@ def current_backup(backup: Path, *, target: str, nand: dict[str, Any]) -> Backup
             or record.acquisition_recipe != nand["acquisition_recipe"]
         ):
             return None
-        require_declared_chip(
-            record.geometry,
-            target=target,
-            declared_id=nand.get("id"),
-            declared_raw_page_bytes=nand.get("raw_page_bytes"),
-            source="saved NAND backup",
+        require_declared_geometry(
+            record.geometry, target=target, nand=nand, source="saved NAND backup"
         )
     except SystemExit:
         return None

@@ -427,9 +427,29 @@ class GlobalProfileTests:
         base = path.read_text()
         path.write_text(base + '\n[nand]\nraw_device = "/dev/first-nand-raw"\n' + declaration)
         with (
-            pytest.raises(SystemExit, match="optionally both id and raw_page_bytes"),
+            pytest.raises(SystemExit, match="requires both id and raw_page_bytes"),
         ):
             targets.load_target("first")
+
+    def test_parallel_nand_requires_a_complete_target_declaration(
+        self, profile_context: ProfileContext
+    ) -> None:
+        """A board selects parallel NAND with an explicit, self-consistent physical layout."""
+        path = profile_context.root / "targets/first/target.toml"
+        base = path.read_text()
+        declaration = (
+            '\n[nand]\nraw_device = "/dev/first-nand-raw"\ninterface = "parallel"\n'
+            "id = 0xba98\nraw_page_bytes = 1088\npage_main_bytes = 1024\n"
+            "oob_bytes = 64\npages_per_block = 64\n"
+        )
+        path.write_text(base + declaration)
+        with pytest.raises(SystemExit, match="parallel interface requires a complete NAND layout"):
+            targets.load_target("first")
+
+        path.write_text(base + declaration + "block_count = 2048\n")
+        nand = targets.load_target("first")["nand"]
+        assert nand["interface"] == "parallel"
+        assert nand["block_count"] == 2048
 
     def test_nand_reader_requires_a_device_path(self, profile_context: ProfileContext) -> None:
         """A board cannot accidentally point a physical NAND backup at a regular file."""

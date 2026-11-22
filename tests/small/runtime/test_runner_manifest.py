@@ -74,19 +74,75 @@ def load_manifest(runtime_manifest_path: Path, manifest: dict[str, Any]) -> dict
     return RUNNER.validate_runtime_identity(runtime)
 
 
-def test_admits_compact_nand_bch12_runtime(runtime_manifest_path: Path) -> None:
-    """The shipped manifest reader accepts the page size used by parallel NAND."""
-    manifest = runtime_manifest()
-    nand = {
+@pytest.fixture
+def parallel_nand() -> dict[str, Any]:
+    """Declare the reader and complete geometry of a parallel NAND runtime."""
+    return {
         "raw_device": "/dev/ums9117-nand-raw",
+        "interface": "parallel",
         "id": 0xBA98,
         "raw_page_bytes": 1088,
+        "page_main_bytes": 1024,
+        "oob_bytes": 64,
+        "pages_per_block": 64,
+        "block_count": 2048,
         "ecc_format": "ums9117-bch12",
         "acquisition_recipe": "a" * 64,
     }
-    manifest["nand"] = nand
 
-    assert load_manifest(runtime_manifest_path, manifest)["nand"] == nand
+
+def test_admits_parallel_nand_runtime(
+    runtime_manifest_path: Path, parallel_nand: dict[str, Any]
+) -> None:
+    """The runner retains the declared interface and layout for backup and preparation."""
+    manifest = runtime_manifest()
+    manifest["nand"] = parallel_nand
+
+    assert load_manifest(runtime_manifest_path, manifest)["nand"] == parallel_nand
+
+
+@pytest.mark.parametrize(
+    ("changed_fields", "message"),
+    [
+        pytest.param({"interface": "mmc"}, "interface must be spi or parallel", id="interface"),
+        pytest.param(
+            {"interface": "spi"}, "full NAND layout requires the parallel interface", id="spi"
+        ),
+        pytest.param(
+            {"block_count": True}, "block_count must be an integer", id="boolean-block-count"
+        ),
+        pytest.param(
+            {"oob_bytes": 128}, "raw_page_bytes must equal page_main_bytes", id="page-total"
+        ),
+        pytest.param(
+            {"page_main_bytes": 960, "oob_bytes": 128},
+            "page_main_bytes disagrees with its ums9117-bch12 format",
+            id="ecc-layout",
+        ),
+    ],
+)
+def test_rejects_inconsistent_runtime_nand_declaration(
+    runtime_manifest_path: Path,
+    parallel_nand: dict[str, Any],
+    changed_fields: dict[str, object],
+    message: str,
+) -> None:
+    manifest = runtime_manifest()
+    manifest["nand"] = {**parallel_nand, **changed_fields}
+
+    with pytest.raises(SystemExit, match=message):
+        load_manifest(runtime_manifest_path, manifest)
+
+
+def test_rejects_runtime_parallel_reader_without_its_full_layout(
+    runtime_manifest_path: Path, parallel_nand: dict[str, Any]
+) -> None:
+    manifest = runtime_manifest()
+    del parallel_nand["pages_per_block"]
+    manifest["nand"] = parallel_nand
+
+    with pytest.raises(SystemExit, match="parallel interface requires a complete NAND layout"):
+        load_manifest(runtime_manifest_path, manifest)
 
 
 @pytest.fixture

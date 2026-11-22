@@ -461,10 +461,10 @@ def test_dump_missing_contradicting_or_unsupported_geometry_is_refused(
         pytest.param(
             {"target": "demo-phone"}, "belongs to another phone target", id="other-target"
         ),
-        pytest.param({"id_bytes": "ecba"}, "expected id_bytes=98ba", id="other-chip"),
+        pytest.param({"id_bytes": "ecba"}, "reported id_bytes=ecba", id="other-chip"),
         pytest.param(
             {"page_main_bytes": 2048, "oob_bytes": 128, "block_count": 1024},
-            "expected id_bytes=98ba",
+            "reported id_bytes=98ba with 2176-byte pages",
             id="same-size-spi-geometry",
         ),
         pytest.param({"sha256": "f" * 64}, "describes different backup bytes", id="wrong-digest"),
@@ -508,12 +508,26 @@ def test_konrow_physical_dump_requires_matching_receipt(
             headfree_headphones_only=False,
         ),
         preparation_recipe=None,
-        nand={"id": 0xBA98, "raw_page_bytes": 1088} if receipt_changes is None else None,
+        nand={
+            "interface": "parallel",
+            "id": 0xBA98,
+            "raw_page_bytes": 1088,
+            "page_main_bytes": 1024,
+            "oob_bytes": 64,
+            "pages_per_block": 64,
+            "block_count": 2048,
+        },
     )
 
     if error is not None:
+        saved = tmp_path / "saved.bin"
+        saved.write_bytes(b"previous backup")
         with pytest.raises(SystemExit, match=error):
-            prepare.read_physical_nand(spec, backup, prepare.DeviceDataTools())
+            prepare.import_phone_backup(
+                spec, prepare.DeviceDataTools(), backup, saved, acquisition_recipe="b" * 64
+            )
+        assert saved.read_bytes() == b"previous backup"
+        assert not saved.with_suffix(".bin.json").exists()
         return
 
     nand = prepare.read_physical_nand(spec, backup, prepare.DeviceDataTools())

@@ -264,10 +264,7 @@ def _read_backup(  # noqa: PLR0913 -- NAND output and optional phone feedback ha
             lambda: connection,
             output or data / "nand.bin",
             target=runtime["target"],
-            acquisition_recipe=nand["acquisition_recipe"],
-            raw_device=nand["raw_device"],
-            declared_id=nand.get("id"),
-            declared_raw_page_bytes=nand.get("raw_page_bytes"),
+            nand=nand,
             progress=progress,
         )
     log.message(f"Backup saved: {backup}")
@@ -276,7 +273,7 @@ def _read_backup(  # noqa: PLR0913 -- NAND output and optional phone feedback ha
 
 def _verify_reader_backup(
     connection: tuple[Any, dict[str, Any]],
-    raw_device: str,
+    nand: dict[str, Any],
     expected: NandGeometry,
     log: RunLog,
     *,
@@ -288,7 +285,7 @@ def _verify_reader_backup(
     transport, session = connection
     with log.capture():
         observed = parse_geometry_report(
-            read_geometry_report(transport, session, raw_device), target=target
+            read_geometry_report(transport, session, nand["raw_device"]), target=target, nand=nand
         )
     if replace_fields(observed, chip=expected.chip) != expected:
         fail(
@@ -461,7 +458,7 @@ def prepare_phone_data(  # noqa: PLR0913 -- preparation inputs and their state o
         elif record is not None and retain_reader and connection is not None:
             _verify_reader_backup(
                 connection,
-                runtime["nand"]["raw_device"],
+                runtime["nand"],
                 record.geometry,
                 log,
                 target=runtime["target"],

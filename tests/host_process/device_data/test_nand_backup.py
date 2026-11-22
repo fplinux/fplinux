@@ -122,8 +122,10 @@ class NandBackupSshStreamTests:
                 lambda: (ssh_transport, nand_ssh_case.session),
                 destination,
                 target="nokia-ta1618",
-                acquisition_recipe="a" * 64,
-                raw_device="/dev/ums9117-nand-raw",
+                nand={
+                    "acquisition_recipe": "a" * 64,
+                    "raw_device": "/dev/ums9117-nand-raw",
+                },
             )
 
         assert (destination.read_bytes()) == (b"previous raw image")
@@ -151,8 +153,10 @@ class NandBackupSshStreamTests:
                 lambda: (ssh_transport, nand_ssh_case.session),
                 destination,
                 target="nokia-ta1618",
-                acquisition_recipe="a" * 64,
-                raw_device="/dev/ums9117-nand-raw",
+                nand={
+                    "acquisition_recipe": "a" * 64,
+                    "raw_device": "/dev/ums9117-nand-raw",
+                },
             )
 
         assert not (destination.exists())
@@ -185,8 +189,10 @@ class NandBackupSshStreamTests:
                 lambda: (ssh_transport, nand_ssh_case.session),
                 destination,
                 target="inoi-244-modern-4g",
-                acquisition_recipe="a" * 64,
-                raw_device="/dev/ums9117-nand-raw",
+                nand={
+                    "acquisition_recipe": "a" * 64,
+                    "raw_device": "/dev/ums9117-nand-raw",
+                },
             )
 
         assert (destination.read_bytes()) == (b"previous complete image")

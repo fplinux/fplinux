@@ -106,6 +106,17 @@ PARALLEL_GEOMETRY = (
     "raw_bytes=142606336\n"
     "geometry_source=parallel\n"
 )
+SPI_READER = {"raw_device": "/dev/ums9117-nand-raw", "acquisition_recipe": "a" * 64}
+PARALLEL_READER = {
+    **SPI_READER,
+    "interface": "parallel",
+    "id": 0xBA98,
+    "raw_page_bytes": 1088,
+    "page_main_bytes": 1024,
+    "oob_bytes": 64,
+    "pages_per_block": 64,
+    "block_count": 2048,
+}
 
 
 class FakePhone:
@@ -158,8 +169,7 @@ class NandDestination:
         phone: FakePhone,
         *,
         target: str = "demo-phone",
-        declared_id: int | None = None,
-        declared_raw_page_bytes: int | None = None,
+        declaration: dict[str, Any] | None = None,
     ) -> str:
         """Publish a controlled phone stream to this case's local backup destination."""
         with contextlib.redirect_stdout(io.StringIO()) as stdout:
@@ -167,10 +177,7 @@ class NandDestination:
                 lambda: (phone, {"session_id": "selected"}),
                 self.destination,
                 target=target,
-                acquisition_recipe="a" * 64,
-                raw_device="/dev/ums9117-nand-raw",
-                declared_id=declared_id,
-                declared_raw_page_bytes=declared_raw_page_bytes,
+                nand=SPI_READER if declaration is None else {**SPI_READER, **declaration},
             )
         return stdout.getvalue()
 
@@ -197,7 +204,7 @@ class NandBackupTests:
     def test_parallel_geometry_reports_the_layout_without_spi_features(self) -> None:
         """The raw reader's parallel report supplies the backup layout."""
         assert parse_geometry_report(
-            PARALLEL_GEOMETRY, target="konrow-senior-280-plus"
+            PARALLEL_GEOMETRY, target="parallel-phone", nand=PARALLEL_READER
         ) == NandGeometry(
             id_bytes="98ba",
             chip="parallel-nand",
@@ -217,7 +224,7 @@ class NandBackupTests:
         with pytest.raises(
             SystemExit, match="parallel NAND geometry report contains SPI features"
         ):
-            parse_geometry_report(report, target="konrow-senior-280-plus")
+            parse_geometry_report(report, target="parallel-phone", nand=PARALLEL_READER)
 
     def test_parallel_backup_uses_physical_records(
         self, nand_destination: NandDestination
@@ -228,44 +235,66 @@ class NandBackupTests:
         with pytest.raises(SystemExit, match="incomplete raw NAND image"):
             nand_destination.backup(
                 phone,
-                target="konrow-senior-280-plus",
-                declared_id=0xBA98,
-                declared_raw_page_bytes=1088,
+                target="parallel-phone",
+                declaration=PARALLEL_READER,
             )
 
         assert phone.raw_reads() == ["exec dd if=/dev/ums9117-nand-raw bs=32640"]
         assert not nand_destination.destination.exists()
 
     @pytest.mark.parametrize(
-        ("target", "report"),
-        [("demo-phone", PARALLEL_GEOMETRY), ("konrow-senior-280-plus", ONE_PAGE_64_OOB)],
+        ("nand", "report"),
+        [(SPI_READER, PARALLEL_GEOMETRY), (PARALLEL_READER, ONE_PAGE_64_OOB)],
     )
     def test_backup_refuses_geometry_from_the_wrong_reader(
-        self, nand_destination: NandDestination, target: str, report: str
+        self, nand_destination: NandDestination, nand: dict[str, Any], report: str
     ) -> None:
         """A valid report for another reader cannot trigger streaming."""
         phone = FakePhone(report, b"unreachable array bytes")
 
         with pytest.raises(SystemExit, match="does not match target"):
-            nand_destination.backup(phone, target=target)
+            nand_destination.backup(phone, declaration=nand)
 
         assert phone.raw_reads() == []
+        assert not nand_destination.destination.exists()
+        assert not nand_destination.receipt.exists()
 
-    def test_parallel_backup_refuses_a_short_candidate_layout(
-        self, nand_destination: NandDestination
+    @pytest.mark.parametrize(
+        ("report", "message"),
+        [
+            pytest.param(
+                PARALLEL_GEOMETRY.replace("id_bytes=98ba", "id_bytes=ecba"),
+                "reported id_bytes=ecba",
+                id="other-chip",
+            ),
+            pytest.param(
+                PARALLEL_GEOMETRY.replace("block_count=2048", "block_count=1024").replace(
+                    "raw_bytes=142606336", "raw_bytes=71303168"
+                ),
+                "unsupported NAND geometry for parallel-phone",
+                id="missing-high-rows",
+            ),
+            pytest.param(
+                PARALLEL_GEOMETRY.replace("page_main_bytes=1024", "page_main_bytes=960").replace(
+                    "oob_bytes=64", "oob_bytes=128"
+                ),
+                "unsupported NAND geometry for parallel-phone",
+                id="same-size-different-main-and-oob",
+            ),
+        ],
+    )
+    def test_parallel_backup_refuses_a_mismatched_declared_geometry(
+        self, nand_destination: NandDestination, report: str, message: str
     ) -> None:
-        """A self-consistent report missing the high rows cannot trigger streaming."""
-        report = PARALLEL_GEOMETRY.replace("block_count=2048", "block_count=1024").replace(
-            "raw_bytes=142606336", "raw_bytes=71303168"
-        )
+        """A self-consistent report for a different chip layout cannot trigger streaming."""
         phone = FakePhone(report, b"unreachable array bytes")
 
-        with pytest.raises(
-            SystemExit, match="unsupported NAND geometry for konrow-senior-280-plus"
-        ):
-            nand_destination.backup(phone, target="konrow-senior-280-plus")
+        with pytest.raises(SystemExit, match=message):
+            nand_destination.backup(phone, target="parallel-phone", declaration=PARALLEL_READER)
 
         assert phone.raw_reads() == []
+        assert not nand_destination.destination.exists()
+        assert not nand_destination.receipt.exists()
 
     def test_parallel_identification_without_geometry_refuses_array_reads(
         self, nand_destination: NandDestination
@@ -274,7 +303,7 @@ class NandBackupTests:
         phone = FakePhone(PARALLEL_IDENTIFICATION, b"unreachable array bytes")
 
         with pytest.raises(SystemExit) as error:
-            nand_destination.backup(phone)
+            nand_destination.backup(phone, declaration=PARALLEL_READER)
 
         assert str(error.value) == (
             "fplinux: the running kernel does not identify this NAND chip: "
@@ -289,7 +318,7 @@ class NandBackupTests:
         report = ONE_PAGE_64_OOB.partition("feature_a0=")[0]
 
         with pytest.raises(SystemExit, match="lacks: feature_a0, feature_b0, feature_c0"):
-            parse_geometry_report(report, target="demo-phone")
+            parse_geometry_report(report, target="demo-phone", nand=SPI_READER)
 
     @pytest.mark.parametrize("complete", [True, False])
     def test_backup_progress_completes_only_after_checked_publication(
@@ -311,8 +340,7 @@ class NandBackupTests:
                 lambda: (phone, {"session_id": "selected"}),
                 nand_destination.destination,
                 target="demo-phone",
-                acquisition_recipe="a" * 64,
-                raw_device="/dev/ums9117-nand-raw",
+                nand=SPI_READER,
                 progress=progress,
             )
 
@@ -334,7 +362,7 @@ class NandBackupTests:
         payload = bytes(range(256)) * 8 + b"O" * 128
         phone = FakePhone(ONE_PAGE_128_OOB, payload)
 
-        output = nand_destination.backup(phone, declared_id=0xB1A1, declared_raw_page_bytes=2176)
+        output = nand_destination.backup(phone, declaration={"id": 0xB1A1, "raw_page_bytes": 2176})
 
         digest = hashlib.sha256(payload).hexdigest()
         assert (nand_destination.destination.read_bytes()) == (payload)
@@ -497,8 +525,7 @@ class NandBackupTests:
         ):
             nand_destination.backup(
                 phone,
-                declared_id=declared_id,
-                declared_raw_page_bytes=declared_raw_page_bytes,
+                declaration={"id": declared_id, "raw_page_bytes": declared_raw_page_bytes},
             )
         assert phone.raw_reads() == []
         assert not nand_destination.destination.exists()
@@ -548,8 +575,7 @@ class NandBackupTests:
                 connect,
                 missing_parent,
                 target="demo-phone",
-                acquisition_recipe="a" * 64,
-                raw_device="/dev/ums9117-nand-raw",
+                nand=SPI_READER,
             )
 
         connect.assert_not_called()
@@ -786,8 +812,7 @@ class BackupReceiptTests:
                 lambda: (FakePhone(ONE_PAGE_64_OOB, payload), {}),
                 backup_receipt.backup,
                 target="demo-phone",
-                acquisition_recipe="a" * 64,
-                raw_device="/dev/ums9117-nand-raw",
+                nand=SPI_READER,
             )
 
         assert (nand_backup.read_backup_geometry(backup_receipt.backup, payload)) == (

@@ -17,15 +17,14 @@ from fplinux_cli.device_data.nand_backup import (
 )
 from fplinux_cli.device_data.nand_geometry import (
     GEOMETRY_SIZE_KEYS,
-    KONROW_NAND_TARGET,
     NandGeometry,
+    nand_interface,
     require_consistent_geometry,
-    require_declared_chip,
-    require_konrow_geometry,
+    require_declared_geometry,
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Mapping
     from pathlib import Path
     from typing import Any, BinaryIO
 
@@ -64,8 +63,8 @@ class SshTransport(Protocol):
 type SessionFactory = Callable[[], tuple[SshTransport, dict[str, Any]]]
 
 
-def parse_geometry_report(report: str, *, target: str) -> NandGeometry:
-    """Admit an identified chip and its physical layout for the selected target."""
+def parse_geometry_report(report: str, *, target: str, nand: Mapping[str, Any]) -> NandGeometry:
+    """Read the reported geometry after admitting the selected interface."""
     values: dict[str, str] = {}
     for line in report.splitlines():
         key, separator, value = line.partition("=")
@@ -95,7 +94,8 @@ def parse_geometry_report(report: str, *, target: str) -> NandGeometry:
         fail(f"NAND geometry report lacks: {', '.join(_SPI_FEATURE_KEYS)}")
     if source not in {"dt", "table", "parallel"}:
         fail(f"NAND geometry report has an invalid geometry_source: {source}")
-    if (source == "parallel") != (target == KONROW_NAND_TARGET):
+    interface = "parallel" if source == "parallel" else "spi"
+    if interface != nand_interface(nand):
         fail(f"NAND geometry report source {source!r} does not match target {target}")
     for key in GEOMETRY_SIZE_KEYS:
         if _DECIMAL.fullmatch(values[key]) is None:
@@ -109,13 +109,7 @@ def parse_geometry_report(report: str, *, target: str) -> NandGeometry:
         block_count=int(values["block_count"]),
         raw_bytes=int(values["raw_bytes"]),
     )
-    require_consistent_geometry(geometry, "NAND geometry report")
-    if source == "parallel":
-        try:
-            require_konrow_geometry(geometry)
-        except ValueError as error:
-            fail(str(error))
-    return geometry
+    return require_consistent_geometry(geometry, "NAND geometry report")
 
 
 def read_geometry_report(ssh: SshTransport, session: dict[str, Any], raw_device: str) -> str:
@@ -138,28 +132,23 @@ def read_geometry_report(ssh: SshTransport, session: dict[str, Any], raw_device:
         fail("NAND geometry report is not ASCII text")
 
 
-def backup_nand(  # noqa: PLR0913 -- the reader and the declared chip are distinct inputs.
+def backup_nand(
     connect: SessionFactory,
     output: Path,
     *,
     target: str,
-    acquisition_recipe: str,
-    raw_device: str,
-    declared_id: int | None = None,
-    declared_raw_page_bytes: int | None = None,
+    nand: Mapping[str, Any],
     progress: Callable[[int, int], None] | None = None,
 ) -> Path:
     """Acquire one exact session and publish a complete physical NAND image and its receipt."""
+    acquisition_recipe = nand["acquisition_recipe"]
+    raw_device = nand["raw_device"]
     require_backup_destination(output, acquisition_recipe)
     ssh, session = connect()
-    geometry = parse_geometry_report(read_geometry_report(ssh, session, raw_device), target=target)
-    require_declared_chip(
-        geometry,
-        target=target,
-        declared_id=declared_id,
-        declared_raw_page_bytes=declared_raw_page_bytes,
-        source="the phone's NAND",
+    geometry = parse_geometry_report(
+        read_geometry_report(ssh, session, raw_device), target=target, nand=nand
     )
+    require_declared_geometry(geometry, target=target, nand=nand, source="the phone's NAND")
     read_batch_bytes = 30 * geometry.raw_page_bytes
 
     def read_progress(completed: int) -> None:

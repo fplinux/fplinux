@@ -223,10 +223,11 @@ def test_manual_nand_backup_preserves_user_display_and_writes_actual_reader_byte
     [
         ("canonical", False, "e521"),
         ("explicit", False, "e521"),
+        ("explicit-without-receipt", False, "e521"),
         ("canonical", True, "e521"),
         ("canonical", True, "c881"),
     ],
-    ids=["saved-ram", "imported-ram", "saved-card", "different-card-nand"],
+    ids=["saved-ram", "imported-ram", "old-spi-dump", "saved-card", "different-card-nand"],
 )
 def test_saved_backup_reconnects_reader_before_extraction_and_preserves_failed_preparation(
     saved_backup_workspace: Path,
@@ -266,6 +267,8 @@ def test_saved_backup_reconnects_reader_before_extraction_and_preserves_failed_p
         ),
         encoding="utf-8",
     )
+    if saved_input == "explicit-without-receipt":
+        saved.with_name(f"{saved.name}.json").unlink()
     from_dump = None if saved_input == "canonical" else saved
     phases: list[str] = []
     extraction_phases: list[str] = []
@@ -427,6 +430,12 @@ def test_saved_backup_reconnects_reader_before_extraction_and_preserves_failed_p
         assert reader_used is True
     finally:
         log.close("success")
+    if saved_input == "explicit-without-receipt":
+        receipt = json.loads((store / "nand.bin.json").read_text(encoding="utf-8"))
+        assert receipt["id_bytes"] == "e521"
+        assert receipt["sha256"] == digest
+        assert receipt["target"] == "phone"
+        assert receipt["acquisition_recipe"] == "a" * 64
 
     assert extraction_phases == ["extracting", "extracting"]
     expected_phases = ["waiting", "extracting", "error", "waiting", "extracting"]

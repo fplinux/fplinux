@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import copy
+import hashlib
+import json
 import struct
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
@@ -11,6 +13,7 @@ from typing import TYPE_CHECKING, Any
 import pytest
 from fplinux_cli.build.phone_data import acquisition_recipe, preparation_recipe
 from fplinux_cli.build.runtime import preparation_source_files, runtime_source_files
+from fplinux_cli.device_data.nand_backup import current_backup
 
 from tests.fdt import binary_tree
 
@@ -198,6 +201,64 @@ def test_live_reader_changes_invalidate_acquisition_without_changing_saved_prepa
 
     assert phone_data_inputs.acquisition() != acquisition
     assert phone_data_inputs.preparation() == preparation
+
+
+def test_parallel_backup_reuse_tracks_changes_to_the_declared_layout(
+    phone_data_inputs: PhoneDataInputs, tmp_path: Path
+) -> None:
+    """A complete saved image remains a hit until the reader's declared layout changes."""
+    inputs = phone_data_inputs
+    inputs.dtb.write_bytes(nand_tree(compatible=b"fplinux,ums9117-nandc-parallel-ro\0"))
+    declaration = {
+        "raw_device": "/dev/nand-raw",
+        "interface": "parallel",
+        "id": 0xBA98,
+        "raw_page_bytes": 1088,
+        "page_main_bytes": 1024,
+        "oob_bytes": 64,
+        "pages_per_block": 2,
+        "block_count": 2,
+    }
+    inputs.config["nand"] = declaration.copy()
+    raw = b"P" * 4352
+    backup = tmp_path / "nand.bin"
+    backup.write_bytes(raw)
+    original_recipe = inputs.acquisition()
+    backup.with_name("nand.bin.json").write_text(
+        json.dumps(
+            {
+                "id_bytes": "98ba",
+                "chip": "parallel-nand",
+                "page_main_bytes": 1024,
+                "oob_bytes": 64,
+                "pages_per_block": 2,
+                "block_count": 2,
+                "raw_bytes": 4352,
+                "sha256": hashlib.sha256(raw).hexdigest(),
+                "target": "phone",
+                "acquisition_recipe": original_recipe,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    def saved_backup() -> object:
+        nand = {**inputs.config["nand"], "acquisition_recipe": inputs.acquisition()}
+        return current_backup(backup, target="phone", nand=nand)
+
+    original = saved_backup()
+    assert original is not None
+    inputs.dtb.write_bytes(
+        nand_tree(display=200, compatible=b"fplinux,ums9117-nandc-parallel-ro\0")
+    )
+    assert saved_backup() == original
+    inputs.config["nand"]["block_count"] = 4
+    assert inputs.acquisition() != original_recipe
+    assert saved_backup() is None
+    new_layout_with_old_recipe = {**inputs.config["nand"], "acquisition_recipe": original_recipe}
+    assert current_backup(backup, target="phone", nand=new_layout_with_old_recipe) is None
+    inputs.config["nand"] = declaration
+    assert saved_backup() == original
 
 
 @pytest.mark.parametrize(
