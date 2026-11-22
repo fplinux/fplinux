@@ -21,7 +21,7 @@ def load_release(target: str, *, bundle_packages: Sequence[str] = ()) -> dict[st
         fail(f"target release manifest is missing or invalid: {path}")
     manifest = exact_table(
         {"publish": True, **load_toml(path)},
-        {"publish", "image", "bundle_files", "runtime_files", "documents"},
+        {"publish", "image", "bundle_files", "documents"},
         f"target {target} release manifest",
     )
     publish = manifest["publish"]
@@ -29,12 +29,9 @@ def load_release(target: str, *, bundle_packages: Sequence[str] = ()) -> dict[st
         fail("release manifest publish must be a boolean")
     image = relative_value(manifest.get("image"), "release manifest image")
     bundle_files = path_array(manifest.get("bundle_files"), "release bundle_files")
-    runtime_files = path_array(manifest.get("runtime_files"), "release runtime_files")
     documents = path_array(manifest.get("documents"), "release documents", allow_empty=True)
-    if image not in runtime_files:
-        fail("release manifest image must be a runtime file")
-    if not set(runtime_files).issubset(bundle_files):
-        fail("release runtime files must be bundle files")
+    if image not in bundle_files:
+        fail("release manifest image must be a bundle file")
     if any(relative.startswith("apks/") for relative in bundle_files):
         fail("release APK files must come from the resolved bundle package set")
     apk_files = path_array(
@@ -48,6 +45,5 @@ def load_release(target: str, *, bundle_packages: Sequence[str] = ()) -> dict[st
         "publish": publish,
         "image": image,
         "bundle_files": bundle_files,
-        "runtime_files": runtime_files,
         "documents": documents,
     }

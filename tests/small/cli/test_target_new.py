@@ -122,7 +122,7 @@ class NewTargetTests:
         with pytest.raises(SystemExit, match="does not support profile microsd-uboot"):
             targets.load_target("hammer-horizon-lte", "microsd-uboot")
         release = package.load_release_manifest("hammer-horizon-lte", config)
-        assert ("assets/t117_fdl1.bin") in (release["runtime_files"])
+        assert "assets/t117_fdl1.bin" in release["bundle_files"]
         assert not (target_checkout.targets / "hammer-horizon-lte/README.md").exists()
 
         lines = printed.splitlines()

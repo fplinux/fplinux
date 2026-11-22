@@ -32,6 +32,13 @@ class ReleaseInputs:
     release_manifest: dict[str, Any]
     readme: Path
 
+    def write_manifest(self, manifest: dict[str, Any]) -> None:
+        """Write target-owned release fields in the parser's TOML input."""
+        (self.readme.parent / "manifest.toml").write_text(
+            "\n".join(f"{key} = {json.dumps(value)}" for key, value in manifest.items()) + "\n",
+            encoding="utf-8",
+        )
+
 
 @pytest.fixture
 def release_inputs(tmp_path: Path) -> ReleaseInputs:
@@ -60,14 +67,7 @@ def release_inputs(tmp_path: Path) -> ReleaseInputs:
             "assets/fdl1.bin",
             "host/keyboard",
             "runtime-manifest.json",
-            "apks/demo.apk",
             "assets.lock.toml",
-        ],
-        "runtime_files": [
-            "image/ramboot.bin",
-            "assets/fdl1.bin",
-            "host/keyboard",
-            "runtime-manifest.json",
         ],
         "documents": ["release/EXTRA.txt"],
     }
@@ -116,13 +116,9 @@ class ReleaseManifestPolicyTests:
         assert not (optional & set(rootfs))
         assert not (omitted & (set(rootfs) | set(bundle)))
         for package in optional:
-            path = f"apks/{package}.apk"
-            assert (path) in (manifest["bundle_files"])
-            assert (path) not in (manifest["runtime_files"])
+            assert f"apks/{package}.apk" in manifest["bundle_files"]
         for package in omitted:
-            path = f"apks/{package}.apk"
-            assert (path) not in (manifest["bundle_files"])
-            assert (path) not in (manifest["runtime_files"])
+            assert f"apks/{package}.apk" not in manifest["bundle_files"]
 
     def test_target_release_paths_preserve_bytes_and_reject_symlinks(
         self, release_inputs: ReleaseInputs
@@ -168,19 +164,7 @@ class ReleaseManifestPolicyTests:
         release_inputs: ReleaseInputs,
     ) -> None:
         """Selected APKs extend the target's release contents without changing its runtime."""
-        source_manifest = {
-            **release_inputs.release_manifest,
-            "bundle_files": [
-                relative
-                for relative in release_inputs.release_manifest["bundle_files"]
-                if not relative.startswith("apks/")
-            ],
-        }
-        (release_inputs.readme.parent / "manifest.toml").write_text(
-            "\n".join(f"{key} = {json.dumps(value)}" for key, value in source_manifest.items())
-            + "\n",
-            encoding="utf-8",
-        )
+        release_inputs.write_manifest(release_inputs.release_manifest)
         with mock.patch.object(common, "ROOT", release_inputs.root):
             release = releases.load_release(
                 release_inputs.target, bundle_packages=("demo", "board-extra")
@@ -198,27 +182,14 @@ class ReleaseManifestPolicyTests:
             "apks/Packages.adb",
             "apks/fplinux-build.rsa.pub",
         ]
-        assert release["runtime_files"] == release_inputs.release_manifest["runtime_files"]
         assert release["documents"] == ["release/EXTRA.txt"]
-        assert no_optional_apks["bundle_files"] == source_manifest["bundle_files"]
+        assert no_optional_apks["bundle_files"] == release_inputs.release_manifest["bundle_files"]
 
     def test_archive_manifest_retains_preinstalled_applications_and_runtime_apks(
         self, release_inputs: ReleaseInputs
     ) -> None:
         """Installing a default app keeps its APK and dependencies in the archive."""
-        source_manifest = {
-            **release_inputs.release_manifest,
-            "bundle_files": [
-                relative
-                for relative in release_inputs.release_manifest["bundle_files"]
-                if not relative.startswith("apks/")
-            ],
-        }
-        (release_inputs.readme.parent / "manifest.toml").write_text(
-            "\n".join(f"{key} = {json.dumps(value)}" for key, value in source_manifest.items())
-            + "\n",
-            encoding="utf-8",
-        )
+        release_inputs.write_manifest(release_inputs.release_manifest)
         lock = {
             "runtime": {
                 "packages": ["base-1-r0.apk"],
@@ -241,7 +212,7 @@ class ReleaseManifestPolicyTests:
             installed = package_commands.load_release_manifest(release_inputs.target, profile)
 
         expected_bundle_files = [
-            *source_manifest["bundle_files"],
+            *release_inputs.release_manifest["bundle_files"],
             "apks/demo.apk",
             "apks/feature-runtime.apk",
             "apks/Packages.adb",
@@ -249,20 +220,15 @@ class ReleaseManifestPolicyTests:
         ]
         for manifest in (optional, installed):
             assert manifest["bundle_files"] == expected_bundle_files
-            assert manifest["runtime_files"] == source_manifest["runtime_files"]
-            assert manifest["documents"] == source_manifest["documents"]
+            assert manifest["documents"] == ["release/EXTRA.txt"]
 
     def test_release_manifest_rejects_a_second_apk_inventory(
         self, release_inputs: ReleaseInputs
     ) -> None:
         """A target release cannot replace the bundle package owner's optional APK set."""
-        (release_inputs.readme.parent / "manifest.toml").write_text(
-            "\n".join(
-                f"{key} = {json.dumps(value)}"
-                for key, value in release_inputs.release_manifest.items()
-            )
-            + "\n",
-            encoding="utf-8",
+        manifest = release_inputs.release_manifest
+        release_inputs.write_manifest(
+            {**manifest, "bundle_files": [*manifest["bundle_files"], "apks/demo.apk"]}
         )
         with (
             mock.patch.object(common, "ROOT", release_inputs.root),
@@ -276,16 +242,14 @@ class ReleaseManifestPolicyTests:
         """Target files cannot replace the required shared legal notice."""
         duplicate = release_inputs.readme.parent / "LICENSE"
         duplicate.write_bytes(b"different notice\n")
-        manifest = {
-            **release_inputs.release_manifest,
-            "documents": [
-                "release/EXTRA.txt",
-                "release/LICENSE",
-            ],
-        }
+        release_inputs.write_manifest(
+            {
+                **release_inputs.release_manifest,
+                "documents": ["release/EXTRA.txt", "release/LICENSE"],
+            }
+        )
         with (
             mock.patch.object(common, "ROOT", release_inputs.root),
-            mock.patch.object(releases, "load_release", return_value=manifest),
             mock.patch.object(platforms, "load_platform", return_value=release_inputs.platform),
             pytest.raises(SystemExit, match="duplicate release archive path"),
         ):
@@ -300,18 +264,11 @@ class ReleaseManifestPolicyTests:
         feature = release_inputs.root / "targets" / release_inputs.target / "features/MICROSD.md"
         feature.parent.mkdir(parents=True)
         feature.write_bytes(b"phone microSD procedures\n")
-        manifest = {
-            **release_inputs.release_manifest,
-            "bundle_files": [
-                relative
-                for relative in release_inputs.release_manifest["bundle_files"]
-                if not relative.startswith("apks/")
-            ],
-            "documents": ["release/EXTRA.txt", "features/MICROSD.md"],
-        }
-        (release_inputs.readme.parent / "manifest.toml").write_text(
-            "\n".join(f"{key} = {json.dumps(value)}" for key, value in manifest.items()) + "\n",
-            encoding="utf-8",
+        release_inputs.write_manifest(
+            {
+                **release_inputs.release_manifest,
+                "documents": ["release/EXTRA.txt", "features/MICROSD.md"],
+            }
         )
         with (
             mock.patch.object(common, "ROOT", release_inputs.root),
@@ -322,43 +279,33 @@ class ReleaseManifestPolicyTests:
                 release_inputs.target, release_inputs.target_config
             )
 
-    def test_release_contract_requires_the_runtime_manifest(
+    def test_release_manifest_rejects_an_image_outside_the_bundle(
         self, release_inputs: ReleaseInputs
     ) -> None:
-        """The runtime manifest supplies the built closure independently of release files."""
-        broken = {
-            **release_inputs.release_manifest,
-            "runtime_files": [
-                path
-                for path in release_inputs.release_manifest["runtime_files"]
-                if path != "runtime-manifest.json"
-            ],
-        }
+        """The target's declared image must also appear in its bundle files."""
+        release_inputs.write_manifest(
+            {**release_inputs.release_manifest, "image": "image/other.bin"}
+        )
         with (
             mock.patch.object(common, "ROOT", release_inputs.root),
-            mock.patch.object(releases, "load_release", return_value=broken),
-            mock.patch.object(platforms, "load_platform", return_value=release_inputs.platform),
-            pytest.raises(SystemExit, match="omit required runtime inputs"),
+            pytest.raises(SystemExit, match="image must be a bundle file"),
         ):
-            package_commands.load_release_manifest(
-                release_inputs.target, release_inputs.target_config
-            )
+            releases.load_release(release_inputs.target)
 
-    def test_release_contract_requires_runner_tools(self, release_inputs: ReleaseInputs) -> None:
-        """Release validation rejects a bundle missing a required runner tool."""
-        without_runner_tool = {
-            **release_inputs.release_manifest,
-            "runtime_files": [
-                path
-                for path in release_inputs.release_manifest["runtime_files"]
-                if path != "host/keyboard"
-            ],
-        }
+    @pytest.mark.parametrize(
+        "member", ["runtime-manifest.json", "assets/fdl1.bin", "host/keyboard"]
+    )
+    def test_package_rejects_an_undeclared_runtime_member(
+        self, release_inputs: ReleaseInputs, member: str
+    ) -> None:
+        """The bundle declaration must include each required runtime input."""
+        manifest = release_inputs.release_manifest
+        bundle_files = [path for path in manifest["bundle_files"] if path != member]
+        release_inputs.write_manifest({**manifest, "bundle_files": bundle_files})
         with (
             mock.patch.object(common, "ROOT", release_inputs.root),
-            mock.patch.object(releases, "load_release", return_value=without_runner_tool),
             mock.patch.object(platforms, "load_platform", return_value=release_inputs.platform),
-            pytest.raises(SystemExit, match="omit required runtime inputs"),
+            pytest.raises(SystemExit, match=f"omit required runtime inputs: {member}"),
         ):
             package_commands.load_release_manifest(
                 release_inputs.target, release_inputs.target_config

@@ -1,5 +1,4 @@
 publish = false
 image = "linux.bin"
-bundle_files = ["z.apk", "a.apk"]
-runtime_files = ["z.bin", "a.bin"]
+bundle_files = ["z.bin", "linux.bin", "a.bin"]
 documents = ["z.md", "a.md"]

@@ -32,17 +32,6 @@ SHARED_PACKAGE_FILES = {
 }
 
 
-def distribution_record(archive: Path, manifest: dict[str, Any], host: str) -> dict[str, str]:
-    """Bind a final runtime archive to its phone and exact kernel identity."""
-    return {
-        "archive": archive.name,
-        "target": manifest["target"],
-        "host": host,
-        "identity": manifest["device_identity"],
-        "sha256": sha256_file(archive),
-    }
-
-
 def finalize_checksums(files: dict[str, bytes]) -> None:
     """Replace the complete member checksum list after the payload is final."""
     files["SHA256SUMS"] = "".join(
@@ -112,10 +101,8 @@ def load_release_manifest(target: str, config: dict[str, Any]) -> dict[str, Any]
     manifest = releases.load_release(target, bundle_packages=bundle_apk_packages)
     image = manifest["image"]
     bundle_files = manifest["bundle_files"]
-    runtime_files = manifest["runtime_files"]
     if config.get("linux", {}).get("root", {}).get("kind") == "initramfs":
         bundle_files = [*bundle_files, "device-data.cpio"]
-        runtime_files = [*runtime_files, "device-data.cpio"]
     documents = manifest["documents"]
     archive_names = set(bundle_files)
     if "README.txt" in archive_names:
@@ -139,12 +126,11 @@ def load_release_manifest(target: str, config: dict[str, Any]) -> dict[str, Any]
         *config["runtime"]["assets"].values(),
         *executables,
     }
-    if not required_runtime.issubset(runtime_files):
-        fail("release runtime files omit required runtime inputs")
+    if missing := required_runtime.difference(bundle_files):
+        fail(f"release bundle files omit required runtime inputs: {', '.join(sorted(missing))}")
     return {
         "image": image,
         "bundle_files": bundle_files,
-        "runtime_files": runtime_files,
         "documents": documents,
     }
 

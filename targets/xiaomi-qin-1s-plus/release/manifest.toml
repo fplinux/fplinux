@@ -10,12 +10,4 @@ bundle_files = [
   "assets.lock.toml",
   "THIRD_PARTY_NOTICES.md",
 ]
-runtime_files = [
-  "assets/fdl1.bin",
-  "assets/fdl2.bin",
-  "assets/sml.bin",
-  "image/ramboot.bin",
-  "host/spd_dump",
-  "runtime-manifest.json",
-]
 documents = []

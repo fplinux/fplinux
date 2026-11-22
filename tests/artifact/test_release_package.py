@@ -44,12 +44,24 @@ def test_release_preserves_optional_apps_documents_and_native_file_modes(
         payload["apks/fixture-runtime.apk"] == b"synthetic built file: apks/fixture-runtime.apk\n"
     )
     assert payload["image/ramboot.bin"] == (inputs.bundle / "image/ramboot.bin").read_bytes()
+    assert payload["assets/t117_fdl1.bin"] == (inputs.bundle / "assets/t117_fdl1.bin").read_bytes()
+    assert not {"Run.sh", "Run.cmd", "Run-debug.cmd"} & payload.keys()
     assert "device-data.cpio" not in payload
     assert b"BUILDER PERSONAL DATA MUST STAY PRIVATE" not in b"".join(files.values())
     assert "host/fplinux-usb-keyboard" not in payload
     assert "fplinux.py" in board["executables"]
     assert modes["fplinux.py"] == 0o100755
     assert modes["README.txt"] == 0o100644
+    runtime = json.loads(payload["runtime-manifest.json"])
+    assert runtime["image"] == "image/ramboot.bin"
+    checksums = dict(
+        line.split("  ")[::-1] for line in payload["SHA256SUMS"].decode().splitlines()
+    )
+    assert checksums == {
+        name: hashlib.sha256(data).hexdigest()
+        for name, data in payload.items()
+        if name != "SHA256SUMS"
+    }
     if host == "linux":
         assert board["executables"] == [
             "fplinux.py",
@@ -61,7 +73,12 @@ def test_release_preserves_optional_apps_documents_and_native_file_modes(
             "tools/linux/sftp",
         ]
         assert modes["Run.sh"] == 0o100755
+        assert b'"$fplinux_archive/runtime/bin/python3.15"' in files["Run.sh"]
+        assert payload["runtime/bin/python3.15"] == files["runtime/bin/python3.15"]
         assert modes["runtime/bin/python3.15"] == 0o100755
+        assert runtime["host_tools"] == {"loader": "host/spd_dump", "bridge": "host/libc_server"}
+        for relative in runtime["host_tools"].values():
+            assert payload[relative] == (inputs.bundle / relative).read_bytes()
         assert (
             payload["licenses/host-tools/Unlicense.txt"]
             == (inputs.root / "LICENSES/Unlicense.txt").read_bytes()
@@ -78,7 +95,15 @@ def test_release_preserves_optional_apps_documents_and_native_file_modes(
             "tools/spd_dump.exe",
         ]
         assert modes["Run.cmd"] == 0o100644
+        assert b'"%~dp0runtime\\python.exe"' in files["Run.cmd"]
+        assert payload["runtime/python.exe"] == files["runtime/python.exe"]
         assert modes["runtime/python.exe"] == 0o100755
+        assert runtime["host_tools"] == {
+            "loader": "tools/spd_dump.exe",
+            "bridge": "tools/libc_server.exe",
+        }
+    for relative in ("assets/t117_fdl1.bin", "image/ramboot.bin", *runtime["host_tools"].values()):
+        assert runtime["sha256"][relative] == hashlib.sha256(payload[relative]).hexdigest()
 
 
 def test_linux_release_includes_sftp_in_the_shared_runtime_and_manifests(
@@ -125,6 +150,19 @@ def test_release_rejects_mismatched_metadata_for_an_admitted_file(
     archive_inputs.manifest["files"]["image/ramboot.bin"]["size"] = 1
 
     with pytest.raises(SystemExit, match="release input differs"):
+        archive_inputs.package("linux")
+
+    assert not archive_inputs.output.exists()
+
+
+def test_release_rejects_a_missing_loader_in_the_selected_bundle(
+    archive_inputs: ArchiveInputs,
+) -> None:
+    (archive_inputs.bundle / "assets/t117_fdl1.bin").unlink()
+
+    with pytest.raises(
+        SystemExit, match=r"release input is missing or invalid: .*assets/t117_fdl1\.bin"
+    ):
         archive_inputs.package("linux")
 
     assert not archive_inputs.output.exists()
