@@ -18,11 +18,11 @@
 	.equ QIN_USB_GATE_DELAY_COUNT, 2000000
 	.equ QIN_USB_RESET_DELAY_COUNT, 1000000
 
-	.section .text.qin_prepare_kernel, "ax", %progbits
+	.section .text.sc9820e_target_prepare_kernel, "ax", %progbits
 	.p2align 2
-	.global qin_prepare_kernel
-	.type qin_prepare_kernel, %function
-qin_prepare_kernel:
+	.global sc9820e_target_prepare_kernel
+	.type sc9820e_target_prepare_kernel, %function
+sc9820e_target_prepare_kernel:
 	cpsid	if
 	mrs	r3, cpsr
 	and	r3, r3, #0x3f
@@ -38,7 +38,7 @@ qin_prepare_kernel:
 	pop	{r4, pc}
 .Linvalid_state:
 	b	.Linvalid_state
-	.size qin_prepare_kernel, . - qin_prepare_kernel
+	.size sc9820e_target_prepare_kernel, . - sc9820e_target_prepare_kernel
 
 .Lreset_usb:
 	push	{r4, r5, r6, lr}

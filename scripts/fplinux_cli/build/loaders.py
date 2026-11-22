@@ -3,12 +3,12 @@
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import shutil
 import struct
 import tarfile
 import tempfile
-import textwrap
 from dataclasses import asdict
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
@@ -29,7 +29,6 @@ if TYPE_CHECKING:
     from fplinux_cli.manifests.loaders import LoaderSource
 
 _RECEIPT_NAME = ".fplinux-loader-receipt.json"
-_LLVM = "/usr/lib/llvm23/bin/"
 _OUTPUTS = (
     "fdl1.bin",
     "fdl2.bin",
@@ -139,128 +138,17 @@ def _dhtb(payload: bytes) -> bytes:
     return bytes(header) + payload
 
 
-def _build_fdl1(source: Path, build: Path, *, sml_entry: int, jobs: int) -> None:
-    compiler = (
-        f"{_LLVM}clang --target=aarch64-none-elf -std=gnu89 "
-        "-Wno-int-conversion -Wno-error=return-mismatch "
-        f"-DCONFIG_QIN_RAM_SML_ENTRY=0x{sml_entry:x}"
-    )
-    make = [
-        "make",
-        f"O={build}",
-        f"CC={compiler}",
-        f"CPP={compiler} -E",
-        "LD=ld.lld",
-        f"AR={_LLVM}llvm-ar",
-        f"NM={_LLVM}llvm-nm",
-        f"OBJCOPY={_LLVM}llvm-objcopy",
-        f"OBJDUMP={_LLVM}llvm-objdump",
-        f"STRIP={_LLVM}llvm-strip",
-        "PLATFORM_RELFLAGS=-fno-common -mstrict-align",
-        "PLATFORM_LIBGCC=",
-    ]
-    process_build.run([*make, "sp9820e_1h10_config"], cwd=source)
-    process_build.run([*make, "-B", f"-j{jobs}", "fdl1"], cwd=source)
-
-
-def _build_fdl2(source: Path, build: Path, *, entry: int, jobs: int) -> None:
-    make = [
-        "make",
-        "-C",
-        str(source),
-        f"O={build}",
-        "ARCH=arm",
-        "CROSS_COMPILE=arm-none-eabi-",
-        "DTC=dtc",
-        f"KCFLAGS=-std=gnu89 -fmacro-prefix-map={source}=. -DCONFIG_QIN_RAM_ENTRY=0x{entry:x}",
-        "HOSTCFLAGS=-O2 -std=gnu89",
-    ]
-    process_build.run([*make, "sp9820e_1h10_defconfig"])
-    process_build.run(
-        [
-            *make,
-            "DEVICE_TREE=sp9820e_1h10",
-            f"-j{jobs}",
-            "u-boot.bin",
-            "u-boot.dtb",
-            "u-boot-dtb.bin",
-        ]
-    )
-
-
-def _build_sml(source: Path, build: Path, loader: dict[str, Any], *, jobs: int) -> None:
-    check = source / "fplinux-placement.c"
-    placement_check = textwrap.dedent("""\
-        #include <platform_def.h>
-        #if BL31_BASE != {sml_load:#x}
-        #error "secure monitor base differs from target placement"
-        #endif
-        #if QIN_NS_ENTRY != {fdl2_entry:#x}
-        #error "non-secure entry differs from target placement"
-        #endif
-        """)
-    check.write_text(
-        placement_check.format(sml_load=loader["sml_load"], fdl2_entry=loader["fdl2_load"] + 512),
-        encoding="ascii",
-    )
-    process_build.run(
-        [
-            f"{_LLVM}clang",
-            "--target=aarch64-none-elf",
-            "-E",
-            "-D__ASSEMBLER__",
-            "-I",
-            "include",
-            "-I",
-            "include/arch/aarch64",
-            "-I",
-            "plat/qin1splus/include",
-            str(check),
-            "-o",
-            str(source / "fplinux-placement.i"),
-        ],
-        cwd=source,
-    )
-    compiler = f"{_LLVM}clang --target=aarch64-none-elf"
-    process_build.run(
-        [
-            "make",
-            f"-j{jobs}",
-            f"BUILD_BASE={build}",
-            "PLAT=qin1splus",
-            "ARCH=aarch64",
-            "DEBUG=0",
-            f"CC={compiler}",
-            f"AS={compiler}",
-            f"CPP={compiler}",
-            f"AR={_LLVM}llvm-ar",
-            "LD=ld.lld",
-            f"OC={_LLVM}llvm-objcopy",
-            f"OD={_LLVM}llvm-objdump",
-            "bl31",
-        ],
-        cwd=source,
-    )
-
-
 def _collect_output(
-    role: str, build: Path, destination: Path, target_config: dict[str, Any]
+    role: str,
+    artifacts: tuple[Path, Path, Path],
+    destination: Path,
+    target_config: dict[str, Any],
 ) -> None:
+    elf, binary, map_file = artifacts
     loader = target_config["loader"]
-    if role == "fdl1":
-        elf, binary, map_file = (
-            build / "nand_fdl/fdl1.axf",
-            build / "nand_fdl/fdl1.bin",
-            build / "nand_fdl/fdl1.map",
-        )
-        _elf_entry(elf, bits=64, machine=183, expected=loader["fdl1_load"] + 512)
-    elif role == "fdl2":
-        elf, binary, map_file = build / "u-boot", build / "u-boot-dtb.bin", build / "u-boot.map"
-        _elf_entry(elf, bits=32, machine=40, expected=loader["fdl2_load"] + 512)
-    else:
-        base = build / "qin1splus/release"
-        elf, binary, map_file = base / "bl31/bl31.elf", base / "bl31.bin", base / "bl31/bl31.map"
-        _elf_entry(elf, bits=64, machine=183, expected=loader["sml_load"])
+    bits, machine = (32, 40) if role == "fdl2" else (64, 183)
+    entry = loader[f"{role}_load"] + (0 if role == "sml" else 512)
+    _elf_entry(elf, bits=bits, machine=machine, expected=entry)
     payload = inputs_build.require_file(binary).read_bytes()
     if not payload:
         fail(f"source-built RAM-loader is empty: {role}")
@@ -277,31 +165,22 @@ def _build_chain(
     *,
     jobs: int,
 ) -> Path:
+    recipe = inputs_build.require_file(target_source / "build.py")
+    spec = importlib.util.spec_from_file_location("fplinux_target_loader", recipe)
+    if spec is None or spec.loader is None:
+        fail(f"cannot load target RAM-loader build recipe: {recipe}")
+    board = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(board)
+
     output = temporary / "publish"
     output.mkdir()
-    patches = {"fdl1": "chipram.patch", "fdl2": "u-boot.patch", "sml": "trusted-firmware.patch"}
     for source_pin in selected:
         role = source_pin.role
         source = _extract_source(source_pin, temporary / role)
-        sources_build.apply_patches(
-            source, [inputs_build.require_file(target_source / patches[role])]
+        artifacts = board.build_stage(
+            role, source, temporary / f"{role}-build", target_config, jobs=jobs
         )
-        build = temporary / f"{role}-build"
-        if role == "fdl1":
-            _build_fdl1(source, build, sml_entry=target_config["loader"]["sml_load"], jobs=jobs)
-        elif role == "fdl2":
-            _build_fdl2(
-                source,
-                build,
-                entry=target_config["bootstrap"]["layout"]["entry_load"],
-                jobs=jobs,
-            )
-        else:
-            shutil.copytree(
-                inputs_build.require_directory(target_source / "bl31"), source / "plat/qin1splus"
-            )
-            _build_sml(source, build, target_config["loader"], jobs=jobs)
-        _collect_output(role, build, output, target_config)
+        _collect_output(role, artifacts, output, target_config)
     for artifact in output.iterdir():
         artifact.chmod(0o644)
     return output

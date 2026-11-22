@@ -119,6 +119,9 @@ def loader_checkout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> LoaderCh
     """Control downloaded sources and compilers while retaining production projection and cache."""
     source_root = tmp_path / "targets/phone/loader"
     source_root.mkdir(parents=True)
+    (source_root / "build.py").write_bytes(
+        (ROOT / "targets/xiaomi-qin-1s-plus/loader/build.py").read_bytes()
+    )
     component_patch = (
         ROOT / "tests/host_process/build/fixtures/source-loaders/component.patch"
     ).read_bytes()

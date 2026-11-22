@@ -10,7 +10,7 @@ SECTIONS
 	. = @ENTRY_LOAD@;
 	.text : {
 		*(.text.entry)
-		*(.text.qin_prepare_kernel)
+		*(.text.sc9820e_target_prepare_kernel)
 		*(.text.sc9820e_enter_linux)
 		*(.text*)
 		*(.glue_7) *(.glue_7t) *(.vfp11_veneer) *(.v4_bx) *(.iplt)

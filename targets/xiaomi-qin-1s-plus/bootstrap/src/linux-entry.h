@@ -11,7 +11,7 @@
 #ifndef __ASSEMBLER__
 #include <stdint.h>
 
-void qin_prepare_kernel(uint32_t stack_phys);
+void sc9820e_target_prepare_kernel(uint32_t stack_phys);
 #endif
 
 #endif

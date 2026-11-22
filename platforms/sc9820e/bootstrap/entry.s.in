@@ -7,7 +7,7 @@
 	.type _start, %function
 _start:
 	ldr	r0, =@STACK@
-	bl	qin_prepare_kernel
+	bl	sc9820e_target_prepare_kernel
 	ldr	sp, =@STACK@
 	ldr	r0, =@KERNEL_LOAD@
 	ldr	r1, =@KERNEL_STAGE@
