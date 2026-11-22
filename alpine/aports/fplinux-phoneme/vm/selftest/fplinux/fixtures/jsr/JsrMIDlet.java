@@ -10,6 +10,7 @@ import javax.microedition.io.PushRegistry;
 import javax.microedition.media.Manager;
 import javax.microedition.media.MediaException;
 import javax.microedition.media.Player;
+import javax.microedition.media.control.MIDIControl;
 import javax.microedition.media.control.VideoControl;
 import javax.microedition.midlet.MIDlet;
 import javax.microedition.pim.PIM;
@@ -106,10 +107,16 @@ public class JsrMIDlet extends MIDlet {
             require(video == null &&
                     player.getControl("javax.microedition.media.control.VideoControl") == null,
                     "Tone player exposed a video control");
+            // Games cast the answer before testing it for null, and the cast
+            // needs the class even then.
+            MIDIControl midi = (MIDIControl)player.getControl("MIDIControl");
+            require(midi == null && MIDIControl.NOTE_ON == 0x90 &&
+                    MIDIControl.CONTROL_CHANGE == 0xB0,
+                    "Tone player exposed a MIDI control");
         } finally {
             player.close();
         }
-        System.out.println("PM-JSR serial and video unavailable");
+        System.out.println("PM-JSR serial, video and MIDI controls unavailable");
     }
 
     private static void pim() {
