@@ -15,7 +15,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
     from pathlib import Path
 
-KERNEL = ROOT / "targets/bq-2830l-tank-connect-max/linux/overlay/drivers/mmc/host/bq2830l-radio"
+KERNEL = ROOT / "platforms/ums9117/linux/overlay/drivers/mmc/host/marlin2"
 FIXTURES = ROOT / "tests/host_tool/bq_2830l_tank_connect_max/radio"
 KERNEL_COMPAT = ROOT / "tests/fixtures/ums9117-kernel"
 PLATFORM = ROOT / "platforms/ums9117/linux/overlay"

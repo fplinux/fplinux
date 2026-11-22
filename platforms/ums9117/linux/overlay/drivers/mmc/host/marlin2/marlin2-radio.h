@@ -1,14 +1,34 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
-#ifndef BQ2830L_RADIO_H
-#define BQ2830L_RADIO_H
+#ifndef MARLIN2_RADIO_H
+#define MARLIN2_RADIO_H
 
+#include <crypto/sha2.h>
 #include <linux/mmc/sdio_func.h>
 #include <linux/types.h>
 
 #include "marlin2-packet.h"
 
-#define BQ2830L_RADIO_COMPATIBLE "bq,2830l-radio"
-#define ITEL_NEO_R60_RADIO_COMPATIBLE "fplinux,itel-neo-r60-marlin2"
+struct gpio_desc;
+
+struct marlin2_radio_pin {
+	u32 offset;
+	u32 value;
+	const char *value_property;
+};
+
+struct marlin2_radio_board {
+	const struct marlin2_radio_pin *pins;
+	size_t num_pins;
+	const char *pins_phandle;
+	int (*enable_controls)(struct gpio_desc *enable,
+			       struct gpio_desc *reset);
+	u8 image_sha256[SHA256_DIGEST_SIZE];
+	unsigned int timeout_ms;
+	int wcn_voltage_uv;
+	bool wifipa_first;
+	bool require_get_info;
+	bool fm;
+};
 
 extern struct sdio_driver marlin2_sdio_driver;
 
@@ -43,12 +63,14 @@ struct marlin2_boot_result {
 	bool packet_attempted;
 };
 
-void bq2830l_radio_report(struct sdio_func *func, int error,
+const struct marlin2_radio_board *
+marlin2_radio_get_board(struct sdio_func *func);
+void marlin2_radio_report(struct sdio_func *func, int error,
 			  const struct marlin2_boot_result *result);
-bool bq2830l_radio_runtime_requested(struct sdio_func *func);
-void bq2830l_radio_runtime_cleanup_error(struct sdio_func *func, int error);
-unsigned long bq2830l_radio_deadline(struct sdio_func *func);
-struct gpio_desc *bq2830l_radio_rx_request(struct sdio_func *func);
+bool marlin2_radio_runtime_requested(struct sdio_func *func);
+void marlin2_radio_runtime_cleanup_error(struct sdio_func *func, int error);
+unsigned long marlin2_radio_deadline(struct sdio_func *func);
+struct gpio_desc *marlin2_radio_rx_request(struct sdio_func *func);
 int marlin2_sdio_bt_write_locked(struct sdio_func *func, const u8 *data,
 				 size_t bytes);
 

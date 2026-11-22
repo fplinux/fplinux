@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-2.0-only
-config MMC_SDHCI_UMS9117_BQ_RADIO
+config MARLIN2_SDIO
 	bool "UMS9117 external Marlin2 radio"
-	depends on MACH_BQ_2830L_TANK_CONNECT_MAX || MACH_ITEL_NEO_R60_PLUS
 	depends on MMC_SDHCI_UMS9117
 	depends on REGULATOR_SC2731
 	select REGULATOR_SC2720_WCN
@@ -11,29 +10,28 @@ config MMC_SDHCI_UMS9117_BQ_RADIO
 	  Provide an on-demand, bounded RAM firmware boot for the board's
 	  external radio through SDIO1. Load the board's firmware and
 	  calibration from the root filesystem when a consumer starts.
-	  Wi-Fi and Bluetooth share this radio's firmware, power and SDIO
-	  transport. The BQ 2830L also uses this radio for FM.
+	  Wi-Fi, Bluetooth and FM share this radio's firmware, power and SDIO
+	  transport.
 
-config BQ2830L_WLAN
+config MARLIN2_WLAN
 	bool "Marlin2 SDIO wireless networking"
-	depends on MMC_SDHCI_UMS9117_BQ_RADIO
+	depends on MARLIN2_SDIO
 	depends on CFG80211 && INET
 	help
 	  Provide a single 2.4 GHz station or access-point interface using
 	  board-supplied firmware, calibration and network address.
 
-config BQ2830L_BLUETOOTH
+config MARLIN2_BLUETOOTH
 	bool "Marlin2 SDIO Bluetooth"
-	depends on MMC_SDHCI_UMS9117_BQ_RADIO && BT=y
+	depends on MARLIN2_SDIO && BT=y
 	help
 	  Provide a native HCI controller using the shared external radio.
 	  Start the prepared controller after root mount through
 	  fplinux-bluetooth enable, then use BlueZ for adapter power.
 
-config BQ2830L_FM
-	bool "BQ 2830L SDIO FM receiver"
-	depends on MMC_SDHCI_UMS9117_BQ_RADIO
-	depends on MACH_BQ_2830L_TANK_CONNECT_MAX
+config MARLIN2_FM
+	bool "Marlin2 SDIO FM receiver"
+	depends on MARLIN2_SDIO
 	depends on VIDEO_DEV=y && MEDIA_RADIO_SUPPORT
 	select UMS9117_FM_WIRE
 	help

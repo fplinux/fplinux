@@ -19,11 +19,8 @@
 #define UMS9117_SDIO_SELECTOR_MASK GENMASK(2, 0)
 #define UMS9117_SDIO0_SELECTOR_RPLL_390M 4
 #define UMS9117_SDIO0_RATE_HZ 195000000UL
-#if IS_ENABLED(CONFIG_MMC_SDHCI_UMS9117_BQ_RADIO) && \
-	IS_ENABLED(CONFIG_MACH_BQ_2830L_TANK_CONNECT_MAX)
 #define UMS9117_SDIO1_SELECTOR_26M 1
 #define UMS9117_SDIO1_RATE_HZ 13000000UL
-#endif
 #define UMS9117_SENSOR_SOURCE_RATE_HZ 48000000UL
 #define UMS9117_SENSOR_CFG_MASK (GENMASK(9, 8) | GENMASK(1, 0))
 #define UMS9117_SENSOR_SOURCE_48M 1
@@ -242,8 +239,6 @@ static struct ums9117_sdio_clk sdio0_clk = {
 	.rate_hz = UMS9117_SDIO0_RATE_HZ,
 };
 
-#if IS_ENABLED(CONFIG_MMC_SDHCI_UMS9117_BQ_RADIO) && \
-	IS_ENABLED(CONFIG_MACH_BQ_2830L_TANK_CONNECT_MAX)
 static struct ums9117_sdio_clk sdio1_clk = {
 	.common = {
 		.regmap = NULL,
@@ -255,7 +250,6 @@ static struct ums9117_sdio_clk sdio1_clk = {
 	.selector = UMS9117_SDIO1_SELECTOR_26M,
 	.rate_hz = UMS9117_SDIO1_RATE_HZ,
 };
-#endif
 
 static struct ums9117_sensor_clk *hw_to_ums9117_sensor_clk(struct clk_hw *hw)
 {
@@ -509,8 +503,6 @@ static const struct sprd_clk_desc ums9117_ap_clk_desc = {
 	.hw_clks = &ums9117_ap_clk_hws,
 };
 
-#if IS_ENABLED(CONFIG_MMC_SDHCI_UMS9117_BQ_RADIO) && \
-	IS_ENABLED(CONFIG_MACH_BQ_2830L_TANK_CONNECT_MAX)
 static struct sprd_clk_common *ums9117_ap_sdio1_clk_clks[] = {
 	&sdio1_clk.common,
 };
@@ -527,35 +519,25 @@ static const struct sprd_clk_desc ums9117_ap_sdio1_clk_desc = {
 	.num_clk_clks = ARRAY_SIZE(ums9117_ap_sdio1_clk_clks),
 	.hw_clks = &ums9117_ap_sdio1_clk_hws,
 };
-#endif
 
 static SPRD_SC_GATE_CLK_NO_PARENT(dma_eb, "dma-eb", 0x0, UMS9117_GATE_SC_OFFSET,
 				  BIT(5), 0, 0);
 static SPRD_SC_GATE_CLK_NO_PARENT(sdio0_eb, "sdio0-eb", 0x0,
 				  UMS9117_GATE_SC_OFFSET, BIT(7), 0, 0);
-#if IS_ENABLED(CONFIG_MMC_SDHCI_UMS9117_BQ_RADIO) && \
-	IS_ENABLED(CONFIG_MACH_BQ_2830L_TANK_CONNECT_MAX)
 static SPRD_SC_GATE_CLK_NO_PARENT(sdio1_eb, "sdio1-eb", 0x0,
 				  UMS9117_GATE_SC_OFFSET, BIT(8), 0, 0);
-#endif
 
 static struct sprd_clk_common *ums9117_apahb_gate_clks[] = {
 	&dma_eb.common,
 	&sdio0_eb.common,
-#if IS_ENABLED(CONFIG_MMC_SDHCI_UMS9117_BQ_RADIO) && \
-	IS_ENABLED(CONFIG_MACH_BQ_2830L_TANK_CONNECT_MAX)
 	&sdio1_eb.common,
-#endif
 };
 
 static struct clk_hw_onecell_data ums9117_apahb_gate_hws = {
 	.hws = {
 		[CLK_DMA_EB] = &dma_eb.common.hw,
 		[CLK_SDIO0_EB] = &sdio0_eb.common.hw,
-#if IS_ENABLED(CONFIG_MMC_SDHCI_UMS9117_BQ_RADIO) && \
-	IS_ENABLED(CONFIG_MACH_BQ_2830L_TANK_CONNECT_MAX)
 		[CLK_SDIO1_EB] = &sdio1_eb.common.hw,
-#endif
 	},
 	.num = ARRAY_SIZE(ums9117_apahb_gate_clks),
 };
@@ -572,11 +554,8 @@ static const struct of_device_id ums9117_clk_ids[] = {
 	{ .compatible = "sprd,ums9117-ap-clk", .data = &ums9117_ap_clk_desc },
 	{ .compatible = "sprd,ums9117-ap-i2c0-clk",
 	  .data = &ums9117_ap_i2c0_clk_desc },
-#if IS_ENABLED(CONFIG_MMC_SDHCI_UMS9117_BQ_RADIO) && \
-	IS_ENABLED(CONFIG_MACH_BQ_2830L_TANK_CONNECT_MAX)
 	{ .compatible = "sprd,ums9117-ap-sdio1-clk",
 	  .data = &ums9117_ap_sdio1_clk_desc },
-#endif
 	{ .compatible = "sprd,ums9117-aonapb-gate",
 	  .data = &ums9117_aonapb_gate_desc },
 	{ .compatible = "sprd,ums9117-apapb-gate",
@@ -617,11 +596,8 @@ static int ums9117_clk_probe(struct platform_device *pdev)
 	}
 	if (desc == &ums9117_ap_clk_desc)
 		sdio0_clk.dev = &pdev->dev;
-#if IS_ENABLED(CONFIG_MMC_SDHCI_UMS9117_BQ_RADIO) && \
-	IS_ENABLED(CONFIG_MACH_BQ_2830L_TANK_CONNECT_MAX)
 	if (desc == &ums9117_ap_sdio1_clk_desc)
 		sdio1_clk.dev = &pdev->dev;
-#endif
 
 	return sprd_clk_probe(&pdev->dev, desc->hw_clks);
 }

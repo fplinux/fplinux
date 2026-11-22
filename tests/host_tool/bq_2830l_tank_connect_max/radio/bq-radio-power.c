@@ -3,7 +3,7 @@
 #include <stdio.h>
 
 #include "kernel-boundary.h"
-#include "bq2830l-radio.h"
+#include "marlin2-radio.h"
 #include "marlin2-bluetooth.h"
 #include "marlin2-fm.h"
 #include "marlin2-transport.h"
@@ -102,16 +102,12 @@ void devm_release_action(struct device *dev, void (*action)(void *),
 
 int platform_driver_register(struct platform_driver *driver)
 {
-	const struct of_device_id *match;
-
-	for (match = driver->driver.of_match_table; match->compatible;
-	     match++) {
-		if (of_device_is_compatible(&fixture.node, match->compatible)) {
-			fixture.driver = driver;
-			return driver->probe(&fixture.pdev);
-		}
-	}
-	return -ENODEV;
+	assert(!strcmp(driver->driver.name, "bq2830l-radio"));
+	fixture.driver = driver;
+	fixture.pdev.dev.driver = &driver->driver;
+	if (!device_get_match_data(&fixture.pdev.dev))
+		return -ENODEV;
+	return driver->probe(&fixture.pdev);
 }
 
 void platform_driver_unregister(struct platform_driver *driver)
@@ -123,6 +119,7 @@ void platform_driver_unregister(struct platform_driver *driver)
 	}
 	free(fixture.allocation);
 	fixture.allocation = NULL;
+	fixture.pdev.dev.driver = NULL;
 }
 
 int sdio_register_driver(struct sdio_driver *driver)
@@ -207,7 +204,18 @@ int regulator_set_voltage(struct regulator *rail, int minimum, int maximum)
 
 int regulator_enable(struct regulator *rail)
 {
+	bool itel = of_device_is_compatible(&fixture.node,
+					    "fplinux,itel-neo-r60-marlin2");
+
 	assert(rail->exclusive);
+	if (rail == &fixture.pa) {
+		assert(!!fixture.wcn.enables != itel);
+		assert(!!(fixture.aon.words[1] & BIT(2)) != itel);
+	} else {
+		if (itel)
+			assert(fixture.pa.enables);
+		assert(fixture.aon.words[1] & BIT(2));
+	}
 	if (rail == &fixture.pa && fixture.pa_error)
 		return fixture.pa_error;
 	rail->enables++;
@@ -259,7 +267,7 @@ int of_platform_populate(struct device_node *node, const void *matches,
 		result.calibration_verified = true;
 	}
 	fixture.populated = true;
-	bq2830l_radio_report(&fixture.func, fixture.boot_error, &result);
+	marlin2_radio_report(&fixture.func, fixture.boot_error, &result);
 	return 0;
 }
 
@@ -270,6 +278,16 @@ void of_platform_depopulate(struct device *dev)
 bool of_device_is_compatible(struct device_node *node, const char *name)
 {
 	return node && !strcmp(name, node->compatible);
+}
+
+const void *device_get_match_data(const struct device *dev)
+{
+	const struct of_device_id *match;
+
+	for (match = dev->driver->of_match_table; match->compatible; match++)
+		if (of_device_is_compatible(dev->of_node, match->compatible))
+			return match->data;
+	return NULL;
 }
 bool mod_delayed_work(struct workqueue_struct *workqueue,
 		      struct delayed_work *work, unsigned long delay)
@@ -287,15 +305,19 @@ int device_add_group(struct device *dev, const struct attribute_group *group)
 void device_remove_group(struct device *dev,
 			 const struct attribute_group *group)
 {
+	assert(fixture.group == group);
+	fixture.group = NULL;
 }
 int device_property_read_string(struct device *dev, const char *name,
 				const char **value)
 {
-	if (!of_device_is_compatible(dev->of_node,
-				     "fplinux,itel-neo-r60-marlin2") ||
-	    strcmp(name, "bluetooth-config-name"))
+	if (strcmp(name, "bluetooth-config-name"))
 		return -ENOENT;
-	*value = "ums9117/itel-neo-r60-plus-wcn-bluetooth.bin";
+	if (of_device_is_compatible(dev->of_node,
+				    "fplinux,itel-neo-r60-marlin2"))
+		*value = "ums9117/itel-neo-r60-plus-wcn-bluetooth.bin";
+	else
+		*value = "ums9117/bq-2830l-tank-connect-max-wcn-bluetooth.bin";
 	return 0;
 }
 int device_property_read_u32(struct device *dev, const char *name, u32 *value)
@@ -314,7 +336,8 @@ int request_firmware_direct(const struct firmware **firmware, const char *name,
 		.size = sizeof(pskey),
 	};
 
-	if (strcmp(name, "ums9117/itel-neo-r60-plus-wcn-bluetooth.bin"))
+	if (strcmp(name, "ums9117/itel-neo-r60-plus-wcn-bluetooth.bin") &&
+	    strcmp(name, "ums9117/bq-2830l-tank-connect-max-wcn-bluetooth.bin"))
 		return -ENOENT;
 	*firmware = &bluetooth;
 	return 0;
@@ -530,6 +553,28 @@ static struct device_attribute *radio_attribute(const char *name)
 	return NULL;
 }
 
+static void check_bq_shutdown(void)
+{
+	struct device_attribute *start;
+
+	setup(false, "bq,2830l-radio");
+	fixture.pins.words[0x464 / 4] = 0x2001;
+	start = radio_attribute("start");
+	assert(start && start->store);
+	assert(!marlin2_channel_open(fixture.wlan.channel));
+	assert(start->store(&fixture.pdev.dev, start, "1", 1) == 1);
+	assert(fixture.populated && fixture.irq_active &&
+	       fixture.fm.registered);
+	assert(fixture.pins.words[0x464 / 4] == 0x102001);
+
+	fixture.driver->shutdown(&fixture.pdev);
+	check_restored(false);
+	assert(!fixture.bluetooth.channel && !fixture.fm.registered);
+	assert(!fixture.group && !(fixture.aon.words[1] & BIT(2)));
+	assert(fixture.pins.words[0x464 / 4] == 0x2001);
+	bq_radio_host_exit();
+}
+
 static void check_itel_runtime(void)
 {
 	struct device_attribute *start;
@@ -580,12 +625,17 @@ static void check_itel_diagnostic(void)
 	bq_radio_host_exit();
 }
 
-int main(void)
+int main(int argc, char **argv)
 {
-	check_shared_lifetime(false);
-	check_shared_lifetime(true);
-	check_failed_boot(false);
-	check_failed_boot(true);
+	if (argc == 1) {
+		check_shared_lifetime(false);
+		check_shared_lifetime(true);
+		check_failed_boot(false);
+		check_failed_boot(true);
+		check_bq_shutdown();
+	} else {
+		assert(argc == 2 && !strcmp(argv[1], "itel-only"));
+	}
 	check_itel_runtime();
 	check_itel_diagnostic();
 	puts("Marlin2 radio power host component cases passed");

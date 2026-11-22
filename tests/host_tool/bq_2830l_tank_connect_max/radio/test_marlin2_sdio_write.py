@@ -15,8 +15,10 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
     from pathlib import Path
 
-KERNEL = ROOT / "targets/bq-2830l-tank-connect-max/linux/overlay/drivers/mmc/host/bq2830l-radio"
+KERNEL = ROOT / "platforms/ums9117/linux/overlay/drivers/mmc/host/marlin2"
 FIXTURES = ROOT / "tests/host_tool/bq_2830l_tank_connect_max/radio"
+BQ = ROOT / "targets/bq-2830l-tank-connect-max/linux/overlay/drivers/mmc/host/marlin2"
+ITEL = ROOT / "targets/itel-neo-r60-plus/linux/overlay/drivers/mmc/host/marlin2"
 
 
 @pytest.fixture(scope="module")
@@ -33,13 +35,17 @@ def sdio_executable(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
                 "-Werror",
                 "-Wno-unused-parameter",
                 "-UNDEBUG",
-                "-DCONFIG_BQ2830L_BLUETOOTH=1",
+                "-DCONFIG_MARLIN2_BLUETOOTH=1",
                 "-ffunction-sections",
                 "-fdata-sections",
                 f"-I{FIXTURES / 'marlin2-sdio-write-compat'}",
                 f"-I{KERNEL}",
+                f"-I{BQ}",
+                f"-I{ITEL}",
                 str(FIXTURES / "marlin2-sdio-write.c"),
                 str(KERNEL / "marlin2-sdio.c"),
+                str(BQ / "bq2830l-marlin2.c"),
+                str(ITEL / "itel-neo-r60-marlin2.c"),
                 "-Wl,--gc-sections",
             ],
             name="compile Marlin2 SDIO write owner host checks",

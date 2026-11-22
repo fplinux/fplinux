@@ -25,35 +25,32 @@
 #include <linux/spinlock.h>
 #include <linux/workqueue.h>
 
-#include "bq2830l-radio.h"
+#include "marlin2-radio.h"
 #include "marlin2-bluetooth.h"
 #include "marlin2-fm.h"
 #include "marlin2-transport.h"
 #include "marlin2-wlan.h"
 
-#define BQ2830L_AUX0_GATE_REG 0x4
-#define BQ2830L_AUX0_GATE_SET 0x1004
-#define BQ2830L_AUX0_GATE_CLEAR 0x2004
-#define BQ2830L_AUX0_GATE BIT(2)
-#define BQ2830L_WCN_VOLTAGE_UV 1587500
-#define BQ2830L_RADIO_TIMEOUT_MS 60000U
-#define ITEL_NEO_R60_RADIO_TIMEOUT_MS 120000U
+#if IS_ENABLED(CONFIG_MACH_BQ_2830L_TANK_CONNECT_MAX)
+#include "bq2830l-marlin2.h"
+#endif
+#if IS_ENABLED(CONFIG_MACH_ITEL_NEO_R60_PLUS)
+#include "itel-neo-r60-marlin2.h"
+#endif
 
-static const struct {
-	u32 offset;
+#define MARLIN2_AUX0_GATE_REG 0x4
+#define MARLIN2_AUX0_GATE_SET 0x1004
+#define MARLIN2_AUX0_GATE_CLEAR 0x2004
+#define MARLIN2_AUX0_GATE BIT(2)
+
+struct marlin2_radio_pin_state {
+	u32 saved;
 	u32 value;
-} bq2830l_radio_pins[] = {
-	{ 0x054, 0x30 },     { 0x454, 0x82046 },  { 0x1b0, 0 },
-	{ 0x5b0, 0x80001 },  { 0x058, 0x30 },	  { 0x458, 0x82001 },
-	{ 0x064, 0x30 },     { 0x464, 0x102001 }, { 0x1c4, 0 },
-	{ 0x1c8, 0 },	     { 0x1cc, 0 },	  { 0x1d0, 0 },
-	{ 0x1d4, 0 },	     { 0x1d8, 0 },	  { 0x5c4, 0x102004 },
-	{ 0x5c8, 0x102088 }, { 0x5cc, 0x102088 }, { 0x5d0, 0x102088 },
-	{ 0x5d4, 0x102088 }, { 0x5d8, 0x102088 },
 };
 
-struct bq2830l_radio {
+struct marlin2_radio {
 	struct device *dev;
+	const struct marlin2_radio_board *board;
 	struct regmap *aon;
 	struct regmap *pins;
 	struct regulator *wcn;
@@ -72,15 +69,12 @@ struct bq2830l_radio {
 	struct marlin2_fm *fm;
 	/* HCI setup may take cleanup_lock while start waits for its work. */
 	struct mutex bluetooth_lock;
-	bool is_itel;
 	bool shutting_down;
 	bool runtime_requested;
 	/* Serializes child creation/removal and restoration of hardware state. */
 	struct mutex cleanup_lock;
 	/* Protects the result shared by the SDIO probe, cleanup and sysfs. */
 	spinlock_t result_lock;
-	u32 saved_pins[ARRAY_SIZE(bq2830l_radio_pins)];
-	u32 pad_0464;
 	struct marlin2_boot_result boot;
 	unsigned long deadline;
 	u16 vendor;
@@ -110,9 +104,12 @@ struct bq2830l_radio {
 	bool cleanup_done;
 	bool restored;
 	bool active;
+	struct marlin2_radio_pin_state pin_state[];
 };
 
-static void record_cleanup_error(struct bq2830l_radio *radio, int ret)
+static struct platform_driver marlin2_radio_driver;
+
+static void record_cleanup_error(struct marlin2_radio *radio, int ret)
 {
 	unsigned long flags;
 
@@ -126,47 +123,47 @@ static void record_cleanup_error(struct bq2830l_radio *radio, int ret)
 		ERR_PTR(ret));
 }
 
-static int bq2830l_aux0_prepare(struct clk_hw *hw)
+static int marlin2_aux0_prepare(struct clk_hw *hw)
 {
-	struct bq2830l_radio *radio =
-		container_of(hw, struct bq2830l_radio, aux0_hw);
+	struct marlin2_radio *radio =
+		container_of(hw, struct marlin2_radio, aux0_hw);
 	unsigned int value;
 	int ret;
 
-	ret = regmap_read(radio->aon, BQ2830L_AUX0_GATE_REG, &value);
+	ret = regmap_read(radio->aon, MARLIN2_AUX0_GATE_REG, &value);
 	if (ret)
 		return ret;
-	radio->saved_gate = !!(value & BQ2830L_AUX0_GATE);
-	return regmap_write(radio->aon, BQ2830L_AUX0_GATE_SET,
-			    BQ2830L_AUX0_GATE);
+	radio->saved_gate = !!(value & MARLIN2_AUX0_GATE);
+	return regmap_write(radio->aon, MARLIN2_AUX0_GATE_SET,
+			    MARLIN2_AUX0_GATE);
 }
 
-static void bq2830l_aux0_unprepare(struct clk_hw *hw)
+static void marlin2_aux0_unprepare(struct clk_hw *hw)
 {
-	struct bq2830l_radio *radio =
-		container_of(hw, struct bq2830l_radio, aux0_hw);
+	struct marlin2_radio *radio =
+		container_of(hw, struct marlin2_radio, aux0_hw);
 	int ret;
 
 	ret = regmap_write(radio->aon,
-			   radio->saved_gate ? BQ2830L_AUX0_GATE_SET :
-					       BQ2830L_AUX0_GATE_CLEAR,
-			   BQ2830L_AUX0_GATE);
+			   radio->saved_gate ? MARLIN2_AUX0_GATE_SET :
+					       MARLIN2_AUX0_GATE_CLEAR,
+			   MARLIN2_AUX0_GATE);
 	record_cleanup_error(radio, ret);
 }
 
-static const struct clk_ops bq2830l_aux0_ops = {
-	.prepare = bq2830l_aux0_prepare,
-	.unprepare = bq2830l_aux0_unprepare,
+static const struct clk_ops marlin2_aux0_ops = {
+	.prepare = marlin2_aux0_prepare,
+	.unprepare = marlin2_aux0_unprepare,
 };
 
-static const struct clk_init_data bq2830l_aux0_init = {
-	.name = "bq2830l-aux0",
-	.ops = &bq2830l_aux0_ops,
+static const struct clk_init_data marlin2_aux0_init = {
+	.name = "marlin2-aux0",
+	.ops = &marlin2_aux0_ops,
 	/* This owner changes only the gate and leaves the inherited source alone. */
 	.flags = CLK_IGNORE_UNUSED,
 };
 
-static int save_gpio_state(struct bq2830l_radio *radio)
+static int save_gpio_state(struct marlin2_radio *radio)
 {
 	radio->enable_direction = gpiod_get_direction(radio->enable);
 	if (radio->enable_direction < 0)
@@ -191,32 +188,29 @@ static int save_gpio_state(struct bq2830l_radio *radio)
 	return 0;
 }
 
-static int apply_radio_pins(struct bq2830l_radio *radio)
+static int apply_radio_pins(struct marlin2_radio *radio)
 {
-	unsigned int index;
+	const struct marlin2_radio_board *board = radio->board;
+	size_t index;
 	int ret;
 
-	for (index = 0; index < ARRAY_SIZE(bq2830l_radio_pins); index++) {
-		ret = regmap_read(radio->pins, bq2830l_radio_pins[index].offset,
-				  &radio->saved_pins[index]);
+	for (index = 0; index < board->num_pins; index++) {
+		ret = regmap_read(radio->pins, board->pins[index].offset,
+				  &radio->pin_state[index].saved);
 		if (ret)
 			return ret;
 	}
 	radio->pins_saved = true;
-	for (index = 0; index < ARRAY_SIZE(bq2830l_radio_pins); index++) {
-		u32 offset = bq2830l_radio_pins[index].offset;
-		u32 value = bq2830l_radio_pins[index].value;
-
-		if (radio->is_itel && offset == 0x464)
-			value = radio->pad_0464;
-		ret = regmap_write(radio->pins, offset, value);
+	for (index = 0; index < board->num_pins; index++) {
+		ret = regmap_write(radio->pins, board->pins[index].offset,
+				   radio->pin_state[index].value);
 		if (ret)
 			return ret;
 	}
 	return 0;
 }
 
-static void restore_gpio(struct bq2830l_radio *radio, struct gpio_desc *gpio,
+static void restore_gpio(struct marlin2_radio *radio, struct gpio_desc *gpio,
 			 int direction, int value)
 {
 	int ret;
@@ -228,10 +222,10 @@ static void restore_gpio(struct bq2830l_radio *radio, struct gpio_desc *gpio,
 	record_cleanup_error(radio, ret);
 }
 
-static void cleanup_radio(struct bq2830l_radio *radio)
+static void cleanup_radio(struct marlin2_radio *radio)
 {
 	unsigned long flags;
-	unsigned int index;
+	size_t index;
 	int ret;
 
 	mutex_lock(&radio->cleanup_lock);
@@ -277,11 +271,10 @@ static void cleanup_radio(struct bq2830l_radio *radio)
 		radio->gpio_saved = false;
 	}
 	if (radio->pins_saved) {
-		for (index = 0; index < ARRAY_SIZE(bq2830l_radio_pins);
-		     index++) {
+		for (index = 0; index < radio->board->num_pins; index++) {
 			ret = regmap_write(radio->pins,
-					   bq2830l_radio_pins[index].offset,
-					   radio->saved_pins[index]);
+					   radio->board->pins[index].offset,
+					   radio->pin_state[index].saved);
 			record_cleanup_error(radio, ret);
 		}
 		radio->pins_saved = false;
@@ -297,61 +290,67 @@ out_unlock:
 	mutex_unlock(&radio->cleanup_lock);
 }
 
-bool bq2830l_radio_runtime_requested(struct sdio_func *func)
+static struct marlin2_radio *radio_from_func(struct sdio_func *func)
 {
 	struct device *parent = func->card->host->parent->parent;
-	struct bq2830l_radio *radio = dev_get_drvdata(parent);
+
+	if (!parent || parent->driver != &marlin2_radio_driver.driver)
+		return NULL;
+	return dev_get_drvdata(parent);
+}
+
+const struct marlin2_radio_board *
+marlin2_radio_get_board(struct sdio_func *func)
+{
+	struct marlin2_radio *radio = radio_from_func(func);
+
+	return radio ? radio->board : NULL;
+}
+
+bool marlin2_radio_runtime_requested(struct sdio_func *func)
+{
+	struct marlin2_radio *radio = radio_from_func(func);
 
 	return READ_ONCE(radio->runtime_requested);
 }
 
-unsigned long bq2830l_radio_deadline(struct sdio_func *func)
+unsigned long marlin2_radio_deadline(struct sdio_func *func)
 {
-	struct device *parent = func->card->host->parent->parent;
-	struct bq2830l_radio *radio = dev_get_drvdata(parent);
+	struct marlin2_radio *radio = radio_from_func(func);
 
 	return radio->deadline;
 }
 
-struct gpio_desc *bq2830l_radio_rx_request(struct sdio_func *func)
+struct gpio_desc *marlin2_radio_rx_request(struct sdio_func *func)
 {
-	struct device *parent = func->card->host->parent->parent;
-	struct bq2830l_radio *radio = dev_get_drvdata(parent);
+	struct marlin2_radio *radio = radio_from_func(func);
 
 	return radio->rx_request;
 }
 
-static void bq2830l_radio_cleanup_work(struct work_struct *work)
+static void marlin2_radio_cleanup_work(struct work_struct *work)
 {
 	struct delayed_work *delayed = to_delayed_work(work);
-	struct bq2830l_radio *radio =
-		container_of(delayed, struct bq2830l_radio, cleanup_work);
+	struct marlin2_radio *radio =
+		container_of(delayed, struct marlin2_radio, cleanup_work);
 
 	cleanup_radio(radio);
 }
 
-static void bq2830l_radio_cleanup(void *data)
+static void marlin2_radio_cleanup(void *data)
 {
-	struct bq2830l_radio *radio = data;
+	struct marlin2_radio *radio = data;
 
 	cancel_delayed_work_sync(&radio->cleanup_work);
 	cleanup_radio(radio);
 }
 
-void bq2830l_radio_report(struct sdio_func *func, int error,
+void marlin2_radio_report(struct sdio_func *func, int error,
 			  const struct marlin2_boot_result *result)
 {
-	struct device *parent = func->card->host->parent->parent;
-	struct bq2830l_radio *radio;
+	struct marlin2_radio *radio = radio_from_func(func);
 	unsigned long flags;
 
-	if (!parent ||
-	    (!of_device_is_compatible(parent->of_node,
-				      BQ2830L_RADIO_COMPATIBLE) &&
-	     !of_device_is_compatible(parent->of_node,
-				      ITEL_NEO_R60_RADIO_COMPATIBLE)))
-		return;
-	radio = dev_get_drvdata(parent);
 	spin_lock_irqsave(&radio->result_lock, flags);
 	if (!radio->reported) {
 		radio->vendor = func->vendor;
@@ -372,10 +371,9 @@ void bq2830l_radio_report(struct sdio_func *func, int error,
 		mod_delayed_work(system_percpu_wq, &radio->cleanup_work, 0);
 }
 
-void bq2830l_radio_runtime_cleanup_error(struct sdio_func *func, int error)
+void marlin2_radio_runtime_cleanup_error(struct sdio_func *func, int error)
 {
-	struct device *parent = func->card->host->parent->parent;
-	struct bq2830l_radio *radio = dev_get_drvdata(parent);
+	struct marlin2_radio *radio = radio_from_func(func);
 	unsigned long flags;
 
 	if (!error)
@@ -409,7 +407,7 @@ static const char *boot_phase_name(enum marlin2_boot_phase phase)
 static ssize_t result_show(struct device *dev, struct device_attribute *attr,
 			   char *buf)
 {
-	struct bq2830l_radio *radio = dev_get_drvdata(dev);
+	struct marlin2_radio *radio = dev_get_drvdata(dev);
 	unsigned long flags;
 	ssize_t size;
 
@@ -506,34 +504,35 @@ static ssize_t boot_store(struct device *dev, struct device_attribute *attr,
 			  const char *buf, size_t count);
 static DEVICE_ATTR_WO(boot);
 
-#if IS_ENABLED(CONFIG_BQ2830L_BLUETOOTH)
+#if IS_ENABLED(CONFIG_MARLIN2_BLUETOOTH)
 static ssize_t start_store(struct device *dev, struct device_attribute *attr,
 			   const char *buf, size_t count);
 static DEVICE_ATTR_WO(start);
 #endif
 
-static struct attribute *bq2830l_radio_attrs[] = {
+static struct attribute *marlin2_radio_attrs[] = {
 	&dev_attr_result.attr,
 	&dev_attr_boot.attr,
-#if IS_ENABLED(CONFIG_BQ2830L_BLUETOOTH)
+#if IS_ENABLED(CONFIG_MARLIN2_BLUETOOTH)
 	&dev_attr_start.attr,
 #endif
 	NULL,
 };
 
-static const struct attribute_group bq2830l_radio_group = {
-	.attrs = bq2830l_radio_attrs,
+static const struct attribute_group marlin2_radio_group = {
+	.attrs = marlin2_radio_attrs,
 };
 
 static void remove_radio_group(void *context)
 {
 	struct device *dev = context;
 
-	device_remove_group(dev, &bq2830l_radio_group);
+	device_remove_group(dev, &marlin2_radio_group);
 }
 
-static int power_on_radio(struct bq2830l_radio *radio)
+static int power_on_radio(struct marlin2_radio *radio)
 {
+	const struct marlin2_radio_board *board = radio->board;
 	int ret;
 
 	ret = gpiod_direction_input(radio->rx_request);
@@ -542,7 +541,7 @@ static int power_on_radio(struct bq2830l_radio *radio)
 	ret = apply_radio_pins(radio);
 	if (ret)
 		return ret;
-	if (radio->is_itel) {
+	if (board->wifipa_first) {
 		ret = regulator_enable(radio->wifipa);
 		if (ret)
 			return ret;
@@ -553,67 +552,38 @@ static int power_on_radio(struct bq2830l_radio *radio)
 		return ret;
 	radio->clock_enabled = true;
 	radio->voltage_owned = true;
-	ret = regulator_set_voltage(radio->wcn, BQ2830L_WCN_VOLTAGE_UV,
-				    BQ2830L_WCN_VOLTAGE_UV);
+	ret = regulator_set_voltage(radio->wcn, board->wcn_voltage_uv,
+				    board->wcn_voltage_uv);
 	if (ret)
 		return ret;
 	ret = regulator_enable(radio->wcn);
 	if (ret)
 		return ret;
 	radio->rail_enabled = true;
-	if (radio->is_itel) {
-		ret = gpiod_direction_output(radio->enable, 0);
+	if (!board->wifipa_first) {
+		ret = regulator_enable(radio->wifipa);
 		if (ret)
 			return ret;
-		msleep(100);
-		gpiod_set_value_cansleep(radio->enable, 1);
-		ret = gpiod_direction_output(radio->reset, 1);
-		if (ret) {
-			gpiod_set_value_cansleep(radio->enable, 0);
-			return ret;
-		}
-		radio->controls_ready = true;
-		fsleep(2000);
-		gpiod_set_value_cansleep(radio->reset, 0);
-		fsleep(2000);
-		msleep(20);
-		return 0;
+		radio->wifipa_enabled = true;
 	}
-	ret = regulator_enable(radio->wifipa);
-	if (ret)
-		return ret;
-	radio->wifipa_enabled = true;
-	ret = gpiod_direction_output(radio->reset, 1);
-	if (ret)
-		return ret;
-	ret = gpiod_direction_output(radio->enable, 0);
+
+	ret = board->enable_controls(radio->enable, radio->reset);
 	if (ret)
 		return ret;
 	radio->controls_ready = true;
-	msleep(100);
-	gpiod_set_value_cansleep(radio->enable, 1);
-	fsleep(2000);
-	gpiod_set_value_cansleep(radio->reset, 1);
-	fsleep(2000);
-	gpiod_set_value_cansleep(radio->reset, 0);
-	fsleep(2000);
 	return 0;
 }
 
-static int start_radio_locked(struct bq2830l_radio *radio)
+static int start_radio_locked(struct marlin2_radio *radio)
 {
 	struct device *dev = radio->dev;
-	unsigned int timeout_ms = BQ2830L_RADIO_TIMEOUT_MS;
 	unsigned long flags;
 	int ret;
 
 	if (radio->active)
 		return -EBUSY;
 	radio->active = true;
-	/* The itel's one-bit SDIO bus reads the entire image back at 400 kHz. */
-	if (radio->is_itel)
-		timeout_ms = ITEL_NEO_R60_RADIO_TIMEOUT_MS;
-	radio->deadline = jiffies + msecs_to_jiffies(timeout_ms);
+	radio->deadline = jiffies + msecs_to_jiffies(radio->board->timeout_ms);
 	spin_lock_irqsave(&radio->result_lock, flags);
 	memset(&radio->boot, 0, sizeof(radio->boot));
 	radio->vendor = 0;
@@ -662,7 +632,7 @@ out_error:
 static ssize_t boot_store(struct device *dev, struct device_attribute *attr,
 			  const char *buf, size_t count)
 {
-	struct bq2830l_radio *radio = dev_get_drvdata(dev);
+	struct marlin2_radio *radio = dev_get_drvdata(dev);
 	int ret;
 
 	if (!sysfs_streq(buf, "1"))
@@ -676,10 +646,10 @@ static ssize_t boot_store(struct device *dev, struct device_attribute *attr,
 	return ret ? ret : count;
 }
 
-#if IS_ENABLED(CONFIG_BQ2830L_WLAN)
+#if IS_ENABLED(CONFIG_MARLIN2_WLAN)
 static int get_mac(void *context, u8 mac[ETH_ALEN])
 {
-	struct bq2830l_radio *radio = context;
+	struct marlin2_radio *radio = context;
 	const struct firmware *address = NULL;
 	const char *name;
 	int ret;
@@ -706,7 +676,7 @@ out_address:
 static int acquire_radio(void *context, struct sdio_func **func,
 			 struct gpio_desc **rx_request)
 {
-	struct bq2830l_radio *radio = context;
+	struct marlin2_radio *radio = context;
 	unsigned long waited;
 	int ret;
 
@@ -747,14 +717,14 @@ out_unlock:
 
 static void release_radio(void *context)
 {
-	struct bq2830l_radio *radio = context;
+	struct marlin2_radio *radio = context;
 
 	cleanup_radio(radio);
 	radio->runtime_requested = false;
 	radio->runtime_func = NULL;
 }
 
-#if IS_ENABLED(CONFIG_BQ2830L_WLAN)
+#if IS_ENABLED(CONFIG_MARLIN2_WLAN)
 static const struct marlin2_wlan_radio_ops wlan_radio_ops = {
 	.get_mac = get_mac,
 };
@@ -766,11 +736,11 @@ static const struct marlin2_transport_radio_ops transport_radio_ops = {
 	.write_bluetooth_locked = marlin2_sdio_bt_write_locked,
 };
 
-#if IS_ENABLED(CONFIG_BQ2830L_BLUETOOTH)
+#if IS_ENABLED(CONFIG_MARLIN2_BLUETOOTH)
 static ssize_t start_store(struct device *dev, struct device_attribute *attr,
 			   const char *buf, size_t count)
 {
-	struct bq2830l_radio *radio = dev_get_drvdata(dev);
+	struct marlin2_radio *radio = dev_get_drvdata(dev);
 	struct marlin2_bluetooth *bluetooth;
 	const struct firmware *configuration = NULL;
 	const char *name;
@@ -821,24 +791,24 @@ out_unlock:
 
 static void unregister_consumers(void *context)
 {
-	struct bq2830l_radio *radio = context;
+	struct marlin2_radio *radio = context;
 
 	mutex_lock(&radio->bluetooth_lock);
 	WRITE_ONCE(radio->shutting_down, true);
-#if IS_ENABLED(CONFIG_BQ2830L_BLUETOOTH)
+#if IS_ENABLED(CONFIG_MARLIN2_BLUETOOTH)
 	if (radio->bluetooth) {
 		marlin2_bluetooth_unregister(radio->bluetooth);
 		radio->bluetooth = NULL;
 	}
 #endif
 	mutex_unlock(&radio->bluetooth_lock);
-#if IS_ENABLED(CONFIG_BQ2830L_WLAN)
+#if IS_ENABLED(CONFIG_MARLIN2_WLAN)
 	if (radio->wlan) {
 		marlin2_wlan_unregister(radio->wlan);
 		radio->wlan = NULL;
 	}
 #endif
-#if IS_ENABLED(CONFIG_BQ2830L_FM)
+#if IS_ENABLED(CONFIG_MARLIN2_FM)
 	if (radio->fm) {
 		marlin2_fm_unregister(radio->fm);
 		radio->fm = NULL;
@@ -848,24 +818,29 @@ static void unregister_consumers(void *context)
 	radio->transport = NULL;
 }
 
-static int bq2830l_radio_probe(struct platform_device *pdev)
+static int marlin2_radio_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
-	struct bq2830l_radio *radio;
+	const struct marlin2_radio_board *board = device_get_match_data(dev);
+	struct marlin2_radio *radio;
+	size_t index;
 	int ret;
 
-	radio = devm_kzalloc(dev, sizeof(*radio), GFP_KERNEL);
+	if (!board)
+		return -ENODEV;
+	radio = devm_kzalloc(dev,
+			     struct_size(radio, pin_state, board->num_pins),
+			     GFP_KERNEL);
 	if (!radio)
 		return -ENOMEM;
 	radio->dev = dev;
-	radio->is_itel = of_device_is_compatible(dev->of_node,
-						 ITEL_NEO_R60_RADIO_COMPATIBLE);
+	radio->board = board;
 	radio->status = -EAGAIN;
 	radio->cleanup_done = true;
 	mutex_init(&radio->cleanup_lock);
 	mutex_init(&radio->bluetooth_lock);
 	spin_lock_init(&radio->result_lock);
-	INIT_DELAYED_WORK(&radio->cleanup_work, bq2830l_radio_cleanup_work);
+	INIT_DELAYED_WORK(&radio->cleanup_work, marlin2_radio_cleanup_work);
 	init_completion(&radio->runtime_ready);
 	platform_set_drvdata(pdev, radio);
 	radio->aon =
@@ -873,15 +848,19 @@ static int bq2830l_radio_probe(struct platform_device *pdev)
 	if (IS_ERR(radio->aon))
 		return dev_err_probe(dev, PTR_ERR(radio->aon),
 				     "AON registers unavailable\n");
-	radio->pins = syscon_regmap_lookup_by_phandle(
-		dev->of_node,
-		radio->is_itel ? "fplinux,radio-pins" : "bq,pins");
+	radio->pins = syscon_regmap_lookup_by_phandle(dev->of_node,
+						      board->pins_phandle);
 	if (IS_ERR(radio->pins))
 		return dev_err_probe(dev, PTR_ERR(radio->pins),
 				     "pin registers unavailable\n");
-	if (radio->is_itel) {
-		ret = device_property_read_u32(dev, "fplinux,radio-pad-0464",
-					       &radio->pad_0464);
+	for (index = 0; index < board->num_pins; index++) {
+		const struct marlin2_radio_pin *pin = &board->pins[index];
+		u32 *value = &radio->pin_state[index].value;
+
+		*value = pin->value;
+		if (!pin->value_property)
+			continue;
+		ret = device_property_read_u32(dev, pin->value_property, value);
 		if (ret)
 			return dev_err_probe(dev, ret,
 					     "radio pad setting unavailable\n");
@@ -906,14 +885,14 @@ static int bq2830l_radio_probe(struct platform_device *pdev)
 	if (IS_ERR(radio->wifipa))
 		return dev_err_probe(dev, PTR_ERR(radio->wifipa),
 				     "WIFIPA regulator unavailable\n");
-	radio->aux0_hw.init = &bq2830l_aux0_init;
+	radio->aux0_hw.init = &marlin2_aux0_init;
 	ret = devm_clk_hw_register(dev, &radio->aux0_hw);
 	if (ret)
 		return ret;
 	radio->aux0 = devm_clk_hw_get_clk(dev, &radio->aux0_hw, "radio");
 	if (IS_ERR(radio->aux0))
 		return PTR_ERR(radio->aux0);
-	ret = devm_add_action_or_reset(dev, bq2830l_radio_cleanup, radio);
+	ret = devm_add_action_or_reset(dev, marlin2_radio_cleanup, radio);
 	if (ret)
 		return ret;
 	radio->transport =
@@ -923,7 +902,7 @@ static int bq2830l_radio_probe(struct platform_device *pdev)
 	ret = devm_add_action_or_reset(dev, unregister_consumers, radio);
 	if (ret)
 		return ret;
-#if IS_ENABLED(CONFIG_BQ2830L_WLAN)
+#if IS_ENABLED(CONFIG_MARLIN2_WLAN)
 	{
 		radio->wlan = marlin2_wlan_register(dev, &wlan_radio_ops, radio,
 						    radio->transport);
@@ -935,8 +914,8 @@ static int bq2830l_radio_probe(struct platform_device *pdev)
 		}
 	}
 #endif
-#if IS_ENABLED(CONFIG_BQ2830L_FM)
-	if (!radio->is_itel) {
+#if IS_ENABLED(CONFIG_MARLIN2_FM)
+	if (board->fm) {
 		radio->fm = marlin2_fm_register(dev, radio->transport);
 		if (IS_ERR(radio->fm)) {
 			ret = PTR_ERR(radio->fm);
@@ -946,58 +925,63 @@ static int bq2830l_radio_probe(struct platform_device *pdev)
 		}
 	}
 #endif
-	ret = device_add_group(dev, &bq2830l_radio_group);
+	ret = device_add_group(dev, &marlin2_radio_group);
 	if (ret)
 		return ret;
 	return devm_add_action_or_reset(dev, remove_radio_group, dev);
 }
 
-static void bq2830l_radio_shutdown(struct platform_device *pdev)
+static void marlin2_radio_shutdown(struct platform_device *pdev)
 {
-	struct bq2830l_radio *radio = platform_get_drvdata(pdev);
+	struct marlin2_radio *radio = platform_get_drvdata(pdev);
 
 	devm_release_action(&pdev->dev, remove_radio_group, &pdev->dev);
 	devm_remove_action(&pdev->dev, unregister_consumers, radio);
 	unregister_consumers(radio);
-	bq2830l_radio_cleanup(radio);
+	marlin2_radio_cleanup(radio);
 }
 
-static const struct of_device_id bq2830l_radio_of_match[] = {
-	{ .compatible = BQ2830L_RADIO_COMPATIBLE },
-	{ .compatible = ITEL_NEO_R60_RADIO_COMPATIBLE },
+static const struct of_device_id marlin2_radio_of_match[] = {
+#if IS_ENABLED(CONFIG_MACH_BQ_2830L_TANK_CONNECT_MAX)
+	BQ2830L_MARLIN2_MATCH,
+#endif
+#if IS_ENABLED(CONFIG_MACH_ITEL_NEO_R60_PLUS)
+	ITEL_NEO_R60_MARLIN2_MATCH,
+#endif
 	{},
 };
-MODULE_DEVICE_TABLE(of, bq2830l_radio_of_match);
+MODULE_DEVICE_TABLE(of, marlin2_radio_of_match);
 
-static struct platform_driver bq2830l_radio_driver = {
-	.probe = bq2830l_radio_probe,
-	.shutdown = bq2830l_radio_shutdown,
+static struct platform_driver marlin2_radio_driver = {
+	.probe = marlin2_radio_probe,
+	.shutdown = marlin2_radio_shutdown,
 	.driver = {
+		/* Keep the sysfs driver name used by existing Bluetooth clients. */
 		.name = "bq2830l-radio",
-		.of_match_table = bq2830l_radio_of_match,
+		.of_match_table = marlin2_radio_of_match,
 	},
 };
 
-static int __init bq2830l_radio_init(void)
+static int __init marlin2_radio_init(void)
 {
 	int ret;
 
 	ret = sdio_register_driver(&marlin2_sdio_driver);
 	if (ret)
 		return ret;
-	ret = platform_driver_register(&bq2830l_radio_driver);
+	ret = platform_driver_register(&marlin2_radio_driver);
 	if (ret)
 		sdio_unregister_driver(&marlin2_sdio_driver);
 	return ret;
 }
-module_init(bq2830l_radio_init);
+module_init(marlin2_radio_init);
 
-static void __exit bq2830l_radio_exit(void)
+static void __exit marlin2_radio_exit(void)
 {
-	platform_driver_unregister(&bq2830l_radio_driver);
+	platform_driver_unregister(&marlin2_radio_driver);
 	sdio_unregister_driver(&marlin2_sdio_driver);
 }
-module_exit(bq2830l_radio_exit);
+module_exit(marlin2_radio_exit);
 
 MODULE_DESCRIPTION("UMS9117 Marlin2 radio control");
 MODULE_LICENSE("GPL");

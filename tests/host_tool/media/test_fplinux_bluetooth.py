@@ -120,7 +120,7 @@ def bluetooth_tools(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Blueto
                     "-Wextra",
                     "-Werror",
                     f"-I{SHARED_INCLUDE}",
-                    '-DFPLINUX_BLUETOOTH_DRIVER_DIR="platform-driver"',
+                    '-DFPLINUX_BLUETOOTH_DEVICES_DIR="platform-driver"',
                     '-DFPLINUX_BLUETOOTH_RECEIVE_SOCKET="receive.sock"',
                     *cflags,
                     str(source),
@@ -315,21 +315,27 @@ def bluetooth_case(bluetooth_tools: BluetoothTools) -> Iterator[BluetoothContext
 class FplinuxBluetoothHostToolTests:
     """Exercise local admission and controlled D-Bus BlueZ/obexd behavior."""
 
+    @pytest.mark.parametrize("name", ["400a0000.bluetooth", "radio"])
     def test_enable_writes_one_start_without_a_bus_service(
-        self, bluetooth_without_bus: BluetoothContext
+        self, bluetooth_without_bus: BluetoothContext, name: str
     ) -> None:
         """A bound controller receives the start request without BlueZ running."""
         directory = bluetooth_without_bus.prepare_driver_directory()
-        device = directory / "400a0000.bluetooth"
-        device.mkdir()
+        device = directory / name
+        (device / "of_node").mkdir(parents=True)
+        (device / "of_node/fplinux,bluetooth-start").touch()
         start = device / "start"
         start.write_bytes(b"")
+        other = directory / "other"
+        other.mkdir()
+        (other / "start").touch()
         (directory / "uevent").write_text("", encoding="ascii")
 
         result = bluetooth_without_bus.run_client("enable")
 
         assert (result.returncode) == (0), result.stderr
         assert (start.read_bytes()) == (b"1\n")
+        assert (other / "start").read_bytes() == b""
         assert (result.stdout) == (
             "Bluetooth interfaces ready; use bluetoothctl for adapter power\n"
         )
@@ -451,7 +457,8 @@ class FplinuxBluetoothHostToolTests:
         """Root and subcommand help cannot write the synthetic start control."""
         directory = bluetooth_without_bus.prepare_driver_directory()
         device = directory / "400a0000.bluetooth"
-        device.mkdir()
+        (device / "of_node").mkdir(parents=True)
+        (device / "of_node/fplinux,bluetooth-start").touch()
         start = device / "start"
         start.write_bytes(b"")
 
@@ -521,9 +528,10 @@ class FplinuxBluetoothHostToolTests:
         """An ambiguous discovery result cannot initialize an arbitrary controller."""
         directory = bluetooth_without_bus.prepare_driver_directory()
         controls = []
-        for name in ("controller-a", "controller-b"):
+        for name in ("400a0000.bluetooth", "radio"):
             device = directory / name
-            device.mkdir()
+            (device / "of_node").mkdir(parents=True)
+            (device / "of_node/fplinux,bluetooth-start").touch()
             start = device / "start"
             start.write_bytes(b"")
             controls.append(start)

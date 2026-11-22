@@ -3,7 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#include "bq2830l-radio.h"
+#include "marlin2-radio.h"
 
 /*
  * The driver is linked unchanged. These doubles replace kernel device state
@@ -85,14 +85,16 @@ HARDWARE_STUB(u8, sdio_f0_readb,
 HARDWARE_STUB(void, sdio_f0_writeb,
 	      (struct sdio_func * func, u8 value, unsigned int address,
 	       int *error))
-HARDWARE_STUB(bool, bq2830l_radio_runtime_requested, (struct sdio_func * func))
-HARDWARE_STUB(unsigned long, bq2830l_radio_deadline, (struct sdio_func * func))
-HARDWARE_STUB(struct gpio_desc *, bq2830l_radio_rx_request,
+HARDWARE_STUB(const struct marlin2_radio_board *, marlin2_radio_get_board,
 	      (struct sdio_func * func))
-HARDWARE_STUB(void, bq2830l_radio_report,
+HARDWARE_STUB(bool, marlin2_radio_runtime_requested, (struct sdio_func * func))
+HARDWARE_STUB(unsigned long, marlin2_radio_deadline, (struct sdio_func * func))
+HARDWARE_STUB(struct gpio_desc *, marlin2_radio_rx_request,
+	      (struct sdio_func * func))
+HARDWARE_STUB(void, marlin2_radio_report,
 	      (struct sdio_func * func, int error,
 	       const struct marlin2_boot_result *result))
-HARDWARE_STUB(void, bq2830l_radio_runtime_cleanup_error,
+HARDWARE_STUB(void, marlin2_radio_runtime_cleanup_error,
 	      (struct sdio_func * func, int error))
 HARDWARE_STUB(int, marlin2_packet_get_info_locked,
 	      (struct sdio_func * func, struct gpio_desc *request, u32 token,

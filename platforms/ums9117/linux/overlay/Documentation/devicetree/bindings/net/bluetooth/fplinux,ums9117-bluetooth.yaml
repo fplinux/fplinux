@@ -16,6 +16,10 @@ description: |
   devices; controller power and reset use only the relevant SET/CLEAR bits.
 
 properties:
+  fplinux,bluetooth-start:
+    type: boolean
+    description: Expose the firmware start control to the Bluetooth service.
+
   compatible:
     const: fplinux,ums9117-bluetooth
 

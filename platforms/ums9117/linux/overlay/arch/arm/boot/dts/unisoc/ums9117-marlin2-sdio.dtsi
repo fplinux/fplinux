@@ -1,0 +1,33 @@
+// SPDX-License-Identifier: GPL-2.0-only
+
+#include <dt-bindings/clock/sprd,ums9117-clk.h>
+#include <dt-bindings/interrupt-controller/arm-gic.h>
+#include <dt-bindings/reset/sprd,ums9117-reset.h>
+
+/ {
+	radio_sdio1_clk: clock-controller@21500074 {
+		compatible = "sprd,ums9117-ap-sdio1-clk";
+		reg = <0x21500074 0x4>;
+		#clock-cells = <1>;
+	};
+
+	radio {
+		ranges;
+		#address-cells = <1>;
+		#size-cells = <1>;
+
+		radio_sdio1: mmc@20400000 {
+			compatible = "sprd,ums9117-sdio";
+			reg = <0x20400000 0x100>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			clock-names = "sdio", "enable";
+			clocks = <&radio_sdio1_clk CLK_SDIO1>,
+				 <&apahb_gate CLK_SDIO1_EB>;
+			interrupts = <GIC_SPI 58 IRQ_TYPE_LEVEL_HIGH>;
+			reg-names = "host";
+			reset-names = "sdio";
+			resets = <&apahb_reset RESET_SDIO1>;
+		};
+	};
+};

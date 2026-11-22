@@ -5,7 +5,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "bq2830l-radio.h"
+#include "bq2830l-marlin2.h"
+#include "itel-neo-r60-marlin2.h"
 
 struct sdio_device {
 	u8 system_address[4];
@@ -46,7 +47,23 @@ struct sdio_device {
 };
 
 static struct sdio_device device;
+static const struct marlin2_radio_board *boot_board = &bq2830l_marlin2;
 unsigned long jiffies;
+
+void fsleep(unsigned long delay)
+{
+	abort();
+}
+
+int gpiod_direction_output(struct gpio_desc *gpio, int value)
+{
+	abort();
+}
+
+void gpiod_set_value_cansleep(struct gpio_desc *gpio, int value)
+{
+	abort();
+}
 
 static u32 selected_address(void)
 {
@@ -393,22 +410,28 @@ u8 sdio_f0_readb(struct sdio_func *func, unsigned int address, int *error)
 	}
 }
 
-bool bq2830l_radio_runtime_requested(struct sdio_func *func)
+const struct marlin2_radio_board *
+marlin2_radio_get_board(struct sdio_func *func)
+{
+	return boot_board;
+}
+
+bool marlin2_radio_runtime_requested(struct sdio_func *func)
 {
 	return device.persistent;
 }
 
-unsigned long bq2830l_radio_deadline(struct sdio_func *func)
+unsigned long marlin2_radio_deadline(struct sdio_func *func)
 {
 	return 60000;
 }
 
-struct gpio_desc *bq2830l_radio_rx_request(struct sdio_func *func)
+struct gpio_desc *marlin2_radio_rx_request(struct sdio_func *func)
 {
 	return NULL;
 }
 
-void bq2830l_radio_report(struct sdio_func *func, int error,
+void marlin2_radio_report(struct sdio_func *func, int error,
 			  const struct marlin2_boot_result *result)
 {
 	assert(!device.claimed);
@@ -416,7 +439,7 @@ void bq2830l_radio_report(struct sdio_func *func, int error,
 	device.reported_boot = *result;
 }
 
-void bq2830l_radio_runtime_cleanup_error(struct sdio_func *func, int error)
+void marlin2_radio_runtime_cleanup_error(struct sdio_func *func, int error)
 {
 	assert(device.claimed);
 	assert(sdio_get_drvdata(func));
@@ -628,14 +651,11 @@ static void check_runtime_remove(struct sdio_func *func, bool itel_image)
 
 int main(int argc, char **argv)
 {
-	struct device radio = { .of_node = "bq,2830l-radio" };
-	struct device host_device = { .parent = &radio };
 	struct mmc_host host = {
 		.max_req_size = 512,
 		.max_seg_size = 512,
 		.max_blk_count = 1,
 		.max_blk_size = 512,
-		.parent = &host_device,
 	};
 	struct mmc_card card = { .host = &host };
 	struct sdio_func func = {
@@ -654,7 +674,7 @@ int main(int argc, char **argv)
 		return 0;
 	}
 	if (argc == 2 && !strcmp(argv[1], "itel-boot")) {
-		radio.of_node = "fplinux,itel-neo-r60-marlin2";
+		boot_board = &itel_neo_r60_marlin2;
 		check_itel_rejects_bq_image(&func);
 		check_itel_rejects_chip_id(&func, false);
 		check_itel_rejects_chip_id(&func, true);

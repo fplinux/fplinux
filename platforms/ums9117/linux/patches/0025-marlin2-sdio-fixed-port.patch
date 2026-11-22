@@ -7,7 +7,7 @@ index 12716ec..69c31ac 100644
  }
  EXPORT_SYMBOL_GPL(sdio_retune_release);
 +
-+#if IS_ENABLED(CONFIG_BQ2830L_BLUETOOTH)
++#if IS_ENABLED(CONFIG_MARLIN2_BLUETOOTH)
 +/**
 + *	sdio_memcpy_toio_fixed_port - write through a port that restarts per command
 + *	@func: SDIO function to access
@@ -74,7 +74,7 @@ index 5d63a64..34b9634 100644
 
  extern int sdio_memcpy_toio(struct sdio_func *func, unsigned int addr,
  	void *src, int count);
-+#if IS_ENABLED(CONFIG_BQ2830L_BLUETOOTH)
++#if IS_ENABLED(CONFIG_MARLIN2_BLUETOOTH)
 +extern int sdio_memcpy_toio_fixed_port(struct sdio_func *func,
 +				       unsigned int addr, void *src, int count);
 +#endif

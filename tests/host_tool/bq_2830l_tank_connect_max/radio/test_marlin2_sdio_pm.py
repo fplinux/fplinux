@@ -12,7 +12,7 @@ from tests.process import run_process
 if TYPE_CHECKING:
     from pathlib import Path
 
-KERNEL = ROOT / "targets/bq-2830l-tank-connect-max/linux/overlay/drivers/mmc/host/bq2830l-radio"
+KERNEL = ROOT / "platforms/ums9117/linux/overlay/drivers/mmc/host/marlin2"
 FIXTURES = ROOT / "tests/host_tool/bq_2830l_tank_connect_max/radio"
 
 
@@ -31,7 +31,7 @@ def test_persistent_sdio_suspend_retains_power_each_cycle_and_reports_unsupporte
             "-Werror",
             "-Wno-unused-parameter",
             "-UNDEBUG",
-            "-DCONFIG_BQ2830L_BLUETOOTH=1",
+            "-DCONFIG_MARLIN2_BLUETOOTH=1",
             f"-I{FIXTURES / 'marlin2-sdio-write-compat'}",
             f"-I{KERNEL}",
             str(FIXTURES / "marlin2-sdio-pm.c"),

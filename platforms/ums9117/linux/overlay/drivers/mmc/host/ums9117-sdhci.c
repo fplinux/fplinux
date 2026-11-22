@@ -571,8 +571,6 @@ static const struct sdhci_pltfm_data ums9117_sdhci_pdata = {
 		   SDHCI_QUIRK2_USE_32BIT_BLK_CNT,
 };
 
-#if IS_ENABLED(CONFIG_MMC_SDHCI_UMS9117_BQ_RADIO) && \
-	IS_ENABLED(CONFIG_MACH_BQ_2830L_TANK_CONNECT_MAX)
 static void ums9117_sdio_set_power(struct sdhci_host *host, unsigned char mode,
 				   unsigned short vdd)
 {
@@ -615,7 +613,6 @@ static const struct sdhci_pltfm_data ums9117_sdio_pdata = {
 	.quirks2 = SDHCI_QUIRK2_NO_1_8_V | SDHCI_QUIRK2_BROKEN_64_BIT_DMA |
 		   SDHCI_QUIRK2_USE_32BIT_BLK_CNT,
 };
-#endif
 
 static bool ums9117_sdhci_forbidden_command(const struct mmc_command *command)
 {
@@ -993,10 +990,7 @@ static void ums9117_sdhci_remove(struct platform_device *pdev)
 
 static const struct of_device_id ums9117_sdhci_of_match[] = {
 	{ .compatible = "sprd,ums9117-sdhci", .data = &ums9117_sdhci_pdata },
-#if IS_ENABLED(CONFIG_MMC_SDHCI_UMS9117_BQ_RADIO) && \
-	IS_ENABLED(CONFIG_MACH_BQ_2830L_TANK_CONNECT_MAX)
 	{ .compatible = "sprd,ums9117-sdio", .data = &ums9117_sdio_pdata },
-#endif
 	{}
 };
 MODULE_DEVICE_TABLE(of, ums9117_sdhci_of_match);

@@ -18,14 +18,8 @@
 #include "fplinux-bluetooth-receive.h"
 #include "fplinux-cli.h"
 
-#ifndef FPLINUX_BLUETOOTH_DRIVER_DIR
-#define FPLINUX_BLUETOOTH_DRIVER_DIR \
-	"/sys/bus/platform/drivers/ums9117-bluetooth"
-#endif
-
-#ifndef FPLINUX_BLUETOOTH_SDIO_DRIVER_DIR
-#define FPLINUX_BLUETOOTH_SDIO_DRIVER_DIR \
-	"/sys/bus/platform/drivers/bq2830l-radio"
+#ifndef FPLINUX_BLUETOOTH_DEVICES_DIR
+#define FPLINUX_BLUETOOTH_DEVICES_DIR "/sys/bus/platform/devices"
 #endif
 
 static volatile sig_atomic_t interrupted;
@@ -36,11 +30,11 @@ static void on_signal(int unused)
 	interrupted = 1;
 }
 
-static int find_start_control(const char *name, int *start_fd)
+static int find_start_control(int *start_fd)
 {
-	DIR *directory = opendir(name);
+	DIR *directory = opendir(FPLINUX_BLUETOOTH_DEVICES_DIR);
 	struct dirent *entry;
-	char path[NAME_MAX + sizeof("/start")];
+	char path[NAME_MAX + sizeof("/of_node/fplinux,bluetooth-start")];
 	int directory_fd;
 	int ret = 0;
 
@@ -56,9 +50,17 @@ static int find_start_control(const char *name, int *start_fd)
 
 		if (entry->d_name[0] == '.')
 			continue;
-		if (snprintf(path, sizeof(path), "%s/start", entry->d_name) >=
-		    (int)sizeof(path))
+		if (snprintf(path, sizeof(path),
+			     "%s/of_node/fplinux,bluetooth-start",
+			     entry->d_name) >= (int)sizeof(path))
 			continue;
+		if (faccessat(directory_fd, path, F_OK, 0) < 0) {
+			if (errno == ENOENT || errno == ENOTDIR)
+				continue;
+			ret = -errno;
+			break;
+		}
+		snprintf(path, sizeof(path), "%s/start", entry->d_name);
 		candidate = openat(directory_fd, path, O_WRONLY | O_CLOEXEC);
 		if (candidate < 0) {
 			if (errno == ENOENT || errno == ENOTDIR)
@@ -85,10 +87,7 @@ static int command_enable(bool optional)
 	ssize_t written;
 	int ret;
 
-	ret = find_start_control(FPLINUX_BLUETOOTH_DRIVER_DIR, &start_fd);
-	if (!ret)
-		ret = find_start_control(FPLINUX_BLUETOOTH_SDIO_DRIVER_DIR,
-					 &start_fd);
+	ret = find_start_control(&start_fd);
 	if (ret) {
 		if (start_fd >= 0)
 			close(start_fd);

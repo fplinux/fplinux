@@ -22,10 +22,7 @@ struct ums9117_reset {
 
 static const u32 ums9117_ap_ahb_reset_bits[] = {
 	[RESET_SDIO0] = BIT(11),
-#if IS_ENABLED(CONFIG_MMC_SDHCI_UMS9117_BQ_RADIO) && \
-	IS_ENABLED(CONFIG_MACH_BQ_2830L_TANK_CONNECT_MAX)
 	[RESET_SDIO1] = BIT(12),
-#endif
 };
 
 static struct ums9117_reset *

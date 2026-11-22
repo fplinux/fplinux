@@ -62,19 +62,24 @@ destination = "drivers/gpu/drm/ums9117/Makefile"
 [[linux.dt_config_checks]]
 path = "/radio"
 compatible = "fplinux,itel-neo-r60-marlin2"
-config = "CONFIG_MMC_SDHCI_UMS9117_BQ_RADIO"
+config = "CONFIG_MARLIN2_SDIO"
 
 [[linux.dt_config_checks]]
 path = "/radio"
 compatible = "fplinux,itel-neo-r60-marlin2"
 property = "mac-address-name"
-config = "CONFIG_BQ2830L_WLAN"
+config = "CONFIG_MARLIN2_WLAN"
 
 [[linux.dt_config_checks]]
 path = "/radio"
 compatible = "fplinux,itel-neo-r60-marlin2"
-property = "bluetooth-config-name"
-config = "CONFIG_BQ2830L_BLUETOOTH"
+property = "fplinux,bluetooth-start"
+config = "CONFIG_MARLIN2_BLUETOOTH"
+
+[[linux.dt_config_checks]]
+path = "/radio/mmc@20400000"
+compatible = "sprd,ums9117-sdio"
+config = "CONFIG_MMC_SDHCI_UMS9117"
 
 [bootstrap]
 lcd_config = "bootstrap/lcd_config.h"

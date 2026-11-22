@@ -17,6 +17,7 @@ typedef uint16_t u16;
 typedef uint32_t u32;
 
 #define BIT(bit) (1UL << (bit))
+#define ARRAY_SIZE(array) (sizeof(array) / sizeof((array)[0]))
 #define min_t(type, left, right) \
 	((type)(left) < (type)(right) ? (type)(left) : (type)(right))
 #define GFP_KERNEL 0
@@ -42,6 +43,7 @@ struct device {
 	void *driver_data;
 	struct device *parent;
 };
+struct gpio_desc;
 struct dev_pm_ops {
 	int (*suspend)(struct device *);
 	int (*resume)(struct device *);
@@ -101,6 +103,9 @@ static inline struct sdio_func *dev_to_sdio_func(struct device *dev)
 
 extern unsigned long jiffies;
 void msleep(unsigned int);
+void fsleep(unsigned long);
+int gpiod_direction_output(struct gpio_desc *, int);
+void gpiod_set_value_cansleep(struct gpio_desc *, int);
 void *kmalloc(size_t, int);
 void kfree(void *);
 void *devm_kzalloc(struct device *, size_t, int);

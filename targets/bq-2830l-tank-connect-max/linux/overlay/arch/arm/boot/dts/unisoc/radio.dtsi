@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 
 #include <dt-bindings/gpio/gpio.h>
-#include <dt-bindings/clock/sprd,ums9117-clk.h>
-#include <dt-bindings/reset/sprd,ums9117-reset.h>
+#include "ums9117-marlin2-sdio.dtsi"
 
 / {
 	radio_pins: syscon@402a0000 {
@@ -10,17 +9,8 @@
 		reg = <0x402a0000 0x800>;
 	};
 
-	radio_sdio1_clk: clock-controller@21500074 {
-		compatible = "sprd,ums9117-ap-sdio1-clk";
-		reg = <0x21500074 0x4>;
-		#clock-cells = <1>;
-	};
-
 	radio {
 		compatible = "bq,2830l-radio";
-		ranges;
-		#address-cells = <1>;
-		#size-cells = <1>;
 		bluetooth-config-name = "ums9117/bq-2830l-tank-connect-max-wcn-bluetooth.bin";
 		enable-gpios = <&ap_gpio 14 GPIO_ACTIVE_HIGH>;
 		mac-address-name = "ums9117/bq-2830l-tank-connect-max-wcn-mac.bin";
@@ -29,35 +19,25 @@
 		wcn-supply = <&radio_wcn>;
 		wifipa-supply = <&radio_wifipa>;
 		bq,pins = <&radio_pins>;
+		fplinux,bluetooth-start;
 		sprd,aon-apb = <&aon_apb>;
+	};
+};
 
-		mmc@20400000 {
-			compatible = "sprd,ums9117-sdio";
-			reg = <0x20400000 0x100>;
-			#address-cells = <1>;
-			#size-cells = <0>;
-			bus-width = <1>;
-			clock-names = "sdio", "enable";
-			clocks = <&radio_sdio1_clk CLK_SDIO1>,
-				 <&apahb_gate CLK_SDIO1_EB>;
-			interrupts = <GIC_SPI 58 IRQ_TYPE_LEVEL_HIGH>;
-			keep-power-in-suspend;
-			max-frequency = <13000000>;
-			no-1-8-v;
-			no-mmc;
-			no-sd;
-			non-removable;
-			reg-names = "host";
-			reset-names = "sdio";
-			resets = <&apahb_reset RESET_SDIO1>;
+&radio_sdio1 {
+	bus-width = <1>;
+	keep-power-in-suspend;
+	max-frequency = <13000000>;
+	no-1-8-v;
+	no-mmc;
+	no-sd;
+	non-removable;
 
-			radio@1 {
-				compatible = "sprd,marlin2-sdio";
-				reg = <1>;
-				calibration-name = "ums9117/bq-2830l-tank-connect-max-wcn-calibration.bin";
-				firmware-name = "ums9117/bq-2830l-tank-connect-max-wcn.bin";
-			};
-		};
+	radio@1 {
+		compatible = "sprd,marlin2-sdio";
+		reg = <1>;
+		calibration-name = "ums9117/bq-2830l-tank-connect-max-wcn-calibration.bin";
+		firmware-name = "ums9117/bq-2830l-tank-connect-max-wcn.bin";
 	};
 };
 

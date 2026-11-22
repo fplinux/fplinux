@@ -170,6 +170,7 @@ patches = [
   "platforms/ums9117/linux/patches/0022-bnep-local-ethernet-address.patch",
   "platforms/ums9117/linux/patches/0023-mmc-card-detection-config.patch",
   "platforms/ums9117/linux/patches/0024-squashfs-ram-layer-uuid.patch",
+  "platforms/ums9117/linux/patches/0025-marlin2-sdio-fixed-port.patch",
 ]
 overlay = "platforms/ums9117/linux/overlay"
 

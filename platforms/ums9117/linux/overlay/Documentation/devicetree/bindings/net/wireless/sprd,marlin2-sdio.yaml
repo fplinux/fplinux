@@ -46,8 +46,8 @@ examples:
         radio@1 {
             compatible = "sprd,marlin2-sdio";
             reg = <1>;
-            firmware-name = "ums9117/bq-2830l-tank-connect-max-wcn.bin";
-            calibration-name = "ums9117/bq-2830l-tank-connect-max-wcn-calibration.bin";
+            firmware-name = "ums9117/radio-wcn.bin";
+            calibration-name = "ums9117/radio-wcn-calibration.bin";
         };
     };
 ...

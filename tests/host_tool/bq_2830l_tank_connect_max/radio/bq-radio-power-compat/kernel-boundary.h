@@ -42,9 +42,11 @@ typedef pthread_mutex_t spinlock_t;
 	__atomic_store_n((pointer), (data), __ATOMIC_RELEASE)
 #define WARN_ON(condition) (!!(condition))
 #define IS_ENABLED(option) option
-#define CONFIG_BQ2830L_WLAN 1
-#define CONFIG_BQ2830L_BLUETOOTH 1
-#define CONFIG_BQ2830L_FM 1
+#define struct_size(pointer, member, count) \
+	(sizeof(*(pointer)) + sizeof((pointer)->member[0]) * (count))
+#define CONFIG_MARLIN2_WLAN 1
+#define CONFIG_MARLIN2_BLUETOOTH 1
+#define CONFIG_MARLIN2_FM 1
 #define max_t(type, left, right) \
 	((type)(left) > (type)(right) ? (type)(left) : (type)(right))
 #define msecs_to_jiffies(milliseconds) (milliseconds)
@@ -71,6 +73,7 @@ struct device_node {
 struct device {
 	struct device *parent;
 	struct device_node *of_node;
+	const struct device_driver *driver;
 	void *driver_data;
 };
 struct platform_device {
@@ -78,14 +81,16 @@ struct platform_device {
 };
 struct of_device_id {
 	const char *compatible;
+	const void *data;
+};
+struct device_driver {
+	const char *name;
+	const struct of_device_id *of_match_table;
 };
 struct platform_driver {
 	int (*probe)(struct platform_device *pdev);
 	void (*shutdown)(struct platform_device *pdev);
-	struct {
-		const char *name;
-		const struct of_device_id *of_match_table;
-	} driver;
+	struct device_driver driver;
 };
 struct attribute {
 	const char *name;
@@ -325,6 +330,7 @@ int of_platform_populate(struct device_node *, const void *, const void *,
 			 struct device *);
 void of_platform_depopulate(struct device *);
 bool of_device_is_compatible(struct device_node *, const char *);
+const void *device_get_match_data(const struct device *);
 bool mod_delayed_work(struct workqueue_struct *, struct delayed_work *,
 		      unsigned long);
 int device_add_group(struct device *, const struct attribute_group *);
