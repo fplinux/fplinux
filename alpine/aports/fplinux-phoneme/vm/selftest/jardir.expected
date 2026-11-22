@@ -1,0 +1,15 @@
+PM-JARDIR /dir/ length=0 hash=0
+PM-JARDIR /dir/sub/ length=0 hash=0
+PM-JARDIR /dir null
+PM-JARDIR /dir/sub null
+PM-JARDIR /dir/sub/a.txt length=11 hash=1788599454
+PM-JARDIR /dir/b.txt length=48 hash=-1738849382
+PM-JARDIR /dir/missing.txt null
+PM-JARDIR /dir/sub/missing/ null
+PM-JARDIR /DIR/ null
+PM-JARDIR /DIR/B.TXT null
+PM-JARDIR /dir/B.txt null
+PM-JARDIR /empty/ length=0 hash=0
+PM-JARDIR /empty null
+PM-JARDIR / null
+PM-JARDIR /dir/ length=0 hash=0

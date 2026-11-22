@@ -259,15 +259,15 @@ for expected in ready removed; do
 		sleep 0.05
 	done
 	case "${expected}" in
-		ready) mv "${files_card}" "${files_card}.removed" ;;
-		removed) mv "${files_card}.removed" "${files_card}" ;;
+	ready) mv "${files_card}" "${files_card}.removed" ;;
+	removed) mv "${files_card}.removed" "${files_card}" ;;
 	esac
 done
 wait "${listener_pid}" &&
 	grep -qx 'PM-FILE-LISTENER pass' "${work}/files-listener.txt" || {
-		cat "${work}/files-listener.txt" >&2
-		fail "File system listener did not report the restored root"
-	}
+	cat "${work}/files-listener.txt" >&2
+	fail "File system listener did not report the restored root"
+}
 rmdir "${files_card}" "${files_home}/Files" "${files_home}"
 
 # Canvas port headless: sizes of the modes, sizeChanged after a mode change,
@@ -357,6 +357,35 @@ build_jar bluetooth "${here}/bluetooth.mf"
 grep -qx 'PM-BLUETOOTH local device unavailable' "${work}/bluetooth.txt" ||
 	fail "Bluetooth availability check differs (${work}/bluetooth.txt)"
 
+# Resources of the application JAR by name, interpreted and compiled: the
+# directory entries of a JAR open as empty streams, other names must match
+# exactly. The same classes run from a JAR with explicit directory entries
+# and from one with files only.
+build_jar jardir "${here}/jardir.mf"
+mkdir -p "${work}/jardir-resources/empty"
+cp -R "${here}/jardir-resources/dir" "${work}/jardir-resources/"
+"${jdk}/bin/jar" uf "${work}/jardir.jar" -C "${work}/jardir-resources" dir \
+	-C "${work}/jardir-resources" empty
+"${jdk}/bin/jar" cfm "${work}/jardir-flat.jar" "${here}/jardir.mf" \
+	-C "${work}/jardir/preverified" fplinux/fixtures/jardir/JarDirMIDlet.class \
+	-C "${work}/jardir-resources" dir/b.txt -C "${work}/jardir-resources" dir/sub/a.txt
+for jar in jardir jardir-flat; do
+	for jit in '' 1; do
+		log="${work}/${jar}-log-${jit:-0}.txt"
+		if ! FPLINUX_PHONEME_JIT=${jit} "${qemu_arm}" -L "${sysroot}" "${headless}" \
+			--system-classes "${classes}" --timeout-ms 30000 "${work}/${jar}.jar" \
+			>"${log}" 2>&1; then
+			cat "${log}" >&2
+			fail "${jar} resource fixture failed (JIT=${jit:-off})"
+		fi
+		grep '^PM-JARDIR ' "${log}" >"${work}/${jar}-${jit:-0}.txt" || true
+		if ! cmp -s "${here}/${jar}.expected" "${work}/${jar}-${jit:-0}.txt"; then
+			diff -u "${here}/${jar}.expected" "${work}/${jar}-${jit:-0}.txt" >&2 || true
+			fail "${jar} resource lookups differ (JIT=${jit:-off})"
+		fi
+	done
+done
+
 for api in wireless jsr; do
 	build_jar "${api}" "${here}/${api}.mf"
 	"${qemu_arm}" -L "${sysroot}" "${headless}" --system-classes "${classes}" \
@@ -409,4 +438,4 @@ END {
 ' "${work}/scheduler-log.txt" ||
 	fail "early VM slice changed the pending Java deadline"
 
-echo "phoneME self-test: PASS (vectors, hello, local JAD, RMS, files, canvas, Form, List/Alert LF, headless media, Bluetooth availability and Java deadlines)"
+echo "phoneME self-test: PASS (vectors, hello, local JAD, RMS, files, canvas, Form, List/Alert LF, headless media, Bluetooth availability, JAR directory entries and Java deadlines)"

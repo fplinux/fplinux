@@ -1,0 +1,7 @@
+Manifest-Version: 1.0
+MIDlet-Name: PM JAR directories
+MIDlet-Vendor: FPLinux
+MIDlet-Version: 1.0.0
+MIDlet-1: JAR directories, , fplinux.fixtures.jardir.JarDirMIDlet
+MicroEdition-Configuration: CLDC-1.1
+MicroEdition-Profile: MIDP-2.0

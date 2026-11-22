@@ -1,0 +1,529 @@
+Index the entries of a JAR file by a hash of their names.
+
+A lookup of a JAR entry scanned the central directory header by header,
+reading each 46 byte header and name through the 256 byte file buffer, and
+kept the entries it had passed in a list of at most 256 byte arrays that was
+searched linearly. Every class and resource of the application is looked up
+in the system classes first and is not there, and a missing name was never
+found in the list: it rescanned the directory from the first uncached entry
+and entered the same entries in the list again. Loading a game spent about
+five percent of its instructions in this code, and a run that reads many
+resources up to fifteen percent.
+
+Build an index of the central directory on the first search of a JAR: an int
+array used as an open-addressing hash table with four bytes per slot, at most
+two thirds of them in use, each holding the offset of an entry and eight bits
+of the hash of its name. The directory is read in 512 byte pieces and no
+object is allocated while it is read. A search hashes the name and reads the
+header and name only of entries whose hash bits match, so a missing name
+costs no file access. The first entry with a name still wins if several have
+it. Names ending in a slash, the directories of the JAR, are indexed like
+the other names: an explicit directory entry is found like a file, whatever
+was searched before, and opens as an empty stream. Names longer than 256
+bytes are left out, as in the old list. A JAR with more than
+MaxJarCacheEntryCount (now 4096) entries, a directory too big for the slot
+offsets or a failed allocation leaves the parser without an index, and its
+directory is scanned for each search as when the entry cache is off. The
+index takes about 4 KB for the 588 entries of the system classes, where the
+list took about 25 KB for its first 256.
+
+--- a/cldc/src/vm/share/runtime/JarFileParser.hpp
++++ b/cldc/src/vm/share/runtime/JarFileParser.hpp
+@@ -73,28 +73,24 @@
+ 
+ #if ENABLE_JAR_ENTRY_CACHE
+   /**
+-   * Cache for the JAR file's header table. It's used to speed up
+-   * entry searching in JarFileParser.cpp. This is an ObjArray. Each
+-   * element is a byte TypeArray:
++   * Index of the JAR file's central directory. It's used to speed up
++   * entry searching in JarFileParser.cpp. This is an int TypeArray
++   * that is built on the first search, see JarFileParser::build_entry_index().
++   * It's an open-addressing hash table whose size is a power of two. An
++   * empty slot is 0; the others hold the offset of an entry in the central
++   * directory plus 1 in the low 24 bits and the top 8 bits of the hash of
++   * the entry's name.
+    *
+-   *        [centralHeader][name ...]
+-   *
+-   * This ObjArray is grown automatically, up to the size specified in
+-   * the global MaxJarCacheEntryCount.
++   * No index is built when the JAR has more than MaxJarCacheEntryCount
++   * entries.
+    */
+-  OopDesc *         _entry_cache;
++  OopDesc *         _entry_index;
+ 
+ 
+   //
+   // All non-oop fields must appear below here.
+   //
+ 
+-
+-  /*
+-   * There may be empty slots at the end of _entry_cache. Only the first
+-   * _entry_cache_count slots are in use.
+-   */
+-  int               _entry_cache_count;
+ #endif
+ 
+   int               _timestamp;
+@@ -195,25 +191,15 @@
+   }
+ 
+ #if ENABLE_JAR_ENTRY_CACHE
+-  static jint entry_cache_offset() {
+-    return FIELD_OFFSET(JarFileParserDesc, _entry_cache);
+-  }
+-  static jint entry_cache_count_offset() {
+-    return FIELD_OFFSET(JarFileParserDesc, _entry_cache_count);
+-  }
+-
+-  ReturnOop entry_cache() {
+-    return obj_field(entry_cache_offset());
+-  }
+-  void set_entry_cache(ObjArray *value) {
+-    obj_field_put(entry_cache_offset(), value);
++  static jint entry_index_offset() {
++    return FIELD_OFFSET(JarFileParserDesc, _entry_index);
+   }
+ 
+-  int entry_cache_count() const {
+-    return int_field(entry_cache_count_offset());
++  ReturnOop entry_index() const {
++    return obj_field(entry_index_offset());
+   }
+-  void set_entry_cache_count(int value) {
+-    int_field_put(entry_cache_count_offset(), value);
++  void set_entry_index(TypeArray *value) {
++    obj_field_put(entry_index_offset(), value);
+   }
+ #endif
+ 
+@@ -308,17 +294,9 @@
+ #endif
+ 
+ #if ENABLE_JAR_ENTRY_CACHE
+-  bool find_entry_from_cache(const char *entryname);
+-  bool add_current_entry_to_cache(char * name, int name_len JVM_TRAPS);
+-  bool add_current_entry_to_cache0(char * name, int name_len JVM_TRAPS);
+-#else
+-  inline bool find_entry_from_cache(const char* /*entryname*/) {
+-    return false;
+-  }
+-  inline bool add_current_entry_to_cache(char* /*name*/, int /*name_len*/
+-                                         JVM_TRAPS) {
+-    return false;
+-  }
++  bool build_entry_index(JVM_SINGLE_ARG_TRAPS);
++  int index_central_directory(TypeArray* index);
++  bool find_entry_in_index(const char *entryname);
+ #endif
+ 
+ #if ENABLE_ROM_GENERATOR
+@@ -345,7 +323,15 @@
+     //
+     // See the global MaxCachedJarParsers. The number of actual parsers
+     // cached are min(MaxCachedJarParsers, MAX_CACHED_PARSERS)
+-    MAX_CACHED_PARSERS = 4
++    MAX_CACHED_PARSERS = 4,
++
++    // Layout of a slot of the entry index, see _entry_index.
++    ENTRY_INDEX_OFFSET_BITS = 24,
++    ENTRY_INDEX_OFFSET_MASK = (1 << ENTRY_INDEX_OFFSET_BITS) - 1,
++
++    // Size of the buffer used to read the central directory when the entry
++    // index is built. It must hold a header and the longest name.
++    ENTRY_INDEX_WINDOW_SIZE = 512
+   };
+ 
+   static int _cached_parsers [MAX_CACHED_PARSERS];
+--- a/cldc/src/vm/share/runtime/JarFileParser.cpp
++++ b/cldc/src/vm/share/runtime/JarFileParser.cpp
+@@ -1055,104 +1055,189 @@
+ 
+ #if ENABLE_JAR_ENTRY_CACHE
+ 
+-bool JarFileParser::find_entry_from_cache(const char *match_name) {
+-  ObjArray::Raw cache = entry_cache();
+-  TypeArray::Raw cache_line;
+-  jint size = entry_cache_count();
+-  jint match_name_len = jvm_strlen(match_name);
+-
+-  for (int i=0; i<size; i++) {
+-    cache_line = cache().obj_at(i);
+-    jint name_len = cache_line().length() - CENHDRSIZ;
+-
+-    if (name_len == match_name_len) {
+-      char *p = (char*)cache_line().base_address();
+-      char *name = p + CENHDRSIZ;
+-
+-      if (jvm_memcmp(match_name, name, name_len) == 0) {
+-        unsigned char *cenp = raw_current_entry()->centralHeader;
+-        jvm_memcpy(cenp, p, CENHDRSIZ);
+-        raw_current_entry()->length = CENLEN(cenp);
++// FNV-1a hash of an entry name.
++static inline juint jar_entry_name_hash(const unsigned char* name, int length) {
++  juint hash = 2166136261U;
++  for (int i = 0; i < length; i++) {
++    hash = (hash ^ name[i]) * 16777619U;
++  }
++  return hash;
++}
+ 
+-        if (TraceJarCache) {
+-          TTY_TRACE_CR(("JAR: entry cache hit: %s", match_name));
+-        }
++// Reads up to window_size bytes from the file offset into the window and
++// returns the number of bytes read.
++static inline juint jar_read_window(BufferedFile* bf, juint offset,
++                                    unsigned char* window, juint file_size,
++                                    juint window_size) {
++  juint size = file_size - offset;
++  if (size > window_size) {
++    size = window_size;
++  }
++  if (bf->seek((jint)offset, SEEK_SET) < 0) {
++    return 0;
++  }
++  return (juint)bf->get_bytes(window, (jint)size);
++}
+ 
+-        return true;
++// Walks the central directory the way the linear search in find_entry() does:
++// it ends at the first header that cannot be read or is not a central header,
++// and it skips the entries whose names are longer than MAX_ENTRY_NAME. Each
++// other entry, a directory (a name ending in '/') included, is entered in
++// <index>; if <index> is NULL the entries are only counted. Returns the
++// number of entries, or -1 if there are more than MaxJarCacheEntryCount of
++// them or an entry is too far from the start of the directory to be entered.
++// No object is allocated here.
++int JarFileParser::index_central_directory(TypeArray* index) {
++  BufferedFile::Raw bf = buffered_file();
++  DECLARE_STATIC_BUFFER(unsigned char, window, ENTRY_INDEX_WINDOW_SIZE);
++  const juint file_size = (juint)bf().file_size();
++  const juint cen_offset = raw_current_entry()->cenOffset;
++  const int limit = index == NULL ? MaxJarCacheEntryCount
++                                  : index->length() * 2 / 3;
++  const juint slot_mask = index == NULL ? 0 : index->length() - 1;
++
++  // The window holds the file range [window_start, window_start+window_size).
++  juint window_start = 0;
++  juint window_size = 0;
++  juint offset = cen_offset;
++  int count = 0;
++
++  while (offset + CENHDRSIZ <= file_size) {
++    if (offset < window_start ||
++        offset + CENHDRSIZ > window_start + window_size) {
++      window_start = offset;
++      window_size = jar_read_window(&bf, offset, window, file_size,
++                                    ENTRY_INDEX_WINDOW_SIZE);
++      if (window_size < CENHDRSIZ) {
++        break;
++      }
++    }
++    const unsigned char* cenp = window + (offset - window_start);
++    if (GETSIG(cenp) != CENSIG) {
++      break;
++    }
++    const juint name_length = CENNAM(cenp);
++    const juint next_offset = offset + CENHDRSIZ + name_length +
++                              CENEXT(cenp) + CENCOM(cenp);
++
++    if (name_length <= MAX_ENTRY_NAME) {
++      if (offset + CENHDRSIZ + name_length > window_start + window_size) {
++        // The name is cut off by the end of the window.
++        window_start = offset;
++        window_size = jar_read_window(&bf, offset, window, file_size,
++                                      ENTRY_INDEX_WINDOW_SIZE);
++        if (window_size < CENHDRSIZ + name_length) {
++          break;
++        }
++        cenp = window;
++      }
++      if (offset - cen_offset >= ENTRY_INDEX_OFFSET_MASK) {
++        return -1;
++      }
++      if (count == limit) {
++        // Counting: there are too many entries. Filling: the file has
++        // changed since the entries were counted.
++        return -1;
++      }
++      count++;
++      if (index != NULL) {
++        const juint hash = jar_entry_name_hash(cenp + CENHDRSIZ, name_length);
++        juint slot = hash & slot_mask;
++        while (index->int_at(slot) != 0) {
++          slot = (slot + 1) & slot_mask;
++        }
++        index->int_at_put(slot, (jint)((hash & ~(juint)ENTRY_INDEX_OFFSET_MASK)
++                                       | (offset - cen_offset + 1)));
+       }
+     }
++    offset = next_offset;
+   }
+-
+-  return false;
++  return count;
+ }
+ 
+-// This function will never THROW
+-bool JarFileParser::add_current_entry_to_cache(char * name, int name_len
+-                                               JVM_TRAPS) {
+-  if (name_len > 1 && name[name_len-1] == '/') {
+-    // No need to cache any directory names
+-    return false;
+-  }
++// Builds _entry_index. If the central directory cannot be indexed (it has
++// too many entries, or there's not enough memory), the entry cache of this
++// parser is turned off and find_entry() searches the directory linearly.
++// This function never throws.
++bool JarFileParser::build_entry_index(JVM_SINGLE_ARG_TRAPS) {
++  UsingFastOops fast_oops;
++  TypeArray::Fast index;
+ 
+-  bool result = add_current_entry_to_cache0(name, name_len JVM_NO_CHECK);
+-  if (!result) {
++  int count = index_central_directory(NULL);
++  if (count >= 0) {
++    // Keep the load factor below 2/3.
++    int slots = 8;
++    while (slots * 2 < count * 3) {
++      slots *= 2;
++    }
++    index = Universe::new_int_array(slots JVM_NO_CHECK);
+     if (CURRENT_HAS_PENDING_EXCEPTION) {
+       Thread::clear_current_pending_exception();
++      index.set_null();
++    }
++    if (index.not_null() && index_central_directory(&index) == count) {
++      set_entry_index(&index);
+       if (TraceJarCache) {
+-        TTY_TRACE_CR(("JAR: entry cache OutOfMemory"));
++        TTY_TRACE_CR(("JAR: indexed %d entries in %d slots", count, slots));
+       }
++      return true;
+     }
+   }
+-  return result;
++  if (TraceJarCache) {
++    TTY_TRACE_CR(("JAR: cannot index the entries"));
++  }
++  set_enable_entry_cache(false);
++  return false;
+ }
+ 
+-bool JarFileParser::add_current_entry_to_cache0(char * name, int name_len
+-                                                JVM_TRAPS) {
+-  UsingFastOops fast_oops;
+-  ObjArray::Fast cache = entry_cache();
+-  ObjArray::Fast new_cache;
+-  TypeArray::Fast cache_line;
+-  jint old_size = entry_cache_count();
+-  jint cache_line_size;
+-
+-  // (1) Expand header list if necessary
+-  if (cache.is_null() || old_size == cache().length()) {
+-    jint new_size = old_size * 5 / 4 + 20;
+-    if (new_size > MaxJarCacheEntryCount) {
+-        new_size = MaxJarCacheEntryCount;
+-    }
+-    if (new_size <= old_size) {
+-      return false; // Do not exceed MaxJarCacheEntryCount
+-    }
+-    new_cache = Universe::new_obj_array(new_size JVM_CHECK_0);
+-    if (cache.not_null()) {
+-      ObjArray::array_copy(&cache, 0, &new_cache, 0, old_size JVM_CHECK_0);
+-    }
+-    set_entry_cache(&new_cache);
+-    cache = new_cache.obj();
+-  }
+-
+-  // (2) Allocate the cache line
+-  cache_line_size = CENHDRSIZ + name_len;
+-  cache_line = Universe::new_byte_array_raw(cache_line_size JVM_CHECK_0);
+-  cache().obj_at_put(old_size, &cache_line);
+-  set_entry_cache_count(old_size+1);
+-
+-  // (3) Copy information there
+-  char *p = (char*)cache_line().base_address();
+-  jvm_memcpy(p, raw_current_entry()->centralHeader, CENHDRSIZ);
++// Finds an entry in _entry_index. If the JAR has several entries with the
++// given name it finds the first one, as the linear search does.
++bool JarFileParser::find_entry_in_index(const char *match_name) {
++  const int match_name_len = jvm_strlen(match_name);
++  if (match_name_len > MAX_ENTRY_NAME) {
++    return false;
++  }
+ 
+-  p += CENHDRSIZ;
+-  jvm_memcpy(p, name, name_len);
++  TypeArray::Raw index = entry_index();
++  BufferedFile::Raw bf = buffered_file();
++  // A central header followed by its name.
++  DECLARE_STATIC_BUFFER(unsigned char, found, CENHDRSIZ + MAX_ENTRY_NAME);
++  const juint hash = jar_entry_name_hash((const unsigned char*)match_name,
++                                         match_name_len);
++  const juint slot_mask = index().length() - 1;
++  const juint cen_offset = raw_current_entry()->cenOffset;
++
++  // The table is never full, so the search ends at an empty slot.
++  for (juint slot = hash & slot_mask; ; slot = (slot + 1) & slot_mask) {
++    const juint value = index().int_at(slot);
++    if (value == 0) {
++      return false;
++    }
++    if ((value >> ENTRY_INDEX_OFFSET_BITS) !=
++        (hash >> ENTRY_INDEX_OFFSET_BITS)) {
++      continue;
++    }
++
++    // Probably the right entry. Compare the name to be sure.
++    const juint offset = cen_offset + (value & ENTRY_INDEX_OFFSET_MASK) - 1;
++    if (bf().seek((jint)offset, SEEK_SET) < 0 ||
++        bf().get_bytes(found, CENHDRSIZ) != CENHDRSIZ ||
++        GETSIG(found) != CENSIG || CENNAM(found) != match_name_len ||
++        bf().get_bytes(found + CENHDRSIZ, match_name_len) !=
++            (size_t)match_name_len ||
++        jvm_memcmp(found + CENHDRSIZ, match_name, match_name_len) != 0) {
++      continue;
++    }
++
++    unsigned char *cenp = raw_current_entry()->centralHeader;
++    jvm_memcpy(cenp, found, CENHDRSIZ);
++    raw_current_entry()->length = CENLEN(cenp);
+ 
+-  if (TraceJarCache) {
+-    DECLARE_STATIC_BUFFER(char, tmp, MAX_ENTRY_NAME+1);
+-    jvm_memcpy(tmp, name, name_len);
+-    tmp[name_len] = 0;
+-    TTY_TRACE_CR(("JAR: cached entry [%d]: %s", old_size, tmp));
++    if (TraceJarCache) {
++      TTY_TRACE_CR(("JAR: entry cache hit: %s", match_name));
++    }
++    return true;
+   }
+-
+-  return true;
+ }
+ 
+ #endif // ENABLE_JAR_ENTRY_CACHE
+@@ -1174,14 +1259,19 @@
+  */
+ bool JarFileParser::find_entry(const char *match_name JVM_TRAPS)
+ {
++#if ENABLE_JAR_ENTRY_CACHE
++  if (match_name != NULL && CacheJarEntries && enable_entry_cache()) {
++    if (entry_index() == NULL) {
++      build_entry_index(JVM_SINGLE_ARG_NO_CHECK);
++    }
++    if (enable_entry_cache()) {
++      return find_entry_in_index(match_name);
++    }
++  }
++#endif
++
+   UsingFastOops fast_oops;
+   BufferedFile::Fast jar_buffer = buffered_file();
+-  const bool use_entry_cache = CacheJarEntries && enable_entry_cache();
+-
+-  if (use_entry_cache && match_name != NULL && 
+-      find_entry_from_cache(match_name)) {
+-    return true;
+-  }
+ 
+   DECLARE_STATIC_BUFFER(unsigned char, found_name, MAX_ENTRY_NAME);
+   int offset = (int) (raw_current_entry()->nextCenOffset);
+@@ -1195,8 +1285,6 @@
+   }
+ 
+   while (true) {
+-    // raw_current_entry() may be moved by add_current_entry_to_cache(),
+-    // Must reload it after every iteration.
+     unsigned char *cenp = (unsigned char *)raw_current_entry()->centralHeader;
+ 
+     /* Offset contains the offset of the next central header. Read the
+@@ -1217,20 +1305,11 @@
+ 
+     /*
+      * (1) Let's decide whether we want to read the entry name at all.
+-     *     In some cases, if we know the length of the name doesn't
+-     *     match, we can reject the name without reading it.
++     *     If we know the length of the name doesn't match, we can reject
++     *     the name without reading it.
+      */
+-    bool read_name = false;
+-    if (use_entry_cache) {
+-      // We're using entry cache. Always read the name.
+-      read_name = true;
+-    }
+-
+     found_name_len = (juint) CENNAM(cenp);
+-    if (found_name_len == match_name_len) {
+-      // The length of the name seems promising; let's read the name.
+-      read_name = true;
+-    }
++    const bool read_name = found_name_len == match_name_len;
+ 
+     // Number of bytes to skip over the current entry
+     int skip_bytes = (int) (CENHDRSIZ + found_name_len + CENEXT(cenp) + 
+@@ -1252,28 +1331,8 @@
+             != found_name_len) { // I/O error
+           return false;
+         }
+-        if (use_entry_cache) {
+-          bool ok = add_current_entry_to_cache((char*)found_name,
+-                                               (int)found_name_len
+-                                               JVM_MUST_SUCCEED);
+-          if (ok) {
+-            // We have successfully cached the current entry (and all entries
+-            // before it). So when we run find_entry() again, we just need to
+-            // search after <offset> in the JarFile.
+-            nextCenOffset = offset + skip_bytes;
+-          }
+-        }
+-
+-        // raw_current_entry() may be moved by
+-        // add_current_entry_to_cache(), Must reload it after every
+-        // iteration.
+-        cenp = (unsigned char *)raw_current_entry()->centralHeader;
+-
+-        // we do length check again to handle caching case 
+-        if (found_name_len == match_name_len) {
+-          if (jvm_memcmp(found_name, match_name, match_name_len) == 0) {
+-            found = true;
+-          }
++        if (jvm_memcmp(found_name, match_name, match_name_len) == 0) {
++          found = true;
+         }
+       }
+     }
+@@ -1408,12 +1467,8 @@
+ 
+ #if ENABLE_JAR_ENTRY_CACHE
+   {
+-    NamedField id("entry_cache", true);
+-    visitor->do_oop(&id, entry_cache_offset(), true);
+-  }
+-  { 
+-    NamedField id("entry_cache_count", true);
+-    visitor->do_int(&id, entry_cache_count_offset(), true);
++    NamedField id("entry_index", true);
++    visitor->do_oop(&id, entry_index_offset(), true);
+   }
+ #endif
+   { 
+--- a/cldc/src/vm/share/utilities/Globals.hpp
++++ b/cldc/src/vm/share/utilities/Globals.hpp
+@@ -328,8 +328,8 @@
+           "Enable caching JAR layout and entries,"                          \
+           " when built with ENABLE_JAR_ENTRY_CACHE=true")                   \
+                                                                             \
+-  develop(int, MaxJarCacheEntryCount, 256,                                  \
+-          "The maximum number of entries cached for a Jar file")            \
++  develop(int, MaxJarCacheEntryCount, 4096,                                 \
++          "The maximum number of entries indexed for a Jar file")           \
+                                                                             \
+   develop(bool, PrintAllObjects, false,                                     \
+           "Print all object by iterating over the object heap")             \
