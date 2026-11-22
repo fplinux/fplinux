@@ -55,11 +55,19 @@ def archive(tmp_path: Path) -> Path:
             "tools/phone-helper": b"helper",
         }
         if target == "jade":
-            contents["card/layout.json"] = b"Selected card layout"
-            contents["card/apk-state.tar"] = b"Selected APK state"
-            contents["card/default-apps"] = b"fplinux-notes\n"
-            contents["card/apks/Packages.adb"] = b"Selected APK index"
-            contents["card/apks/fplinux-build.rsa.pub"] = b"Selected APK public key"
+            contents.update(
+                {
+                    "card/boot.xz": b"Selected FAT partition",
+                    "card/root.ext4.xz": b"Selected ext4 partition",
+                    "card/board.tar": b"Selected board files",
+                    "card/fit.itb": b"Selected FIT",
+                    "card/layout.json": b"Selected card layout",
+                    "card/default-apps": b"fplinux-notes\n",
+                    "card/apk-state.tar": b"Selected APK state",
+                    "card/apks/Packages.adb": b"Selected APK index",
+                    "card/apks/fplinux-build.rsa.pub": b"Selected APK public key",
+                }
+            )
         records = {
             relative: {
                 "size": len(data),
@@ -334,6 +342,7 @@ def test_menu_selects_one_model_and_uses_its_exact_bundle_and_runtime_status(
     assert "1. Jade Phone (jade)" in result.stdout
     assert "2. Opal Phone (opal)" in result.stdout
     assert "Enter a model number or its target ID." in result.stdout
+    assert "microSD" not in result.stdout
     action = _record(result)
     assert action["target"] == "opal"
     bundle = Path(action["bundle"])
@@ -429,7 +438,13 @@ def test_supported_model_menu_selects_card_writer_with_interactive_consent(archi
     result = _launch(archive, terminal="1\n2\n")
 
     assert result.returncode == 23, (result.stdout, result.stderr)
-    assert "Install on microSD" in result.stdout
+    assert (
+        "  2. Install on microSD\n"
+        "  3. Start from microSD\n"
+        "  4. Update microSD\n"
+        "  5. Select a previous microSD build\n"
+        "  6. Shut down the running microSD system\n"
+    ) in result.stdout
     action = _record(result)
     assert action["target"] == "jade"
     assert action["action"] == "install"
@@ -554,13 +569,60 @@ def test_card_start_rejects_ram_build_recipe_for_the_same_phone(archive: Path) -
     path = archive / "targets.json"
     catalog = json.loads(path.read_bytes())
     board = catalog["targets"]["jade"]
-    board["microsd"] = {"files": board["files"], "executables": board["executables"]}
+    board["microsd"] = {
+        "files": {
+            name: parts for name, parts in board["files"].items() if not name.startswith("card/")
+        },
+        "executables": board["executables"],
+    }
     path.write_text(json.dumps(catalog), encoding="utf-8")
 
     result = _launch(archive, "run", "jade", "--boot", "microsd")
 
     assert result.returncode == 1
     assert "phone model jade and boot profile" in result.stderr
+    assert not (archive / "runtime data").exists()
+
+
+@pytest.mark.parametrize("member", ["card/boot.xz", "card/apk-state.tar"])
+def test_incomplete_card_declaration_is_rejected_before_model_selection(
+    archive: Path, member: str
+) -> None:
+    path = archive / "targets.json"
+    catalog = json.loads(path.read_bytes())
+    del catalog["targets"]["jade"]["files"][member]
+    path.write_text(json.dumps(catalog), encoding="utf-8")
+
+    result = _launch(archive, terminal="0\n")
+
+    assert result.returncode == 1, (result.stdout, result.stderr)
+    assert "incomplete card installation files: jade" in result.stderr
+    assert "Select your phone model" not in result.stdout
+    assert not (archive / "runtime data").exists()
+
+
+@pytest.mark.parametrize(
+    ("target", "profile", "message"),
+    [
+        ("opal", None, "declares card installation files without microSD boot: opal"),
+        ("jade", "microsd", "installed card runtime includes installation files: jade"),
+    ],
+)
+def test_card_files_in_the_wrong_recipe_are_rejected_before_model_selection(
+    archive: Path, target: str, profile: str | None, message: str
+) -> None:
+    path = archive / "targets.json"
+    catalog = json.loads(path.read_bytes())
+    board = catalog["targets"][target]
+    recipe = board if profile is None else board[profile]
+    recipe["files"]["card/apks/extra.apk"] = [_write_object(archive, b"extra APK")]
+    path.write_text(json.dumps(catalog), encoding="utf-8")
+
+    result = _launch(archive, terminal="0\n")
+
+    assert result.returncode == 1, (result.stdout, result.stderr)
+    assert message in result.stderr
+    assert "Select your phone model" not in result.stdout
     assert not (archive / "runtime data").exists()
 
 

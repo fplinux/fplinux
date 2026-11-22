@@ -16,7 +16,7 @@ from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from fplinux_cli.artifacts.card_kit import CARD_APK_PREFLIGHT
+from fplinux_cli.artifacts.card_kit import CARD_MEMBERS
 from fplinux_cli.artifacts.release_identity import RELEASE_FIELDS, release_context_from_fields
 from fplinux_cli.common import fail, is_sha256, relative_name, sha256_bytes, sha256_file
 from fplinux_cli.data_paths import data_root
@@ -139,6 +139,12 @@ def _target_bundle(target: str, entry: object) -> TargetBundle:
         if not isinstance(card, dict) or set(card) != {"files", "executables"}:
             fail(f"invalid microSD release catalog entry for {target}")
         microsd = _bundle_recipe(f"{target} microSD", card["files"], card["executables"])
+        if not set(CARD_MEMBERS).issubset(ram.files):
+            fail(f"release board has incomplete card installation files: {target}")
+        if any(name.startswith("card/") for name in microsd.files):
+            fail(f"installed card runtime includes installation files: {target}")
+    elif any(name.startswith("card/") for name in ram.files):
+        fail(f"release board declares card installation files without microSD boot: {target}")
     return TargetBundle(ram.files, ram.executables, name, microsd)
 
 
@@ -377,22 +383,19 @@ def _choose_target(catalog: ReleaseCatalog) -> str | None:
 
 
 def _choose_action(
-    target: str, *, install_card: bool, boot_card: bool, change_card: bool, copy_files: bool
+    target: str, *, microsd: bool, copy_files: bool
 ) -> RunRequest | LiveRequest | CardRequest | None:
     choices: dict[str, tuple[str, RunRequest | LiveRequest | CardRequest | None]] = {
         "1": ("Start in RAM", RunRequest(target=target))
     }
-    if install_card:
+    if microsd:
         choices["2"] = ("Install on microSD", CardRequest(target=target))
-    if boot_card:
         choices["3"] = ("Start from microSD", RunRequest(target=target, boot=MICROSD_BOOT_MODE))
-    if change_card:
         choices["4"] = ("Update microSD", CardRequest(target=target, action="update"))
         choices["5"] = (
             "Select a previous microSD build",
             CardRequest(target=target, action="rollback"),
         )
-    if boot_card:
         choices["6"] = (
             "Shut down the running microSD system",
             LiveRequest(target=target, shutdown=True),
@@ -407,12 +410,12 @@ def _choose_action(
         action = input("Action: ").strip()
         if action == "0":
             return None
-        if action == "5" and change_card:
+        if action == "5" and microsd:
             build_id = input("Previous confirmed build ID: ").strip()
             return CardRequest(target=target, action="rollback", build_id=build_id)
         if copy_files and action in {"7", "8"}:
             boot = None
-            if boot_card:
+            if microsd:
                 system = input("Running system (1. RAM, 2. microSD): ").strip()
                 if system not in {"1", "2"}:
                     print("Enter 1 for RAM or 2 for microSD.")
@@ -566,19 +569,8 @@ def main(*, archive_root: Path) -> None:
     try:
         with cancellation_signals():
             catalog = load_catalog(archive_root)
-            card_targets = {
-                target
-                for target, board in catalog.targets.items()
-                if "card/layout.json" in board.files
-            }
             microsd_targets = {
                 target for target, board in catalog.targets.items() if board.microsd is not None
-            }
-            update_targets = {
-                target
-                for target in card_targets
-                if {f"card/{name}" for name in CARD_APK_PREFLIGHT}
-                <= catalog.targets[target].files.keys()
             }
             data_override = log_override = None
             request: Operation | None
@@ -587,15 +579,10 @@ def main(*, archive_root: Path) -> None:
                 if target is None:
                     return
                 copy_files = file_transfer_available()
+                microsd = target in microsd_targets
                 request = (
-                    _choose_action(
-                        target,
-                        install_card=target in card_targets,
-                        boot_card=target in microsd_targets,
-                        change_card=target in update_targets,
-                        copy_files=copy_files,
-                    )
-                    if copy_files or target in card_targets or target in microsd_targets
+                    _choose_action(target, microsd=microsd, copy_files=copy_files)
+                    if copy_files or microsd
                     else RunRequest(target=target)
                 )
                 if request is None:
@@ -603,7 +590,7 @@ def main(*, archive_root: Path) -> None:
             else:
                 parser = argument_parser(
                     targets=sorted(catalog.targets),
-                    card_targets=card_targets,
+                    card_targets=microsd_targets,
                 )
                 options = parser.parse_args()
                 request = operation_request(parser, options)
@@ -615,11 +602,6 @@ def main(*, archive_root: Path) -> None:
                 ):
                     parser.error(f"{request.target} has no system microSD boot in this archive")
             if isinstance(request, CardRequest):
-                if (
-                    request.action in {"update", "rollback"}
-                    and request.target not in update_targets
-                ):
-                    fail(f"{request.target} has no system microSD update kit in this archive")
                 error = card_selection_error(
                     request.action,
                     request.erase_card,

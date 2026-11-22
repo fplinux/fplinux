@@ -12,7 +12,6 @@ from dataclasses import dataclass
 from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Any, cast
 
-from fplinux_cli.artifacts.card_kit import CARD_MEMBERS
 from fplinux_cli.artifacts.release import (
     RELEASE_VERSION_NAME,
     public_source_digest,
@@ -196,11 +195,6 @@ def _universal_manifests(
     manifests = {}
     used_objects = set()
     for target, board in catalog.targets.items():
-        card_members = set(CARD_MEMBERS) & board.files.keys()
-        if card_members != (set(CARD_MEMBERS) if board.microsd is not None else set()) or (
-            board.microsd is None and any(name.startswith("card/") for name in board.files)
-        ):
-            fail(f"release board has incomplete card installation files: {target}")
         for recipe, profile in ((board, None), (board.microsd, MICROSD_BOOT_PROFILE)):
             if recipe is None:
                 continue
@@ -258,8 +252,6 @@ def _universal_manifests(
                     fail(f"release shared file has the wrong executable mode: {parts[0]}")
             if profile is None:
                 manifests[target] = manifest
-            elif any(name.startswith("card/") for name in recipe.files):
-                fail(f"installed card runtime includes installation files: {target}")
     if used_objects != {name for name in checksums if name.startswith("objects/")}:
         fail("release contains unreferenced objects")
     return catalog.release, manifests
