@@ -74,21 +74,13 @@ def test_sdio_probe_and_remove_restore_state_and_preserve_first_error(
     assert result.stdout == "Marlin2 SDIO cleanup host cases passed\n"
 
 
-def test_sdio_identification_reads_two_ids_without_loading_firmware(sdio_executable: Path) -> None:
-    result = run_process(
-        [str(sdio_executable), "identify"],
-        name="run Marlin2 identification host cases",
-        timeout=10,
-        check=True,
-    )
-    assert result.stdout == "Marlin2 identification host cases passed\n"
-
-
-def test_itel_sdio_probe_reports_get_info_and_restores_state(sdio_executable: Path) -> None:
+def test_itel_sdio_boot_checks_board_image_and_keeps_function_until_remove(
+    sdio_executable: Path,
+) -> None:
     result = run_process(
         [str(sdio_executable), "itel-boot"],
-        name="run itel Marlin2 firmware probe host cases",
+        name="run itel Marlin2 SDIO boot host cases",
         timeout=10,
         check=True,
     )
-    assert result.stdout == "itel Marlin2 firmware probe host cases passed\n"
+    assert result.stdout == "itel Marlin2 SDIO boot host cases passed\n"

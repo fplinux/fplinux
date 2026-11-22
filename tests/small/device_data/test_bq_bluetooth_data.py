@@ -3,18 +3,12 @@
 
 from __future__ import annotations
 
-import importlib.util
 import struct
-from typing import TYPE_CHECKING
 
 import pytest
-from fplinux_cli.common import ROOT
 from fplinux_cli.device_data.formats import PhysicalNand
+from fplinux_cli.device_data.marlin2 import prepare_bluetooth_pskey
 from fplinux_cli.device_data.running_nv import read_running_nv_record
-
-if TYPE_CHECKING:
-    from types import ModuleType
-
 
 _RAW_PAGE = 2176
 _PAGES = 64
@@ -155,22 +149,7 @@ def test_nonempty_lower_remapping_is_rejected_before_logical_selection() -> None
         read_current(image)
 
 
-@pytest.fixture
-def radio_parser() -> ModuleType:
-    """Load the target parser normally without any fitted input bytes."""
-    path = ROOT / "targets/bq-2830l-tank-connect-max/device-data/bq2830l_device_data.py"
-    spec = importlib.util.spec_from_file_location("bq_bluetooth_parser", path)
-    if spec is None or spec.loader is None:
-        message = "target parser source is unavailable"
-        raise ImportError(message)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-def test_selected_address_and_controller_fields_have_literal_wire_bytes(
-    radio_parser: ModuleType,
-) -> None:
+def test_selected_address_and_controller_fields_have_literal_wire_bytes() -> None:
     configuration = bytearray(
         bytes(range(256))
         + bytes(reversed(range(256)))
@@ -198,27 +177,21 @@ def test_selected_address_and_controller_fields_have_literal_wire_bytes(
         "00000000"
     )
 
-    assert radio_parser.prepare_bluetooth_pskey(bytes(configuration), settings) == expected
+    assert prepare_bluetooth_pskey(bytes(configuration), settings) == expected
 
 
 @pytest.mark.parametrize("settings", [bytes(7), bytes(9), bytes(8)])
-def test_missing_or_zero_controller_identity_is_rejected(
-    radio_parser: ModuleType, settings: bytes
-) -> None:
+def test_missing_or_zero_controller_identity_is_rejected(settings: bytes) -> None:
     configuration = bytearray(888)
     configuration[0] = 2
 
     with pytest.raises(
         ValueError, match=r"saved Bluetooth (record has the wrong size|address is zero)"
     ):
-        radio_parser.prepare_bluetooth_pskey(bytes(configuration), settings)
+        prepare_bluetooth_pskey(bytes(configuration), settings)
 
 
 @pytest.mark.parametrize("configuration", [bytes(887), bytes(888), bytes([3]) + bytes(887)])
-def test_unknown_configuration_layout_is_rejected(
-    radio_parser: ModuleType, configuration: bytes
-) -> None:
+def test_unknown_configuration_layout_is_rejected(configuration: bytes) -> None:
     with pytest.raises(ValueError, match="unsupported external Bluetooth radio configuration"):
-        radio_parser.prepare_bluetooth_pskey(
-            configuration, bytes.fromhex("01 02 03 04 05 06 00 00")
-        )
+        prepare_bluetooth_pskey(configuration, bytes.fromhex("01 02 03 04 05 06 00 00"))

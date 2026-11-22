@@ -22,7 +22,13 @@ backlight = "itel-neo-r60-plus-backlight"
 levels = [0, 5, 9, 14, 18, 23, 27, 32, 36, 41, 45]
 
 [rootfs]
-packages = ["fplinux-font-terminus-8x16"]
+packages = [
+  "fplinux-font-terminus-8x16",
+  "fplinux-hostapd",
+  "fplinux-libnl",
+  "fplinux-wifi",
+  "fplinux-wpa-supplicant",
+]
 
 [bundle]
 packages = []
@@ -53,6 +59,23 @@ destination = "drivers/gpu/drm/Kconfig"
 source = "linux/fragments/drivers/gpu/drm/ums9117/drm.Makefile"
 destination = "drivers/gpu/drm/ums9117/Makefile"
 
+[[linux.dt_config_checks]]
+path = "/radio"
+compatible = "fplinux,itel-neo-r60-marlin2"
+config = "CONFIG_MMC_SDHCI_UMS9117_BQ_RADIO"
+
+[[linux.dt_config_checks]]
+path = "/radio"
+compatible = "fplinux,itel-neo-r60-marlin2"
+property = "mac-address-name"
+config = "CONFIG_BQ2830L_WLAN"
+
+[[linux.dt_config_checks]]
+path = "/radio"
+compatible = "fplinux,itel-neo-r60-marlin2"
+property = "bluetooth-config-name"
+config = "CONFIG_BQ2830L_BLUETOOTH"
+
 [bootstrap]
 lcd_config = "bootstrap/lcd_config.h"
 image = "itel_neo_r60_plus_linux_bootstrap.bin"
@@ -68,28 +91,17 @@ boot_instructions = "Power the phone off, hold the left soft key and call key to
 [device_data]
 parser = "device-data/itel_device_data.py"
 
-[bluetooth]
-firmware = [
-  { source = "itel-neo-r60-plus-cm4.bin", destination = "ums9117/itel-neo-r60-plus-cm4.bin" },
-  { source = "itel-neo-r60-plus-bt-config.bin", destination = "ums9117/itel-neo-r60-plus-bt-config.bin", size = 8 },
-  { source = "itel-neo-r60-plus-bt-sprd.bin", destination = "ums9117/itel-neo-r60-plus-bt-sprd.bin", size = 176 },
-  { source = "itel-neo-r60-plus-bt-rf-config.bin", destination = "ums9117/itel-neo-r60-plus-bt-rf-config.bin", size = 252 },
-]
-
 [audio_profile]
 firmware = [
   { source = "itel-neo-r60-plus-audio-profile.bin", destination = "fplinux/itel-neo-r60-plus-audio-profile.bin", size = 788 },
-]
-
-[fm_radio]
-firmware = [
-  { source = "itel-neo-r60-plus-fm-config.bin", destination = "fplinux/itel-neo-r60-plus-fm-config.bin", size = 128 },
 ]
 
 [wcn_firmware]
 firmware = [
   { source = "itel-neo-r60-plus-wcn.bin", destination = "ums9117/itel-neo-r60-plus-wcn.bin", size = 592896, sha256 = "453f52e204aa1211c99ef81ec665340cffff917a0da7ea84f46a18f6d8b0261e" },
   { source = "itel-neo-r60-plus-wcn-calibration.bin", destination = "ums9117/itel-neo-r60-plus-wcn-calibration.bin", size = 3908 },
+  { source = "itel-neo-r60-plus-wcn-mac.bin", destination = "ums9117/itel-neo-r60-plus-wcn-mac.bin", size = 6 },
+  { source = "itel-neo-r60-plus-wcn-bluetooth.bin", destination = "ums9117/itel-neo-r60-plus-wcn-bluetooth.bin", size = 220 },
 ]
 
 [microsd.bootstrap]

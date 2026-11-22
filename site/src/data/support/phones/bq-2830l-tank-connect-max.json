@@ -139,7 +139,7 @@
     "stock": "available",
     "hardware": "present",
     "status": "partial",
-    "note": "This target supplies its own external-radio implementation. RAM station and access-point modes work with WPA2-PSK/CCMP, DHCP and file transfer in both directions. Station DNS and HTTP Internet access work through a shared PC connection; sustained throughput is unverified. Updating a running access point's beacon and per-station signal statistics are unsupported."
+    "note": "RAM station and access-point modes work with WPA2-PSK/CCMP, DHCP and file transfer in both directions. Station DNS and HTTP Internet access work through a shared PC connection; sustained throughput is unverified. Updating a running access point's beacon and per-station signal statistics are unsupported."
   },
   "camera": {
     "stock": "available",

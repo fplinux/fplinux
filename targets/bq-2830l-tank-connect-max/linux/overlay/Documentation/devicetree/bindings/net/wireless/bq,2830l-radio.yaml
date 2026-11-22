@@ -13,8 +13,6 @@ description:
   The board owns the power, reset and pin controls for its external radio and
   creates the child SDIO controller after powering the radio. Radio firmware,
   configuration and addresses are supplied through the firmware loader.
-  The itel board powers its SDIO function for a manual diagnostic and restores
-  the board state after the function reports the result.
 
 allOf:
   - if:
@@ -26,14 +24,16 @@ allOf:
         - bq,pins
     else:
       required:
-        - fplinux,probe-pins
-        - fplinux,probe-pad-0464
+        - bluetooth-config-name
+        - fplinux,radio-pad-0464
+        - fplinux,radio-pins
+        - mac-address-name
 
 properties:
   compatible:
     enum:
       - bq,2830l-radio
-      - fplinux,itel-neo-r60-marlin2-probe
+      - fplinux,itel-neo-r60-marlin2
 
   "#address-cells":
     const: 1
@@ -73,13 +73,13 @@ properties:
     description: Phandle to the board pin-control registers.
     $ref: /schemas/types.yaml#/definitions/phandle
 
-  fplinux,probe-pins:
-    description: Phandle to the board pin-control registers for the probe.
-    $ref: /schemas/types.yaml#/definitions/phandle
-
-  fplinux,probe-pad-0464:
+  fplinux,radio-pad-0464:
     description: Board pad-control value for register offset 0x464.
     $ref: /schemas/types.yaml#/definitions/uint32
+
+  fplinux,radio-pins:
+    description: Phandle to the board pin-control registers.
+    $ref: /schemas/types.yaml#/definitions/phandle
 
   sprd,aon-apb:
     description: Phandle to the always-on APB registers.

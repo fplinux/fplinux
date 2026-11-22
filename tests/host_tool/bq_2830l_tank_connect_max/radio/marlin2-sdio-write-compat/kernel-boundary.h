@@ -16,7 +16,6 @@ typedef int8_t s8;
 typedef uint16_t u16;
 typedef uint32_t u32;
 
-#define U32_MAX UINT32_MAX
 #define BIT(bit) (1UL << (bit))
 #define min_t(type, left, right) \
 	((type)(left) < (type)(right) ? (type)(left) : (type)(right))

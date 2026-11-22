@@ -489,20 +489,22 @@ static void check_probe_restoration(struct sdio_func *func)
 	assert(func->card->quirks == 0x20 && !device.claimed);
 }
 
-static void check_identification(struct sdio_func *func, bool id_changes)
+static void check_itel_rejects_chip_id(struct sdio_func *func, bool id_changes)
 {
 	prepare_boot(func);
-	device.chip_id = 0x23490002;
+	device.itel_image = true;
+	device.persistent = true;
+	if (!id_changes)
+		device.chip_id = 0x23490002;
 	device.chip_id_changes = id_changes;
-	assert(marlin2_sdio_driver.probe(func, NULL) ==
-	       (id_changes ? -ENODEV : 0));
-	assert(device.reported_error == (id_changes ? -ENODEV : 0));
+	assert(marlin2_sdio_driver.probe(func, NULL) == -ENODEV);
+	assert(device.reported_error == -ENODEV);
 	assert(device.reported_boot.phase == MARLIN2_BOOT_CHIP_ID);
-	assert(device.reported_boot.identify_only);
 	assert(device.chip_reads == 2);
-	assert(device.reported_boot.chip_id[0] == 0x23490002);
-	assert(device.reported_boot.chip_id[1] == 0x23490002U + id_changes);
-	assert(!device.firmware_requests && !device.word_writes);
+	assert(device.reported_boot.chip_id[0] ==
+	       (id_changes ? 0x23490001 : 0x23490002));
+	assert(device.reported_boot.chip_id[1] == 0x23490002);
+	assert(!device.word_writes && !sdio_get_drvdata(func));
 	assert(!device.downloaded_bytes && !device.reported_boot.image_bytes);
 	assert(device.public_interrupts == 0x80 &&
 	       device.direct_interrupts == 0x40);
@@ -513,6 +515,7 @@ static void check_identification(struct sdio_func *func, bool id_changes)
 static void check_itel_rejects_bq_image(struct sdio_func *func)
 {
 	prepare_boot(func);
+	device.persistent = true;
 	assert(marlin2_sdio_driver.probe(func, NULL) == -EBADMSG);
 	assert(device.reported_error == -EBADMSG);
 	assert(device.reported_boot.phase == MARLIN2_BOOT_FIRMWARE_REQUEST);
@@ -521,7 +524,8 @@ static void check_itel_rejects_bq_image(struct sdio_func *func)
 	assert(!device.enabled && !device.disables && !device.claimed);
 }
 
-static void check_itel_firmware_probe(struct sdio_func *func, int packet_error)
+static void check_itel_firmware_diagnostic(struct sdio_func *func,
+					   int packet_error)
 {
 	const struct marlin2_boot_result *result = &device.reported_boot;
 
@@ -568,7 +572,7 @@ static void check_completed_probe_cleanup_error(struct sdio_func *func)
 	assert(func->card->quirks == 0x20 && !device.claimed);
 }
 
-static void check_runtime_remove(struct sdio_func *func)
+static void check_runtime_remove(struct sdio_func *func, bool itel_image)
 {
 	static const struct {
 		int public_error;
@@ -586,8 +590,14 @@ static void check_runtime_remove(struct sdio_func *func)
 	for (index = 0; index < sizeof(cases) / sizeof(cases[0]); index++) {
 		prepare_boot(func);
 		device.persistent = true;
+		device.itel_image = itel_image;
 		assert(!marlin2_sdio_driver.probe(func, NULL));
 		assert(sdio_get_drvdata(func));
+		assert(device.reported_boot.phase == MARLIN2_BOOT_COMPLETE);
+		assert(device.reported_boot.image_bytes == 592896);
+		assert(device.reported_boot.image_verified);
+		assert(device.reported_boot.calibration_verified);
+		assert(device.reported_boot.ready && !device.packet_requests);
 		assert(device.enabled && !device.disables);
 		assert(device.public_interrupts == 0x87);
 		assert(device.direct_interrupts == 0x43);
@@ -639,24 +649,19 @@ int main(int argc, char **argv)
 	if (argc == 2 && !strcmp(argv[1], "cleanup")) {
 		check_probe_restoration(&func);
 		check_completed_probe_cleanup_error(&func);
-		check_runtime_remove(&func);
+		check_runtime_remove(&func, false);
 		puts("Marlin2 SDIO cleanup host cases passed");
 		return 0;
 	}
-	if (argc == 2 && !strcmp(argv[1], "identify")) {
-		radio.of_node = "fplinux,itel-neo-r60-marlin2-probe";
-		func.dev.of_node = "fplinux,marlin2-sdio-identify";
-		check_identification(&func, false);
-		check_identification(&func, true);
-		puts("Marlin2 identification host cases passed");
-		return 0;
-	}
 	if (argc == 2 && !strcmp(argv[1], "itel-boot")) {
-		radio.of_node = "fplinux,itel-neo-r60-marlin2-probe";
+		radio.of_node = "fplinux,itel-neo-r60-marlin2";
 		check_itel_rejects_bq_image(&func);
-		check_itel_firmware_probe(&func, 0);
-		check_itel_firmware_probe(&func, -ETIMEDOUT);
-		puts("itel Marlin2 firmware probe host cases passed");
+		check_itel_rejects_chip_id(&func, false);
+		check_itel_rejects_chip_id(&func, true);
+		check_itel_firmware_diagnostic(&func, 0);
+		check_itel_firmware_diagnostic(&func, -ETIMEDOUT);
+		check_runtime_remove(&func, true);
+		puts("itel Marlin2 SDIO boot host cases passed");
 		return 0;
 	}
 	if (argc != 1)

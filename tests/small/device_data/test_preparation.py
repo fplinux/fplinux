@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import hashlib
 import importlib.util
+import struct
 
 import pytest
 from fplinux_cli.common import ROOT
@@ -27,6 +28,76 @@ from tests.small.device_data.nv_fixtures import fixed_records, nv1, radio_record
 from tests.small.device_data.partition_fixtures import vbm_table
 
 
+def itel_running_nv() -> bytearray:
+    """Build two current records with redundant indices and one obsolete Wi-Fi address."""
+    header = bytes.fromhex("564e5453000008019101a001b0130004100010000101")
+    wifi_address = bytes.fromhex("58fe9766a001060001000000021122334455")
+    old_address = bytes.fromhex("58fe9755a001060001000000021122334466")
+    bluetooth_settings = bytes.fromhex("65fe50889101080001000000") + b"current!"
+    index = bytearray(1024)
+    index[:16] = bytes.fromhex("f7ee0800001100000000000000000000")
+    index[240:256] = bytes.fromhex("f9ed0600001200000000000000000000")
+    records = bytearray(b"\xff" * 1024)
+    records[256 : 256 + len(bluetooth_settings)] = bluetooth_settings
+    records[512 : 512 + len(wifi_address)] = wifi_address
+    records[768 : 768 + len(old_address)] = old_address
+    block = bytearray(b"\xff" * (64 * 2176))
+    # Literal BCH address codewords for logical sectors 0, 2, 3 and 4.
+    sectors = (
+        ("054f8f000000", header),
+        ("05639f010000", index),
+        ("855dff010000", index),
+        ("0517af020000", records),
+    )
+    for page, (codeword, main) in enumerate(sectors, start=1):
+        start = page * 2176
+        block[start : start + len(main)] = main
+        tag, parity, remaining = struct.unpack("1s2s3s", bytes.fromhex(codeword))
+        block[start + 2049 : start + 2052] = parity + tag
+        block[start + 2073 : start + 2076] = remaining
+    return block
+
+
+def itel_external_radio_nand(
+    image: bytes, *, conflicting_record: int | None = None
+) -> device_data.PhysicalNand:
+    """Store fitted audio and WCN without requiring the inactive CM4 partition."""
+    downloaded_audio, protected_audio = inoi_audio_records()
+    downloaded_records = (
+        radio_records() | {401: b"current!", 416: bytes.fromhex("021122334455")} | downloaded_audio
+    )
+    protected_records = downloaded_records | protected_audio
+    if conflicting_record is not None:
+        protected_records[conflicting_record] = b"!" + downloaded_records[conflicting_record][1:]
+    table = vbm_table(
+        (
+            (0x10000001, 0x100, 0, 0),
+            (0x1000000F, 0x100, 1, 1),
+            (0x10000003, 1, 2, 2),
+            (0x10000014, 0x100, 3, 7),
+        )
+    )
+    mapping = bytes.fromhex("5f4d41500201000000000000")
+    block_bytes = 131072
+    payloads = (
+        nv1(tuple(sorted(downloaded_records.items()))).ljust(block_bytes, b"\xff"),
+        nv1(tuple(sorted(protected_records.items()))).ljust(block_bytes, b"\xff"),
+        b"\xff" * block_bytes,
+        image.ljust(5 * block_bytes, b"\xff"),
+        mapping.ljust(block_bytes, b"\xff") * 2,
+        table.ljust(block_bytes, b"\xff") * 2,
+    )
+    main = b"".join(payloads)
+    raw = bytearray(
+        b"".join(
+            main[offset : offset + 2048] + b"\xff" * 128 for offset in range(0, len(main), 2048)
+        )
+    )
+    block_start = 2 * 64 * 2176
+    raw[block_start : block_start + 64 * 2176] = itel_running_nv()
+    return device_data.PhysicalNand(bytes(raw), 2176)
+
+
 class PartitionPreparationTests:
     """Exercise extraction and copy preservation on synthetic physical pages."""
 
@@ -36,7 +107,6 @@ class PartitionPreparationTests:
         protected_fm: bytes = bytes(range(128)),
         *,
         oob_bytes: int = 64,
-        external_radio: bool = False,
     ) -> tuple[
         device_data.PhysicalNand,
         dict[int, tuple[int, int]],
@@ -50,11 +120,6 @@ class PartitionPreparationTests:
             404: b"C" * 252,
             419: protected_fm,
         } | protected_audio
-        if external_radio:
-            downloaded_records.update(radio_records())
-            protected_records.update(radio_records())
-            downloaded_records = dict(sorted(downloaded_records.items()))
-            protected_records = dict(sorted(protected_records.items()))
         payloads = (
             original,
             nv1(tuple(downloaded_records.items())),
@@ -123,58 +188,67 @@ class PartitionPreparationTests:
         assert result.groups["bluetooth"].originals[f"{prefix}-cm4.bin"] == original
         assert result.groups["bluetooth"].prepared[f"{prefix}-cm4.bin"] == expected_cm4
 
-    @pytest.mark.parametrize("image_matches", [True, False], ids=["supported", "other-image"])
+    @pytest.mark.parametrize(
+        ("image_matches", "conflicting_record", "error"),
+        [
+            pytest.param(True, None, None, id="supported"),
+            pytest.param(False, None, "does not match supported itel firmware", id="other-image"),
+            pytest.param(True, 401, "RunningNV and fixed NV401 disagree", id="bluetooth-conflict"),
+            pytest.param(True, 416, "RunningNV and fixed NV416 disagree", id="wifi-conflict"),
+        ],
+    )
     def test_itel_prepares_external_radio_from_the_same_nand(
-        self, monkeypatch: pytest.MonkeyPatch, *, image_matches: bool
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        *,
+        image_matches: bool,
+        conflicting_record: int | None,
+        error: str | None,
     ) -> None:
-        """The external image needs its own digest and matching fitted calibration."""
+        """Fitted audio, calibrated radio and current identities use a single handset image."""
         target = "itel-neo-r60-plus"
         parser = load_target(target)["device_data"]["parser"]
         spec = importlib.util.spec_from_file_location(
             "test_itel_device_data", ROOT / "targets" / target / parser
         )
-        assert spec is not None and spec.loader is not None
+        assert spec is not None
+        assert spec.loader is not None
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         image = b"itel radio image" * 37056
         assert len(image) == 592896
         monkeypatch.setattr(module, "_WCN_IMAGE_SHA256", hashlib.sha256(image).hexdigest())
         stored_image = image if image_matches else b"?" + image[1:]
-        nand, _partitions = self._inputs(oob_bytes=128, external_radio=True)
-        table = vbm_table(
-            (
-                (0x10000018, 0x100, 0, 0),
-                (0x10000001, 0x100, 1, 1),
-                (0x1000000F, 0x100, 2, 2),
-                (0x10000003, 1, 3, 3),
-                (0x10000014, 0x100, 4, 8),
-            )
-        ).ljust(131072, b"\xff")
-        main = stored_image.ljust(5 * 131072, b"\xff") + table + table
-        raw = b"".join(
-            main[offset : offset + 2048] + b"\xff" * 128 for offset in range(0, len(main), 2048)
-        )
-        nand = device_data.PhysicalNand(nand.raw + raw, 2176)
+        nand = itel_external_radio_nand(stored_image, conflicting_record=conflicting_record)
         audio = device_data.AudioProfileContext(
             machine_compatible=b"itel,neo-r60",
             speaker_vibration=False,
             speaker_from_headphones=False,
             headfree_headphones_only=False,
         )
-        if not image_matches:
-            with pytest.raises(ValueError, match="does not match supported itel firmware"):
+        if error is not None:
+            with pytest.raises(ValueError, match=error):
                 module.prepare_device_data(nand, audio=audio)
             return
 
         prepared = module.prepare_device_data(nand, audio=audio).groups
 
-        assert set(prepared) == {"bluetooth", "audio-profile", "fm-radio", "wcn-firmware"}
+        assert set(prepared) == {"audio-profile", "wcn-firmware"}
+        profile = prepared["audio-profile"].prepared["itel-neo-r60-plus-audio-profile.bin"]
+        assert profile[:32] == b"FPAUDIO\0itel,neo-r60" + b"\0" * 12
+        assert profile[53:] == FITTED_HEADFREE_SECTION + FITTED_INOI_PROCESSING_SECTION
         assert prepared["wcn-firmware"].prepared == {
             "itel-neo-r60-plus-wcn.bin": image,
             "itel-neo-r60-plus-wcn-calibration.bin": b"\x02"
             + b"C" * 615
             + b"\x02\x01"
             + b"K" * 3290,
+            "itel-neo-r60-plus-wcn-mac.bin": bytes.fromhex("021122334455"),
+            "itel-neo-r60-plus-wcn-bluetooth.bin": b"ed configuration tail"
+            + b"T" * 55
+            + b"curren"
+            + b"T" * 134
+            + b"\0" * 4,
         }
 
     def test_shared_fitted_extraction_includes_fm_and_rejects_conflicting_copies(self) -> None:

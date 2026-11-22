@@ -7,7 +7,8 @@
 
 #include "marlin2-packet.h"
 
-#define BQ2830L_RADIO_TIMEOUT_MS 60000U
+#define BQ2830L_RADIO_COMPATIBLE "bq,2830l-radio"
+#define ITEL_NEO_R60_RADIO_COMPATIBLE "fplinux,itel-neo-r60-marlin2"
 
 extern struct sdio_driver marlin2_sdio_driver;
 
@@ -40,7 +41,6 @@ struct marlin2_boot_result {
 	bool calibration_verified;
 	bool ready;
 	bool packet_attempted;
-	bool identify_only;
 };
 
 void bq2830l_radio_report(struct sdio_func *func, int error,

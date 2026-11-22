@@ -7,7 +7,9 @@ description="Start fitted Bluetooth firmware"
 
 depend() {
 	need localmount fplinux-devices
-	before dbus
+	# Start SSH and USB DHCP before waiting for fitted firmware.
+	after fplinux-ssh fplinux-usb-dhcp
+	before bluetooth
 }
 
 start() {

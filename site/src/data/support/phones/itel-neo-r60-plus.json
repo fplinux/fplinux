@@ -4,8 +4,8 @@
     "note": "RAM boot and the authenticated Linux handoff were observed on this phone."
   },
   "persistent-boot": {
-    "status": "unsupported",
-    "note": "Only RAM boot is configured; there is no persistent boot profile."
+    "status": "untested",
+    "note": "The microSD system-card profile is configured. Startup through USB and autonomous startup have not been verified on this phone."
   },
   "local-console": {
     "status": "untested",
@@ -131,8 +131,8 @@
   "fm-radio": {
     "stock": "available",
     "hardware": "present",
-    "status": "untested",
-    "note": "The CM4 radio and this phone's FM settings are configured; tuning and playback have not been tested."
+    "status": "unsupported",
+    "note": "FM is unavailable with the external radio configuration."
   },
   "modem-and-mobile-service": {
     "stock": "unknown",
@@ -143,15 +143,15 @@
   "bluetooth": {
     "stock": "available",
     "hardware": "present",
-    "status": "untested",
-    "note": "The CM4 controller uses this phone's prepared firmware and radio settings. Controller startup and connections have not been tested."
+    "status": "partial",
+    "note": "The controller appeared in Settings during a RAM test. Pairing and file transfer remain unverified."
   },
   "wi-fi": {
     "stock": "unknown",
     "stockNote": "Availability in the stock system is unknown.",
-    "hardware": "unknown",
-    "status": "unsupported",
-    "note": "Wi-Fi is not enabled for this phone."
+    "hardware": "present",
+    "status": "partial",
+    "note": "A RAM test confirmed connection through Settings, address assignment and DNS resolution. Sustained transfers and reconnection after sleep remain unverified."
   },
   "camera": {
     "stock": "unknown",
@@ -241,7 +241,7 @@
   "bluetooth-pairing": {
     "stock": "available",
     "status": "untested",
-    "note": "Pairing is configured through BlueZ and Settings; connections have not been tested."
+    "note": "Pairing is available in Settings. A headset pairing attempt failed; successful pairing remains unverified."
   },
   "bluetooth-file-transfer": {
     "stock": "available",

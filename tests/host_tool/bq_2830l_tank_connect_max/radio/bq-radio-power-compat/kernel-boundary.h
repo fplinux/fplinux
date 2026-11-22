@@ -43,8 +43,8 @@ typedef pthread_mutex_t spinlock_t;
 #define WARN_ON(condition) (!!(condition))
 #define IS_ENABLED(option) option
 #define CONFIG_BQ2830L_WLAN 1
-#define CONFIG_BQ2830L_BLUETOOTH 0
-#define CONFIG_BQ2830L_FM 0
+#define CONFIG_BQ2830L_BLUETOOTH 1
+#define CONFIG_BQ2830L_FM 1
 #define max_t(type, left, right) \
 	((type)(left) > (type)(right) ? (type)(left) : (type)(right))
 #define msecs_to_jiffies(milliseconds) (milliseconds)

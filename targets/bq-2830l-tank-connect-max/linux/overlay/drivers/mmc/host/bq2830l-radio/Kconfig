@@ -1,21 +1,21 @@
 # SPDX-License-Identifier: GPL-2.0-only
 config MMC_SDHCI_UMS9117_BQ_RADIO
-	bool "BQ 2830L external radio SDIO"
-	depends on MACH_BQ_2830L_TANK_CONNECT_MAX && MMC_SDHCI_UMS9117
+	bool "UMS9117 external Marlin2 radio"
+	depends on MACH_BQ_2830L_TANK_CONNECT_MAX || MACH_ITEL_NEO_R60_PLUS
+	depends on MMC_SDHCI_UMS9117
 	depends on REGULATOR_SC2731
 	select REGULATOR_SC2720_WCN
 	select REGULATOR_SC2720_WIFIPA
 	select CRYPTO_LIB_SHA256
 	help
 	  Provide an on-demand, bounded RAM firmware boot for the board's
-	  external radio through SDIO1. The boot attribute starts the operation
-	  after the root filesystem is available; result reports firmware and
-	  calibration readback, the ready event and restored board state.
-	  The target's wireless, Bluetooth and FM options share this radio's
-	  firmware, power and SDIO transport.
+	  external radio through SDIO1. Load the board's firmware and
+	  calibration from the root filesystem when a consumer starts.
+	  Wi-Fi and Bluetooth share this radio's firmware, power and SDIO
+	  transport. The BQ 2830L also uses this radio for FM.
 
 config BQ2830L_WLAN
-	bool "BQ 2830L SDIO wireless networking"
+	bool "Marlin2 SDIO wireless networking"
 	depends on MMC_SDHCI_UMS9117_BQ_RADIO
 	depends on CFG80211 && INET
 	help
@@ -23,7 +23,7 @@ config BQ2830L_WLAN
 	  board-supplied firmware, calibration and network address.
 
 config BQ2830L_BLUETOOTH
-	bool "BQ 2830L SDIO Bluetooth"
+	bool "Marlin2 SDIO Bluetooth"
 	depends on MMC_SDHCI_UMS9117_BQ_RADIO && BT=y
 	help
 	  Provide a native HCI controller using the shared external radio.
@@ -33,6 +33,7 @@ config BQ2830L_BLUETOOTH
 config BQ2830L_FM
 	bool "BQ 2830L SDIO FM receiver"
 	depends on MMC_SDHCI_UMS9117_BQ_RADIO
+	depends on MACH_BQ_2830L_TANK_CONNECT_MAX
 	depends on VIDEO_DEV=y && MEDIA_RADIO_SUPPORT
 	select UMS9117_FM_WIRE
 	help

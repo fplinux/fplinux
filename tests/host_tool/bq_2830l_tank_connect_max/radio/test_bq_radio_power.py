@@ -18,7 +18,7 @@ KERNEL_COMPAT = ROOT / "tests/fixtures/ums9117-kernel"
 
 
 def test_radio_supplies_restore_after_shared_lifetime_and_failed_start(tmp_path: Path) -> None:
-    """Link the owner and transport; hardware and consumer registration are doubles."""
+    """Link both board variants and transport with hardware and interface doubles."""
     executable = tmp_path / "bq-radio-power"
     compile_c(
         executable,
@@ -51,4 +51,4 @@ def test_radio_supplies_restore_after_shared_lifetime_and_failed_start(tmp_path:
         timeout=10,
         check=True,
     )
-    assert result.stdout.endswith("BQ radio power host component cases passed\n")
+    assert result.stdout.endswith("Marlin2 radio power host component cases passed\n")

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 
 #include <dt-bindings/clock/sprd,ums9117-clk.h>
+#include <dt-bindings/gpio/gpio.h>
 #include <dt-bindings/reset/sprd,ums9117-reset.h>
 
 / {
@@ -15,18 +16,20 @@
 		#clock-cells = <1>;
 	};
 
-	itel-radio-probe {
-		compatible = "fplinux,itel-neo-r60-marlin2-probe";
+	radio {
+		compatible = "fplinux,itel-neo-r60-marlin2";
 		ranges;
 		#address-cells = <1>;
 		#size-cells = <1>;
+		bluetooth-config-name = "ums9117/itel-neo-r60-plus-wcn-bluetooth.bin";
 		enable-gpios = <&ap_gpio 14 GPIO_ACTIVE_HIGH>;
+		mac-address-name = "ums9117/itel-neo-r60-plus-wcn-mac.bin";
 		reset-gpios = <&ap_gpio 17 GPIO_ACTIVE_LOW>;
 		rx-request-gpios = <&ap_gpio 13 GPIO_ACTIVE_HIGH>;
 		wcn-supply = <&itel_radio_wcn>;
 		wifipa-supply = <&itel_radio_wifipa>;
-		fplinux,probe-pad-0464 = <0x2001>;
-		fplinux,probe-pins = <&itel_radio_pins>;
+		fplinux,radio-pad-0464 = <0x2001>;
+		fplinux,radio-pins = <&itel_radio_pins>;
 		sprd,aon-apb = <&aon_apb>;
 
 		mmc@20400000 {
@@ -39,6 +42,7 @@
 			clocks = <&itel_radio_sdio1_clk CLK_SDIO1>,
 				 <&apahb_gate CLK_SDIO1_EB>;
 			interrupts = <GIC_SPI 58 IRQ_TYPE_LEVEL_HIGH>;
+			keep-power-in-suspend;
 			max-frequency = <400000>;
 			no-1-8-v;
 			no-mmc;

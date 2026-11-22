@@ -8,8 +8,7 @@
 #include "ums9117.dtsi"
 #include "ums9117-sc2720.dtsi"
 #include "ums9117-musb-cold.dtsi"
-#include "ums9117-bluetooth.dtsi"
-#include "itel-neo-r60-radio-probe.dtsi"
+#include "itel-neo-r60-radio.dtsi"
 #include "fplinux-itel-neo-r60-plus-identity.dtsi"
 #include "fplinux-itel-neo-r60-plus-audio-policy.dtsi"
 #include "ums9117-nand-readonly.dtsi"
@@ -99,16 +98,6 @@
 			0x18 0x0008e000 0x1c 0x0008e001
 		>;
 	};
-};
-
-&bluetooth {
-	firmware-name = "ums9117/itel-neo-r60-plus-cm4.bin",
-			"ums9117/itel-neo-r60-plus-bt-config.bin",
-			"ums9117/itel-neo-r60-plus-bt-sprd.bin",
-			"ums9117/itel-neo-r60-plus-bt-rf-config.bin";
-	fplinux,fm-config-name = "fplinux/itel-neo-r60-plus-fm-config.bin";
-
-	status = "disabled";
 };
 
 &keypad_mux {

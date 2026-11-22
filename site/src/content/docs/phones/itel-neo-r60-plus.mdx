@@ -23,13 +23,15 @@ The 240×320 SPI display shows the graphical interface. The keypad has a 5×4 la
 
 ## Storage
 
-The first-run flow has been verified on Windows. The launcher read a fresh raw NAND backup, prepared the phone data and reached the graphical interface on the next launch. The backup supplies this phone's audio profile, Bluetooth firmware and FM settings. See [Phone data](/fplinux/guides/device-data/) for saved backups and preparation.
+The first-run flow has been verified on Windows. The launcher read a fresh raw NAND backup, prepared the phone data and reached the graphical interface on the next launch. The backup supplies this phone's audio profile, external radio firmware and fitted wireless data. See [Phone data](/fplinux/guides/device-data/) for saved backups and preparation.
 
 A microSD data card inserted before startup mounted and appeared in Files. Card writes are untested. Keep the card installed while the phone is powered and [unmount the data card before shutdown](/fplinux/use/power/#unmount-data-cards). Hot-swap is unsupported. The [microSD system-card profile](/fplinux/guides/microsd-system-card/) is configured and remains unverified on the phone.
 
 ## Audio and peripherals
 
-The handset played an alarm, vibrated and lit its keypad during testing. Headphone playback, jack detection, Bluetooth and FM are configured and await testing on this handset. The phone's saved settings supply its playback gains and radio data.
+The handset played an alarm, vibrated and lit its keypad during testing. Headphone playback and jack detection remain unverified. The phone's saved settings supply its playback gains.
+
+The external radio uses firmware and calibration from the phone's backup. In a RAM test build, Wi-Fi connected through Settings, obtained an IP address and resolved a DNS name. Bluetooth appeared in Settings. Pairing and file transfer on this phone are unverified. FM radio is unavailable.
 
 Microphone capture and the camera are not configured. Hardware JPEG, image rotation and internal temperature reporting are configured but have not been tested.
 
