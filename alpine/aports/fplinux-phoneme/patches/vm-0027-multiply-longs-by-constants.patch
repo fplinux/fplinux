@@ -1,0 +1,101 @@
+Multiply longs by constants without a register for the high word.
+
+The compiler loaded both words of a constant multiplier into registers and
+multiplied with UMULL and two MLA. A constant whose high word is 0 or -1,
+which covers every constant that fits in 32 bits, needs one register and
+one MLA: for -1 the missing term is a subtraction of the low word of the
+other operand. Multiplication by a power of two is a shift, and by -1 a
+negation. Besides saving the instructions, the missing register eases the
+register pressure in loops that multiply by a constant.
+
+And, or and exclusive or with an immediate word that leaves the word
+unchanged no longer emit an instruction when the result already lives in
+the register of the operand.
+
+--- a/cldc/src/vm/cpu/arm/CodeGenerator_arm.cpp
++++ b/cldc/src/vm/cpu/arm/CodeGenerator_arm.cpp
+@@ -2705,6 +2705,12 @@
+ }
+ #endif  // ENABLE_FLOAT
+ 
++// Whether a logical operation with this immediate leaves the word unchanged.
++static inline bool is_logical_identity(Assembler::Opcode opcode, jint imm) {
++  return (opcode == Assembler::_andr && imm == -1) ||
++         ((opcode == Assembler::_orr || opcode == Assembler::_eor) && imm == 0);
++}
++
+ void CodeGenerator::larithmetic(Opcode opcode1, Opcode opcode2,
+                                 Value& result, Value& op1, Value& op2) {
+   write_literals_if_desperate();
+@@ -2724,8 +2730,14 @@
+ 
+   if (op2.is_immediate()) {
+     const CompilerLiteralAccessor cla;
+-    arith_imm(opcode1, R1, A1, op2.lsw_bits(), &cla, mode);
+-    arith_imm(opcode2, R2, A2, op2.msw_bits(), &cla);
++    // A logical operation that leaves a word unchanged needs no instruction
++    // when the result shares the register of the operand.
++    if (!(R1 == A1 && is_logical_identity(opcode1, op2.lsw_bits()))) {
++      arith_imm(opcode1, R1, A1, op2.lsw_bits(), &cla, mode);
++    }
++    if (!(R2 == A2 && is_logical_identity(opcode2, op2.msw_bits()))) {
++      arith_imm(opcode2, R2, A2, op2.msw_bits(), &cla);
++    }
+   } else {
+     arith(opcode1, R1, A1, reg(op2.lsw_register()), mode);
+     arith(opcode2, R2, A2, reg(op2.msw_register()));
+@@ -2734,11 +2746,52 @@
+ 
+ void CodeGenerator::lmul(Value& result, Value& op1, Value& op2 JVM_TRAPS) {
+   JVM_IGNORE_TRAPS;
+-  // Should eventually detect multiplication by small (0..10) and
+-  // by 32bit constants and generate better code for those cases.
+   write_literals_if_desperate();
+ 
+   op1.materialize();
++
++  if (op2.is_immediate()) {
++    // long_binary swaps an immediate first operand, so only op2 can be one.
++    const jlong c = op2.as_long();
++    if (c == min_jlong || (c > 0 && (c & (c - 1)) == 0)) {
++      // multiplication by a power of two is a shift
++      int shift = 0;
++      while (((julong)c >> shift) != 1) {
++        shift++;
++      }
++      lshift_imm(lsl, result, op1, shift);
++      return;
++    }
++    if (c == -1) {
++      long_unary_do(result, op1, BytecodeClosure::una_neg JVM_NO_CHECK_AT_BOTTOM);
++      return;
++    }
++    const jint hi = op2.msw_bits();
++    if (hi == 0 || hi == -1) {
++      // The constant is lo - (hi == 0 ? 0 : 2^32) for the unsigned low word
++      // lo, so the product needs no register for the high word:
++      //   A * c = A1*lo + A2*lo*(2^32) [- A1*(2^32) when hi is -1]
++      result.assign_register();
++
++      Register A1 = op1.lsw_register();
++      Register A2 = op1.msw_register();
++      Register R1 = result.lsw_register();
++      Register R2 = result.msw_register();
++
++      TempRegister lo;
++      const CompilerLiteralAccessor cla;
++      mov_imm(lo, op2.lsw_bits(), &cla);
++      umull(R1, R2, A1, lo    ); // r =                         A1*lo
++      mla  (    R2, A2, lo, R2); // r =          A2*lo*(2^32) + A1*lo
++      if (hi != 0) {
++        sub(R2, R2, reg(A1));    // r = (A2*lo - A1)*(2^32)    + A1*lo
++      }
++      return;
++    }
++  }
++
++  // Should eventually detect multiplication by small (0..10) constants and
++  // generate better code for those cases.
+   op2.materialize();
+   result.assign_register();
+ 

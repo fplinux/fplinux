@@ -1,0 +1,104 @@
+Divide longs by 32 bit divisors with 32 bit divisions.
+
+The routines behind ldiv and lrem used the generic 64 bit division of the
+runtime library, which takes about 300 instructions even for small operands.
+A divisor that fits in 32 bits is the usual case in fixed-point arithmetic,
+so divide the dividend in 32 bit steps with the hardware divide of the
+processor instead: a divisor below 65536 needs three divisions of 16 bit
+digits, any other 32 bit divisor the usual two digit estimate and
+correction. Larger divisors still use the library.
+
+The interpreter calls the same routines.
+
+--- a/cldc/src/vm/share/interpreter/InterpreterRuntime.cpp
++++ b/cldc/src/vm/share/interpreter/InterpreterRuntime.cpp
+@@ -145,14 +145,87 @@
+     Synchronizer::signal_waiters(stack_lock);
+   }
+ 
++  // Divides the 64 bit number u1:u0 by v, where u1 < v, and returns the 32 bit
++  // quotient. The remainder is stored in *rem. Only 32 bit divisions are used,
++  // on 16 bit digits of the divisor normalised to have its top bit set.
++  static juint divide_64_by_32(juint u1, juint u0, juint v, juint* rem) {
++    const juint base = 65536;
++    const int s = __builtin_clz(v);
++    v <<= s;
++    const juint vn1 = v >> 16;
++    const juint vn0 = v & 0xffff;
++    const juint un32 = s == 0 ? u1 : (u1 << s) | (u0 >> (32 - s));
++    const juint un10 = u0 << s;
++    const juint un1 = un10 >> 16;
++    const juint un0 = un10 & 0xffff;
++
++    juint q1 = un32 / vn1;
++    juint rhat = un32 - q1 * vn1;
++    while (q1 >= base || q1 * vn0 > base * rhat + un1) {
++      q1--;
++      rhat += vn1;
++      if (rhat >= base) break;
++    }
++    const juint un21 = un32 * base + un1 - q1 * v;
++
++    juint q0 = un21 / vn1;
++    rhat = un21 - q0 * vn1;
++    while (q0 >= base || q0 * vn0 > base * rhat + un0) {
++      q0--;
++      rhat += vn1;
++      if (rhat >= base) break;
++    }
++    *rem = (un21 * base + un0 - q0 * v) >> s;
++    return q1 * base + q0;
++  }
++
++  // Unsigned 64 bit division. Divisors that fit in 32 bits do not need the
++  // generic 64 bit routine, which is slow.
++  static julong unsigned_divide(julong n, julong d, julong* rem) {
++    if ((d >> 32) != 0) {
++      *rem = n % d;
++      return n / d;
++    }
++    const juint d32 = (juint)d;
++    const juint hi = (juint)(n >> 32);
++    const juint lo = (juint)n;
++    if (hi == 0) {
++      *rem = lo % d32;
++      return lo / d32;
++    }
++    const juint q_hi = hi / d32;
++    juint r = hi - q_hi * d32;
++    if (d32 < 65536) {
++      // Each step divides 16 bits of the dividend and the remainder of the
++      // previous step, which fit in 32 bits.
++      juint t = (r << 16) | (lo >> 16);
++      const juint q1 = t / d32;
++      t = ((t - q1 * d32) << 16) | (lo & 0xffff);
++      const juint q0 = t / d32;
++      *rem = t - q0 * d32;
++      return ((julong)q_hi << 32) | (q1 << 16) | q0;
++    }
++    const juint q_lo = divide_64_by_32(r, lo, d32, &r);
++    *rem = r;
++    return ((julong)q_hi << 32) | q_lo;
++  }
++
+   jlong jvm_ldiv(jlong dividend, jlong divisor) {
+     GUARANTEE(divisor != 0, "Already check for division by zero");
+-    return dividend / divisor;
++    julong rem;
++    const julong n = dividend < 0 ? 0 - (julong)dividend : (julong)dividend;
++    const julong d = divisor < 0 ? 0 - (julong)divisor : (julong)divisor;
++    const julong q = unsigned_divide(n, d, &rem);
++    return (jlong)((dividend ^ divisor) < 0 ? 0 - q : q);
+   }
+ 
+   jlong jvm_lrem(jlong dividend, jlong divisor) {
+     GUARANTEE(divisor != 0, "Already check for division by zero");
+-    return dividend % divisor;
++    julong rem;
++    const julong n = dividend < 0 ? 0 - (julong)dividend : (julong)dividend;
++    const julong d = divisor < 0 ? 0 - (julong)divisor : (julong)divisor;
++    unsigned_divide(n, d, &rem);
++    return (jlong)(dividend < 0 ? 0 - rem : rem);
+   }
+ 
+   void array_index_out_of_bounds_exception(JVM_SINGLE_ARG_TRAPS) {

@@ -1,0 +1,81 @@
+Divide integers with SDIV when the processor has it.
+
+Compiled code divided by a register value through a shared stub: the frame
+was flushed to memory, and the stub found each quotient bit with a compare
+and a subtraction. Cortex-A7 has SDIV, which rounds toward zero and gives
+MIN_VALUE for MIN_VALUE / -1 as Java requires, so idiv and irem become a
+zero check and one or two instructions when Linux reports HWCAP_IDIVA.
+
+--- a/cldc/src/vm/cpu/arm/Assembler_arm.hpp
++++ b/cldc/src/vm/cpu/arm/Assembler_arm.hpp
+@@ -493,6 +493,17 @@
+     emit(cond << 28 | 0x016f0f10 | rd << 12 | rm);
+   }
+
++  // Integer divide extension (Cortex-A7 and later): rd = rn / rm.
++  void sdiv(Register rd, Register rn, Register rm, Condition cond = al) {
++    emit(cond << 28 | 0x0710f010 | rd << 16 | rm << 8 | rn);
++  }
++
++  // rd = ra - rn * rm
++  void mls(Register rd, Register rn, Register rm, Register ra,
++           Condition cond = al) {
++    emit(cond << 28 | 0x00600090 | rd << 16 | ra << 12 | rm << 8 | rn);
++  }
++
+   void bx(Register rm, Condition cond = al) {
+     emit(cond << 28 | 0x012fff10 | rm);
+   }
+--- a/cldc/src/vm/cpu/arm/CodeGenerator_arm.cpp
++++ b/cldc/src/vm/cpu/arm/CodeGenerator_arm.cpp
+@@ -1679,6 +1679,24 @@
+   }
+ }
+
++#if defined(__arm__) && defined(__linux__) && !CROSS_GENERATOR
++extern "C" unsigned long getauxval(unsigned long type);
++#endif
++
++// Whether this processor has SDIV (the Linux HWCAP_IDIVA bit).
++static bool has_hardware_divide() {
++#if defined(__arm__) && defined(__linux__) && !CROSS_GENERATOR
++  static int known = -1;
++  if (known < 0) {
++    enum { AT_HWCAP_TYPE = 16, HWCAP_IDIVA_BIT = 1 << 17 };
++    known = (getauxval(AT_HWCAP_TYPE) & HWCAP_IDIVA_BIT) != 0;
++  }
++  return known != 0 && !GenerateROMImage;
++#else
++  return false;
++#endif
++}
++
+ void CodeGenerator::idiv_rem(Value& result, Value& op1, Value& op2,
+                              bool isRemainder JVM_TRAPS) {
+   Register resReg, invReg;
+@@ -1690,7 +1708,24 @@
+     negate = !isRemainder;
+   }
+
+-  if (op2.in_register()) {
++  if (op2.in_register() && has_hardware_divide()) {
++    // SDIV rounds toward zero and gives MIN_VALUE for MIN_VALUE / -1 as Java
++    // requires, so only a zero divisor needs a check. Unlike the stub call it
++    // keeps the frame in registers.
++    ZeroDivisorCheckStub* check =
++      ZeroDivisorCheckStub::allocate_or_share(JVM_SINGLE_ARG_ZCHECK(check));
++    cmp(op2.lo_register(), zero);
++    b(check, eq);
++    result.assign_register();
++    if (isRemainder) {
++      TempRegister quotient;
++      sdiv(quotient, op1.lo_register(), op2.lo_register());
++      mls(result.lo_register(), quotient, op2.lo_register(),
++          op1.lo_register());
++    } else {
++      sdiv(result.lo_register(), op1.lo_register(), op2.lo_register());
++    }
++  } else if (op2.in_register()) {
+     flush_frame(JVM_SINGLE_ARG_CHECK);
+     setup_c_args(2, &op1, &op2, NULL);
+     // Call the compiler stub.

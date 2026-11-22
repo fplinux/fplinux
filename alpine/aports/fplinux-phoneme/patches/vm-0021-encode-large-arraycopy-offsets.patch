@@ -1,0 +1,23 @@
+Encode large constant arraycopy offsets.
+
+Compiled System.arraycopy() with a constant position adds the position's
+byte offset to the array as one ARM immediate. An offset such as 3558 + 8
+fits no single rotated 8-bit immediate, and the compiler stopped the VM
+with a fatal error. Add the offset with add_imm(), which splits it or loads
+it as needed.
+
+--- a/cldc/src/vm/cpu/arm/CodeGenerator_arm.cpp
++++ b/cldc/src/vm/cpu/arm/CodeGenerator_arm.cpp
+@@ -5960,8 +5960,10 @@
+     int offset_imm = offset.as_int();
+     GUARANTEE(offset_imm >= 0, "Negative offset");
+
+-    add(data_reg, array_reg, imm(Array::base_offset() +
+-                                 (offset_imm << log_element_size)));
++    // A constant position such as 3558 makes an offset that no single ARM
++    // immediate can hold.
++    add_imm(data_reg, array_reg,
++            Array::base_offset() + (offset_imm << log_element_size));
+
+     offset_word_aligned =
+       ((offset_imm << log_element_size) & right_n_bits(BytesPerWord)) == 0;

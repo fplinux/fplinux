@@ -1,0 +1,75 @@
+Stop recompiling a method that does not fit into compiler memory.
+
+A compilation that ran out of memory only doubled the code buffer for the
+next attempt. When the compiler's temporary data was what did not fit, the
+larger code buffer left even less room for it, and the attempt failed the
+same way after doing the same work. A hot method was compiled again every
+time a timer tick found it running.
+
+The retry now reserves the largest temporary area, a quarter of the compiler
+area. When the retry runs out of memory too, the method is marked impossible
+to compile, as the reservation comment already describes. Only the root
+compilation records the failure, and an aborted compilation does not count
+as running out of memory: an inlined method that aborts it permanently is
+marked itself, and its caller compiles again without inlining it.
+
+--- a/cldc/src/vm/share/compiler/Compiler.cpp
++++ b/cldc/src/vm/share/compiler/Compiler.cpp
+@@ -372,10 +372,11 @@
+     temp_data_size += sizeof *_compiler_state;
+ #endif
+     const size_t max_temp_data = HeapCapacity * CompilerAreaPercentage/100/4;
+-    if( temp_data_size > max_temp_data ) {
++    if( temp_data_size > max_temp_data || method->is_double_size() ) {
+       // Don't use more than a quarter of the compiler area to compile any
+       // method. This means very big methods would fail to compile and
+-      // would be marked as impossible to compile.
++      // would be marked as impossible to compile. A method whose previous
++      // compilation ran out of memory reserves the whole quarter.
+       temp_data_size = max_temp_data;
+     }
+     const int needed = compiled_size + temp_data_size;
+@@ -565,7 +566,19 @@
+ }
+
+ inline void Compiler::handle_out_of_memory( void ) {
+-  method()->set_double_size();
++  if( is_inlining() ) {
++    // The root compilation fails as well and handles the failure.
++    return;
++  }
++  if( method()->is_double_size() ) {
++    // An earlier compilation of this method ran out of memory, so this one
++    // reserved a doubled code buffer and the largest temporary area, and it
++    // ran out as well. Further attempts would fail the same way after the
++    // same work, so interpret the method from now on.
++    set_impossible_to_compile( method(), "out of memory" );
++  } else {
++    method()->set_double_size();
++  }
+ }
+
+ #if  ENABLE_INTERNAL_CODE_OPTIMIZER
+@@ -906,6 +919,10 @@
+     set_impossible_to_compile(current()->method(),
+                               "compilation aborted permanently");
+   }
++  // The compilation did not run out of memory, so the root method keeps its
++  // reservation and may compile later: without the method marked above, or
++  // once the reason for an uncommon trap, such as an unloaded class, is gone.
++  _failure = aborted;
+   Throw::out_of_memory_error(JVM_SINGLE_ARG_THROW);
+ }
+
+--- a/cldc/src/vm/share/compiler/Compiler.hpp
++++ b/cldc/src/vm/share/compiler/Compiler.hpp
+@@ -490,7 +490,8 @@
+     reservation_failed,
+     out_of_time,
+     out_of_memory,
+-    out_of_stack
++    out_of_stack,
++    aborted
+   };
+
+   static CompilationFailure _failure;

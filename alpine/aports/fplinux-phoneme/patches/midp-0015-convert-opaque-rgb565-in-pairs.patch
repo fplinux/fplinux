@@ -1,0 +1,59 @@
+Convert opaque RGB565 pixels in pairs.
+
+Image.getRGB() of an opaque image converted one 16-bit pixel per load, with
+the alpha added separately. Load two pixels at a time and look the high byte
+up in a table that already holds the alpha. M3G reads its whole target this
+way for every frame.
+
+--- a/midp/src/lowlevelui/image/img_putpixel/native/imgj_imagedatafactory_kni.c
++++ b/midp/src/lowlevelui/image/img_putpixel/native/imgj_imagedatafactory_kni.c
+@@ -65,6 +65,8 @@
+  */
+ static jint rgb_of_high_byte[256];
+ static jint rgb_of_low_byte[256];
++/* rgb_of_high_byte with the opaque alpha. */
++static jint argb_of_high_byte[256];
+ static jboolean rgb_tables_ready;
+
+ static void init_rgb_tables(void) {
+@@ -73,10 +75,15 @@
+   for (i = 0; i < 256; i++) {
+     rgb_of_high_byte[i] = RGB16TORGB24(i << 8);
+     rgb_of_low_byte[i] = RGB16TORGB24(i);
++    argb_of_high_byte[i] = rgb_of_high_byte[i] | 0xFF000000;
+   }
+   rgb_tables_ready = KNI_TRUE;
+ }
+
++static jint opaque_argb(unsigned int pixel) {
++  return argb_of_high_byte[pixel >> 8] | rgb_of_low_byte[pixel & 0xFF];
++}
++
+ /**
+  * Create native representation for a image.
+  *
+@@ -290,10 +297,20 @@
+             (rgb_of_high_byte[pixel >> 8] | rgb_of_low_byte[pixel & 0xFF]);
+         }
+       } else {
+-        for (column = 0; column < width; column++) {
+-          pixel = pixels[column];
+-          argb[column] = rgb_of_high_byte[pixel >> 8] |
+-            rgb_of_low_byte[pixel & 0xFF] | 0xFF000000;
++        const PIXEL *pixel_end = pixels + width;
++
++        if (((size_t)pixels & 2) != 0 && pixels < pixel_end) {
++          *argb++ = opaque_argb(*pixels++);
++        }
++        /* Two pixels from one aligned load; the first is in the low half. */
++        for (; pixel_end - pixels >= 2; pixels += 2, argb += 2) {
++          unsigned int pair;
++          memcpy(&pair, pixels, sizeof(pair));
++          argb[0] = opaque_argb(pair & 0xFFFF);
++          argb[1] = opaque_argb(pair >> 16);
++        }
++        if (pixels < pixel_end) {
++          *argb = opaque_argb(*pixels);
+         }
+       }
+     }

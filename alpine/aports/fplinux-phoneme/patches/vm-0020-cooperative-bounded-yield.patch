@@ -1,0 +1,71 @@
+Let the host wait briefly when a rapid Thread.yield loop has no runnable peer.
+
+Keep normal dispatch when a Java timer is due during the wait. Returning a
+timeout through the existing scheduler keeps the host event loop responsive.
+
+--- a/cldc/src/vm/share/natives/Natives.cpp
++++ b/cldc/src/vm/share/natives/Natives.cpp
+@@ -1094,7 +1094,19 @@
+ }
+ 
+ void Java_java_lang_Thread_yield() {
+-  Scheduler::yield();
++  enum { spin_yields = 200 };
++  static jlong last_millis;
++  static int repeated_yields;
++  const jlong now = Os::monotonic_time_millis();
++  jlong idle_delay = 0;
++  if (now != last_millis) {
++    last_millis = now;
++    repeated_yields = 0;
++  } else if (++repeated_yields >= spin_yields) {
++    repeated_yields = 0;
++    idle_delay = 1;
++  }
++  Scheduler::yield(idle_delay);
+ }
+ 
+ // public static native void sleep(long millis) throws InterruptedException;
+--- a/cldc/src/vm/share/runtime/Scheduler.cpp
++++ b/cldc/src/vm/share/runtime/Scheduler.cpp
+@@ -1084,7 +1084,7 @@
+     Setup the cache _next_runnable_thread so that switch_thread()
+     can quickly find the next thread to switch to.
+  */
+-void Scheduler::yield() {
++void Scheduler::yield(jlong idle_delay) {
+   SETUP_ERROR_CHECKER_ARG;
+   wake_up_timed_out_sleepers(JVM_SINGLE_ARG_CHECK);
+ 
+@@ -1096,8 +1096,18 @@
+                       next_thread->obj(), next_thread->id()));
+       }
+     }
+-    if (is_slave_mode() && _timer_has_ticked) {
+-      slave_mode_wait_for_event_or_timer(0);
++    if (is_slave_mode()) {
++      jlong delay = 0;
++      if (idle_delay > 0 && next_thread->equals(Thread::current())) {
++        const jlong deadline = earliest_waiting_deadline();
++        if (deadline == 0 ||
++            deadline - Os::monotonic_time_millis() > idle_delay) {
++          delay = idle_delay;
++        }
++      }
++      if (delay > 0 || _timer_has_ticked) {
++        slave_mode_wait_for_event_or_timer(delay);
++      }
+     }
+   } else {
+     if (TraceThreadsExcessive) {
+--- a/cldc/src/vm/share/runtime/Scheduler.hpp
++++ b/cldc/src/vm/share/runtime/Scheduler.hpp
+@@ -325,7 +325,7 @@
+   }
+ 
+   // Forwarded from java.lang.Thread
+-  static void yield();
++  static void yield(jlong idle_delay = 0);
+   static void sleep_current_thread(jlong millis);
+   static void start(Thread* thread JVM_TRAPS);
+   static void set_priority(Thread* thread, int old_priority);

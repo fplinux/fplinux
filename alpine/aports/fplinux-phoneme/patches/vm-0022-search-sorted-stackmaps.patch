@@ -1,0 +1,108 @@
+Search sorted stack maps by bci.
+
+The verifier finds the stack map of a branch target through a cache that
+covers the first 512 bytes of a method; past it, it walked every stack map
+of the method. Game methods of several kilobytes with hundreds of stack
+maps made class loading spend most of the verification time there. When the
+method's stack maps have increasing bcis, which populate_stackmap_cache()
+now checks, search them by bci; otherwise keep the walk.
+
+--- a/cldc/src/vm/share/verifier/Verifier.hpp
++++ b/cldc/src/vm/share/verifier/Verifier.hpp
+@@ -34,6 +34,7 @@
+   static bool _is_cache_active;
+   static void verify_class_internal(InstanceClass* klass JVM_TRAPS);
+   static int _stackmap_cache_max;
++  static bool _stackmaps_sorted;
+ public:
+
+   static bool is_active() {
+@@ -56,5 +57,11 @@
+   static int stackmap_cache_max() {
+     return _stackmap_cache_max;
+   }
++
++  // Whether the stack maps of the method being verified have increasing
++  // bcis, so that a bci past the cache can be found by binary search.
++  static bool stackmaps_sorted() {
++    return _stackmaps_sorted;
++  }
+ friend class VerifyMethodCodes;
+ };
+--- a/cldc/src/vm/share/runtime/HotRoutines.incl.hpp
++++ b/cldc/src/vm/share/runtime/HotRoutines.incl.hpp
+@@ -55,6 +55,7 @@
+ int               _rom_data_block_size_fast;
+
+ int       Verifier::_stackmap_cache_max;
++bool      Verifier::_stackmaps_sorted;
+
+ ObjectHeap::QuickVars ObjectHeap::_quick_vars;
+
+@@ -218,6 +219,25 @@
+   address *p = (address*)stackmaps()->base_address();
+   int stackmap_index = 0;
+
++  if (Verifier::stackmaps_sorted()) {
++    // Large game methods have hundreds of stack maps; search them by bci.
++    int low = 0;
++    int high = len / 2 - 1;
++    while (low <= high) {
++      const int middle = (low + high) >> 1;
++      const jint bci = ((jint*)(p[2 * middle] + Array::base_offset()))[0];
++      if (bci == target_bci) {
++        return 2 * middle;
++      }
++      if (bci < target_bci) {
++        low = middle + 1;
++      } else {
++        high = middle - 1;
++      }
++    }
++    return -1;
++  }
++
+   // WAS: for (stackmap_index = 0; stackmap_index < len; stackmap_index+=2)
+   while (stackmap_index < len) {
+     address scalars = *p;
+--- a/cldc/src/vm/share/verifier/VerifyMethodCodes.cpp
++++ b/cldc/src/vm/share/verifier/VerifyMethodCodes.cpp
+@@ -123,6 +123,7 @@
+   ObjArray::Raw stackmaps = method->stackmaps();
+   if (stackmaps.is_null()) {
+     Verifier::_stackmap_cache_max = 0;
++    Verifier::_stackmaps_sorted = false;
+     return;
+   }
+   int max = method->code_size();
+@@ -134,15 +135,22 @@
+   jvm_memset(cache().base_address(), 0xff, sizeof(jint) * max);
+
+   int i, len = stackmaps().length();
++  int previous_bci = -1;
++  bool sorted = true;
+   TypeArray::Raw stackmap_scalars;
+   for (i = 0; i < len; i += 2) {
+     stackmap_scalars = stackmaps().obj_at(i);
+     int target_bci = stackmap_scalars().int_at(0);
++    if (target_bci <= previous_bci) {
++      sorted = false;
++    }
++    previous_bci = target_bci;
+     if (target_bci < max) {
+       if (cache().int_at(target_bci) != -1) {
+         // oops - duplicated stack maps. This is a bad classfile. Don't
+         // use the cache, and the error will eventually be sorted out
+         max = 0;
++        sorted = false;
+         break;
+       } else {
+         cache().int_at_put(target_bci, i);
+@@ -151,6 +159,7 @@
+   }
+
+   Verifier::_stackmap_cache_max = max;
++  Verifier::_stackmaps_sorted = sorted;
+ }
+
+ void VerifyMethodCodes::verify(Method *method, ObjArray *stackmaps JVM_TRAPS) {

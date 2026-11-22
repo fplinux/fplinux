@@ -1,0 +1,29 @@
+Do not reuse a literal one word beyond the reach of ldr.
+
+With ARM VFP enabled, find_literal() reused a written literal as long as it
+was at most 4088 bytes behind the load. The load is relative to pc + 8, so a
+literal exactly 4088 bytes back needs the displacement -4096, which does not
+fit the 12-bit immediate. The encoded instruction lost the offset and set the
+low bit of the destination register: it loaded the next instruction word, or
+loaded into the neighbouring register. Require the literal to be closer, as
+the variant without VFP already does.
+
+--- a/cldc/src/vm/cpu/arm/BinaryAssembler_arm.cpp
++++ b/cldc/src/vm/cpu/arm/BinaryAssembler_arm.cpp
+@@ -288,11 +288,14 @@
+
+   LiteralPoolElement* literal = _first_literal;
+
+-  // Search for a bound literal not too far from current instruction
++  // Search for a bound literal not too far from current instruction.
++  // The load is relative to pc + 8: a literal at min_offset would need the
++  // displacement -(offset + 8), the whole range given by the caller, which
++  // the 12-bit immediate of ldr cannot encode.
+   {
+     const int min_offset = _code_offset - offset;
+     for( ; literal && literal->is_bound(); literal = literal->next() ) {
+-      if( literal->_bci >= min_offset && literal->matches(obj, imm32)) {
++      if( literal->_bci > min_offset && literal->matches(obj, imm32)) {
+         return literal;
+       }
+     }

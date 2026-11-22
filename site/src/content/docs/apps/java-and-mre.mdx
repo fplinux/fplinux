@@ -35,6 +35,8 @@ If saving fails, the chosen value remains applied and Settings shows **Unsaved**
 
 In phoneME, **Settings → JIT** selects **Interpreter** or **JIT (experimental)**. The default is Interpreter. **This program → JIT** can override the default for the current Java program or restore it with **Use default**. Close and reopen the program to apply a VM mode change. To change a game's mode before opening it again, focus it in **Recent** and choose **Options → VM mode**.
 
+In a session configured to launch phoneME with the `FPLINUX_PHONEME_FPS_LIMIT` environment variable, a positive integer paces an isolated `callSerially()` callback that repeatedly queues itself on the same foreground Canvas. Repaints and input can continue during the wait. If another callback joins the queue, both run in their original order as soon as the event dispatcher can deliver them. Pacing is off when the variable is unset or zero.
+
 If a program came with a JAD descriptor, keep it beside the JAR and open the JAD. Its **MIDlet-Jar-URL** must name the JAR in the same folder, its declared size must match the file, and the suite name, vendor and version must match the JAR manifest. Properties in a matching JAD override the corresponding manifest properties. Opening the JAR also uses a matching `.jad` or `.JAD` with the same filename stem when present. A standalone JAR uses its manifest.
 
 When a suite contains several MIDlets, choose the one to run. Opening another suite asks to close the current program. Choose **Cancel** to keep it running.

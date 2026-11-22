@@ -1,0 +1,81 @@
+Convert RGB565 pixels for Image.getRGB through two byte tables.
+
+Each term of RGB16TORGB24() takes its bits from either the high or the low
+byte of the pixel, so the 24-bit color is the OR of a table entry for each
+byte. The tables are filled once with the same macro; the copied values are
+unchanged. The row pointers are computed once per row.
+
+--- a/midp/src/lowlevelui/image/img_putpixel/native/imgj_imagedatafactory_kni.c
++++ b/midp/src/lowlevelui/image/img_putpixel/native/imgj_imagedatafactory_kni.c
+@@ -58,6 +58,25 @@
+                               ((x & 0x07E0) << 5) | ((x & 0x0600) >> 1) |\
+                               ((x & 0xF800) << 8) | ((x & 0xE000) << 3) )
+
++/*
++ * RGB16TORGB24() of the high and of the low byte of a 565 pixel. Every term
++ * of the macro masks and shifts bits of one byte only, so the color of a
++ * pixel is the OR of its two entries.
++ */
++static jint rgb_of_high_byte[256];
++static jint rgb_of_low_byte[256];
++static jboolean rgb_tables_ready;
++
++static void init_rgb_tables(void) {
++  int i;
++
++  for (i = 0; i < 256; i++) {
++    rgb_of_high_byte[i] = RGB16TORGB24(i << 8);
++    rgb_of_low_byte[i] = RGB16TORGB24(i);
++  }
++  rgb_tables_ready = KNI_TRUE;
++}
++
+ /**
+  * Create native representation for a image.
+  *
+@@ -252,23 +271,29 @@
+     // P(a, b) = rgbData[offset + (a - x) + (b - y) * scanlength]
+     // x <= a < x + width
+     // y <= b < y + height
+-    int a, b, pixel, alpha;
++    int row, column, pixel, alpha;
+
+-    if (srcAlphaData != NULL) {
+-      for (b = y; b < y + height; b++) {
+-        for (a = x; a < x + width; a++) {
+-          pixel = srcPixelData[b*srcWidth + a];
+-          alpha = srcAlphaData[b*srcWidth + a];
+-          rgbBuffer[offset + (a - x) + (b - y) * scanlength] =
+-            (alpha << 24) + RGB16TORGB24(pixel);
+-        }
+-      }
+-    } else {
+-      for (b = y; b < y + height; b++) {
+-        for (a = x; a < x + width; a++) {
+-          pixel = srcPixelData[b*srcWidth + a];
+-          rgbBuffer[offset + (a - x) + (b - y) * scanlength] =
+-            RGB16TORGB24(pixel) | 0xFF000000;
++    if (!rgb_tables_ready) {
++      init_rgb_tables();
++    }
++    for (row = 0; row < height; row++) {
++      const PIXEL *pixels = srcPixelData + (y + row) * srcWidth + x;
++      jint *argb = rgbBuffer + offset + row * scanlength;
++
++      if (srcAlphaData != NULL) {
++        const ALPHA *alphas = srcAlphaData + (y + row) * srcWidth + x;
++
++        for (column = 0; column < width; column++) {
++          pixel = pixels[column];
++          alpha = alphas[column];
++          argb[column] = (alpha << 24) +
++            (rgb_of_high_byte[pixel >> 8] | rgb_of_low_byte[pixel & 0xFF]);
++        }
++      } else {
++        for (column = 0; column < width; column++) {
++          pixel = pixels[column];
++          argb[column] = rgb_of_high_byte[pixel >> 8] |
++            rgb_of_low_byte[pixel & 0xFF] | 0xFF000000;
+         }
+       }
+     }

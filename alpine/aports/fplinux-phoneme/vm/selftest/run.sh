@@ -44,14 +44,18 @@ fail() {
 	exit 1
 }
 
-run_jit_fixture() {
-	if ! FPLINUX_PHONEME_JIT=$1 FPLINUX_PHONEME_JIT_TRACE=$2 \
+run_jit_fixture() (
+	jit_mode=$1
+	jit_trace=$2
+	log=$3
+	shift 3
+	if ! FPLINUX_PHONEME_JIT=${jit_mode} FPLINUX_PHONEME_JIT_TRACE=${jit_trace} \
 		"${qemu_arm}" -L "${sysroot}" "${headless}" --system-classes "${classes}" \
-		--timeout-ms 30000 "${work}/jit.jar" >"$3" 2>&1; then
-		cat "$3" >&2
-		fail "JIT fixture failed with JIT=$1 trace=$2"
+		--timeout-ms 30000 "${work}/jit.jar" "$@" >"${log}" 2>&1; then
+		cat "${log}" >&2
+		fail "JIT fixture failed with JIT=${jit_mode} trace=${jit_trace}"
 	fi
-}
+)
 
 mkdir -p "${work}"
 build_jar jit "${here}/jit.mf"
@@ -94,6 +98,45 @@ awk '
 	cat "${work}/jit-trace.txt" >&2
 	fail "JIT did not compile all arithmetic methods"
 }
+
+for kind in LongMath FloatBits; do
+	case ${kind} in
+	LongMath)
+		expected='PM-JIT-LONG hash=5564715207957261824'
+		methods='multiply divideByPowersOfTwo divideByOthers'
+		;;
+	FloatBits)
+		expected='PM-JIT-FLOATBITS hash=-976795926404499192'
+		methods='floatFlows doubleFlows'
+		;;
+	esac
+	fixture="fplinux.fixtures.jit.Jit${kind}MIDlet"
+	for mode in '' 1; do
+		output="${work}/jit-${kind}-${mode:-0}.txt"
+		run_jit_fixture "${mode}" 0 "${output}" "${fixture}"
+		grep -Fqx "${expected}" "${output}" || {
+			cat "${output}" >&2
+			fail "${kind} result differs with JIT=${mode:-0}"
+		}
+	done
+	trace="${work}/jit-${kind}-trace.txt"
+	run_jit_fixture 1 1 "${trace}" "${fixture}"
+	awk -v fixture="Jit${kind}MIDlet" -v methods="${methods}" '
+		BEGIN { n = split(methods, names, " "); for (i = 1; i <= n; i++) pending[names[i]] = 1 }
+		/Compiling / {
+			method = ""
+			if ($(NF) ~ ("/" fixture "\\.")) {
+				method = $(NF)
+				sub(/^.*\./, "", method)
+			}
+		}
+		method && /<done [1-9][0-9]*>/ { delete pending[method]; method = "" }
+		END { for (name in pending) exit 1 }
+	' "${trace}" || {
+		cat "${trace}" >&2
+		fail "JIT did not compile all ${kind} methods"
+	}
+done
 
 build_jar hello "${here}/hello.mf"
 build_jar vectors "${here}/vectors.mf"

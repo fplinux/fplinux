@@ -1,0 +1,133 @@
+Divide longs by 1, -1 and powers of two without a runtime call.
+
+Every long division and remainder, whatever the divisor, called a runtime
+routine after the frame had been flushed and the arguments moved into
+registers. A constant divisor of 1 or -1 now compiles to a copy or a
+negation (or zero for the remainder), and a power of two 2^n to a bias
+taken from the sign, an addition and a shift for the quotient, or a mask
+and a subtraction of the bias for the remainder. Other divisors, including
+Long.MIN_VALUE, still call the routine.
+
+--- a/cldc/src/vm/cpu/arm/CodeGenerator_arm.cpp
++++ b/cldc/src/vm/cpu/arm/CodeGenerator_arm.cpp
+@@ -2834,12 +2834,108 @@
+   call_simple_c_runtime(result, routine, op1, op2);
+ }
+ 
+-void CodeGenerator::ldiv(Value& result, Value& op1, Value& op2 JVM_TRAPS) {
++// Division and remainder by 1, -1 and the powers of two. Returns false for
++// other divisors, which need the runtime routine.
++bool CodeGenerator::ldiv_lrem_by_constant(Value& result, Value& op1,
++                                          jlong divisor, bool remainder) {
++  if (divisor == 1 || divisor == -1) {
++    if (remainder) {
++      result.set_long(0);
++    } else if (divisor == 1) {
++      op1.copy(result);
++    } else {
++      assign_register(result, op1);
++      rsb(result.lsw_register(), op1.lsw_register(), zero, set_CC);
++      rsc(result.msw_register(), op1.msw_register(), zero);
++    }
++    return true;
++  }
++  if (divisor < 2 || (divisor & (divisor - 1)) != 0 || divisor == min_jlong) {
++    return false;
++  }
++  int n = 0;
++  while ((divisor >> n) != 1) {
++    n++;
++  }
++  GUARANTEE(1 <= n && n <= 62, "power of two other than 1, 2^63");
++
++  result.assign_register();
++  const Register A1 = op1.lsw_register();
++  const Register A2 = op1.msw_register();
++  const Register R1 = result.lsw_register();
++  const Register R2 = result.msw_register();
++
++  // Truncating division of x adds a bias of 2^n - 1 to a negative x before the
++  // arithmetic shift right. The bias is built from the sign of x: for n < 32
++  // it is bias_lo, for n >= 32 its low word is bias_lo (all ones) and its
++  // high word is bias_lo >> (64 - n) (zero for n == 32).
++  TempRegister bias_lo;
++  mov(bias_lo, imm_shift(A2, asr, 31));
++  if (n < 32) {
++    mov(bias_lo, imm_shift(bias_lo, lsr, 32 - n));
++    if (remainder) {
++      // The remainder is smaller than 2^n, so only the low words matter and
++      // the high word is the sign of the low one.
++      add(R1, A1, reg(bias_lo));
++      mov(R1, imm_shift(R1, lsl, 32 - n));
++      mov(R1, imm_shift(R1, lsr, 32 - n));
++      sub(R1, R1, reg(bias_lo));
++      mov(R2, imm_shift(R1, asr, 31));
++      return true;
++    }
++    add(R1, A1, reg(bias_lo), set_CC);
++    adc(R2, A2, zero);
++  } else if (n == 32) {
++    add(R1, A1, reg(bias_lo), set_CC);
++    adc(R2, A2, zero);
++  } else {
++    add(R1, A1, reg(bias_lo), set_CC);
++    adc(R2, A2, imm_shift(bias_lo, lsr, 64 - n));
++  }
+ 
++  if (!remainder) {
++    // (x + bias) >> n
++    if (n < 32) {
++      mov(R1, imm_shift(R1, lsr, n));
++      orr(R1, R1, imm_shift(R2, lsl, 32 - n));
++      mov(R2, imm_shift(R2, asr, n));
++    } else {
++      if (n == 32) {
++        mov_reg(R1, R2);
++      } else {
++        mov(R1, imm_shift(R2, asr, n - 32));
++      }
++      mov(R2, imm_shift(R2, asr, 31));
++    }
++  } else {
++    // ((x + bias) & (2^n - 1)) - bias
++    if (n == 32) {
++      mov(R2, zero);
++      sub(R1, R1, reg(bias_lo), set_CC);
++      sbc(R2, R2, zero);
++    } else {
++      mov(R2, imm_shift(R2, lsl, 64 - n));
++      mov(R2, imm_shift(R2, lsr, 64 - n));
++      sub(R1, R1, reg(bias_lo), set_CC);
++      sbc(R2, R2, imm_shift(bias_lo, lsr, 64 - n));
++    }
++  }
++  return true;
++}
++
++void CodeGenerator::ldiv(Value& result, Value& op1, Value& op2 JVM_TRAPS) {
++  if (op2.is_immediate() &&
++      ldiv_lrem_by_constant(result, op1, op2.as_long(), false)) {
++    return;
++  }
+   runtime_long_op(result, op1, op2, true, (address)jvm_ldiv JVM_NO_CHECK_AT_BOTTOM);
+ }
+ 
+ void CodeGenerator::lrem(Value& result, Value& op1, Value& op2 JVM_TRAPS) {
++  if (op2.is_immediate() &&
++      ldiv_lrem_by_constant(result, op1, op2.as_long(), true)) {
++    return;
++  }
+   runtime_long_op(result, op1, op2, true, (address)jvm_lrem JVM_NO_CHECK_AT_BOTTOM);
+ }
+ 
+--- a/cldc/src/vm/cpu/arm/CodeGenerator_arm.hpp
++++ b/cldc/src/vm/cpu/arm/CodeGenerator_arm.hpp
+@@ -103,6 +103,8 @@
+   void lshift(Shift type, Value& result, Value& op1, Value& op2);
+   void lshift_reg(Shift type, Value& result, Value& op1, Value& op2);
+   void lshift_imm(Shift type, Value& result, Value& op1, int shift);
++  bool ldiv_lrem_by_constant(Value& result, Value& op1, jlong divisor,
++                             bool remainder);
+ 
+   void adjust_for_invoke(int parameters_size, BasicType return_type,
+                          bool native = false);

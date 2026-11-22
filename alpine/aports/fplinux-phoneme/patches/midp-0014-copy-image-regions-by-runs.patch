@@ -1,0 +1,175 @@
+Copy image regions by rows and alpha runs.
+
+An opaque region was copied one pixel at a time; copy each row at once.
+Sources with alpha are mostly runs of opaque and transparent pixels: find
+them four alpha values at a time, copy the opaque ones by rows and skip the
+transparent ones. Blend the rest with red and blue weighed together in
+place, which gives the same pixels as the per-channel arithmetic.
+
+--- a/midp/src/lowlevelui/graphics/gx_putpixel/native/gxj_image.c
++++ b/midp/src/lowlevelui/graphics/gx_putpixel/native/gxj_image.c
+@@ -29,6 +29,7 @@
+  * Immutable image functions that needed to be implemented for each port.
+  */
+ #include <kni.h>
++#include <stdint.h>
+ #include <string.h>
+
+ #include <midpMalloc.h>
+@@ -193,6 +194,44 @@
+
+
+
++/*
++ * End of the run of alpha values from column on whose bits under mask all
++ * equal value. Sprites consist mostly of opaque and transparent runs, so the
++ * values are tested four at a time.
++ */
++static int
++alpha_run_end(const unsigned char *alpha, int column, int width,
++              unsigned int mask, unsigned int value) {
++    const uint32_t mask4 = mask * 0x01010101u, value4 = value * 0x01010101u;
++    uint32_t four;
++
++    while (column + 4 <= width) {
++        memcpy(&four, alpha + column, sizeof(four));
++        if ((four & mask4) != value4)
++            break;
++        column += 4;
++    }
++    while (column < width && (alpha[column] & mask) == value)
++        column++;
++    return column;
++}
++
++/*
++ * Draws source over old with an alpha above 3 and below 255: each channel
++ * becomes (s * a + o * (max - a)) >> bits with the channel's alpha a. Red and
++ * blue are weighed together in place, since each weighted sum stays below
++ * 1024 and the red one starts at bit 11; green, below 4096, separately.
++ */
++static gxj_pixel_type
++blend_pixel(gxj_pixel_type source, gxj_pixel_type old, unsigned int alpha) {
++    unsigned int a2 = alpha >> 2;
++    unsigned int a3 = alpha >> 3;
++    uint32_t red_blue = ((source & 0xF81Fu) * a3 + (old & 0xF81Fu) * (31 - a3)) >> 5;
++    uint32_t green = ((source & 0x07E0u) * a2 + (old & 0x07E0u) * (63 - a2)) >> 6;
++
++    return (gxj_pixel_type)((red_blue & 0xF81Fu) | (green & 0x07E0u));
++}
++
+ /* Straight-alpha source-over for an offscreen image with an alpha plane. */
+ static void
+ composite_pixel(gxj_pixel_type *dest, unsigned char *destAlpha,
+@@ -473,10 +512,6 @@
+         int rowsCopied;
+         gxj_pixel_type* pDest = dest->pixelData + (y_dest * dest->width) + x_dest;
+         gxj_pixel_type* pSrc = src->pixelData + (y_src * src->width) + x_src;
+-        gxj_pixel_type* limit;
+-        int destWidthDiff = dest->width - width;
+-        int srcWidthDiff = src->width - width;
+-        int r1, g1, b1, a2, a3, r2, b2, g2;
+
+         if (dest->alphaData != NULL) {
+             unsigned char *dstAlpha = dest->alphaData +
+@@ -485,10 +520,23 @@
+                 if (src->alphaData != NULL) {
+                     const unsigned char *srcAlpha = src->alphaData +
+                         (y_src + rowsCopied) * src->width + x_src;
+-                    int column;
+-                    for (column = 0; column < width; column++)
+-                        composite_pixel(pDest + column, dstAlpha + column,
+-                                        pSrc[column], srcAlpha[column]);
++                    int column = 0;
++                    while (column < width) {
++                        int end;
++                        if (srcAlpha[column] == 255) {
++                            end = alpha_run_end(srcAlpha, column, width, 0xFF, 0xFF);
++                            memmove(pDest + column, pSrc + column,
++                                    (end - column) * sizeof(*pDest));
++                            memset(dstAlpha + column, 255, end - column);
++                        } else if (srcAlpha[column] == 0) {
++                            end = alpha_run_end(srcAlpha, column, width, 0xFF, 0);
++                        } else {
++                            composite_pixel(pDest + column, dstAlpha + column,
++                                            pSrc[column], srcAlpha[column]);
++                            end = column + 1;
++                        }
++                        column = end;
++                    }
+                 } else {
+                     memcpy(pDest, pSrc, width * sizeof(*pDest));
+                     memset(dstAlpha, 255, width);
+@@ -498,49 +546,39 @@
+                 dstAlpha += dest->width;
+             }
+         } else if (src->alphaData != NULL) {
+-            unsigned char *pSrcAlpha = src->alphaData + (y_src * src->width) + x_src;
++            const unsigned char *pSrcAlpha = src->alphaData + (y_src * src->width) + x_src;
+
+             /* copy the source to the destination */
+             for (rowsCopied = 0; rowsCopied < height; rowsCopied++) {
+-                for (limit = pDest + width; pDest < limit; pDest++, pSrc++, pSrcAlpha++) {
+-                    if ((*pSrcAlpha) == 0xFF) {
+-                        CHECK_PTR_CLIP(dest, pDest);
+-                        *pDest = *pSrc;
+-                    }
+-                    else if (*pSrcAlpha > 0x3) {
+-                        r1 = (*pSrc >> 11);
+-                        g1 = ((*pSrc >> 5) & 0x3F);
+-                        b1 = (*pSrc & 0x1F);
+-
+-                        r2 = (*pDest >> 11);
+-                        g2 = ((*pDest >> 5) & 0x3F);
+-                        b2 = (*pDest & 0x1F);
+-
+-                        a2 = *pSrcAlpha >> 2;
+-                        a3 = *pSrcAlpha >> 3;
+-
+-                        r1 = (r1 * a3 + r2 * (31 - a3)) >> 5;
+-                        g1 = (g1 * a2 + g2 * (63 - a2)) >> 6;
+-                        b1 = (b1 * a3 + b2 * (31 - a3)) >> 5;
+-
+-                        *pDest = (gxj_pixel_type)((r1 << 11) | (g1 << 5) | (b1));
++                int column = 0;
++                while (column < width) {
++                    unsigned int alpha = pSrcAlpha[column];
++                    if (alpha == 0xFF) {
++                        int end = alpha_run_end(pSrcAlpha, column, width, 0xFF, 0xFF);
++                        memmove(pDest + column, pSrc + column,
++                                (end - column) * sizeof(*pDest));
++                        column = end;
++                    } else if (alpha <= 0x3) {
++                        /* Nearly transparent pixels are left untouched. */
++                        column = alpha_run_end(pSrcAlpha, column, width, 0xFC, 0);
++                    } else {
++                        do {
++                            pDest[column] = blend_pixel(pSrc[column], pDest[column], alpha);
++                        } while (++column < width && (alpha = pSrcAlpha[column]) > 0x3 &&
++                                 alpha != 0xFF);
+                     }
+                 }
+
+-                pDest += destWidthDiff;
+-                pSrc += srcWidthDiff;
+-                pSrcAlpha += srcWidthDiff;
++                pDest += dest->width;
++                pSrc += src->width;
++                pSrcAlpha += src->width;
+             }
+         } else {
+             /* copy the source to the destination */
+             for (rowsCopied = 0; rowsCopied < height; rowsCopied++) {
+-                for (limit = pDest + width; pDest < limit; pDest++, pSrc++) {
+-                    CHECK_PTR_CLIP(dest, pDest);
+-                    *pDest = *pSrc;
+-                }
+-
+-                pDest += destWidthDiff;
+-                pSrc += srcWidthDiff;
++                memmove(pDest, pSrc, width * sizeof(*pDest));
++                pDest += dest->width;
++                pSrc += src->width;
+             }
+         }
+     }

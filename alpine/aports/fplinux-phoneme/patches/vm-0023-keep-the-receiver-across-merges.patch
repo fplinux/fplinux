@@ -1,0 +1,113 @@
+Keep the receiver known across merges.
+
+At every bytecode with several entries the compiler forgets what it knew
+about each local, including that local 0 of an instance method holds the
+non-null receiver of the holder's type. Loops therefore checked this for
+null again in every iteration before reading a field. When no bytecode of
+the method stores into local 0, it holds the receiver on every path, so
+the merged frame describes it again as the method entry does.
+
+--- a/cldc/src/vm/share/handles/Method.hpp
++++ b/cldc/src/vm/share/handles/Method.hpp
+@@ -620,6 +620,7 @@
+     bool has_loops;
+     bool can_throw_exceptions;
+     bool bytecodes_allow_inlining;
++    bool writes_local_0;              // Some bytecode stores into local 0
+   };
+ 
+   // Bytecode attributes
+--- a/cldc/src/vm/share/handles/Method.cpp
++++ b/cldc/src/vm/share/handles/Method.cpp
+@@ -2317,6 +2317,7 @@
+     {
+       int num_locks = 0;
+       bool has_loops = false;
++      bool writes_local_0 = false;
+       int exception_count = 0;
+       const jubyte* codebase = (jubyte*)code_base();
+       int bci = 0;
+@@ -2376,6 +2377,26 @@
+               ADD_BACK_BRANCH_ENTRY( get_java_switch_int(4 * i + table_index + 12) );
+             }
+           } break;
++          case Bytecodes::_istore_0:
++          case Bytecodes::_lstore_0:
++          case Bytecodes::_fstore_0:
++          case Bytecodes::_dstore_0:
++          case Bytecodes::_astore_0:
++            writes_local_0 = true;
++            break;
++          case Bytecodes::_istore:
++          case Bytecodes::_lstore:
++          case Bytecodes::_fstore:
++          case Bytecodes::_dstore:
++          case Bytecodes::_astore:
++          case Bytecodes::_iinc:
++            writes_local_0 |= bcptr[1] == 0;
++            break;
++          case Bytecodes::_wide:
++            // Also a wide load of local 0, which only gives up on the
++            // receiver needlessly.
++            writes_local_0 |= Bytes::get_Java_u2(address(bcptr + 2)) == 0;
++            break;
+           case Bytecodes::_monitorenter:
+             num_locks++;
+             break;
+@@ -2413,6 +2434,7 @@
+       attributes.entry_counts = entry_count_array;
+       attributes.bci_flags = bci_flags_array;
+       attributes.has_loops = has_loops;
++      attributes.writes_local_0 = writes_local_0;
+       attributes.can_throw_exceptions =
+         Bytecodes::can_throw_exceptions_flags(accumulated_flags);
+ #if ENABLE_INLINE
+--- a/cldc/src/vm/share/compiler/CompilerContext.hpp
++++ b/cldc/src/vm/share/compiler/CompilerContext.hpp
+@@ -36,7 +36,8 @@
+   template( int,                      bci                            )\
+   template( int,                      saved_num_stack_lock_words     )\
+   template( bool,                     in_loop                        )\
+-  template( bool,                     has_loops                      )
++  template( bool,                     has_loops                      )\
++  template( bool,                     keeps_receiver                 )
+ 
+ #if ENABLE_INLINE
+ #define INLINER_COMPILER_CONTEXT_FIELDS_DO(template)  \
+--- a/cldc/src/vm/share/compiler/Compiler.cpp
++++ b/cldc/src/vm/share/compiler/Compiler.cpp
+@@ -493,6 +493,9 @@
+ #endif
+ 
+   Compiler::set_has_loops( attributes.has_loops );
++  // Local 0 then holds the receiver on every path through the method.
++  Compiler::set_keeps_receiver( !method()->is_static() &&
++                                !attributes.writes_local_0 );
+ 
+   { // Allocate object array for the entry table
+     EntryTableType* p =
+--- a/cldc/src/vm/share/compiler/VirtualStackFrame.cpp
++++ b/cldc/src/vm/share/compiler/VirtualStackFrame.cpp
+@@ -527,6 +527,22 @@
+     }
+   }
+ 
++  if (merging && Compiler::root()->keeps_receiver()) {
++    // No bytecode stores into local 0, so every path into this entry still
++    // has the receiver there, as VirtualStackFrame::create() described it.
++    RawLocation* receiver = raw_location_at(0);
++    if (receiver->type() == T_OBJECT) {
++      receiver->set_flags(Value::F_MUST_BE_NONNULL);
++#if ENABLE_COMPILER_TYPE_INFO
++      JavaClass::Raw holder = Compiler::root()->method()->holder();
++      receiver->set_class_id(holder().class_id());
++      if (holder().is_final_type()) {
++        receiver->set_is_exact_type();
++      }
++#endif
++    }
++  }
++
+   // Mark all the literals as being junk
+   clear_literals();
+ 

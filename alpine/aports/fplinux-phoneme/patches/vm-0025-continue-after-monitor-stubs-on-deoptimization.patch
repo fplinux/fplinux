@@ -1,0 +1,36 @@
+Continue after monitor stubs when a frame is deoptimized.
+
+Compiled code runs monitorenter and monitorexit in a shared stub after
+taking the object off the expression stack. A thread can wait in that stub
+for a contended monitor while another thread loads a class that overrides
+a method the compiled code calls directly; the waiting frame is then
+deoptimized. The stub still finishes the bytecode and returns to the
+deoptimization entry, which ran the same bytecode again: monitorenter
+popped an operand that was no longer there and moved the expression stack
+past its bottom, and monitorexit would fail on the monitor it had just
+released.
+
+Continue at the next bytecode for a topmost frame stopped at monitorenter
+or monitorexit.
+
+--- a/cldc/src/vm/share/runtime/Frame.cpp
++++ b/cldc/src/vm/share/runtime/Frame.cpp
+@@ -369,6 +369,18 @@
+   Method::Raw method = this->method();
+   int bci = this->bci();
+ 
++  if (callee->is_null()) {
++    // Compiled code runs monitorenter and monitorexit in a shared stub,
++    // after taking the object off the expression stack. A frame stopped
++    // there is waiting in that stub, which finishes the bytecode before it
++    // returns to the deoptimization entry: continue after the bytecode
++    // instead of running it a second time without its operand.
++    const Bytecodes::Code bc = method().bytecode_at(bci);
++    if (bc == Bytecodes::_monitorenter || bc == Bytecodes::_monitorexit) {
++      bci += Bytecodes::length_for(bc);
++    }
++  }
++
+ #if 0 && USE_INDIRECT_EXECUTION_SENSOR_UPDATE
+   // IMPL_NOTE: if this is ncessary here?
+   CompiledMethod::Raw cm = method().compiled_code();

@@ -1,0 +1,214 @@
+Compile the bit conversions of Float and Double as inline code.
+
+Float.floatToIntBits, Float.intBitsToFloat, Double.doubleToLongBits and
+Double.longBitsToDouble are natives, so each call from compiled code goes
+through the full VM transition. Recognize them by class, method name and
+return type when compiling an invokestatic and emit the conversion directly.
+The conversions to bits keep the natives' result, the canonical NaN (0x7fc00000
+and 0x7ff8000000000000) for every NaN, with a compare and two conditional
+moves; the conversions from bits are a single register transfer to the VFP
+register. Constant operands are folded at compile time. Only VFP builds use
+this; other builds keep calling the natives.
+
+--- a/cldc/src/vm/cpu/arm/CodeGenerator_arm.cpp
++++ b/cldc/src/vm/cpu/arm/CodeGenerator_arm.cpp
+@@ -2705,6 +2705,111 @@
+ }
+ #endif  // ENABLE_FLOAT
+ 
++#if ENABLE_ARM_VFP
++// Float.floatToIntBits(), Float.intBitsToFloat(), Double.doubleToLongBits()
++// and Double.longBitsToDouble() as inline code.  The conversions to bits
++// replace every NaN with the canonical one, as the natives do.
++
++void CodeGenerator::float_to_int_bits(Value& result, Value& value JVM_TRAPS) {
++  JVM_IGNORE_TRAPS;
++  write_literals_if_desperate();
++  if (value.is_immediate()) {
++    jint bits = value.as_raw_int();
++    if ((bits & 0x7fffffff) > 0x7f800000) {
++      bits = 0x7fc00000;
++    }
++    result.set_int(bits);
++    return;
++  }
++
++  ensure_not_in_float_register(value);
++  RegisterAllocator::reference(value.lo_register());
++  result.assign_register();
++  RegisterAllocator::dereference(value.lo_register());
++
++  const Register bits = value.lo_register();
++  const Register res  = result.lo_register();
++
++  // A NaN has the exponent bits set and a non-zero fraction, that is,
++  // bits << 1 is above the one of an infinity.
++  mov(res, imm_shift(bits, lsl, 1));
++  cmp(res, imm(0xff000000));
++  mov(res, reg(bits), ls);
++  mov(res, imm(0x7f000000), hi);
++  orr(res, res, imm(0x00c00000), hi);
++}
++
++void CodeGenerator::int_bits_to_float(Value& result, Value& value JVM_TRAPS) {
++  JVM_IGNORE_TRAPS;
++  write_literals_if_desperate();
++  if (value.is_immediate()) {
++    result.set_raw_int(value.as_int());
++    return;
++  }
++
++  RegisterAllocator::reference(value.lo_register());
++  result.assign_register();
++  RegisterAllocator::dereference(value.lo_register());
++  fmsr(result.lo_register(), value.lo_register());
++}
++
++void CodeGenerator::double_to_long_bits(Value& result, Value& value JVM_TRAPS) {
++  JVM_IGNORE_TRAPS;
++  write_literals_if_desperate();
++  if (value.is_immediate()) {
++    jlong bits = value.as_raw_long();
++    if ((bits & JVM_LL(0x7fffffffffffffff)) > JVM_LL(0x7ff0000000000000)) {
++      bits = JVM_LL(0x7ff8000000000000);
++    }
++    result.set_long(bits);
++    return;
++  }
++
++  ensure_not_in_float_register(value);
++  RegisterAllocator::reference(value.lo_register());
++  RegisterAllocator::reference(value.hi_register());
++  result.assign_register();
++  RegisterAllocator::dereference(value.lo_register());
++  RegisterAllocator::dereference(value.hi_register());
++
++  const Register vmsw = TARGET_MSW_FIRST_FOR_DOUBLE ? value.lo_register()
++                                                    : value.hi_register();
++  const Register vlsw = TARGET_MSW_FIRST_FOR_DOUBLE ? value.hi_register()
++                                                    : value.lo_register();
++  const Register rmsw = result.msw_register();
++  const Register rlsw = result.lsw_register();
++
++  // A NaN has the exponent bits set and a non-zero fraction: the high word
++  // shifted left by one is above 0xffe00000, or equal to it with a non-zero
++  // low word.  cmn sets the carry for 0xffe00000 and above and the zero flag
++  // for 0xffe00000 only.
++  mov(rmsw, imm_shift(vmsw, lsl, 1));
++  cmn(rmsw, imm(0x00200000));
++  cmp(vlsw, zero, eq);
++  mov(rmsw, reg(vmsw), ls);
++  mov(rlsw, reg(vlsw), ls);
++  mov(rmsw, imm(0x7f000000), hi);
++  orr(rmsw, rmsw, imm(0x00f80000), hi);
++  mov(rlsw, zero, hi);
++}
++
++void CodeGenerator::long_bits_to_double(Value& result, Value& value JVM_TRAPS) {
++  JVM_IGNORE_TRAPS;
++  write_literals_if_desperate();
++  if (value.is_immediate()) {
++    result.set_raw_long(value.as_long());
++    return;
++  }
++
++  RegisterAllocator::reference(value.lo_register());
++  RegisterAllocator::reference(value.hi_register());
++  result.assign_register();
++  RegisterAllocator::dereference(value.lo_register());
++  RegisterAllocator::dereference(value.hi_register());
++  fmsrr(result.lo_register(), value.lsw_register(), value.msw_register());
++}
++#endif  // ENABLE_ARM_VFP
++
+ // Whether a logical operation with this immediate leaves the word unchanged.
+ static inline bool is_logical_identity(Assembler::Opcode opcode, jint imm) {
+   return (opcode == Assembler::_andr && imm == -1) ||
+--- a/cldc/src/vm/cpu/arm/CodeGenerator_arm.hpp
++++ b/cldc/src/vm/cpu/arm/CodeGenerator_arm.hpp
+@@ -183,6 +183,14 @@
+ 
+   friend class CompilerLiteralAccessor;
+ 
++#if ENABLE_ARM_VFP
++  // Inline code for the bit conversions of Float and Double
++  void float_to_int_bits  (Value& result, Value& value JVM_TRAPS);
++  void int_bits_to_float  (Value& result, Value& value JVM_TRAPS);
++  void double_to_long_bits(Value& result, Value& value JVM_TRAPS);
++  void long_bits_to_double(Value& result, Value& value JVM_TRAPS);
++#endif
++
+   void increment_stack_pointer_by(int adjustment) {
+     add_imm(jsp, jsp, JavaStackDirection * adjustment * BytesPerStackElement);
+   }
+--- a/cldc/src/vm/share/compiler/BytecodeCompileClosure.cpp
++++ b/cldc/src/vm/share/compiler/BytecodeCompileClosure.cpp
+@@ -1699,6 +1699,19 @@
+   __ invoke(callee, must_do_null_check JVM_NO_CHECK_AT_BOTTOM);
+ }
+ 
++#if ENABLE_ARM_VFP && !ENABLE_THUMB_COMPILER
++// Whether the symbol spells exactly the given text.
++static bool symbol_is_text(Symbol* name, const char* text) {
++  const int length = name->length();
++  for (int i = 0; i < length; i++) {
++    if (text[i] == 0 || name->byte_at(i) != text[i]) {
++      return false;
++    }
++  }
++  return text[length] == 0;
++}
++#endif
++
+ void BytecodeCompileClosure::direct_invoke(int index, bool must_do_null_check
+                                            JVM_TRAPS)
+ {
+@@ -1778,6 +1791,48 @@
+     }
+   }
+ 
++#if ENABLE_ARM_VFP && !ENABLE_THUMB_COMPILER
++  // Float.floatToIntBits() and the other bit conversions are a few
++  // instructions inline.
++  if (callee().is_native()) {
++    Symbol::Fast holder_name = holder().name();
++    const bool is_float = symbol_is_text(&holder_name, "java/lang/Float");
++    const bool is_double = symbol_is_text(&holder_name, "java/lang/Double");
++    name = callee().name();
++    signature = callee().signature();
++    type = signature().return_type();
++    if (is_float && type == T_INT &&
++        symbol_is_text(&name, "floatToIntBits")) {
++      PoppedValue value(T_FLOAT);
++      Value result(T_INT);
++      __ float_to_int_bits(result, value JVM_CHECK);
++      frame_push(result);
++      return;
++    } else if (is_float && type == T_FLOAT &&
++               symbol_is_text(&name, "intBitsToFloat")) {
++      PoppedValue value(T_INT);
++      Value result(T_FLOAT);
++      __ int_bits_to_float(result, value JVM_CHECK);
++      frame_push(result);
++      return;
++    } else if (is_double && type == T_LONG &&
++               symbol_is_text(&name, "doubleToLongBits")) {
++      PoppedValue value(T_DOUBLE);
++      Value result(T_LONG);
++      __ double_to_long_bits(result, value JVM_CHECK);
++      frame_push(result);
++      return;
++    } else if (is_double && type == T_DOUBLE &&
++               symbol_is_text(&name, "longBitsToDouble")) {
++      PoppedValue value(T_LONG);
++      Value result(T_DOUBLE);
++      __ long_bits_to_double(result, value JVM_CHECK);
++      frame_push(result);
++      return;
++    }
++  }
++#endif
++
+ #if ENABLE_INLINED_ARRAYCOPY
+   // Check for System.arraycopy()
+   if (holder.equals(Universe::system_class())) {

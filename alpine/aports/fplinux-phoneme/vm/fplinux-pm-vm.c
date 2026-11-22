@@ -172,6 +172,9 @@ bool fplinux_pm_vm_start(const struct fplinux_pm_vm_config *config)
 		finish(EXIT_START_FAILED);
 		return false;
 	}
+	const char *fps = getenv("FPLINUX_PHONEME_FPS_LIMIT");
+	if (fps != NULL)
+		JVMSPI_SetSystemProperty("fplinux.fps.limit", fps);
 	JVM_SetConfig(JVM_CONFIG_HEAP_CAPACITY, (int)(heap_kib * 1024u));
 	JVM_SetConfig(JVM_CONFIG_SLAVE_MODE, KNI_TRUE);
 	midp_thread_set_timeslice_proc(timeslice_requested);

@@ -1,0 +1,31 @@
+Store merged immediates to memory before moving registers.
+
+A frame merge writes immediates to memory first, because the store needs a
+spare register and getting one may spill a register mapped in the frame. Only
+destinations held in memory alone were handled there. A destination cached in
+a register as well got its memory store in the last loop, after other
+locations had been moved into place. When no register was free, the spare
+register could be one the target frame had just been given, such as the one
+holding this, and the constant overwrote it.
+
+Do the memory store of every immediate in the first loop; the register store
+remains in the last loop.
+
+--- a/cldc/src/vm/share/compiler/VirtualStackFrame.cpp
++++ b/cldc/src/vm/share/compiler/VirtualStackFrame.cpp
+@@ -753,10 +753,12 @@
+   FOR_EACH_LOCATION_DONE(src, dst, index);
+
+   // Need to handle immediate->memory transfers in a separate loop,
+-  // since this might allocate registers mapped in the frame.
++  // since this might allocate registers mapped in the frame. This
++  // includes the memory store for a destination that also keeps the value
++  // in a register: the register is written in the loop below.
+   FOR_EACH_LOCATION_DO(src, dst, index)
+-    if (dst->is_flushed() && src->is_immediate()) {
+-      src->conform_to(index, dst, index);
++    if (src->is_immediate() && (dst->is_flushed() || !dst->is_immediate())) {
++      src->do_conform_to(index, dst, index, RawLocation::LOC_STORE);
+     }
+   FOR_EACH_LOCATION_DONE(src, dst, index);
+

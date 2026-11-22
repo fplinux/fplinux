@@ -1,0 +1,195 @@
+Pace isolated Canvas callbacks without blocking LCDUI.
+
+Leave an isolated self-rescheduled callSerially callback queued and post
+its dispatch event at the next frame deadline. If another callback joins
+the queue, cancel the delay and dispatch the batch in its original order.
+
+--- a/midp/src/highlevelui/lcdui/reference/classes/javax/microedition/lcdui/Display.jpp
++++ b/midp/src/highlevelui/lcdui/reference/classes/javax/microedition/lcdui/Display.jpp
+@@ -29,6 +29,11 @@
+ /* This is used to implement the communication between MIDlet and Display */
+ import javax.microedition.midlet.MIDlet;
+
++import java.util.Timer;
++import java.util.TimerTask;
++
++import com.sun.cldchi.jvm.JVM;
++import com.sun.midp.events.EventQueue;
+ import com.sun.midp.lcdui.DisplayFactory;
+
+ import com.sun.midp.security.SecurityToken;
+@@ -608,6 +613,17 @@
+     /** Current active queue for serially repainted operations. */
+     private static java.util.Vector currentQueue = queue1;
+
++    private static final int SERIAL_INTERVAL_MS = serialIntervalMillis();
++
++    // The timer and pending wakeup share LCDUILock with currentQueue.
++    private static Timer serialTimer;
++    private static SerialWakeup serialWakeup;
++
++    // Candidate for self-rescheduling on the event dispatch thread.
++    private Runnable activeSerialCallback;
++    private DisplayableLF activeSerialCanvas;
++    private long activeSerialStart;
++
+     // #ifdef ENABLE_GCI
+     /** GCIDisplay that incapsulates information about the display device */
+     private GCIDisplay gciDisplay;
+@@ -690,6 +706,11 @@
+     */
+     private void close()
+     {
++        if (SERIAL_INTERVAL_MS != 0) {
++            synchronized (LCDUILock) {
++                releaseSerialWakeup();
++            }
++        }
+         // #ifdef ENABLE_CHAMELEON
+         // Free the window to allow it to GC.
+         window = null;
+@@ -1417,6 +1438,11 @@
+         }
+         synchronized (LCDUILock) {
+             currentQueue.addElement(r);
++            if (delaySerialContinuation(r)) {
++                return;
++            }
++            // Keep the earlier callback first, without delaying this one.
++            cancelSerialWakeup();
+             displayEventProducer.sendCallSeriallyEvent(consumer);
+         }
+     }
+@@ -1993,6 +2019,7 @@
+             oldCurrent = current;
+             current = null;
+             transitionCurrent = newCurrent;
++            releaseSerialWakeup();
+
+             if (oldCurrent != null) {
+                 oldCurrent.lSetDisplay(null);
+@@ -2544,6 +2571,74 @@
+      */
+     private native void drawTrustedIcon0(int displayId, boolean drawTrusted);
+
++    private static int serialIntervalMillis() {
++        String limit = System.getProperty("fplinux.fps.limit");
++        if (limit == null) {
++            return 0;
++        }
++        try {
++            int fps = Integer.parseInt(limit);
++            return fps > 0 ? 1 + 999 / fps : 0;
++        } catch (NumberFormatException e) {
++            return 0;
++        }
++    }
++
++    /** With LCDUILock held, delays only an isolated self-rescheduling callback. */
++    private boolean delaySerialContinuation(Runnable callback) {
++        if (SERIAL_INTERVAL_MS == 0 || !EventQueue.isDispatchThread()
++                || callback != activeSerialCallback || current != activeSerialCanvas
++                || current != pendingCurrent || wantsForeground != WANTS_FOREGROUND
++                || currentQueue.size() != 1) {
++            return false;
++        }
++        long remaining = SERIAL_INTERVAL_MS
++                - (JVM.monotonicTimeMillis() - activeSerialStart);
++        if (remaining <= 0) {
++            return false;
++        }
++        if (serialTimer == null) {
++            serialTimer = new Timer();
++        }
++        SerialWakeup wakeup = new SerialWakeup(this);
++        serialTimer.schedule(wakeup, remaining);
++        serialWakeup = wakeup;
++        return true;
++    }
++
++    /** Cancels the timer, leaving the callback in currentQueue. */
++    private static void cancelSerialWakeup() {
++        if (serialWakeup != null) {
++            serialWakeup.cancel();
++            serialWakeup = null;
++        }
++    }
++
++    /** Restores normal dispatch on a display transition, with LCDUILock held. */
++    private void releaseSerialWakeup() {
++        if (serialWakeup != null && serialWakeup.display == this) {
++            cancelSerialWakeup();
++            displayEventProducer.sendCallSeriallyEvent(consumer);
++        }
++    }
++
++    private static final class SerialWakeup extends TimerTask {
++        private final Display display;
++
++        SerialWakeup(Display display) {
++            this.display = display;
++        }
++
++        public void run() {
++            synchronized (LCDUILock) {
++                if (serialWakeup == this) {
++                    serialWakeup = null;
++                    displayEventProducer.sendCallSeriallyEvent(display.consumer);
++                }
++            }
++        }
++    }
++
+     /**
+      * Run the serially repainted operations.
+      */
+@@ -2551,8 +2646,14 @@
+         java.util.Vector q = null;
+
+         synchronized (LCDUILock) {
++            cancelSerialWakeup();
+             q = currentQueue;
+             currentQueue = (q == queue1) ? queue2 : queue1;
++            if (SERIAL_INTERVAL_MS != 0 && hasForeground && !paintSuspended
++                    && current instanceof CanvasLFImpl && q.size() == 1) {
++                activeSerialCanvas = current;
++                activeSerialCallback = (Runnable) q.elementAt(0);
++            }
+         }
+
+         // SYNC NOTE: we synch on calloutLock for the call into
+@@ -2561,6 +2662,9 @@
+             for (int i = 0; i < q.size(); i++) {
+                 try {
+                     Runnable r = (Runnable) q.elementAt(i);
++                    if (r == activeSerialCallback) {
++                        activeSerialStart = JVM.monotonicTimeMillis();
++                    }
+                     r.run();
+                 } catch (Throwable thr) {
+                     handleThrowable(thr);
+@@ -2569,6 +2673,8 @@
+         }
+
+         q.removeAllElements();
++        activeSerialCallback = null;
++        activeSerialCanvas = null;
+     }
+
+     // #ifdef ENABLE_CHAMELEON
+@@ -3303,6 +3409,7 @@
+             synchronized (Display.LCDUILock) {
+
+                 paintSuspended = true;
++                releaseSerialWakeup();
+
+                 if (current == null) {
+                     return;
+@@ -4004,6 +4111,7 @@
+                 // Update hasForeground after uCallFreeze to allow
+                 // isShown() to return false unitl now
+                 hasForeground = false;
++                releaseSerialWakeup();
+             }
+
+             // SYNC NOTE: for Canvas and CustomItem, dsHide/Show() will

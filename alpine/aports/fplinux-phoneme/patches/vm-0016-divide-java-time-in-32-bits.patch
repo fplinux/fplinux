@@ -1,0 +1,21 @@
+Divide the microseconds of the Java time as a 32-bit value.
+
+suseconds_t is 64 bits wide with the time64 musl ABI, and ARM divides a
+64-bit value only in a library routine, which took most of the instructions
+of System.currentTimeMillis(). The microseconds are below one million, so the
+32-bit division gives the same milliseconds.
+
+--- a/cldc/src/vm/os/linux/OS_linux.cpp
++++ b/cldc/src/vm/os/linux/OS_linux.cpp
+@@ -146,8 +146,9 @@
+ jlong Os::java_time_millis() {
+     struct timeval tv;
+     ::jvm_gettimeofday(&tv, NULL);
+-    /* We adjust to 1000 ticks per second */
+-    return (jlong)tv.tv_sec * 1000 + tv.tv_usec/1000;
++    /* We adjust to 1000 ticks per second. tv_usec is below one million but
++       may be a 64-bit type, which ARM can only divide in software. */
++    return (jlong)tv.tv_sec * 1000 + (jint)tv.tv_usec / 1000;
+ }
+
+ #if SUPPORTS_MONOTONIC_CLOCK
