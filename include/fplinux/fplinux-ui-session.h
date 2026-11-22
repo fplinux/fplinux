@@ -461,7 +461,7 @@ struct fplinux_ui_session_message {
 	bool background_playing;
 	char locale[FPLINUX_UI_SESSION_LOCALE_BYTES];
 	char input_locale[FPLINUX_UI_SESSION_LOCALE_BYTES];
-	/* Diagnostic fields and the source C representation of setting replies. */
+	/* Generic message fields. For an unknown setting, name holds its key. */
 	char name[FPLINUX_UI_SESSION_NAME_BYTES];
 	char value[FPLINUX_UI_SESSION_TEXT_BYTES];
 	struct fplinux_ui_setting setting;

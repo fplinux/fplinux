@@ -135,11 +135,14 @@ static void pump(struct capture *capture)
 		} else if (message.type == FPLINUX_UI_SESSION_EXIT) {
 			capture->exits++;
 		} else if (message.type == FPLINUX_UI_SESSION_CLOSE_REPLY) {
-			capture->close_waits += !strcmp(message.value, "wait");
+			capture->close_waits += message.close_response ==
+						FPLINUX_UI_SESSION_CLOSE_WAIT;
 			capture->close_cancels +=
-				!strcmp(message.value, "cancel");
+				message.close_response ==
+				FPLINUX_UI_SESSION_CLOSE_CANCEL;
 			if (message.serial == capture->close_serial &&
-			    !strcmp(message.value, "ready"))
+			    message.close_response ==
+				    FPLINUX_UI_SESSION_CLOSE_READY)
 				capture->close_ready++;
 		}
 	}

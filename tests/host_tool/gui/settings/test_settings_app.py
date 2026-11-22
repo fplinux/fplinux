@@ -340,8 +340,8 @@ def test_settings_pending_visual_choice_holds_back_until_reply_finishes(
     if outcome == "applied":
         assert result.stderr == ""
     else:
-        value = "dark" if setting == "theme" else "fr"
-        assert result.stderr == f'fplinux-settings: {setting}="{value}" failed: {outcome}\n'
+        expected = rf"fplinux-settings: setting [1-9]\d* failed: {outcome}\n"
+        assert re.fullmatch(expected, result.stderr)
 
 
 @pytest.mark.parametrize("arguments", [["-h"], ["--help"], ["--unknown", "--help"]])

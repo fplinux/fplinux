@@ -290,9 +290,10 @@ static void check_input_locales(int sender, int receiver)
 	      "absent languages retain empty defaults");
 	message = (struct fplinux_ui_session_message){
 		.type = FPLINUX_UI_SESSION_SETTING,
+		.setting = { .kind = FPLINUX_UI_SETTING_INPUT_LOCALE,
+			     .operation = FPLINUX_UI_SETTING_SET,
+			     .value.locale = "ru" },
 	};
-	strcpy(message.name, "input_locale");
-	strcpy(message.value, "ru");
 	check(fplinux_ui_session_send(sender, &message) &&
 		      fplinux_ui_session_receive(receiver, &received) == 1 &&
 		      received.type == FPLINUX_UI_SESSION_SETTING &&
@@ -300,15 +301,15 @@ static void check_input_locales(int sender, int receiver)
 			      FPLINUX_UI_SETTING_INPUT_LOCALE &&
 		      received.setting.operation == FPLINUX_UI_SETTING_SET &&
 		      !strcmp(received.setting.value.locale, "ru") &&
-		      !strcmp(received.name, "input_locale") &&
-		      !strcmp(received.value, "ru"),
-	      "legacy C input language becomes a typed setting");
+		      !received.name[0] && !received.value[0],
+	      "input language round-trips through the typed setting");
 	for (size_t i = 0; i < sizeof(invalid) / sizeof(invalid[0]); ++i)
 		check(receive_raw(sender, receiver, invalid[i], &received) ==
 				      -1 &&
 			      errno == EPROTO,
 		      "mistyped, malformed and misplaced input locales are rejected");
 	message.type = FPLINUX_UI_SESSION_CONFIG;
+	message.setting = (struct fplinux_ui_setting){ 0 };
 	for (size_t i = 0; i < sizeof(bad_codes) / sizeof(bad_codes[0]); ++i) {
 		memset(message.input_locale, 0, sizeof(message.input_locale));
 		memcpy(message.input_locale, bad_codes[i],
@@ -382,6 +383,8 @@ static void check_state_packets(int sender, int receiver)
 		.battery = 14,
 		.charging = true,
 		.theme = FPLINUX_UI_SESSION_THEME_DARK,
+		.launcher_view = FPLINUX_UI_LAUNCHER_VIEW_CATALOGUE,
+		.launcher_catalogue = FPLINUX_UI_LAUNCHER_CATALOGUE_LIST,
 	};
 	struct fplinux_ui_session_message received;
 	struct fplinux_ui_session_message ack = {
@@ -396,8 +399,6 @@ static void check_state_packets(int sender, int receiver)
 	strcpy(sent.reason, "unlock-press-star");
 	strcpy(sent.locale, "ru");
 	strcpy(sent.input_locale, "en");
-	strcpy(sent.name, "list");
-	strcpy(sent.value, "catalogue");
 	strcpy(sent.notice, "battery-low");
 	check(fplinux_ui_session_send(sender, &sent) &&
 		      fplinux_ui_session_receive(receiver, &received) == 1 &&
@@ -412,8 +413,11 @@ static void check_state_packets(int sender, int receiver)
 		      !strcmp(received.reason, "unlock-press-star") &&
 		      !strcmp(received.locale, "ru") &&
 		      !strcmp(received.input_locale, "en") &&
-		      !strcmp(received.name, "list") &&
-		      !strcmp(received.value, "catalogue") &&
+		      received.launcher_view ==
+			      FPLINUX_UI_LAUNCHER_VIEW_CATALOGUE &&
+		      received.launcher_catalogue ==
+			      FPLINUX_UI_LAUNCHER_CATALOGUE_LIST &&
+		      !received.name[0] && !received.value[0] &&
 		      received.battery == 14 && received.charging &&
 		      !strcmp(received.notice, "battery-low") &&
 		      received.theme == FPLINUX_UI_SESSION_THEME_DARK,
@@ -440,8 +444,11 @@ static void check_state_packets(int sender, int receiver)
 			.type = i ? FPLINUX_UI_SESSION_ERROR :
 				    FPLINUX_UI_SESSION_SETTING,
 			.serial = 23,
-			.name = "theme",
-			.value = "dark",
+			.applied = true,
+			.setting = { .kind = FPLINUX_UI_SETTING_THEME,
+				     .operation = FPLINUX_UI_SETTING_RESULT,
+				     .value.theme =
+					     FPLINUX_UI_SESSION_THEME_DARK },
 		};
 		if (i)
 			strcpy(sent.reason, "save-failed");
@@ -450,8 +457,12 @@ static void check_state_packets(int sender, int receiver)
 				      1 &&
 			      received.type == sent.type &&
 			      received.serial == 23 &&
-			      !strcmp(received.name, "theme") &&
-			      !strcmp(received.value, "dark") &&
+			      received.setting.kind ==
+				      FPLINUX_UI_SETTING_THEME &&
+			      received.setting.operation ==
+				      FPLINUX_UI_SETTING_RESULT &&
+			      received.setting.value.theme ==
+				      FPLINUX_UI_SESSION_THEME_DARK &&
 			      !strcmp(received.reason, i ? "save-failed" : ""),
 		      "applied settings and save failures retain their redraw serial");
 	}
@@ -563,6 +574,28 @@ static void check_tasks_view(int sender, int receiver)
 		      &received) == -1 &&
 		      errno == EPROTO,
 	      "opening Quick settings cannot change the catalogue layout");
+	check(receive_raw(sender, receiver,
+			  "{\"type\":\"ACTIVE\",\"value\":\"home\"}",
+			  &received) == -1 &&
+		      errno == EPROTO,
+	      "ACTIVE rejects the old JSON view field");
+	check(receive_raw(sender, receiver,
+			  "{\"type\":\"SELECT\",\"name\":\"list\"}",
+			  &received) == -1 &&
+		      errno == EPROTO,
+	      "SELECT rejects the old JSON catalogue field");
+	sent = (struct fplinux_ui_session_message){
+		.type = FPLINUX_UI_SESSION_ACTIVE,
+		.value = "home",
+	};
+	check(!fplinux_ui_session_send(sender, &sent) && errno == EINVAL,
+	      "ACTIVE requires typed C view fields");
+	sent = (struct fplinux_ui_session_message){
+		.type = FPLINUX_UI_SESSION_SELECT,
+		.name = "list",
+	};
+	check(!fplinux_ui_session_send(sender, &sent) && errno == EINVAL,
+	      "SELECT requires typed C catalogue fields");
 }
 
 static void check_playback(int sender, int receiver)
@@ -981,6 +1014,11 @@ static void check_tasks(int sender, int receiver)
 static void check_close_preparation(int sender, int receiver)
 {
 	struct fplinux_ui_session_message received;
+	struct fplinux_ui_session_message legacy = {
+		.type = FPLINUX_UI_SESSION_CLOSE_REPLY,
+		.serial = 17,
+		.value = "ready",
+	};
 	static const char *const replies[] = { "ready", "cancel", "wait" };
 	static const enum fplinux_ui_session_close_response decisions[] = {
 		FPLINUX_UI_SESSION_CLOSE_READY,
@@ -992,6 +1030,7 @@ static void check_close_preparation(int sender, int receiver)
 		"{\"type\":\"PREPARE_CLOSE\",\"serial\":0}",
 		"{\"type\":\"CLOSE_REPLY\",\"serial\":7}",
 		"{\"type\":\"CLOSE_REPLY\",\"serial\":7,\"value\":\"discard\"}",
+		"{\"type\":\"CLOSE_REPLY\",\"serial\":7,\"close_response\":\"ready\"}",
 		"{\"type\":\"CLOSE_REPLY\",\"serial\":0,\"value\":\"ready\"}",
 		"{\"type\":\"CLOSE_ACK\"}",
 		"{\"type\":\"CLOSE_ACK\",\"serial\":0}",
@@ -1017,6 +1056,12 @@ static void check_close_preparation(int sender, int receiver)
 	      "decision frame acknowledgment preserves its close attempt");
 	for (size_t i = 0; i < sizeof(replies) / sizeof(replies[0]); ++i) {
 		char packet[128];
+		char encoded[FPLINUX_UI_SESSION_PACKET_BYTES] = { 0 };
+		const struct fplinux_ui_session_message response = {
+			.type = FPLINUX_UI_SESSION_CLOSE_REPLY,
+			.serial = 17,
+			.close_response = decisions[i],
+		};
 
 		snprintf(
 			packet, sizeof(packet),
@@ -1025,9 +1070,19 @@ static void check_close_preparation(int sender, int receiver)
 		check(receive_raw(sender, receiver, packet, &received) == 1 &&
 			      received.type == FPLINUX_UI_SESSION_CLOSE_REPLY &&
 			      received.serial == 17 &&
-			      received.close_response == decisions[i],
+			      received.close_response == decisions[i] &&
+			      !received.value[0],
 		      "close reply preserves its attempt and decision");
+		snprintf(packet, sizeof(packet), "\"value\":\"%s\"",
+			 replies[i]);
+		check(fplinux_ui_session_send(sender, &response) &&
+			      recv(receiver, encoded, sizeof(encoded) - 1, 0) >
+				      0 &&
+			      strstr(encoded, packet),
+		      "typed close response is encoded as a JSON value string");
 	}
+	check(!fplinux_ui_session_send(sender, &legacy) && errno == EINVAL,
+	      "CLOSE_REPLY requires a typed C response");
 	for (size_t i = 0; i < sizeof(invalid) / sizeof(invalid[0]); ++i)
 		check(receive_raw(sender, receiver, invalid[i], &received) ==
 				      -1 &&
@@ -1092,6 +1147,8 @@ static void check_setting_packets(int sender, int receiver)
 {
 	static const char *const invalid[] = {
 		"{\"type\":\"SETTING\",\"name\":\"volume\",\"value\":\"3\"}",
+		"{\"type\":\"ERROR\",\"name\":\"media_volume_step\",\"value\":\"-1\",\"reason\":\"unavailable\"}",
+		"{\"type\":\"SETTING\",\"value\":\"-1\",\"serial\":57,\"setting\":{\"kind\":\"media_volume_step\",\"op\":\"step\",\"step\":-1}}",
 		"{\"type\":\"SETTING\",\"setting\":{\"kind\":\"wifi\",\"op\":\"set\",\"enabled\":1}}",
 		"{\"type\":\"SETTING\",\"setting\":{\"kind\":\"wifi\",\"op\":\"get\",\"enabled\":true}}",
 		"{\"type\":\"SETTING\",\"setting\":{\"kind\":\"wifi\",\"op\":\"preview\",\"enabled\":true}}",
@@ -1112,6 +1169,26 @@ static void check_setting_packets(int sender, int receiver)
 		.value = "-1",
 		.serial = 57,
 	};
+	const struct fplinux_ui_session_message step = {
+		.type = FPLINUX_UI_SESSION_SETTING,
+		.serial = 57,
+		.setting = { .kind = FPLINUX_UI_SETTING_MEDIA_VOLUME_STEP,
+			     .operation = FPLINUX_UI_SETTING_STEP,
+			     .value.step = -1 },
+	};
+	const struct fplinux_ui_session_message generic_error = {
+		.type = FPLINUX_UI_SESSION_ERROR,
+		.name = "vibration",
+		.value = "start",
+		.reason = "unavailable",
+	};
+	const struct fplinux_ui_session_message unknown = {
+		.type = FPLINUX_UI_SESSION_ERROR,
+		.name = "example-setting",
+		.reason = "unknown-setting",
+		.setting = { .kind = FPLINUX_UI_SETTING_UNKNOWN,
+			     .operation = FPLINUX_UI_SETTING_INVALID },
+	};
 	char packet[FPLINUX_UI_SESSION_PACKET_BYTES] = { 0 };
 
 	check(receive_raw(
@@ -1130,8 +1207,7 @@ static void check_setting_packets(int sender, int receiver)
 			      FPLINUX_UI_SETTING_MIDI_SOUNDFONT &&
 		      received.setting.operation == FPLINUX_UI_SETTING_RESULT &&
 		      !strcmp(received.setting.value.soundfont, "fm1gm") &&
-		      !strcmp(received.name, "midi_soundfont") &&
-		      !strcmp(received.value, "fm1gm"),
+		      !received.name[0] && !received.value[0],
 	      "A soundfont result carries its installed ID for C callers");
 	check(receive_raw(
 		      sender, receiver,
@@ -1147,18 +1223,44 @@ static void check_setting_packets(int sender, int receiver)
 		      sender, receiver,
 		      "{\"type\":\"SETTING\",\"applied\":true,\"serial\":57,\"setting\":{\"kind\":\"media_volume_step\",\"op\":\"result\",\"level\":9}}",
 		      &received) == 1 &&
+		      received.setting.kind ==
+			      FPLINUX_UI_SETTING_MEDIA_VOLUME_STEP &&
+		      received.setting.operation == FPLINUX_UI_SETTING_RESULT &&
 		      received.setting.value.level == 9 &&
-		      received.serial == 57 &&
-		      !strcmp(received.name, "media_volume_step") &&
-		      !strcmp(received.value, "9"),
-	      "Media step replies preserve the documented C name and serial");
-	check(fplinux_ui_session_send(sender, &legacy) &&
+		      received.serial == 57 && !received.name[0] &&
+		      !received.value[0],
+	      "Media step replies preserve the typed result and serial");
+	check(fplinux_ui_session_send(sender, &step) &&
 		      recv(receiver, packet, sizeof(packet) - 1, 0) > 0 &&
 		      strstr(packet,
 			     "\"setting\":{\"kind\":\"media_volume_step\",\"op\":\"step\",\"step\":-1}") &&
+		      strstr(packet, "\"serial\":57") &&
 		      !strstr(packet, "\"name\"") &&
 		      !strstr(packet, "\"value\""),
-	      "Legacy C source arguments produce a numeric step packet");
+	      "Typed C source arguments produce a numeric step packet");
+	check(!fplinux_ui_session_send(sender, &legacy) && errno == EINVAL,
+	      "Legacy C source arguments are rejected");
+	legacy.type = FPLINUX_UI_SESSION_ERROR;
+	check(!fplinux_ui_session_send(sender, &legacy) && errno == EINVAL,
+	      "Legacy C setting errors are rejected");
+	check(recv(receiver, packet, sizeof(packet), MSG_DONTWAIT) == -1 &&
+		      errno == EAGAIN,
+	      "Rejecting a legacy C setting writes no packet");
+	check(fplinux_ui_session_send(sender, &generic_error) &&
+		      fplinux_ui_session_receive(receiver, &received) == 1 &&
+		      received.setting.kind == FPLINUX_UI_SETTING_NONE &&
+		      !strcmp(received.name, "vibration") &&
+		      !strcmp(received.value, "start") &&
+		      !strcmp(received.reason, "unavailable"),
+	      "Generic errors retain their name, value and reason");
+	check(fplinux_ui_session_send(sender, &unknown) &&
+		      fplinux_ui_session_receive(receiver, &received) == 1 &&
+		      received.setting.kind == FPLINUX_UI_SETTING_UNKNOWN &&
+		      received.setting.operation ==
+			      FPLINUX_UI_SETTING_INVALID &&
+		      !strcmp(received.name, "example-setting") &&
+		      !received.value[0],
+	      "Unknown setting errors retain the requested key");
 	for (size_t i = 0; i < sizeof(invalid) / sizeof(invalid[0]); ++i)
 		check(receive_raw(sender, receiver, invalid[i], &received) ==
 				      -1 &&

@@ -93,6 +93,106 @@ static void exercise_repeat(struct fplinux_ui_frame_peer *compositor,
 	wait_legends(compositor, session, options, open, back);
 }
 
+static struct fplinux_ui_session_message
+wait_message(struct fplinux_ui_frame_peer *compositor, int session,
+	     enum fplinux_ui_session_message_type type)
+{
+	struct fplinux_ui_session_message message;
+
+	do {
+		message = fplinux_ui_frame_wait_message(compositor, session);
+	} while (message.type != type);
+	return message;
+}
+
+static uint32_t step_volume(struct fplinux_ui_frame_peer *compositor,
+			    int session, unsigned int key, int step)
+{
+	press(compositor, key);
+	struct fplinux_ui_session_message request =
+		wait_message(compositor, session, FPLINUX_UI_SESSION_SETTING);
+
+	assert(request.serial);
+	assert(request.setting.kind == FPLINUX_UI_SETTING_MEDIA_VOLUME_STEP);
+	assert(request.setting.operation == FPLINUX_UI_SETTING_STEP);
+	assert(request.setting.value.step == step);
+	return request.serial;
+}
+
+static void
+send_reply_and_wait_for_redraw(struct fplinux_ui_frame_peer *compositor,
+			       int session,
+			       const struct fplinux_ui_session_message *reply)
+{
+	assert(fplinux_ui_session_send(session, reply));
+	assert(wait_message(compositor, session, FPLINUX_UI_SESSION_REDRAW_ACK)
+		       .serial == reply->serial);
+}
+
+static void exercise_volume(struct fplinux_ui_frame_peer *compositor,
+			    int session)
+{
+	const struct fplinux_ui_session_message activation = {
+		.type = FPLINUX_UI_SESSION_ACTIVATION,
+		.activation = FPLINUX_UI_SESSION_ACTIVATION_RESUME,
+		.serial = 1,
+	};
+	struct fplinux_ui_session_message reply = {
+		.type = FPLINUX_UI_SESSION_ERROR,
+		.setting = {
+			.kind = FPLINUX_UI_SETTING_MEDIA_VOLUME_STEP,
+			.operation = FPLINUX_UI_SETTING_RESULT,
+			.value.level = 1,
+		},
+		.reason = "superseded",
+	};
+
+	wait_message(compositor, session, FPLINUX_UI_SESSION_READY);
+	send_media_level(session, 4);
+	assert(fplinux_ui_session_send(session, &activation));
+	assert(wait_message(compositor, session,
+			    FPLINUX_UI_SESSION_ACTIVATION_ACK)
+		       .serial == activation.serial);
+	size_t bytes = (size_t)compositor->width * compositor->height *
+		       sizeof(*compositor->pixels);
+	uint16_t *normal = malloc(bytes);
+
+	assert(normal && compositor->pixels);
+	memcpy(normal, compositor->pixels, bytes);
+	assert(compositor->keyboards[1].keyboard);
+	fplinux_ui_frame_focus_keyboard(&compositor->keyboards[1]);
+	uint32_t first = step_volume(compositor, session, KEY_UP, 1);
+	uint32_t second = step_volume(compositor, session, KEY_DOWN, -1);
+
+	assert(first != second);
+	reply.serial = first;
+	send_reply_and_wait_for_redraw(compositor, session, &reply);
+	assert(!memcmp(normal, compositor->pixels, bytes));
+
+	reply.serial = second;
+	reply.setting.kind = FPLINUX_UI_SETTING_ALARM_VOLUME;
+	reply.setting.operation = FPLINUX_UI_SETTING_GET;
+	strcpy(reply.reason, "unavailable");
+	send_reply_and_wait_for_redraw(compositor, session, &reply);
+	assert(!memcmp(normal, compositor->pixels, bytes));
+
+	reply.setting.kind = FPLINUX_UI_SETTING_MEDIA_VOLUME_STEP;
+	reply.setting.operation = FPLINUX_UI_SETTING_RESULT;
+	reply.setting.value.level = 0;
+	send_reply_and_wait_for_redraw(compositor, session, &reply);
+	assert(memcmp(normal, compositor->pixels, bytes));
+
+	/* A successful step at the lower limit clears the warning. */
+	reply.serial = step_volume(compositor, session, KEY_DOWN, -1);
+	assert(reply.serial != first && reply.serial != second);
+	reply.type = FPLINUX_UI_SESSION_SETTING;
+	reply.applied = true;
+	reply.reason[0] = '\0';
+	send_reply_and_wait_for_redraw(compositor, session, &reply);
+	assert(!memcmp(normal, compositor->pixels, bytes));
+	free(normal);
+}
+
 int main(int argc, char **argv)
 {
 	assert(argc == 9 || argc == 10);
@@ -141,7 +241,9 @@ int main(int argc, char **argv)
 		fplinux_ui_frame_wait_message(&compositor, session);
 	assert(message.type == FPLINUX_UI_SESSION_HELLO);
 	assert(fplinux_ui_session_send(session, &config));
-	if (commands) {
+	if (commands && !strcmp(argv[7], "volume")) {
+		exercise_volume(&compositor, session);
+	} else if (commands) {
 		exercise_repeat(&compositor, session, !strcmp(argv[8], "ru"));
 	} else {
 		send_media_level(session, 0);

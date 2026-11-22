@@ -21,7 +21,7 @@ static unsigned int clock_callbacks;
 static unsigned int clock_period_ms;
 static uint32_t active_serial;
 static uint32_t volume_preview_serial;
-static char volume_preview_value[16];
+static int volume_preview_level;
 
 struct fplinux_ui *__real_fplinux_ui_open(const char *app_id,
 					  fplinux_ui_event_cb callback,
@@ -46,9 +46,7 @@ static void send_observation(struct launcher_frame_observation *observation)
 	observation->animations = lv_anim_count_running();
 	observation->active_serial = active_serial;
 	observation->volume_preview_serial = volume_preview_serial;
-	snprintf(observation->volume_preview_value,
-		 sizeof(observation->volume_preview_value), "%s",
-		 volume_preview_value);
+	observation->volume_preview_level = volume_preview_level;
 	sent = send(atoi(descriptor), observation, sizeof(*observation),
 		    MSG_DONTWAIT | MSG_NOSIGNAL);
 	assert(sent == (ssize_t)sizeof(*observation) ||
@@ -75,12 +73,12 @@ static void observe_event(struct fplinux_ui *ui,
 	bool volume_preview =
 		event->type == FPLINUX_UI_EVENT_SESSION && event->session &&
 		event->session->type == FPLINUX_UI_SESSION_SETTING &&
-		!strcmp(event->session->name, "volume_preview");
+		event->session->setting.kind ==
+			FPLINUX_UI_SETTING_VOLUME_PREVIEW;
 
 	if (volume_preview) {
 		volume_preview_serial = event->session->serial;
-		snprintf(volume_preview_value, sizeof(volume_preview_value),
-			 "%.15s", event->session->value);
+		volume_preview_level = event->session->setting.value.level;
 	}
 	application_event(ui, event, context);
 	if (event->type == FPLINUX_UI_EVENT_VISIBILITY || volume_preview)

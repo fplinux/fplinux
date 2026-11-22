@@ -36,7 +36,7 @@ struct capture {
 	uint32_t close_serial;
 	uint32_t activation_serial;
 	uint32_t activation_ack;
-	char close_value[16];
+	enum fplinux_ui_session_close_response close_response;
 	unsigned int snapshots;
 	unsigned int retransmissions;
 	bool has_request;
@@ -183,9 +183,7 @@ static void pump(struct capture *capture)
 			capture->activation_ack = message.serial;
 		} else if (message.type == FPLINUX_UI_SESSION_CLOSE_REPLY) {
 			assert(message.serial == capture->close_serial);
-			assert(strlen(message.value) <
-			       sizeof(capture->close_value));
-			strcpy(capture->close_value, message.value);
+			capture->close_response = message.close_response;
 		}
 	}
 	assert(received == 0);
@@ -257,14 +255,16 @@ static void redraw(struct capture *capture)
 		.type = FPLINUX_UI_SESSION_SETTING,
 		.applied = true,
 		.serial = ++capture->redraw_serial,
+		.setting = { .kind = FPLINUX_UI_SETTING_THEME,
+			     .operation = FPLINUX_UI_SETTING_RESULT },
 	};
 	const char *theme = getenv("FPLINUX_CLOCKS_TEST_THEME");
 	uint64_t deadline = fplinux_ui_frame_now_ms() + 3000;
 
 	/* Repeat the configured theme, so that the fence changes no colour. */
-	strcpy(setting.name, "theme");
-	strcpy(setting.value,
-	       theme && !strcmp(theme, "light") ? "light" : "dark");
+	setting.setting.value.theme = theme && !strcmp(theme, "light") ?
+					      FPLINUX_UI_SESSION_THEME_LIGHT :
+					      FPLINUX_UI_SESSION_THEME_DARK;
 	assert(fplinux_ui_session_send(capture->session, &setting));
 	while (capture->redraw_ack != setting.serial &&
 	       fplinux_ui_frame_now_ms() < deadline)
@@ -1389,14 +1389,15 @@ background_durable_retains_accepted_revision(struct capture *capture)
 	puts("clocks-background-durable: unchanged accepted draft saves without mutation; newer draft stays dirty and edits the same ID");
 }
 
-static void wait_close_response(struct capture *capture, const char *value)
+static void wait_close_response(struct capture *capture,
+				enum fplinux_ui_session_close_response response)
 {
 	uint64_t deadline = fplinux_ui_frame_now_ms() + 3000;
 
-	while (strcmp(capture->close_value, value) &&
+	while (capture->close_response != response &&
 	       fplinux_ui_frame_now_ms() < deadline)
 		pump(capture);
-	assert(!strcmp(capture->close_value, value));
+	assert(capture->close_response == response);
 }
 
 static void prepare_ordinary_close(struct capture *capture)
@@ -1406,10 +1407,10 @@ static void prepare_ordinary_close(struct capture *capture)
 		.serial = ++capture->close_serial,
 	};
 
-	capture->close_value[0] = '\0';
+	capture->close_response = FPLINUX_UI_SESSION_CLOSE_NONE;
 	strcpy(message.reason, "capture-close");
 	assert(fplinux_ui_session_send(capture->session, &message));
-	wait_close_response(capture, "wait");
+	wait_close_response(capture, FPLINUX_UI_SESSION_CLOSE_WAIT);
 	wait_label(capture, "Leave without saving?");
 }
 
@@ -1433,7 +1434,7 @@ ordinary_close_keeps_or_discards_a_failed_draft(struct capture *capture)
 	activate(capture, FPLINUX_UI_SESSION_ACTIVATION_OPEN);
 	wait_label(capture, "Leave without saving?");
 	press(capture, 1, KEY_F14);
-	wait_close_response(capture, "cancel");
+	wait_close_response(capture, FPLINUX_UI_SESSION_CLOSE_CANCEL);
 	wait_label(capture, "New alarm");
 	redraw(capture);
 	assert(capture->observed.time_fields == 1);
@@ -1453,7 +1454,7 @@ ordinary_close_keeps_or_discards_a_failed_draft(struct capture *capture)
 	enter_alarm_hour(capture, KEY_NUMERIC_9);
 	prepare_ordinary_close(capture);
 	press(capture, 1, KEY_F13);
-	wait_close_response(capture, "ready");
+	wait_close_response(capture, FPLINUX_UI_SESSION_CLOSE_READY);
 	assert(waitpid(capture->application, &status, WNOHANG) == 0);
 	assert(capture->owner.alarm_count == 1 &&
 	       capture->owner.alarms[0].spec.once_utc == INT64_C(1704096000));
@@ -1474,7 +1475,7 @@ static void close_stay_resumes_pending_alarm_retry(struct capture *capture)
 	assert(capture->operation.alarm.once_utc == INT64_C(1704096000));
 	prepare_ordinary_close(capture);
 	press(capture, 1, KEY_F14);
-	wait_close_response(capture, "cancel");
+	wait_close_response(capture, FPLINUX_UI_SESSION_CLOSE_CANCEL);
 	wait_label(capture, "New alarm");
 	assert(!capture->retransmissions);
 	wait_retransmissions(capture, 1);

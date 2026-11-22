@@ -78,9 +78,10 @@ bool fplinux_ui_audio_pause(struct fplinux_audio_stream *stream, bool paused);
 bool fplinux_ui_audio_status(const struct fplinux_audio_stream *stream,
 			     struct fplinux_ui_audio_status *status);
 /*
- * Requests one persistent system Media volume step (-1 or +1). Acceptance
- * arrives asynchronously as SETTING/ERROR named media_volume_step. An
- * application cannot set Alarm volume or other system settings this way.
+ * Requests one persistent system Media volume step (-1 or +1). The
+ * asynchronous SETTING or ERROR has kind FPLINUX_UI_SETTING_MEDIA_VOLUME_STEP
+ * and a nonzero serial. A newer step can supersede an outstanding step.
+ * The request changes only Media volume.
  */
 bool fplinux_ui_audio_volume_step(struct fplinux_ui *ui, int step);
 /* Drops frames still in this stream. An already mixed output tail is bounded

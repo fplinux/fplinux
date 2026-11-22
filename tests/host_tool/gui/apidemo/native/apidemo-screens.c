@@ -129,10 +129,14 @@ static void redraw(struct capture *capture)
 		.type = FPLINUX_UI_SESSION_SETTING,
 		.applied = true,
 		.serial = ++capture->serial,
+		.setting = { .kind = FPLINUX_UI_SETTING_THEME,
+			     .operation = FPLINUX_UI_SETTING_RESULT,
+			     .value.theme =
+				     !strcmp(capture->theme, "dark") ?
+					     FPLINUX_UI_SESSION_THEME_DARK :
+					     FPLINUX_UI_SESSION_THEME_LIGHT },
 	};
 
-	strcpy(setting.name, "theme");
-	strcpy(setting.value, capture->theme);
 	assert(fplinux_ui_session_send(capture->session, &setting));
 	for (;;) {
 		struct fplinux_ui_session_message message =

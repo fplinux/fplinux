@@ -1431,27 +1431,6 @@ static bool setting_time_shape(const struct fplinux_ui_setting_time *time)
 	       time->minute <= 99 && time->second >= 0 && time->second <= 99;
 }
 
-static bool setting_time_parse(const char *value,
-			       struct fplinux_ui_setting_time *time)
-{
-	static const char pattern[] = "dddd-dd-dd dd:dd:dd";
-	size_t length = strlen(value);
-	struct fplinux_ui_setting_time parsed = { 0 };
-
-	if (length != 16 && length != 19)
-		return false;
-	for (size_t i = 0; i < length; ++i)
-		if (pattern[i] == 'd' ? value[i] < '0' || value[i] > '9' :
-					value[i] != pattern[i])
-			return false;
-	if (sscanf(value, "%d-%d-%d %d:%d:%d", &parsed.year, &parsed.month,
-		   &parsed.day, &parsed.hour, &parsed.minute,
-		   &parsed.second) != (length == 16 ? 5 : 6))
-		return false;
-	*time = parsed;
-	return true;
-}
-
 static bool setting_value_valid(const struct fplinux_ui_setting *setting)
 {
 	const union fplinux_ui_setting_value *value = &setting->value;
@@ -1499,23 +1478,6 @@ static bool setting_valid(enum fplinux_ui_session_message_type type,
 		type == FPLINUX_UI_SESSION_SETTING);
 }
 
-static bool setting_number(const char *text, int *value)
-{
-	int number = 0;
-
-	if (!text[0] || (text[0] == '0' && text[1]))
-		return false;
-	for (; *text; ++text) {
-		int digit = *text - '0';
-
-		if (digit < 0 || digit > 9 || number > (INT32_MAX - digit) / 10)
-			return false;
-		number = number * 10 + digit;
-	}
-	*value = number;
-	return true;
-}
-
 static unsigned int name_index(const char *text, const char *const *names,
 			       size_t count)
 {
@@ -1525,188 +1487,33 @@ static unsigned int name_index(const char *text, const char *const *names,
 	return count;
 }
 
-static bool setting_from_text(struct fplinux_ui_setting *setting,
-			      const char *text)
+static bool setting_required(enum fplinux_ui_session_message_type type,
+			     const struct fplinux_ui_session_message *message)
 {
-	union fplinux_ui_setting_value *value = &setting->value;
-	unsigned int choice;
-
-	switch (setting_payload(setting)) {
-	case SETTING_NO_PAYLOAD:
-		return !text[0];
-	case SETTING_LEVEL:
-		return setting_number(text, &value->level);
-	case SETTING_STEP:
-		if (strcmp(text, "1") && strcmp(text, "-1"))
-			return false;
-		value->step = text[0] == '-' ? -1 : 1;
-		return true;
-	case SETTING_SECONDS:
-		if (setting->kind == FPLINUX_UI_SETTING_AUTO_LOCK &&
-		    !strcmp(text, "off")) {
-			value->seconds = -1;
-			return true;
-		}
-		return setting_number(text, &value->seconds);
-	case SETTING_ROUTE:
-		choice = name_index(text, route_names, ARRAY_SIZE(route_names));
-		value->route = choice;
-		return choice < ARRAY_SIZE(route_names);
-	case SETTING_ROUTES:
-		while (*text) {
-			size_t length = strcspn(text, ",");
-
-			for (choice = 0; choice < ARRAY_SIZE(route_names);
-			     ++choice)
-				if (length == strlen(route_names[choice]) &&
-				    !strncmp(text, route_names[choice], length))
-					break;
-			if (choice == ARRAY_SIZE(route_names))
-				return false;
-			value->routes |= FPLINUX_UI_AUDIO_OUTPUT(choice);
-			text += length;
-			if (*text)
-				++text;
-		}
-		return setting_value_valid(setting);
-	case SETTING_LOCALE:
-		if (!text[0] || strlen(text) >= sizeof(value->locale))
-			return false;
-		strcpy(value->locale, text);
-		return true;
-	case SETTING_SOUNDFONT:
-		if (!text[0] || strlen(text) >= sizeof(value->soundfont))
-			return false;
-		strcpy(value->soundfont, text);
-		return true;
-	case SETTING_TIME:
-		return setting_time_parse(text, &value->time);
-	case SETTING_THEME:
-		choice = name_index(text, theme_names, ARRAY_SIZE(theme_names));
-		value->theme = choice;
-		return choice < ARRAY_SIZE(theme_names);
-	case SETTING_ENABLED:
-		if (strcmp(text, "0") && strcmp(text, "1"))
-			return false;
-		value->enabled = text[0] == '1';
-		return true;
-	}
-	return false;
+	return type == FPLINUX_UI_SESSION_SETTING ||
+	       (type == FPLINUX_UI_SESSION_ERROR &&
+		(message->applied || name_index(message->name, setting_names,
+						ARRAY_SIZE(setting_names)) <
+					     FPLINUX_UI_SETTING_UNKNOWN));
 }
 
-static enum fplinux_ui_setting_operation
-legacy_setting_operation(enum fplinux_ui_setting_kind kind, bool has_value)
+static bool
+setting_fields_valid(const struct fplinux_ui_session_message *message)
 {
-	switch (kind) {
-	case FPLINUX_UI_SETTING_BRIGHTNESS_PREVIEW:
-	case FPLINUX_UI_SETTING_VOLUME_PREVIEW:
-	case FPLINUX_UI_SETTING_ALARM_VOLUME_PREVIEW:
-		return has_value ? FPLINUX_UI_SETTING_PREVIEW :
-				   FPLINUX_UI_SETTING_CANCEL;
-	case FPLINUX_UI_SETTING_VOLUME_STEP:
-	case FPLINUX_UI_SETTING_MEDIA_VOLUME_STEP:
-		return FPLINUX_UI_SETTING_STEP;
-	case FPLINUX_UI_SETTING_VOLUME_COMMIT:
-	case FPLINUX_UI_SETTING_ALARM_VOLUME_COMMIT:
-		return FPLINUX_UI_SETTING_COMMIT;
-	default:
-		return has_value ? FPLINUX_UI_SETTING_SET :
-				   FPLINUX_UI_SETTING_GET;
-	}
-}
+	const struct fplinux_ui_setting *setting = &message->setting;
 
-/* Normalize existing C callers before the packet is encoded. */
-static struct fplinux_ui_setting
-setting_for_send(const struct fplinux_ui_session_message *message)
-{
-	struct fplinux_ui_setting setting = message->setting;
-	unsigned int kind;
-
-	if (setting.kind != FPLINUX_UI_SETTING_NONE ||
-	    (message->type != FPLINUX_UI_SESSION_SETTING &&
-	     message->type != FPLINUX_UI_SESSION_ERROR))
-		return setting;
-	kind = name_index(message->name, setting_names,
-			  ARRAY_SIZE(setting_names));
-	if (kind >= FPLINUX_UI_SETTING_UNKNOWN) {
-		if (message->type == FPLINUX_UI_SESSION_SETTING) {
-			setting.kind = FPLINUX_UI_SETTING_UNKNOWN;
-			setting.operation = FPLINUX_UI_SETTING_INVALID;
-		}
-		return setting;
-	}
-	setting.kind = kind;
-	if (message->applied)
-		setting.operation = FPLINUX_UI_SETTING_RESULT;
-	else
-		setting.operation =
-			legacy_setting_operation(kind, message->value[0]);
-	if (!setting_operation_valid(&setting) ||
-	    !setting_from_text(&setting, message->value))
-		setting.operation = FPLINUX_UI_SETTING_INVALID;
-	return setting;
-}
-
-static void setting_to_text(const struct fplinux_ui_setting *setting,
-			    char *text, size_t size)
-{
-	const union fplinux_ui_setting_value *value = &setting->value;
-	const struct fplinux_ui_setting_time *time = &value->time;
-	size_t offset = 0;
-
-	switch (setting_payload(setting)) {
-	case SETTING_NO_PAYLOAD:
-		break;
-	case SETTING_LEVEL:
-		snprintf(text, size, "%d", value->level);
-		break;
-	case SETTING_STEP:
-		snprintf(text, size, "%d", value->step);
-		break;
-	case SETTING_SECONDS:
-		if (value->seconds == -1)
-			snprintf(text, size, "off");
-		else
-			snprintf(text, size, "%d", value->seconds);
-		break;
-	case SETTING_ROUTE:
-		snprintf(text, size, "%s", route_names[value->route]);
-		break;
-	case SETTING_ROUTES:
-		for (size_t i = 0; i < ARRAY_SIZE(route_names); ++i)
-			if (value->routes & FPLINUX_UI_AUDIO_OUTPUT(i))
-				offset += snprintf(text + offset, size - offset,
-						   "%s%s", offset ? "," : "",
-						   route_names[i]);
-		break;
-	case SETTING_LOCALE:
-		snprintf(text, size, "%s", value->locale);
-		break;
-	case SETTING_SOUNDFONT:
-		snprintf(text, size, "%s", value->soundfont);
-		break;
-	case SETTING_TIME:
-		offset = snprintf(text, size, "%04d-%02d-%02d %02d:%02d",
-				  time->year, time->month, time->day,
-				  time->hour, time->minute);
-		if (time->second ||
-		    setting->operation == FPLINUX_UI_SETTING_SET)
-			snprintf(text + offset, size - offset, ":%02d",
-				 time->second);
-		break;
-	case SETTING_THEME:
-		snprintf(text, size, "%s", theme_names[value->theme]);
-		break;
-	case SETTING_ENABLED:
-		snprintf(text, size, "%d", value->enabled);
-		break;
-	}
+	if (setting->kind == FPLINUX_UI_SETTING_NONE)
+		return !setting_required(message->type, message);
+	return setting_valid(message->type, message->applied, setting) &&
+	       (setting->kind == FPLINUX_UI_SETTING_UNKNOWN ||
+		!message->name[0]) &&
+	       !message->value[0];
 }
 
 static void add_setting(struct json_object *object,
-			const struct fplinux_ui_session_message *message,
-			const struct fplinux_ui_setting *setting)
+			const struct fplinux_ui_session_message *message)
 {
+	const struct fplinux_ui_setting *setting = &message->setting;
 	const union fplinux_ui_setting_value *value = &setting->value;
 	enum setting_payload payload = setting_payload(setting);
 	struct json_object *entry = json_object_new_object();
@@ -1876,12 +1683,7 @@ static bool get_setting(struct json_object *object,
 	bool has_key;
 
 	if (!json_object_object_get_ex(object, "setting", &entry))
-		return type != FPLINUX_UI_SESSION_SETTING &&
-		       (type != FPLINUX_UI_SESSION_ERROR ||
-			(!message->applied &&
-			 name_index(message->name, setting_names,
-				    ARRAY_SIZE(setting_names)) >=
-				 FPLINUX_UI_SETTING_UNKNOWN));
+		return !setting_required(type, message);
 	if (!json_object_is_type(entry, json_type_object) ||
 	    json_object_object_get_ex(object, "name", &field) ||
 	    json_object_object_get_ex(object, "value", &field) ||
@@ -1902,12 +1704,8 @@ static bool get_setting(struct json_object *object,
 	    !get_setting_payload(entry, setting) ||
 	    !setting_valid(type, message->applied, setting))
 		return false;
-	if (has_key)
-		return get_string(entry, "key", message->name,
-				  sizeof(message->name));
-	strcpy(message->name, setting_names[kind]);
-	setting_to_text(setting, message->value, sizeof(message->value));
-	return true;
+	return !has_key ||
+	       get_string(entry, "key", message->name, sizeof(message->name));
 }
 
 static bool get_launcher_view(struct json_object *object,
@@ -1939,10 +1737,20 @@ static bool get_launcher_view(struct json_object *object,
 		return false;
 	message->launcher_view = view;
 	message->launcher_catalogue = catalogue;
-	if (view)
-		strcpy(message->value, launcher_view_names[view]);
-	if (catalogue)
-		strcpy(message->name, launcher_catalogue_names[catalogue]);
+	return true;
+}
+
+static bool get_close_response(struct json_object *object,
+			       struct fplinux_ui_session_message *message)
+{
+	unsigned int response;
+
+	if (!get_choice(object, "value", close_response_names,
+			ARRAY_SIZE(close_response_names),
+			FPLINUX_UI_SESSION_CLOSE_NONE, &response) ||
+	    response == FPLINUX_UI_SESSION_CLOSE_NONE)
+		return false;
+	message->close_response = response;
 	return true;
 }
 
@@ -2591,7 +2399,6 @@ static bool input_locale_valid(const char *locale)
 bool fplinux_ui_session_send(int fd,
 			     const struct fplinux_ui_session_message *message)
 {
-	struct fplinux_ui_setting setting = setting_for_send(message);
 	unsigned int launcher_view = message->launcher_view;
 	unsigned int launcher_catalogue = message->launcher_catalogue;
 	unsigned int close_response = message->close_response;
@@ -2603,17 +2410,6 @@ bool fplinux_ui_session_send(int fd,
 	ssize_t sent;
 	int error;
 
-	if (launcher && !launcher_view && message->value[0])
-		launcher_view = name_index(message->value, launcher_view_names,
-					   ARRAY_SIZE(launcher_view_names));
-	if (launcher && !launcher_catalogue && message->name[0])
-		launcher_catalogue =
-			name_index(message->name, launcher_catalogue_names,
-				   ARRAY_SIZE(launcher_catalogue_names));
-	if (message->type == FPLINUX_UI_SESSION_CLOSE_REPLY && !close_response)
-		close_response = name_index(message->value,
-					    close_response_names,
-					    ARRAY_SIZE(close_response_names));
 	if ((unsigned int)message->type >= ARRAY_SIZE(message_names) ||
 	    (unsigned int)message->mode >= ARRAY_SIZE(mode_names) ||
 	    (unsigned int)message->display >= ARRAY_SIZE(display_names) ||
@@ -2625,10 +2421,10 @@ bool fplinux_ui_session_send(int fd,
 	    !volume_fields_valid(message) || !system_levels_valid(message) ||
 	    !light_fields_valid(message) || !wifi_fields_valid(message) ||
 	    !bluetooth_fields_valid(message) ||
-	    (setting.kind &&
-	     !setting_valid(message->type, message->applied, &setting)) ||
+	    !setting_fields_valid(message) ||
 	    (launcher &&
-	     (launcher_view >= ARRAY_SIZE(launcher_view_names) ||
+	     (message->name[0] || message->value[0] ||
+	      launcher_view >= ARRAY_SIZE(launcher_view_names) ||
 	      launcher_catalogue >= ARRAY_SIZE(launcher_catalogue_names) ||
 	      (message->type == FPLINUX_UI_SESSION_ACTIVE &&
 	       launcher_view > FPLINUX_UI_LAUNCHER_VIEW_CATALOGUE) ||
@@ -2678,7 +2474,7 @@ bool fplinux_ui_session_send(int fd,
 	      message->type == FPLINUX_UI_SESSION_CLOSE_REPLY) &&
 	     !message->serial) ||
 	    (message->type == FPLINUX_UI_SESSION_CLOSE_REPLY &&
-	     (!close_response ||
+	     (message->value[0] || !close_response ||
 	      close_response >= ARRAY_SIZE(close_response_names)))) {
 		errno = EINVAL;
 		return false;
@@ -2864,8 +2660,8 @@ bool fplinux_ui_session_send(int fd,
 	if (message->type == FPLINUX_UI_SESSION_CONFIG ||
 	    message->type == FPLINUX_UI_SESSION_ACTIVE)
 		add_string(object, "input_locale", message->input_locale);
-	if (setting.kind)
-		add_setting(object, message, &setting);
+	if (message->setting.kind)
+		add_setting(object, message);
 	else if (launcher) {
 		if (launcher_view)
 			add_string(object, "launcher_view",
@@ -3100,8 +2896,10 @@ int fplinux_ui_session_receive(int fd,
 		input_locale_valid(message->input_locale) &&
 		get_string(object, "name", message->name,
 			   sizeof(message->name)) &&
-		get_string(object, "value", message->value,
-			   sizeof(message->value)) &&
+		(type == FPLINUX_UI_SESSION_CLOSE_REPLY ?
+			 get_close_response(object, message) :
+			 get_string(object, "value", message->value,
+				    sizeof(message->value))) &&
 		get_string(object, "notice", message->notice,
 			   sizeof(message->notice)) &&
 		get_int(object, "width", &message->width) &&
@@ -3148,14 +2946,6 @@ int fplinux_ui_session_receive(int fd,
 	if (valid)
 		valid = get_setting(object, type, message) &&
 			get_launcher_view(object, type, message);
-	if (valid && type == FPLINUX_UI_SESSION_CLOSE_REPLY) {
-		unsigned int response =
-			name_index(message->value, close_response_names,
-				   ARRAY_SIZE(close_response_names));
-
-		valid = response < ARRAY_SIZE(close_response_names);
-		message->close_response = response;
-	}
 	if (valid && json_object_object_get_ex(object, "serial", &field)) {
 		int64_t serial = json_object_get_int64(field);
 

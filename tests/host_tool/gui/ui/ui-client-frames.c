@@ -232,7 +232,7 @@ static void application_event(struct fplinux_ui *ui,
 		paint(ui, 0x00ff00);
 		assert(fplinux_ui_send(ui, &ack));
 	} else if (event->session->type == FPLINUX_UI_SESSION_SETTING) {
-		if (!strcmp(event->session->name, "locale"))
+		if (event->session->setting.kind == FPLINUX_UI_SETTING_LOCALE)
 			assert(!strcmp(fplinux_ui_locale(ui), "ru"));
 		else
 			assert(fplinux_ui_theme(ui)->kind ==
@@ -3295,6 +3295,10 @@ check_raw_text_cancellation(struct fplinux_ui_frame_peer *compositor,
 			.type = FPLINUX_UI_SESSION_SETTING,
 			.applied = true,
 			.serial = 100,
+			.setting = { .kind = FPLINUX_UI_SETTING_THEME,
+				     .operation = FPLINUX_UI_SETTING_RESULT,
+				     .value.theme =
+					     FPLINUX_UI_SESSION_THEME_LIGHT },
 		};
 		int left = 240, top = 320, right = -1, bottom = -1;
 
@@ -3304,8 +3308,6 @@ check_raw_text_cancellation(struct fplinux_ui_frame_peer *compositor,
 		fplinux_ui_frame_send_key(phone, KEY_NUMERIC_STAR, false);
 		assert_text_key(compositor, control, KEY_NUMERIC_STAR, false,
 				"");
-		strcpy(redraw.name, "theme");
-		strcpy(redraw.value, "light");
 		assert(fplinux_ui_session_send(session, &redraw));
 		for (;;) {
 			struct fplinux_ui_session_message message =
@@ -3778,8 +3780,8 @@ static void check_ack(struct fplinux_ui_frame_peer *compositor, int session,
 		update.type = FPLINUX_UI_SESSION_ACTIVE;
 		strcpy(update.locale, "en");
 		strcpy(update.input_locale, "en");
-		strcpy(update.value, "home");
-		strcpy(update.name, "grid");
+		update.launcher_view = FPLINUX_UI_LAUNCHER_VIEW_HOME;
+		update.launcher_catalogue = FPLINUX_UI_LAUNCHER_CATALOGUE_GRID;
 		update.battery = -1;
 		expected = FPLINUX_UI_SESSION_ACTIVE_ACK;
 	} else if (!strcmp(scenario, "activation-open") ||
@@ -3827,10 +3829,15 @@ static void check_ack(struct fplinux_ui_frame_peer *compositor, int session,
 		assert(!strcmp(scenario, "setting") ||
 		       !strcmp(scenario, "locale"));
 		update.applied = true;
-		strcpy(update.name,
-		       !strcmp(scenario, "locale") ? "locale" : "theme");
-		strcpy(update.value,
-		       !strcmp(scenario, "locale") ? "ru" : "dark");
+		update.setting.operation = FPLINUX_UI_SETTING_RESULT;
+		if (!strcmp(scenario, "locale")) {
+			update.setting.kind = FPLINUX_UI_SETTING_LOCALE;
+			strcpy(update.setting.value.locale, "ru");
+		} else {
+			update.setting.kind = FPLINUX_UI_SETTING_THEME;
+			update.setting.value.theme =
+				FPLINUX_UI_SESSION_THEME_DARK;
+		}
 	}
 	if (strcmp(scenario, "applied-theme") &&
 	    strcmp(scenario, "applied-locale") &&
@@ -4506,8 +4513,10 @@ static void check_media_audio(struct fplinux_ui_frame_peer *compositor,
 		wait_input(compositor, control, 'u');
 		volume = wait_message(compositor, session,
 				      FPLINUX_UI_SESSION_SETTING);
-		assert(!strcmp(volume.name, "media_volume_step"));
-		assert(!strcmp(volume.value, "-1") && volume.serial);
+		assert(volume.setting.kind ==
+		       FPLINUX_UI_SETTING_MEDIA_VOLUME_STEP);
+		assert(volume.setting.operation == FPLINUX_UI_SETTING_STEP);
+		assert(volume.setting.value.step == -1 && volume.serial);
 		assert(fplinux_ui_session_send(session, &revoke));
 		wait_input(compositor, control, 'C');
 		assert(write(control, "r", 1) == 1);
@@ -4560,18 +4569,20 @@ static void check_prepare_close(struct fplinux_ui_frame_peer *compositor,
 	       (ssize_t)strlen(packet));
 	fplinux_ui_frame_wait_readable(compositor, session);
 	assert(fplinux_ui_session_receive(session, &reply) == 1);
-	assert(reply.serial == 19 && !strcmp(reply.value, "ready"));
+	assert(reply.serial == 19 &&
+	       reply.close_response == FPLINUX_UI_SESSION_CLOSE_READY);
 	assert(reply.type == FPLINUX_UI_SESSION_CLOSE_REPLY);
 	assert(waitpid(child, &status, WNOHANG) == 0);
 }
 
 static void assert_close_reply(struct fplinux_ui_frame_peer *compositor,
-			       int session, uint32_t serial, const char *value)
+			       int session, uint32_t serial,
+			       enum fplinux_ui_session_close_response response)
 {
 	struct fplinux_ui_session_message reply = wait_message(
 		compositor, session, FPLINUX_UI_SESSION_CLOSE_REPLY);
 
-	assert(reply.serial == serial && !strcmp(reply.value, value));
+	assert(reply.serial == serial && reply.close_response == response);
 }
 
 static void check_close_decisions(struct fplinux_ui_frame_peer *compositor,
@@ -4591,7 +4602,8 @@ static void check_close_decisions(struct fplinux_ui_frame_peer *compositor,
 	wait_message(compositor, session, FPLINUX_UI_SESSION_EXIT);
 	assert(fplinux_ui_session_send(session, &prepare));
 	wait_input(compositor, control, 'w');
-	assert_close_reply(compositor, session, 31, "wait");
+	assert_close_reply(compositor, session, 31,
+			   FPLINUX_UI_SESSION_CLOSE_WAIT);
 	wait_commits(compositor, 2);
 	assert_colour(compositor, 0xffe0);
 	assert(wait_message(compositor, session, FPLINUX_UI_SESSION_CLOSE_ACK)
@@ -4605,13 +4617,15 @@ static void check_close_decisions(struct fplinux_ui_frame_peer *compositor,
 	wait_input(compositor, control, 'b');
 	wait_message(compositor, session, FPLINUX_UI_SESSION_EXIT);
 	assert(fplinux_ui_session_send(session, &prepare));
-	assert_close_reply(compositor, session, 31, "wait");
+	assert_close_reply(compositor, session, 31,
+			   FPLINUX_UI_SESSION_CLOSE_WAIT);
 	assert(wait_message(compositor, session, FPLINUX_UI_SESSION_CLOSE_ACK)
 		       .serial == 31);
 	wait_commits(compositor, before + 1);
 	assert(write(control, "c", 1) == 1);
 	wait_input(compositor, control, 'c');
-	assert_close_reply(compositor, session, 31, "cancel");
+	assert_close_reply(compositor, session, 31,
+			   FPLINUX_UI_SESSION_CLOSE_CANCEL);
 	assert(wait_message(compositor, session, FPLINUX_UI_SESSION_CLOSE_ACK)
 		       .serial == 31);
 	before = compositor->commits;
@@ -4625,7 +4639,8 @@ static void check_close_decisions(struct fplinux_ui_frame_peer *compositor,
 	wait_input(compositor, control, 'b');
 	wait_message(compositor, session, FPLINUX_UI_SESSION_EXIT);
 	assert(fplinux_ui_session_send(session, &prepare));
-	assert_close_reply(compositor, session, 31, "cancel");
+	assert_close_reply(compositor, session, 31,
+			   FPLINUX_UI_SESSION_CLOSE_CANCEL);
 	assert(wait_message(compositor, session, FPLINUX_UI_SESSION_CLOSE_ACK)
 		       .serial == 31);
 	wait_commits(compositor, before + 1);
@@ -4633,14 +4648,16 @@ static void check_close_decisions(struct fplinux_ui_frame_peer *compositor,
 	before = compositor->commits;
 	assert(fplinux_ui_session_send(session, &prepare));
 	wait_input(compositor, control, 'w');
-	assert_close_reply(compositor, session, 32, "wait");
+	assert_close_reply(compositor, session, 32,
+			   FPLINUX_UI_SESSION_CLOSE_WAIT);
 	wait_commits(compositor, before + 1);
 	assert(wait_message(compositor, session, FPLINUX_UI_SESSION_CLOSE_ACK)
 		       .serial == 32);
 	assert_colour(compositor, 0xffe0);
 	assert(write(control, "r", 1) == 1);
 	wait_input(compositor, control, 'r');
-	assert_close_reply(compositor, session, 32, "ready");
+	assert_close_reply(compositor, session, 32,
+			   FPLINUX_UI_SESSION_CLOSE_READY);
 	assert(waitpid(child, &status, WNOHANG) == 0);
 }
 
@@ -4655,8 +4672,9 @@ check_close_acknowledgments(struct fplinux_ui_frame_peer *compositor,
 	struct fplinux_ui_session_message appearance = {
 		.type = FPLINUX_UI_SESSION_SETTING,
 		.applied = true,
-		.name = "theme",
-		.value = "dark",
+		.setting = { .kind = FPLINUX_UI_SETTING_THEME,
+			     .operation = FPLINUX_UI_SETTING_RESULT,
+			     .value.theme = FPLINUX_UI_SESSION_THEME_DARK },
 		.serial = 73,
 	};
 	struct fplinux_ui_session_message activation = {
@@ -4693,7 +4711,8 @@ check_close_acknowledgments(struct fplinux_ui_frame_peer *compositor,
 		wait_input(compositor, control, 'a');
 	if (activating)
 		wait_input(compositor, control, 'a');
-	assert_close_reply(compositor, session, 31, "wait");
+	assert_close_reply(compositor, session, 31,
+			   FPLINUX_UI_SESSION_CLOSE_WAIT);
 	assert_quiet(compositor, session, 2);
 	fplinux_ui_frame_release_buffers(compositor);
 	if (hidden) {
@@ -4853,9 +4872,11 @@ static void check_runtime(struct fplinux_ui_frame_peer *compositor, int session,
 		request.type = FPLINUX_UI_SESSION_PREPARE_CLOSE;
 		assert(fplinux_ui_session_send(session, &request));
 		if (!strcmp(scenario, "runtime-close-quit"))
-			assert_close_reply(compositor, session, 73, "ready");
+			assert_close_reply(compositor, session, 73,
+					   FPLINUX_UI_SESSION_CLOSE_READY);
 		else if (!strcmp(scenario, "runtime-close-self-reply")) {
-			assert_close_reply(compositor, session, 73, "wait");
+			assert_close_reply(compositor, session, 73,
+					   FPLINUX_UI_SESSION_CLOSE_WAIT);
 			assert(wait_message(compositor, session,
 					    FPLINUX_UI_SESSION_CLOSE_ACK)
 				       .serial == 73);
@@ -4943,10 +4964,12 @@ static void check_system_levels(struct fplinux_ui_frame_peer *compositor,
 	first = wait_message(compositor, session, FPLINUX_UI_SESSION_SETTING);
 	second = wait_message(compositor, session, FPLINUX_UI_SESSION_SETTING);
 	assert(first.serial && second.serial && first.serial != second.serial);
-	assert(!strcmp(first.name, "media_volume_step") &&
-	       !strcmp(first.value, "1"));
-	assert(!strcmp(second.name, "media_volume_step") &&
-	       !strcmp(second.value, "-1"));
+	assert(first.setting.kind == FPLINUX_UI_SETTING_MEDIA_VOLUME_STEP &&
+	       first.setting.operation == FPLINUX_UI_SETTING_STEP &&
+	       first.setting.value.step == 1);
+	assert(second.setting.kind == FPLINUX_UI_SETTING_MEDIA_VOLUME_STEP &&
+	       second.setting.operation == FPLINUX_UI_SETTING_STEP &&
+	       second.setting.value.step == -1);
 	wait_input(compositor, control, 'z');
 }
 

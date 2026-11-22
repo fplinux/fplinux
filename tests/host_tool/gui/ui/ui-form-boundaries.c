@@ -430,10 +430,11 @@ static void redraw_form(struct form_capture *capture)
 		.type = FPLINUX_UI_SESSION_SETTING,
 		.applied = true,
 		.serial = ++capture->serial,
+		.setting = { .kind = FPLINUX_UI_SETTING_THEME,
+			     .operation = FPLINUX_UI_SETTING_RESULT,
+			     .value.theme = FPLINUX_UI_SESSION_THEME_LIGHT },
 	};
 
-	strcpy(redraw.name, "theme");
-	strcpy(redraw.value, "light");
 	assert(fplinux_ui_session_send(capture->session, &redraw));
 	for (;;) {
 		struct fplinux_ui_session_message message =

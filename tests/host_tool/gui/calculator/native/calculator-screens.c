@@ -179,10 +179,14 @@ static void redraw(struct capture *capture)
 		.type = FPLINUX_UI_SESSION_SETTING,
 		.applied = true,
 		.serial = ++capture->serial,
+		.setting = { .kind = FPLINUX_UI_SETTING_THEME,
+			     .operation = FPLINUX_UI_SETTING_RESULT,
+			     .value.theme =
+				     !strcmp(appearance, "dark") ?
+					     FPLINUX_UI_SESSION_THEME_DARK :
+					     FPLINUX_UI_SESSION_THEME_LIGHT },
 	};
 
-	strcpy(setting.name, "theme");
-	strcpy(setting.value, appearance);
 	assert(fplinux_ui_session_send(capture->session, &setting));
 	for (;;) {
 		struct fplinux_ui_session_message message =
@@ -508,7 +512,8 @@ static void capture_number_limit(struct capture *capture)
 	wait_legends(capture, "", "", "Back");
 }
 
-static void wait_close_reply(struct capture *capture, const char *expected)
+static void wait_close_reply(struct capture *capture,
+			     enum fplinux_ui_session_close_response expected)
 {
 	for (;;) {
 		struct fplinux_ui_session_message reply =
@@ -518,12 +523,13 @@ static void wait_close_reply(struct capture *capture, const char *expected)
 		if (reply.type != FPLINUX_UI_SESSION_CLOSE_REPLY)
 			continue;
 		assert(reply.serial == capture->close_serial);
-		assert(!strcmp(reply.value, expected));
+		assert(reply.close_response == expected);
 		return;
 	}
 }
 
-static void prepare_close(struct capture *capture, const char *expected)
+static void prepare_close(struct capture *capture,
+			  enum fplinux_ui_session_close_response expected)
 {
 	struct fplinux_ui_session_message request = {
 		.type = FPLINUX_UI_SESSION_PREPARE_CLOSE,
@@ -597,17 +603,17 @@ static void storage_failure(struct capture *capture, char **argv)
 	puts("calculator-storage: Home resumed without a save question");
 	press(capture, 1, KEY_NUMERIC_2, "42");
 	expect_saved(capture, "", "9");
-	prepare_close(capture, "wait");
+	prepare_close(capture, FPLINUX_UI_SESSION_CLOSE_WAIT);
 	wait_legends(capture, "", "OK", translated("Stay", "Остаться"));
 	check_save_prompt(capture, false, true);
 	activate(capture, FPLINUX_UI_SESSION_ACTIVATION_OPEN);
 	activate(capture, FPLINUX_UI_SESSION_ACTIVATION_RESUME);
 	expect_saved(capture, "", "9");
 	press(capture, 1, KEY_F14, NULL);
-	wait_close_reply(capture, "cancel");
+	wait_close_reply(capture, FPLINUX_UI_SESSION_CLOSE_CANCEL);
 	/* Stay cancels closing and returns to the draft. */
 	press(capture, 1, KEY_NUMERIC_3, "423");
-	prepare_close(capture, "wait");
+	prepare_close(capture, FPLINUX_UI_SESSION_CLOSE_WAIT);
 	check_save_prompt(capture, false, true);
 	press(capture, 1, KEY_OK, NULL);
 	check_save_prompt(capture, false, true);
@@ -615,7 +621,7 @@ static void storage_failure(struct capture *capture, char **argv)
 	assert(unlink(failure_path) == 0);
 	fplinux_ui_frame_send_key(&capture->peer.keyboards[1], KEY_OK, true);
 	fplinux_ui_frame_send_key(&capture->peer.keyboards[1], KEY_OK, false);
-	wait_close_reply(capture, "ready");
+	wait_close_reply(capture, FPLINUX_UI_SESSION_CLOSE_READY);
 	expect_saved(capture, "", "423");
 	close_and_reap(capture);
 
@@ -625,16 +631,16 @@ static void storage_failure(struct capture *capture, char **argv)
 	      translated("Clear", "Стереть"));
 	reset_from_options(capture);
 	press(capture, 1, KEY_NUMERIC_7, "7");
-	prepare_close(capture, "wait");
+	prepare_close(capture, FPLINUX_UI_SESSION_CLOSE_WAIT);
 	check_save_prompt(capture, false, true);
 	press(capture, 1, KEY_DOWN, NULL);
 	check_save_prompt(capture, false, false);
 	assert(unlink(failure_path) == 0);
 	/* A renewed close request preserves the decision and the focused row. */
-	prepare_close(capture, "wait");
+	prepare_close(capture, FPLINUX_UI_SESSION_CLOSE_WAIT);
 	fplinux_ui_frame_send_key(&capture->peer.keyboards[1], KEY_OK, true);
 	fplinux_ui_frame_send_key(&capture->peer.keyboards[1], KEY_OK, false);
-	wait_close_reply(capture, "ready");
+	wait_close_reply(capture, FPLINUX_UI_SESSION_CLOSE_READY);
 	visibility(capture, false);
 	send_lifecycle(capture, FPLINUX_UI_SESSION_BACKGROUND);
 	close_and_reap(capture);
@@ -688,19 +694,19 @@ static void published_save_without_confirmation(struct capture *capture,
 	       (int)sizeof(path));
 	gate = fopen(path, "wx");
 	assert(gate && fputs("s", gate) >= 0 && !fclose(gate));
-	prepare_close(capture, "wait");
+	prepare_close(capture, FPLINUX_UI_SESSION_CLOSE_WAIT);
 	wait_legends(capture, "", "OK", translated("Stay", "Остаться"));
 	check_save_prompt(capture, true, true);
 	expect_saved(capture, "", "42");
 	press(capture, 1, KEY_F14, NULL);
-	wait_close_reply(capture, "cancel");
+	wait_close_reply(capture, FPLINUX_UI_SESSION_CLOSE_CANCEL);
 	press(capture, 1, KEY_NUMERIC_3, "423");
-	prepare_close(capture, "wait");
+	prepare_close(capture, FPLINUX_UI_SESSION_CLOSE_WAIT);
 	press(capture, 1, KEY_DOWN, NULL);
 	check_save_prompt(capture, true, false);
 	fplinux_ui_frame_send_key(&capture->peer.keyboards[1], KEY_OK, true);
 	fplinux_ui_frame_send_key(&capture->peer.keyboards[1], KEY_OK, false);
-	wait_close_reply(capture, "ready");
+	wait_close_reply(capture, FPLINUX_UI_SESSION_CLOSE_READY);
 	assert(unlink(path) == 0);
 	close_and_reap(capture);
 	expect_saved(capture, "", "423");

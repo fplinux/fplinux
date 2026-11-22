@@ -142,8 +142,8 @@ static void pump(struct fixture *fixture)
 		else {
 			fixture->frame.volume_preview_serial =
 				frame.volume_preview_serial;
-			strcpy(fixture->frame.volume_preview_value,
-			       frame.volume_preview_value);
+			fixture->frame.volume_preview_level =
+				frame.volume_preview_level;
 		}
 	}
 }
@@ -292,11 +292,11 @@ static void start(struct fixture *fixture, char **arguments)
 	uint64_t preview_deadline = fplinux_ui_frame_now_ms() + 3000;
 
 	while ((!fixture->frame.volume_preview_serial ||
-		strcmp(fixture->frame.volume_preview_value, "7")) &&
+		fixture->frame.volume_preview_level != 7) &&
 	       fplinux_ui_frame_now_ms() < preview_deadline)
 		pump(fixture);
 	assert(fixture->frame.volume_preview_serial);
-	assert(!strcmp(fixture->frame.volume_preview_value, "7"));
+	assert(fixture->frame.volume_preview_level == 7);
 }
 
 int main(int argc, char **argv)

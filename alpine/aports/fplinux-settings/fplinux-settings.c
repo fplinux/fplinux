@@ -2164,8 +2164,8 @@ static void show_error(struct settings_app *app,
 	enum fplinux_ui_setting_operation operation =
 		message->setting.operation;
 
-	fprintf(stderr, "fplinux-settings: %s=\"%s\" failed: %s\n",
-		message->name, message->value, message->reason);
+	fprintf(stderr, "fplinux-settings: setting %d failed: %s\n", kind,
+		message->reason);
 	if (kind == FPLINUX_UI_SETTING_VOLUME_PREVIEW ||
 	    kind == FPLINUX_UI_SETTING_ALARM_VOLUME_PREVIEW) {
 		if (operation == FPLINUX_UI_SETTING_CANCEL ||

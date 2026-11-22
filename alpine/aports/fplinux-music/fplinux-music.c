@@ -1080,7 +1080,8 @@ static void event(struct fplinux_ui *ui, const struct fplinux_ui_event *event,
 	} else if (event->type == FPLINUX_UI_EVENT_SYSTEM_LEVELS) {
 		music_view_update_volume(&app->view, ui, app->volume_warning);
 	} else if (event->type == FPLINUX_UI_EVENT_SESSION &&
-		   !strcmp(event->session->name, "media_volume_step") &&
+		   event->session->setting.kind ==
+			   FPLINUX_UI_SETTING_MEDIA_VOLUME_STEP &&
 		   strcmp(event->session->reason, "superseded") &&
 		   (event->session->type == FPLINUX_UI_SESSION_SETTING ||
 		    event->session->type == FPLINUX_UI_SESSION_ERROR)) {

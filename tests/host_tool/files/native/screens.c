@@ -215,11 +215,14 @@ static void pump(struct capture *capture)
 					 message.centre, message.right);
 			}
 		} else if (message.type == FPLINUX_UI_SESSION_CLOSE_REPLY) {
-			if (!strcmp(message.value, "wait"))
+			if (message.close_response ==
+			    FPLINUX_UI_SESSION_CLOSE_WAIT)
 				capture->close_waits++;
-			else if (!strcmp(message.value, "cancel"))
+			else if (message.close_response ==
+				 FPLINUX_UI_SESSION_CLOSE_CANCEL)
 				capture->close_cancels++;
-			else if (!strcmp(message.value, "ready"))
+			else if (message.close_response ==
+				 FPLINUX_UI_SESSION_CLOSE_READY)
 				capture->close_ready++;
 		} else if (message.type == FPLINUX_UI_SESSION_ACTIVATION_ACK) {
 			capture->activation_ack = message.serial;

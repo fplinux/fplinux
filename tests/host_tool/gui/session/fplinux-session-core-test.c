@@ -505,7 +505,8 @@ static int run_peer(void)
 	int session_fd = -1;
 	bool hold_close = false;
 	bool hold_activation = false;
-	char close_decision[8] = "ready";
+	enum fplinux_ui_session_close_response close_decision =
+		FPLINUX_UI_SESSION_CLOSE_READY;
 
 	peer_manager = getppid();
 	CHECK(id && strlen(id) < sizeof(command.app_id));
@@ -561,9 +562,7 @@ static int run_peer(void)
 				send_command(channel, &command);
 				break;
 			case COMMAND_CLOSE_DECISION:
-				CHECK(strlen(command.message.value) <
-				      sizeof(close_decision));
-				strcpy(close_decision, command.message.value);
+				close_decision = command.message.close_response;
 				command.type = COMMAND_SENT;
 				send_command(channel, &command);
 				break;
@@ -604,13 +603,13 @@ static int run_peer(void)
 			}
 			if (command.message.type ==
 				    FPLINUX_UI_SESSION_PREPARE_CLOSE &&
-			    close_decision[0]) {
+			    close_decision != FPLINUX_UI_SESSION_CLOSE_NONE) {
 				struct fplinux_ui_session_message response = {
 					.type = FPLINUX_UI_SESSION_CLOSE_REPLY,
 					.serial = command.message.serial,
+					.close_response = close_decision,
 				};
 
-				strcpy(response.value, close_decision);
 				CHECK(fplinux_ui_session_send(session_fd,
 							      &response));
 			}
@@ -1098,14 +1097,16 @@ static struct peer *wait_peer(struct fixture *fixture, const char *id)
 	return NULL;
 }
 
-static bool take_message(struct peer *peer,
-			 enum fplinux_ui_session_message_type type,
-			 const char *name,
-			 struct fplinux_ui_session_message *message)
+static bool take_matching_message(struct peer *peer,
+				  enum fplinux_ui_session_message_type type,
+				  const char *name,
+				  enum fplinux_ui_setting_kind kind,
+				  struct fplinux_ui_session_message *message)
 {
 	for (size_t i = 0; i < peer->message_count; ++i) {
 		if (peer->messages[i].type != type ||
-		    (name && strcmp(peer->messages[i].name, name)))
+		    (name && strcmp(peer->messages[i].name, name)) ||
+		    (kind && peer->messages[i].setting.kind != kind))
 			continue;
 		*message = peer->messages[i];
 		--peer->message_count;
@@ -1116,22 +1117,57 @@ static bool take_message(struct peer *peer,
 	return false;
 }
 
+static bool take_message(struct peer *peer,
+			 enum fplinux_ui_session_message_type type,
+			 const char *name,
+			 struct fplinux_ui_session_message *message)
+{
+	return take_matching_message(peer, type, name, FPLINUX_UI_SETTING_NONE,
+				     message);
+}
+
+static bool take_setting(struct peer *peer,
+			 enum fplinux_ui_session_message_type type,
+			 enum fplinux_ui_setting_kind kind,
+			 struct fplinux_ui_session_message *message)
+{
+	return take_matching_message(peer, type, NULL, kind, message);
+}
+
 static struct fplinux_ui_session_message
-wait_message(struct fixture *fixture, struct peer *peer,
-	     enum fplinux_ui_session_message_type type, const char *name)
+wait_matching_message(struct fixture *fixture, struct peer *peer,
+		      enum fplinux_ui_session_message_type type,
+		      const char *name, enum fplinux_ui_setting_kind kind)
 {
 	struct fplinux_ui_session_message message;
 	uint64_t deadline = real_ms() + 2000;
 
 	do {
-		if (take_message(peer, type, name, &message))
+		if (take_matching_message(peer, type, name, kind, &message))
 			return message;
 		pump(fixture, 2);
 	} while (real_ms() < deadline);
-	fprintf(stderr, "waiting for message type=%d name=%s peer=%s\n", type,
-		name ? name : "", peer->id);
+	fprintf(stderr,
+		"waiting for message type=%d name=%s setting=%d peer=%s\n",
+		type, name ? name : "", kind, peer->id);
 	CHECK(false);
 	return (struct fplinux_ui_session_message){ 0 };
+}
+
+static struct fplinux_ui_session_message
+wait_message(struct fixture *fixture, struct peer *peer,
+	     enum fplinux_ui_session_message_type type, const char *name)
+{
+	return wait_matching_message(fixture, peer, type, name,
+				     FPLINUX_UI_SETTING_NONE);
+}
+
+static struct fplinux_ui_session_message
+wait_setting(struct fixture *fixture, struct peer *peer,
+	     enum fplinux_ui_session_message_type type,
+	     enum fplinux_ui_setting_kind kind)
+{
+	return wait_matching_message(fixture, peer, type, NULL, kind);
 }
 
 static void issue(struct fixture *fixture, struct peer *peer,
@@ -1350,7 +1386,7 @@ static void test_home_retains_exit_saves(struct fixture *fixture)
 	struct fplinux_ui_session_message home =
 		active_for(fixture, launcher, "");
 
-	CHECK(!strcmp(home.value, "home"));
+	CHECK(home.launcher_view == FPLINUX_UI_LAUNCHER_VIEW_HOME);
 	acknowledge(fixture, launcher, &home);
 	const struct fplinux_session_process *process =
 		fplinux_session_find_process(fixture->session, pid);
@@ -1372,7 +1408,7 @@ static void test_home_retains_exit_saves(struct fixture *fixture)
 	clear_messages(fixture, launcher);
 	send_type(fixture, app, FPLINUX_UI_SESSION_EXIT);
 	active = active_for(fixture, launcher, "");
-	CHECK(!strcmp(active.value, "catalogue"));
+	CHECK(active.launcher_view == FPLINUX_UI_LAUNCHER_VIEW_CATALOGUE);
 	CHECK(!strcmp(active.selected_id, TEST_APP));
 	acknowledge(fixture, launcher, &active);
 	wait_message(fixture, app, FPLINUX_UI_SESSION_CLOSE, NULL);
@@ -1382,13 +1418,13 @@ static void test_home_retains_exit_saves(struct fixture *fixture)
 }
 
 static void set_close_decision(struct fixture *fixture, struct peer *peer,
-			       const char *decision)
+			       enum fplinux_ui_session_close_response decision)
 {
-	struct command command = { .type = COMMAND_CLOSE_DECISION };
+	struct command command = { .type = COMMAND_CLOSE_DECISION,
+				   .message.close_response = decision };
 	unsigned int sent = peer->sent;
 	uint64_t deadline = real_ms() + 2000;
 
-	strcpy(command.message.value, decision);
 	send_command(peer->fd, &command);
 	while (peer->sent == sent && real_ms() < deadline)
 		pump(fixture, 2);
@@ -1396,14 +1432,15 @@ static void set_close_decision(struct fixture *fixture, struct peer *peer,
 }
 
 static void answer_close(struct fixture *fixture, struct peer *peer,
-			 uint32_t serial, const char *decision)
+			 uint32_t serial,
+			 enum fplinux_ui_session_close_response decision)
 {
 	struct fplinux_ui_session_message message = {
 		.type = FPLINUX_UI_SESSION_CLOSE_REPLY,
 		.serial = serial,
+		.close_response = decision,
 	};
 
-	strcpy(message.value, decision);
 	issue(fixture, peer, &message);
 }
 
@@ -1436,7 +1473,7 @@ static void test_close_cancel_and_stale_reply(struct fixture *fixture)
 	struct fplinux_ui_session_message ignored;
 
 	present_scene(fixture, initial);
-	set_close_decision(fixture, app, "");
+	set_close_decision(fixture, app, FPLINUX_UI_SESSION_CLOSE_NONE);
 	send_type(fixture, app, FPLINUX_UI_SESSION_EXIT);
 	struct fplinux_ui_session_message first = wait_message(
 		fixture, app, FPLINUX_UI_SESSION_PREPARE_CLOSE, NULL);
@@ -1449,7 +1486,8 @@ static void test_close_cancel_and_stale_reply(struct fixture *fixture)
 	CHECK(process->lifecycle == FPLINUX_UI_SESSION_FOREGROUND);
 	present_scene(fixture, restored);
 	expect_scene(fixture, initial);
-	answer_close(fixture, app, first.serial, "cancel");
+	answer_close(fixture, app, first.serial,
+		     FPLINUX_UI_SESSION_CLOSE_CANCEL);
 	expect_scene(fixture, initial);
 	acknowledge_close(fixture, app, first.serial);
 	expect_scene(fixture, restored);
@@ -1460,10 +1498,12 @@ static void test_close_cancel_and_stale_reply(struct fixture *fixture)
 		fixture, app, FPLINUX_UI_SESSION_PREPARE_CLOSE, NULL);
 
 	CHECK(second.serial && second.serial != first.serial);
-	answer_close(fixture, app, first.serial, "ready");
+	answer_close(fixture, app, first.serial,
+		     FPLINUX_UI_SESSION_CLOSE_READY);
 	process = fplinux_session_find_process(fixture->session, app->pid);
 	CHECK(process && !process->closing && process->shown);
-	answer_close(fixture, app, second.serial, "ready");
+	answer_close(fixture, app, second.serial,
+		     FPLINUX_UI_SESSION_CLOSE_READY);
 	struct fplinux_ui_session_message active =
 		active_for(fixture, launcher, "");
 
@@ -1482,7 +1522,7 @@ static void test_close_ready_retains_scene_before_reply(struct fixture *fixture)
 	struct peer *app = show_app(fixture, launcher, TEST_APP);
 
 	present_scene(fixture, covering);
-	set_close_decision(fixture, app, "");
+	set_close_decision(fixture, app, FPLINUX_UI_SESSION_CLOSE_NONE);
 	send_type(fixture, app, FPLINUX_UI_SESSION_EXIT);
 	struct fplinux_ui_session_message prepare = wait_message(
 		fixture, app, FPLINUX_UI_SESSION_PREPARE_CLOSE, NULL);
@@ -1493,7 +1533,8 @@ static void test_close_ready_retains_scene_before_reply(struct fixture *fixture)
 	fixture->now_ms += 1000;
 	pump(fixture, 4);
 	expect_scene(fixture, covering);
-	answer_close(fixture, app, prepare.serial, "ready");
+	answer_close(fixture, app, prepare.serial,
+		     FPLINUX_UI_SESSION_CLOSE_READY);
 	expect_scene(fixture, covering);
 	struct fplinux_ui_session_message active =
 		active_for(fixture, launcher, "");
@@ -1520,12 +1561,13 @@ test_close_wait_needs_decision_and_system_frames(struct fixture *fixture)
 	};
 
 	present_scene(fixture, initial);
-	set_close_decision(fixture, app, "");
+	set_close_decision(fixture, app, FPLINUX_UI_SESSION_CLOSE_NONE);
 	send_type(fixture, app, FPLINUX_UI_SESSION_EXIT);
 	struct fplinux_ui_session_message prepare = wait_message(
 		fixture, app, FPLINUX_UI_SESSION_PREPARE_CLOSE, NULL);
 
-	answer_close(fixture, app, prepare.serial, "wait");
+	answer_close(fixture, app, prepare.serial,
+		     FPLINUX_UI_SESSION_CLOSE_WAIT);
 	issue(fixture, app, &legends);
 	struct fplinux_ui_session_message active =
 		active_for(fixture, launcher, TEST_APP);
@@ -1548,7 +1590,7 @@ test_close_wait_survives_home_and_repeated_close(struct fixture *fixture)
 	struct peer *app = show_app(fixture, launcher, TEST_APP);
 	struct fplinux_ui_session_message ignored;
 
-	set_close_decision(fixture, app, "wait");
+	set_close_decision(fixture, app, FPLINUX_UI_SESSION_CLOSE_WAIT);
 	send_type(fixture, app, FPLINUX_UI_SESSION_EXIT);
 	struct fplinux_ui_session_message prepare = wait_message(
 		fixture, app, FPLINUX_UI_SESSION_PREPARE_CLOSE, NULL);
@@ -1589,7 +1631,7 @@ static void test_close_unanswered_has_bounded_timeout(struct fixture *fixture)
 	struct peer *launcher = start_launcher(fixture);
 	struct peer *app = show_app(fixture, launcher, TEST_APP);
 
-	set_close_decision(fixture, app, "");
+	set_close_decision(fixture, app, FPLINUX_UI_SESSION_CLOSE_NONE);
 	send_type(fixture, app, FPLINUX_UI_SESSION_EXIT);
 	wait_message(fixture, app, FPLINUX_UI_SESSION_PREPARE_CLOSE, NULL);
 	fixture->now_ms += 2999;
@@ -1612,13 +1654,14 @@ test_delayed_close_wait_after_home_stays_hidden(struct fixture *fixture)
 	struct peer *launcher = start_launcher(fixture);
 	struct peer *app = show_app(fixture, launcher, TEST_APP);
 
-	set_close_decision(fixture, app, "");
+	set_close_decision(fixture, app, FPLINUX_UI_SESSION_CLOSE_NONE);
 	send_type(fixture, app, FPLINUX_UI_SESSION_EXIT);
 	struct fplinux_ui_session_message prepare = wait_message(
 		fixture, app, FPLINUX_UI_SESSION_PREPARE_CLOSE, NULL);
 
 	return_home(fixture, launcher);
-	answer_close(fixture, app, prepare.serial, "wait");
+	answer_close(fixture, app, prepare.serial,
+		     FPLINUX_UI_SESSION_CLOSE_WAIT);
 	pump(fixture, 10);
 	const struct fplinux_session_process *process =
 		fplinux_session_find_process(fixture->session, app->pid);
@@ -2008,7 +2051,7 @@ test_close_background_wait_activates_same_instance(struct fixture *fixture)
 	uint32_t token = task_record(&tasks, TEST_APP)->token;
 
 	present_scene(fixture, initial);
-	set_close_decision(fixture, app, "wait");
+	set_close_decision(fixture, app, FPLINUX_UI_SESSION_CLOSE_WAIT);
 	task_action(fixture, launcher, FPLINUX_UI_SESSION_CLOSE_TASK, TEST_APP,
 		    token);
 	struct fplinux_ui_session_message prepare = wait_message(
@@ -2041,7 +2084,8 @@ test_close_background_wait_activates_same_instance(struct fixture *fixture)
 	CHECK(fplinux_session_focused_pid(fixture->session) == app->pid);
 	CHECK(fplinux_session_find_process(fixture->session, settings->pid)
 		      ->lifecycle == FPLINUX_UI_SESSION_BACKGROUND);
-	answer_close(fixture, app, prepare.serial, "cancel");
+	answer_close(fixture, app, prepare.serial,
+		     FPLINUX_UI_SESSION_CLOSE_CANCEL);
 	CHECK(!fplinux_session_find_process(fixture->session, app->pid)
 		       ->closing);
 }
@@ -2196,13 +2240,14 @@ static void test_task_stale_and_locked(struct fixture *fixture)
 	struct peer *settings = show_app(fixture, launcher, TEST_SETTINGS);
 	struct fplinux_ui_session_message setting = {
 		.type = FPLINUX_UI_SESSION_SETTING,
-		.name = "auto_lock_seconds",
-		.value = "0",
+		.setting = { .kind = FPLINUX_UI_SETTING_AUTO_LOCK,
+			     .operation = FPLINUX_UI_SETTING_SET,
+			     .value.seconds = 0 },
 	};
 
 	issue(fixture, settings, &setting);
-	wait_message(fixture, settings, FPLINUX_UI_SESSION_SETTING,
-		     "auto_lock_seconds");
+	wait_setting(fixture, settings, FPLINUX_UI_SESSION_SETTING,
+		     FPLINUX_UI_SETTING_AUTO_LOCK);
 	return_home(fixture, launcher);
 	fixture->now_ms += 30000;
 	pump(fixture, 4);
@@ -2359,7 +2404,7 @@ static void test_cancel_cleans_process(struct fixture *fixture)
 	struct fplinux_ui_session_message active =
 		active_for(fixture, launcher, "");
 
-	CHECK(!strcmp(active.value, "catalogue"));
+	CHECK(active.launcher_view == FPLINUX_UI_LAUNCHER_VIEW_CATALOGUE);
 	CHECK(!strcmp(active.reason, ""));
 }
 
@@ -2407,7 +2452,7 @@ static void test_red_home_retains_task(struct fixture *fixture, bool fullscreen)
 	struct fplinux_ui_session_message active =
 		active_for(fixture, launcher, "");
 
-	CHECK(!strcmp(active.value, "home"));
+	CHECK(active.launcher_view == FPLINUX_UI_LAUNCHER_VIEW_HOME);
 	acknowledge(fixture, launcher, &active);
 	const struct fplinux_session_process *process =
 		fplinux_session_find_process(fixture->session, pid);
@@ -2420,16 +2465,18 @@ static void test_red_home_retains_task(struct fixture *fixture, bool fullscreen)
 	CHECK(fplinux_session_focused_pid(fixture->session) == launcher->pid);
 }
 
-static void select_launcher_view(struct fixture *fixture, struct peer *launcher,
-				 const char *view, const char *presentation)
+static void
+select_launcher_view(struct fixture *fixture, struct peer *launcher,
+		     enum fplinux_ui_launcher_view view,
+		     enum fplinux_ui_launcher_catalogue presentation)
 {
 	struct fplinux_ui_session_message select = {
 		.type = FPLINUX_UI_SESSION_SELECT,
+		.launcher_view = view,
+		.launcher_catalogue = presentation,
 		.selected_id = TEST_APP,
 	};
 
-	strcpy(select.value, view);
-	strcpy(select.name, presentation);
 	issue(fixture, launcher, &select);
 }
 
@@ -2473,7 +2520,8 @@ static void test_task_close_ready_keeps_tasks(struct fixture *fixture)
 		active_for(fixture, launcher, "");
 
 	CHECK(!strcmp(active.title, title.title));
-	CHECK(active.tasks_view && !strcmp(active.value, "home"));
+	CHECK(active.tasks_view &&
+	      active.launcher_view == FPLINUX_UI_LAUNCHER_VIEW_HOME);
 	acknowledge(fixture, launcher, &active);
 	/* Red leaves Tasks for Home instead of locking an already bare Home. */
 	phone_gesture(fixture, FPLINUX_KEY_POWER);
@@ -2493,7 +2541,7 @@ static void test_task_close_wait_returns_tasks(struct fixture *fixture,
 		query_tasks(fixture, launcher);
 	uint32_t token = task_record(&snapshot, TEST_APP)->token;
 
-	set_close_decision(fixture, app, "wait");
+	set_close_decision(fixture, app, FPLINUX_UI_SESSION_CLOSE_WAIT);
 	task_action(fixture, launcher, FPLINUX_UI_SESSION_CLOSE_TASK, TEST_APP,
 		    token);
 	struct fplinux_ui_session_message prepare = wait_message(
@@ -2518,10 +2566,11 @@ static void test_task_close_wait_returns_tasks(struct fixture *fixture,
 		acknowledge_close(fixture, app, prepare.serial);
 	}
 	clear_messages(fixture, launcher);
-	answer_close(fixture, app, prepare.serial, "ready");
+	answer_close(fixture, app, prepare.serial,
+		     FPLINUX_UI_SESSION_CLOSE_READY);
 	active = active_for(fixture, launcher, "");
 	CHECK(active.tasks_view);
-	CHECK(!strcmp(active.value, "home"));
+	CHECK(active.launcher_view == FPLINUX_UI_LAUNCHER_VIEW_HOME);
 	acknowledge(fixture, launcher, &active);
 	wait_reaped(fixture, app->pid);
 	snapshot = query_tasks(fixture, launcher);
@@ -2539,7 +2588,7 @@ static void test_task_close_cancel_keeps_ordinary_exit(struct fixture *fixture)
 	struct fplinux_ui_session_message snapshot =
 		query_tasks(fixture, launcher);
 
-	set_close_decision(fixture, app, "wait");
+	set_close_decision(fixture, app, FPLINUX_UI_SESSION_CLOSE_WAIT);
 	task_action(fixture, launcher, FPLINUX_UI_SESSION_CLOSE_TASK, TEST_APP,
 		    task_record(&snapshot, TEST_APP)->token);
 	struct fplinux_ui_session_message prepare = wait_message(
@@ -2549,14 +2598,15 @@ static void test_task_close_cancel_keeps_ordinary_exit(struct fixture *fixture)
 
 	acknowledge(fixture, launcher, &active);
 	acknowledge_close(fixture, app, prepare.serial);
-	answer_close(fixture, app, prepare.serial, "cancel");
+	answer_close(fixture, app, prepare.serial,
+		     FPLINUX_UI_SESSION_CLOSE_CANCEL);
 	CHECK(fplinux_session_focused_pid(fixture->session) == app->pid);
-	set_close_decision(fixture, app, "ready");
+	set_close_decision(fixture, app, FPLINUX_UI_SESSION_CLOSE_READY);
 	clear_messages(fixture, launcher);
 	send_type(fixture, app, FPLINUX_UI_SESSION_EXIT);
 	active = active_for(fixture, launcher, "");
 	CHECK(!active.tasks_view);
-	CHECK(!strcmp(active.value, "catalogue"));
+	CHECK(active.launcher_view == FPLINUX_UI_LAUNCHER_VIEW_CATALOGUE);
 	acknowledge(fixture, launcher, &active);
 	wait_reaped(fixture, app->pid);
 }
@@ -2571,7 +2621,7 @@ static void test_task_close_home_supersedes_return(struct fixture *fixture)
 	struct fplinux_ui_session_message snapshot =
 		query_tasks(fixture, launcher);
 
-	set_close_decision(fixture, app, "wait");
+	set_close_decision(fixture, app, FPLINUX_UI_SESSION_CLOSE_WAIT);
 	task_action(fixture, launcher, FPLINUX_UI_SESSION_CLOSE_TASK, TEST_APP,
 		    task_record(&snapshot, TEST_APP)->token);
 	struct fplinux_ui_session_message prepare = wait_message(
@@ -2586,7 +2636,8 @@ static void test_task_close_home_supersedes_return(struct fixture *fixture)
 	CHECK(!active.tasks_view);
 	/* Complete the pending close before Home's replacement frame arrives. */
 	clear_messages(fixture, launcher);
-	answer_close(fixture, app, prepare.serial, "ready");
+	answer_close(fixture, app, prepare.serial,
+		     FPLINUX_UI_SESSION_CLOSE_READY);
 	acknowledge(fixture, launcher, &active);
 	wait_reaped(fixture, app->pid);
 	/* A bare Home locks; returning to Tasks or the catalogue would not. */
@@ -2620,7 +2671,7 @@ static void test_task_close_fullscreen_restores_tasks(struct fixture *fixture)
 	struct fplinux_ui_session_message snapshot =
 		query_tasks(fixture, launcher);
 
-	set_close_decision(fixture, app, "wait");
+	set_close_decision(fixture, app, FPLINUX_UI_SESSION_CLOSE_WAIT);
 	task_action(fixture, launcher, FPLINUX_UI_SESSION_CLOSE_TASK, TEST_APP,
 		    task_record(&snapshot, TEST_APP)->token);
 	struct fplinux_ui_session_message prepare = wait_message(
@@ -2628,7 +2679,8 @@ static void test_task_close_fullscreen_restores_tasks(struct fixture *fixture)
 
 	wait_reaped(fixture, launcher->pid);
 	acknowledge_close(fixture, app, prepare.serial);
-	answer_close(fixture, app, prepare.serial, "ready");
+	answer_close(fixture, app, prepare.serial,
+		     FPLINUX_UI_SESSION_CLOSE_READY);
 	launcher = wait_peer(fixture, TEST_LAUNCHER);
 	authenticate(fixture, launcher, NULL);
 	send_type(fixture, launcher, FPLINUX_UI_SESSION_READY);
@@ -2636,7 +2688,8 @@ static void test_task_close_fullscreen_restores_tasks(struct fixture *fixture)
 					  fixture->width, fixture->height);
 	fplinux_session_frame(fixture->session, launcher->pid);
 	active = active_for(fixture, launcher, "");
-	CHECK(active.tasks_view && !strcmp(active.value, "home"));
+	CHECK(active.tasks_view &&
+	      active.launcher_view == FPLINUX_UI_LAUNCHER_VIEW_HOME);
 	acknowledge(fixture, launcher, &active);
 	wait_reaped(fixture, app->pid);
 }
@@ -2653,7 +2706,7 @@ test_task_close_new_activation_supersedes_return(struct fixture *fixture)
 	struct fplinux_ui_session_message snapshot =
 		query_tasks(fixture, launcher);
 
-	set_close_decision(fixture, app, "");
+	set_close_decision(fixture, app, FPLINUX_UI_SESSION_CLOSE_NONE);
 	task_action(fixture, launcher, FPLINUX_UI_SESSION_CLOSE_TASK, TEST_APP,
 		    task_record(&snapshot, TEST_APP)->token);
 	struct fplinux_ui_session_message prepare = wait_message(
@@ -2666,12 +2719,14 @@ test_task_close_new_activation_supersedes_return(struct fixture *fixture)
 		active_for(fixture, launcher, TEST_SETTINGS);
 
 	acknowledge(fixture, launcher, &active);
-	answer_close(fixture, app, prepare.serial, "ready");
+	answer_close(fixture, app, prepare.serial,
+		     FPLINUX_UI_SESSION_CLOSE_READY);
 	wait_reaped(fixture, app->pid);
 	clear_messages(fixture, launcher);
 	send_type(fixture, other, FPLINUX_UI_SESSION_EXIT);
 	active = active_for(fixture, launcher, "");
-	CHECK(!active.tasks_view && !strcmp(active.value, "catalogue"));
+	CHECK(!active.tasks_view &&
+	      active.launcher_view == FPLINUX_UI_LAUNCHER_VIEW_CATALOGUE);
 	acknowledge(fixture, launcher, &active);
 	wait_reaped(fixture, other->pid);
 }
@@ -2684,10 +2739,12 @@ static void test_task_view_red_returns_home(struct fixture *fixture)
 		.title = "Task snapshot",
 	};
 
-	select_launcher_view(fixture, launcher, "home", "grid");
+	select_launcher_view(fixture, launcher, FPLINUX_UI_LAUNCHER_VIEW_HOME,
+			     FPLINUX_UI_LAUNCHER_CATALOGUE_GRID);
 	set_tasks_view(fixture, launcher, true);
 	/* A catalogue refresh reports its selection while Tasks stays open. */
-	select_launcher_view(fixture, launcher, "home", "grid");
+	select_launcher_view(fixture, launcher, FPLINUX_UI_LAUNCHER_VIEW_HOME,
+			     FPLINUX_UI_LAUNCHER_CATALOGUE_GRID);
 	struct fplinux_ui_session_message snapshot =
 		query_tasks(fixture, launcher);
 
@@ -2696,8 +2753,8 @@ static void test_task_view_red_returns_home(struct fixture *fixture)
 	struct fplinux_ui_session_message active =
 		active_for(fixture, launcher, "");
 
-	CHECK(!strcmp(active.value, "home"));
-	CHECK(!strcmp(active.name, "grid"));
+	CHECK(active.launcher_view == FPLINUX_UI_LAUNCHER_VIEW_HOME);
+	CHECK(active.launcher_catalogue == FPLINUX_UI_LAUNCHER_CATALOGUE_GRID);
 	CHECK(!strcmp(active.selected_id, TEST_APP));
 	acknowledge(fixture, launcher, &active);
 	clear_messages(fixture, launcher);
@@ -2722,7 +2779,8 @@ static void test_task_view_closed_home_locks(struct fixture *fixture,
 {
 	struct peer *launcher = start_launcher(fixture);
 
-	select_launcher_view(fixture, launcher, "home", "grid");
+	select_launcher_view(fixture, launcher, FPLINUX_UI_LAUNCHER_VIEW_HOME,
+			     FPLINUX_UI_LAUNCHER_CATALOGUE_GRID);
 	if (opened)
 		set_tasks_view(fixture, launcher, true);
 	query_tasks(fixture, launcher);
@@ -2743,8 +2801,12 @@ static void test_task_view_closed_home_locks(struct fixture *fixture,
 static void test_task_view_restart_restores_base(struct fixture *fixture,
 						 bool catalogue)
 {
-	const char *view = catalogue ? "catalogue" : "home";
-	const char *presentation = catalogue ? "list" : "grid";
+	enum fplinux_ui_launcher_view view =
+		catalogue ? FPLINUX_UI_LAUNCHER_VIEW_CATALOGUE :
+			    FPLINUX_UI_LAUNCHER_VIEW_HOME;
+	enum fplinux_ui_launcher_catalogue presentation =
+		catalogue ? FPLINUX_UI_LAUNCHER_CATALOGUE_LIST :
+			    FPLINUX_UI_LAUNCHER_CATALOGUE_GRID;
 	struct peer *launcher = start_launcher(fixture);
 	struct command crash = { .type = COMMAND_CRASH };
 	struct fplinux_ui_session_message title = {
@@ -2759,8 +2821,8 @@ static void test_task_view_restart_restores_base(struct fixture *fixture,
 	struct fplinux_ui_session_message active =
 		active_for(fixture, launcher, "");
 
-	CHECK(!strcmp(active.value, view));
-	CHECK(!strcmp(active.name, presentation));
+	CHECK(active.launcher_view == view);
+	CHECK(active.launcher_catalogue == presentation);
 	CHECK(!strcmp(active.selected_id, TEST_APP));
 	acknowledge(fixture, launcher, &active);
 	send_command(launcher->fd, &crash);
@@ -2772,8 +2834,8 @@ static void test_task_view_restart_restores_base(struct fixture *fixture,
 					  fixture->width, fixture->height);
 	fplinux_session_frame(fixture->session, launcher->pid);
 	active = active_for(fixture, launcher, "");
-	CHECK(!strcmp(active.value, view));
-	CHECK(!strcmp(active.name, presentation));
+	CHECK(active.launcher_view == view);
+	CHECK(active.launcher_catalogue == presentation);
 	CHECK(!strcmp(active.selected_id, TEST_APP));
 	acknowledge(fixture, launcher, &active);
 	clear_messages(fixture, launcher);
@@ -2803,7 +2865,9 @@ test_task_view_close_preserves_activated_selection(struct fixture *fixture)
 		query_tasks(fixture, launcher);
 	uint32_t token = task_record(&snapshot, TEST_SETTINGS)->token;
 
-	select_launcher_view(fixture, launcher, "catalogue", "list");
+	select_launcher_view(fixture, launcher,
+			     FPLINUX_UI_LAUNCHER_VIEW_CATALOGUE,
+			     FPLINUX_UI_LAUNCHER_CATALOGUE_LIST);
 	set_tasks_view(fixture, launcher, true);
 	task_action(fixture, launcher, FPLINUX_UI_SESSION_ACTIVATE,
 		    TEST_SETTINGS, token);
@@ -2817,23 +2881,31 @@ test_task_view_close_preserves_activated_selection(struct fixture *fixture)
 	clear_messages(fixture, launcher);
 	send_type(fixture, app, FPLINUX_UI_SESSION_EXIT);
 	active = active_for(fixture, launcher, "");
-	CHECK(!strcmp(active.value, "catalogue"));
-	CHECK(!strcmp(active.name, "list"));
+	CHECK(active.launcher_view == FPLINUX_UI_LAUNCHER_VIEW_CATALOGUE);
+	CHECK(active.launcher_catalogue == FPLINUX_UI_LAUNCHER_CATALOGUE_LIST);
 	CHECK(!strcmp(active.selected_id, TEST_SETTINGS));
 	acknowledge(fixture, launcher, &active);
 	CHECK(fplinux_session_focused_pid(fixture->session) == launcher->pid);
 }
 
-static void setting(struct fixture *fixture, struct peer *settings,
-		    const char *name, const char *value)
+static void send_setting(struct fixture *fixture, struct peer *peer,
+			 struct fplinux_ui_setting setting)
 {
 	struct fplinux_ui_session_message message = {
-		.type = FPLINUX_UI_SESSION_SETTING
+		.type = FPLINUX_UI_SESSION_SETTING,
+		.setting = setting,
 	};
 
-	strcpy(message.name, name);
-	strcpy(message.value, value);
-	issue(fixture, settings, &message);
+	issue(fixture, peer, &message);
+}
+
+static void query_setting(struct fixture *fixture, struct peer *peer,
+			  enum fplinux_ui_setting_kind kind)
+{
+	send_setting(fixture, peer,
+		     (struct fplinux_ui_setting){
+			     .kind = kind,
+			     .operation = FPLINUX_UI_SETTING_GET });
 }
 
 static void write_soundfont_header(const char *path)
@@ -2897,16 +2969,22 @@ static void test_midi_soundfont_changes(struct fixture *fixture)
 
 	CHECK(!settings->soundfont[0] && !launcher->soundfont[0]);
 	for (size_t i = 0; i < 3; ++i) {
-		setting(fixture, settings, "midi_soundfont", invalid_ids[i]);
-		reply = wait_message(fixture, settings,
+		struct fplinux_ui_setting setting = {
+			.kind = FPLINUX_UI_SETTING_MIDI_SOUNDFONT,
+			.operation = FPLINUX_UI_SETTING_SET,
+		};
+
+		strcpy(setting.value.soundfont, invalid_ids[i]);
+		send_setting(fixture, settings, setting);
+		reply = wait_setting(fixture, settings,
 				     FPLINUX_UI_SESSION_ERROR,
-				     "midi_soundfont");
+				     FPLINUX_UI_SETTING_MIDI_SOUNDFONT);
 		CHECK(!reply.applied && !strcmp(reply.reason, "invalid-value"));
 	}
-	setting(fixture, settings, "midi_soundfont", "");
-	reply = wait_message(fixture, settings, FPLINUX_UI_SESSION_SETTING,
-			     "midi_soundfont");
-	CHECK(!strcmp(reply.value, "default"));
+	query_setting(fixture, settings, FPLINUX_UI_SETTING_MIDI_SOUNDFONT);
+	reply = wait_setting(fixture, settings, FPLINUX_UI_SESSION_SETTING,
+			     FPLINUX_UI_SETTING_MIDI_SOUNDFONT);
+	CHECK(!strcmp(reply.setting.value.soundfont, "default"));
 	expect_file(fixture->settings, default_settings);
 	for (size_t i = 0; i < 3; ++i) {
 		const struct fplinux_session_process *process =
@@ -2924,8 +3002,8 @@ static void test_midi_soundfont_changes(struct fixture *fixture)
 	};
 
 	issue(fixture, settings, &selection);
-	reply = wait_message(fixture, settings, FPLINUX_UI_SESSION_SETTING,
-			     "midi_soundfont");
+	reply = wait_setting(fixture, settings, FPLINUX_UI_SESSION_SETTING,
+			     FPLINUX_UI_SETTING_MIDI_SOUNDFONT);
 	CHECK(reply.applied && !reply.serial &&
 	      reply.setting.kind == FPLINUX_UI_SETTING_MIDI_SOUNDFONT &&
 	      reply.setting.operation == FPLINUX_UI_SETTING_RESULT &&
@@ -2943,9 +3021,13 @@ static void test_midi_soundfont_changes(struct fixture *fixture)
 
 	CHECK(!strcmp(music->soundfont, selected));
 	show_retained_app(fixture, launcher, settings);
-	setting(fixture, settings, "midi_soundfont", "fm1gm");
-	wait_message(fixture, settings, FPLINUX_UI_SESSION_SETTING,
-		     "midi_soundfont");
+	send_setting(fixture, settings,
+		     (struct fplinux_ui_setting){
+			     .kind = FPLINUX_UI_SETTING_MIDI_SOUNDFONT,
+			     .operation = FPLINUX_UI_SETTING_SET,
+			     .value.soundfont = "fm1gm" });
+	wait_setting(fixture, settings, FPLINUX_UI_SESSION_SETTING,
+		     FPLINUX_UI_SETTING_MIDI_SOUNDFONT);
 	const struct fplinux_session_process *process =
 		fplinux_session_find_process(fixture->session, music->pid);
 
@@ -2955,10 +3037,15 @@ static void test_midi_soundfont_changes(struct fixture *fixture)
 
 	CHECK(!strcmp(java->soundfont, alias));
 	show_retained_app(fixture, launcher, settings);
-	setting(fixture, settings, "midi_soundfont", "default");
-	reply = wait_message(fixture, settings, FPLINUX_UI_SESSION_SETTING,
-			     "midi_soundfont");
-	CHECK(reply.applied && !strcmp(reply.value, "default"));
+	send_setting(fixture, settings,
+		     (struct fplinux_ui_setting){
+			     .kind = FPLINUX_UI_SETTING_MIDI_SOUNDFONT,
+			     .operation = FPLINUX_UI_SETTING_SET,
+			     .value.soundfont = "default" });
+	reply = wait_setting(fixture, settings, FPLINUX_UI_SESSION_SETTING,
+			     FPLINUX_UI_SETTING_MIDI_SOUNDFONT);
+	CHECK(reply.applied &&
+	      !strcmp(reply.setting.value.soundfont, "default"));
 	for (size_t i = 0; i < 2; ++i) {
 		struct peer *consumer = i ? java : music;
 
@@ -3004,18 +3091,27 @@ static void test_task_titles_follow_applied_locale(struct fixture *fixture,
 		issue(fixture, settings, &title);
 	}
 	/* Queries, rejected values and keypad language do not rename the task. */
-	setting(fixture, settings, "locale", "");
-	struct fplinux_ui_session_message reply = wait_message(
-		fixture, settings, FPLINUX_UI_SESSION_SETTING, "locale");
+	query_setting(fixture, settings, FPLINUX_UI_SETTING_LOCALE);
+	struct fplinux_ui_session_message reply =
+		wait_setting(fixture, settings, FPLINUX_UI_SESSION_SETTING,
+			     FPLINUX_UI_SETTING_LOCALE);
 
-	CHECK(!reply.serial && !strcmp(reply.value, "ru"));
-	setting(fixture, settings, "locale", "xx");
-	reply = wait_message(fixture, settings, FPLINUX_UI_SESSION_ERROR,
-			     "locale");
+	CHECK(!reply.serial && !strcmp(reply.setting.value.locale, "ru"));
+	send_setting(fixture, settings,
+		     (struct fplinux_ui_setting){
+			     .kind = FPLINUX_UI_SETTING_LOCALE,
+			     .operation = FPLINUX_UI_SETTING_SET,
+			     .value.locale = "xx" });
+	reply = wait_setting(fixture, settings, FPLINUX_UI_SESSION_ERROR,
+			     FPLINUX_UI_SETTING_LOCALE);
 	CHECK(!reply.applied && !reply.serial);
-	setting(fixture, settings, "input_locale", "ru");
-	wait_message(fixture, settings, FPLINUX_UI_SESSION_SETTING,
-		     "input_locale");
+	send_setting(fixture, settings,
+		     (struct fplinux_ui_setting){
+			     .kind = FPLINUX_UI_SETTING_INPUT_LOCALE,
+			     .operation = FPLINUX_UI_SETTING_SET,
+			     .value.locale = "ru" });
+	wait_setting(fixture, settings, FPLINUX_UI_SESSION_SETTING,
+		     FPLINUX_UI_SETTING_INPUT_LOCALE);
 	snapshot = query_tasks(fixture, launcher);
 	CHECK(!strcmp(task_record(&snapshot, TEST_SETTINGS)->title,
 		      "Настройки"));
@@ -3024,17 +3120,22 @@ static void test_task_titles_follow_applied_locale(struct fixture *fixture,
 		const char *title = explicit_title || i ? "Настройки" :
 							  "Settings";
 		pid_t old_launcher = launcher->pid;
+		struct fplinux_ui_setting setting = {
+			.kind = FPLINUX_UI_SETTING_LOCALE,
+			.operation = FPLINUX_UI_SETTING_SET,
+		};
 
 		clear_messages(fixture, settings);
 		sync_fails = save_failed;
-		setting(fixture, settings, "locale", locale);
-		reply = wait_message(fixture, settings,
+		strcpy(setting.value.locale, locale);
+		send_setting(fixture, settings, setting);
+		reply = wait_setting(fixture, settings,
 				     save_failed ? FPLINUX_UI_SESSION_ERROR :
 						   FPLINUX_UI_SESSION_SETTING,
-				     "locale");
+				     FPLINUX_UI_SETTING_LOCALE);
 		sync_fails = false;
 		CHECK(reply.applied && reply.serial);
-		CHECK(!strcmp(reply.value, locale));
+		CHECK(!strcmp(reply.setting.value.locale, locale));
 		if (save_failed)
 			CHECK(!strcmp(reply.reason, "save-failed"));
 		wait_reaped(fixture, old_launcher);
@@ -3108,9 +3209,13 @@ static void test_key_routing(struct fixture *fixture)
 	CHECK(fplinux_session_focused_pid(fixture->session) == app->pid);
 	struct peer *settings = show_app(fixture, launcher, TEST_SETTINGS);
 
-	setting(fixture, settings, "auto_lock_seconds", "0");
-	wait_message(fixture, settings, FPLINUX_UI_SESSION_SETTING,
-		     "auto_lock_seconds");
+	send_setting(fixture, settings,
+		     (struct fplinux_ui_setting){
+			     .kind = FPLINUX_UI_SETTING_AUTO_LOCK,
+			     .operation = FPLINUX_UI_SETTING_SET,
+			     .value.seconds = 0 });
+	wait_setting(fixture, settings, FPLINUX_UI_SESSION_SETTING,
+		     FPLINUX_UI_SETTING_AUTO_LOCK);
 	clear_messages(fixture, launcher);
 	clear_messages(fixture, settings);
 	fixture->now_ms += 30000;
@@ -3141,18 +3246,22 @@ static void test_input_language(struct fixture *fixture, bool save_fails)
 	clear_messages(fixture, app);
 	clear_messages(fixture, launcher);
 	sync_fails = save_fails;
-	setting(fixture, settings, "input_locale", "ru");
+	send_setting(fixture, settings,
+		     (struct fplinux_ui_setting){
+			     .kind = FPLINUX_UI_SETTING_INPUT_LOCALE,
+			     .operation = FPLINUX_UI_SETTING_SET,
+			     .value.locale = "ru" });
 	struct fplinux_ui_session_message reply =
-		wait_message(fixture, settings,
+		wait_setting(fixture, settings,
 			     save_fails ? FPLINUX_UI_SESSION_ERROR :
 					  FPLINUX_UI_SESSION_SETTING,
-			     "input_locale");
+			     FPLINUX_UI_SETTING_INPUT_LOCALE);
 
-	CHECK(!strcmp(reply.value, "ru"));
+	CHECK(!strcmp(reply.setting.value.locale, "ru"));
 	CHECK(!strcmp(reply.reason, save_fails ? "save-failed" : ""));
-	reply = wait_message(fixture, app, FPLINUX_UI_SESSION_SETTING,
-			     "input_locale");
-	CHECK(!strcmp(reply.value, "ru"));
+	reply = wait_setting(fixture, app, FPLINUX_UI_SESSION_SETTING,
+			     FPLINUX_UI_SETTING_INPUT_LOCALE);
+	CHECK(!strcmp(reply.setting.value.locale, "ru"));
 	struct fplinux_ui_session_message active =
 		active_for(fixture, launcher, TEST_SETTINGS);
 
@@ -3161,14 +3270,14 @@ static void test_input_language(struct fixture *fixture, bool save_fails)
 	acknowledge(fixture, launcher, &active);
 	CHECK(fplinux_session_find_process(fixture->session, app_pid));
 	CHECK(fplinux_session_find_process(fixture->session, launcher_pid));
-	setting(fixture, settings, "locale", "");
-	reply = wait_message(fixture, settings, FPLINUX_UI_SESSION_SETTING,
-			     "locale");
-	CHECK(!strcmp(reply.value, "en"));
-	setting(fixture, settings, "input_locale", "");
-	reply = wait_message(fixture, settings, FPLINUX_UI_SESSION_SETTING,
-			     "input_locale");
-	CHECK(!strcmp(reply.value, "ru"));
+	query_setting(fixture, settings, FPLINUX_UI_SETTING_LOCALE);
+	reply = wait_setting(fixture, settings, FPLINUX_UI_SESSION_SETTING,
+			     FPLINUX_UI_SETTING_LOCALE);
+	CHECK(!strcmp(reply.setting.value.locale, "en"));
+	query_setting(fixture, settings, FPLINUX_UI_SETTING_INPUT_LOCALE);
+	reply = wait_setting(fixture, settings, FPLINUX_UI_SESSION_SETTING,
+			     FPLINUX_UI_SETTING_INPUT_LOCALE);
+	CHECK(!strcmp(reply.setting.value.locale, "ru"));
 	if (save_fails)
 		expect_file(
 			fixture->settings,
@@ -3196,35 +3305,47 @@ static void test_settings_retries_latest_value(struct fixture *fixture,
 	struct peer *settings = show_app(fixture, launcher, TEST_SETTINGS);
 
 	sync_fails = true;
-	setting(fixture, settings, "auto_lock_seconds", "5");
+	send_setting(fixture, settings,
+		     (struct fplinux_ui_setting){
+			     .kind = FPLINUX_UI_SETTING_AUTO_LOCK,
+			     .operation = FPLINUX_UI_SETTING_SET,
+			     .value.seconds = 5 });
 	struct fplinux_ui_session_message reply =
-		wait_message(fixture, settings, FPLINUX_UI_SESSION_ERROR,
-			     "auto_lock_seconds");
+		wait_setting(fixture, settings, FPLINUX_UI_SESSION_ERROR,
+			     FPLINUX_UI_SETTING_AUTO_LOCK);
 
-	CHECK(reply.applied && !strcmp(reply.value, "5"));
+	CHECK(reply.applied && reply.setting.value.seconds == 5);
 	CHECK(reply.storage_state == FPLINUX_STORAGE_UNPUBLISHED &&
 	      reply.storage_error == EIO);
-	setting(fixture, settings, "auto_lock_seconds", "30");
-	reply = wait_message(fixture, settings, FPLINUX_UI_SESSION_ERROR,
-			     "auto_lock_seconds");
-	CHECK(reply.applied && !strcmp(reply.value, "30"));
+	send_setting(fixture, settings,
+		     (struct fplinux_ui_setting){
+			     .kind = FPLINUX_UI_SETTING_AUTO_LOCK,
+			     .operation = FPLINUX_UI_SETTING_SET,
+			     .value.seconds = 30 });
+	reply = wait_setting(fixture, settings, FPLINUX_UI_SESSION_ERROR,
+			     FPLINUX_UI_SETTING_AUTO_LOCK);
+	CHECK(reply.applied && reply.setting.value.seconds == 30);
 	fixture->now_ms += 2000;
 	pump(fixture, 4);
 	sync_fails = false;
 	if (explicit) {
-		setting(fixture, settings, "auto_lock_seconds", "30");
-		reply = wait_message(fixture, settings,
+		send_setting(fixture, settings,
+			     (struct fplinux_ui_setting){
+				     .kind = FPLINUX_UI_SETTING_AUTO_LOCK,
+				     .operation = FPLINUX_UI_SETTING_SET,
+				     .value.seconds = 30 });
+		reply = wait_setting(fixture, settings,
 				     FPLINUX_UI_SESSION_SETTING,
-				     "auto_lock_seconds");
+				     FPLINUX_UI_SETTING_AUTO_LOCK);
 	} else {
 		fixture->now_ms += 4000;
 		pump(fixture, 4);
-		setting(fixture, settings, "auto_lock_seconds", "");
-		reply = wait_message(fixture, settings,
+		query_setting(fixture, settings, FPLINUX_UI_SETTING_AUTO_LOCK);
+		reply = wait_setting(fixture, settings,
 				     FPLINUX_UI_SESSION_SETTING,
-				     "auto_lock_seconds");
+				     FPLINUX_UI_SETTING_AUTO_LOCK);
 	}
-	CHECK(reply.applied && !strcmp(reply.value, "30"));
+	CHECK(reply.applied && reply.setting.value.seconds == 30);
 	CHECK(reply.storage_state == FPLINUX_STORAGE_DURABLE &&
 	      !reply.storage_error);
 	expect_file(fixture->settings,
@@ -3237,12 +3358,16 @@ static void test_brightness_restore(struct fixture *fixture, bool crash)
 	struct peer *launcher = start_launcher(fixture);
 	struct peer *settings = show_app(fixture, launcher, TEST_SETTINGS);
 
-	setting(fixture, settings, "brightness_preview", "3");
+	send_setting(fixture, settings,
+		     (struct fplinux_ui_setting){
+			     .kind = FPLINUX_UI_SETTING_BRIGHTNESS_PREVIEW,
+			     .operation = FPLINUX_UI_SETTING_PREVIEW,
+			     .value.level = 3 });
 	struct fplinux_ui_session_message reply =
-		wait_message(fixture, settings, FPLINUX_UI_SESSION_SETTING,
-			     "brightness_preview");
+		wait_setting(fixture, settings, FPLINUX_UI_SESSION_SETTING,
+			     FPLINUX_UI_SETTING_BRIGHTNESS_PREVIEW);
 
-	CHECK(!strcmp(reply.value, "3"));
+	CHECK(reply.setting.value.level == 3);
 	expect_file(fixture->brightness_level, "3\n");
 	expect_file(fixture->settings,
 		    "screen_off_seconds=30\nauto_lock_seconds=off\n"
@@ -3274,12 +3399,12 @@ static void set_quick_settings_view(struct fixture *fixture,
 }
 
 static void expect_setting_refused(struct fixture *fixture,
-				   struct peer *launcher, const char *name,
-				   const char *value)
+				   struct peer *launcher,
+				   struct fplinux_ui_setting setting)
 {
-	setting(fixture, launcher, name, value);
-	struct fplinux_ui_session_message reply =
-		wait_message(fixture, launcher, FPLINUX_UI_SESSION_ERROR, name);
+	send_setting(fixture, launcher, setting);
+	struct fplinux_ui_session_message reply = wait_setting(
+		fixture, launcher, FPLINUX_UI_SESSION_ERROR, setting.kind);
 
 	CHECK(!strcmp(reply.reason, "not-foreground") && !reply.applied);
 }
@@ -3294,16 +3419,21 @@ static void preview_in_quick_settings(struct fixture *fixture,
 {
 	struct fplinux_ui_session_message reply;
 
-	select_launcher_view(fixture, launcher, "home", "grid");
+	select_launcher_view(fixture, launcher, FPLINUX_UI_LAUNCHER_VIEW_HOME,
+			     FPLINUX_UI_LAUNCHER_CATALOGUE_GRID);
 	set_quick_settings_view(fixture, launcher, true);
-	setting(fixture, launcher, "brightness", "");
-	reply = wait_message(fixture, launcher, FPLINUX_UI_SESSION_SETTING,
-			     "brightness");
-	CHECK(!strcmp(reply.value, "7"));
-	setting(fixture, launcher, "brightness_preview", "3");
-	reply = wait_message(fixture, launcher, FPLINUX_UI_SESSION_SETTING,
-			     "brightness_preview");
-	CHECK(!strcmp(reply.value, "3"));
+	query_setting(fixture, launcher, FPLINUX_UI_SETTING_BRIGHTNESS);
+	reply = wait_setting(fixture, launcher, FPLINUX_UI_SESSION_SETTING,
+			     FPLINUX_UI_SETTING_BRIGHTNESS);
+	CHECK(reply.setting.value.level == 7);
+	send_setting(fixture, launcher,
+		     (struct fplinux_ui_setting){
+			     .kind = FPLINUX_UI_SETTING_BRIGHTNESS_PREVIEW,
+			     .operation = FPLINUX_UI_SETTING_PREVIEW,
+			     .value.level = 3 });
+	reply = wait_setting(fixture, launcher, FPLINUX_UI_SESSION_SETTING,
+			     FPLINUX_UI_SETTING_BRIGHTNESS_PREVIEW);
+	CHECK(reply.setting.value.level == 3);
 	expect_file(fixture->brightness_level, "3\n");
 }
 
@@ -3321,9 +3451,13 @@ static void test_quick_settings_preview_ends(struct fixture *fixture,
 		struct peer *settings =
 			show_app(fixture, launcher, TEST_SETTINGS);
 
-		setting(fixture, settings, "auto_lock_seconds", "0");
-		wait_message(fixture, settings, FPLINUX_UI_SESSION_SETTING,
-			     "auto_lock_seconds");
+		send_setting(fixture, settings,
+			     (struct fplinux_ui_setting){
+				     .kind = FPLINUX_UI_SETTING_AUTO_LOCK,
+				     .operation = FPLINUX_UI_SETTING_SET,
+				     .value.seconds = 0 });
+		wait_setting(fixture, settings, FPLINUX_UI_SESSION_SETTING,
+			     FPLINUX_UI_SETTING_AUTO_LOCK);
 		return_home(fixture, launcher);
 		stored = "screen_off_seconds=30\nauto_lock_seconds=0\n"
 			 "locale=en\ninput_locale=en\ntheme=light\n"
@@ -3331,12 +3465,16 @@ static void test_quick_settings_preview_ends(struct fixture *fixture,
 	}
 	preview_in_quick_settings(fixture, launcher);
 	if (!strcmp(exit, "save")) {
-		setting(fixture, launcher, "brightness", "4");
-		struct fplinux_ui_session_message reply =
-			wait_message(fixture, launcher,
-				     FPLINUX_UI_SESSION_SETTING, "brightness");
+		send_setting(fixture, launcher,
+			     (struct fplinux_ui_setting){
+				     .kind = FPLINUX_UI_SETTING_BRIGHTNESS,
+				     .operation = FPLINUX_UI_SETTING_SET,
+				     .value.level = 4 });
+		struct fplinux_ui_session_message reply = wait_setting(
+			fixture, launcher, FPLINUX_UI_SESSION_SETTING,
+			FPLINUX_UI_SETTING_BRIGHTNESS);
 
-		CHECK(!strcmp(reply.value, "4") && reply.applied &&
+		CHECK(reply.setting.value.level == 4 && reply.applied &&
 		      reply.storage_state == FPLINUX_STORAGE_DURABLE);
 		set_quick_settings_view(fixture, launcher, false);
 		expect_file(fixture->brightness_level, "4\n");
@@ -3370,8 +3508,12 @@ static void test_quick_settings_preview_ends(struct fixture *fixture,
 	expect_file(fixture->settings, stored);
 	if (!strcmp(exit, "red") || !strcmp(exit, "close"))
 		/* The ended view has no authority left to change the level. */
-		expect_setting_refused(fixture, launcher, "brightness_preview",
-				       "2");
+		expect_setting_refused(
+			fixture, launcher,
+			(struct fplinux_ui_setting){
+				.kind = FPLINUX_UI_SETTING_BRIGHTNESS_PREVIEW,
+				.operation = FPLINUX_UI_SETTING_PREVIEW,
+				.value.level = 2 });
 	expect_file(fixture->brightness_level, "7\n");
 }
 
@@ -3381,29 +3523,63 @@ static void test_quick_settings_authority(struct fixture *fixture)
 	struct peer *launcher = start_launcher(fixture);
 	struct fplinux_ui_session_message ignored;
 
-	select_launcher_view(fixture, launcher, "home", "grid");
-	expect_setting_refused(fixture, launcher, "brightness_preview", "3");
-	expect_setting_refused(fixture, launcher, "brightness", "4");
-	select_launcher_view(fixture, launcher, "catalogue", "grid");
+	select_launcher_view(fixture, launcher, FPLINUX_UI_LAUNCHER_VIEW_HOME,
+			     FPLINUX_UI_LAUNCHER_CATALOGUE_GRID);
+	expect_setting_refused(
+		fixture, launcher,
+		(struct fplinux_ui_setting){
+			.kind = FPLINUX_UI_SETTING_BRIGHTNESS_PREVIEW,
+			.operation = FPLINUX_UI_SETTING_PREVIEW,
+			.value.level = 3 });
+	expect_setting_refused(fixture, launcher,
+			       (struct fplinux_ui_setting){
+				       .kind = FPLINUX_UI_SETTING_BRIGHTNESS,
+				       .operation = FPLINUX_UI_SETTING_SET,
+				       .value.level = 4 });
+	select_launcher_view(fixture, launcher,
+			     FPLINUX_UI_LAUNCHER_VIEW_CATALOGUE,
+			     FPLINUX_UI_LAUNCHER_CATALOGUE_GRID);
 	set_quick_settings_view(fixture, launcher, true);
-	expect_setting_refused(fixture, launcher, "brightness_preview", "3");
+	expect_setting_refused(
+		fixture, launcher,
+		(struct fplinux_ui_setting){
+			.kind = FPLINUX_UI_SETTING_BRIGHTNESS_PREVIEW,
+			.operation = FPLINUX_UI_SETTING_PREVIEW,
+			.value.level = 3 });
 	set_quick_settings_view(fixture, launcher, false);
 
 	struct peer *app = show_app(fixture, launcher, TEST_APP);
 
 	set_quick_settings_view(fixture, launcher, true);
-	expect_setting_refused(fixture, launcher, "brightness_preview", "3");
-	expect_setting_refused(fixture, launcher, "brightness", "4");
+	expect_setting_refused(
+		fixture, launcher,
+		(struct fplinux_ui_setting){
+			.kind = FPLINUX_UI_SETTING_BRIGHTNESS_PREVIEW,
+			.operation = FPLINUX_UI_SETTING_PREVIEW,
+			.value.level = 3 });
+	expect_setting_refused(fixture, launcher,
+			       (struct fplinux_ui_setting){
+				       .kind = FPLINUX_UI_SETTING_BRIGHTNESS,
+				       .operation = FPLINUX_UI_SETTING_SET,
+				       .value.level = 4 });
 	expect_file(fixture->brightness_level, "7\n");
 	/* Quick settings gives an ordinary application no authority. */
-	setting(fixture, app, "brightness_preview", "3");
+	send_setting(fixture, app,
+		     (struct fplinux_ui_setting){
+			     .kind = FPLINUX_UI_SETTING_BRIGHTNESS_PREVIEW,
+			     .operation = FPLINUX_UI_SETTING_PREVIEW,
+			     .value.level = 3 });
 	wait_reaped(fixture, app->pid);
 	CHECK(!take_message(app, FPLINUX_UI_SESSION_SETTING, NULL, &ignored));
 	expect_file(fixture->brightness_level, "7\n");
 
 	return_home(fixture, launcher);
 	set_quick_settings_view(fixture, launcher, true);
-	setting(fixture, launcher, "theme", "dark");
+	send_setting(fixture, launcher,
+		     (struct fplinux_ui_setting){
+			     .kind = FPLINUX_UI_SETTING_THEME,
+			     .operation = FPLINUX_UI_SETTING_SET,
+			     .value.theme = FPLINUX_UI_SESSION_THEME_DARK });
 	wait_reaped(fixture, launcher->pid);
 	CHECK(!take_message(launcher, FPLINUX_UI_SESSION_SETTING, NULL,
 			    &ignored));
@@ -3533,8 +3709,9 @@ static void test_levels_coalesced_steps_follow_ack(struct fixture *fixture)
 	struct fplinux_ui_session_message step = {
 		.type = FPLINUX_UI_SESSION_SETTING,
 		.serial = 501,
-		.name = "media_volume_step",
-		.value = "-1",
+		.setting = { .kind = FPLINUX_UI_SETTING_MEDIA_VOLUME_STEP,
+			     .operation = FPLINUX_UI_SETTING_STEP,
+			     .value.step = -1 },
 	};
 	struct fplinux_ui_session_message response;
 
@@ -3547,8 +3724,8 @@ static void test_levels_coalesced_steps_follow_ack(struct fixture *fixture)
 	      indicator(fixture).level.value == 10);
 	step.serial = 502;
 	issue(fixture, app, &step);
-	response = wait_message(fixture, app, FPLINUX_UI_SESSION_ERROR,
-				"media_volume_step");
+	response = wait_setting(fixture, app, FPLINUX_UI_SESSION_ERROR,
+				FPLINUX_UI_SETTING_MEDIA_VOLUME_STEP);
 	CHECK(response.serial == 501 && !response.applied &&
 	      !strcmp(response.reason, "superseded"));
 	volume_gesture(fixture, false, KEY_VOLUMEDOWN);
@@ -3559,13 +3736,13 @@ static void test_levels_coalesced_steps_follow_ack(struct fixture *fixture)
 	expect_media_level(latest_levels(fixture, app), 9, true);
 	CHECK(indicator(fixture).level.value == 9 &&
 	      indicator(fixture).level.pending);
-	CHECK(!take_message(app, FPLINUX_UI_SESSION_SETTING,
-			    "media_volume_step", &response));
+	CHECK(!take_setting(app, FPLINUX_UI_SESSION_SETTING,
+			    FPLINUX_UI_SETTING_MEDIA_VOLUME_STEP, &response));
 	acknowledge_audio(fixture);
-	response = wait_message(fixture, app, FPLINUX_UI_SESSION_SETTING,
-				"media_volume_step");
+	response = wait_setting(fixture, app, FPLINUX_UI_SESSION_SETTING,
+				FPLINUX_UI_SETTING_MEDIA_VOLUME_STEP);
 	CHECK(response.serial == 502 && response.applied &&
-	      !strcmp(response.value, "7") && !response.storage_error);
+	      response.setting.value.level == 7 && !response.storage_error);
 	expect_media_level(latest_levels(fixture, app), 7, false);
 	CHECK(indicator(fixture).level.value == 7 &&
 	      fplinux_session_focused_pid(fixture->session) == app->pid);
@@ -3627,35 +3804,39 @@ static void test_levels_steps_preserve_editor_save(struct fixture *fixture)
 	struct fplinux_ui_session_message request = {
 		.type = FPLINUX_UI_SESSION_SETTING,
 		.serial = 521,
-		.name = "volume",
-		.value = "7",
+		.setting = { .kind = FPLINUX_UI_SETTING_VOLUME,
+			     .operation = FPLINUX_UI_SETTING_SET,
+			     .value.level = 7 },
 	};
 	struct fplinux_ui_session_message response;
 
 	fixture->hold_audio_ack = true;
 	issue(fixture, settings, &request);
 	request.serial = 522;
-	strcpy(request.name, "media_volume_step");
-	strcpy(request.value, "-1");
+	request.setting = (struct fplinux_ui_setting){
+		.kind = FPLINUX_UI_SETTING_MEDIA_VOLUME_STEP,
+		.operation = FPLINUX_UI_SETTING_STEP,
+		.value.step = -1
+	};
 	issue(fixture, settings, &request);
 	request.serial = 523;
 	issue(fixture, settings, &request);
-	response = wait_message(fixture, settings, FPLINUX_UI_SESSION_ERROR,
-				"media_volume_step");
+	response = wait_setting(fixture, settings, FPLINUX_UI_SESSION_ERROR,
+				FPLINUX_UI_SETTING_MEDIA_VOLUME_STEP);
 	CHECK(response.serial == 522 && !strcmp(response.reason, "superseded"));
 	volume_gesture(fixture, false, KEY_VOLUMEDOWN);
 	CHECK(audio_ack_is(fixture, FPLINUX_AUDIO_MEDIA, 7));
 	acknowledge_audio_with_next(fixture, true);
-	response = wait_message(fixture, settings, FPLINUX_UI_SESSION_SETTING,
-				"volume");
+	response = wait_setting(fixture, settings, FPLINUX_UI_SESSION_SETTING,
+				FPLINUX_UI_SETTING_VOLUME);
 	CHECK(response.serial == 521 && response.applied &&
-	      !strcmp(response.value, "7"));
+	      response.setting.value.level == 7);
 	CHECK(audio_ack_is(fixture, FPLINUX_AUDIO_MEDIA, 4));
 	acknowledge_audio(fixture);
-	response = wait_message(fixture, settings, FPLINUX_UI_SESSION_SETTING,
-				"media_volume_step");
+	response = wait_setting(fixture, settings, FPLINUX_UI_SESSION_SETTING,
+				FPLINUX_UI_SETTING_MEDIA_VOLUME_STEP);
 	CHECK(response.serial == 523 && response.applied &&
-	      !strcmp(response.value, "4"));
+	      response.setting.value.level == 4);
 	expect_saved_volume(fixture, "4");
 }
 
@@ -3666,18 +3847,20 @@ static void test_levels_applied_save_failure(struct fixture *fixture)
 	struct fplinux_ui_session_message step = {
 		.type = FPLINUX_UI_SESSION_SETTING,
 		.serial = 511,
-		.name = "media_volume_step",
-		.value = "-1",
+		.setting = { .kind = FPLINUX_UI_SETTING_MEDIA_VOLUME_STEP,
+			     .operation = FPLINUX_UI_SETTING_STEP,
+			     .value.step = -1 },
 	};
 	struct fplinux_ui_session_message response;
 
 	directory_sync_fails = true;
 	issue(fixture, app, &step);
-	response = wait_message(fixture, app, FPLINUX_UI_SESSION_ERROR,
-				"media_volume_step");
+	response = wait_setting(fixture, app, FPLINUX_UI_SESSION_ERROR,
+				FPLINUX_UI_SETTING_MEDIA_VOLUME_STEP);
 	CHECK(response.serial == 511 && response.applied &&
 	      response.storage_state == FPLINUX_STORAGE_PUBLISHED_UNSYNCED &&
-	      response.storage_error == EIO && !strcmp(response.value, "9"));
+	      response.storage_error == EIO &&
+	      response.setting.value.level == 9);
 	CHECK(indicator(fixture).visible && indicator(fixture).warning &&
 	      indicator(fixture).level.value == 9 &&
 	      fixture->audio_volume == 9);
@@ -3811,16 +3994,24 @@ static void test_levels_inline_and_sleep_are_silent(struct fixture *fixture)
 	struct peer *settings = show_app(fixture, launcher, TEST_SETTINGS);
 
 	clear_messages(fixture, settings);
-	setting(fixture, settings, "volume_preview", "7");
-	wait_message(fixture, settings, FPLINUX_UI_SESSION_SETTING,
-		     "volume_preview");
+	send_setting(fixture, settings,
+		     (struct fplinux_ui_setting){
+			     .kind = FPLINUX_UI_SETTING_VOLUME_PREVIEW,
+			     .operation = FPLINUX_UI_SETTING_PREVIEW,
+			     .value.level = 7 });
+	wait_setting(fixture, settings, FPLINUX_UI_SESSION_SETTING,
+		     FPLINUX_UI_SETTING_VOLUME_PREVIEW);
 	expect_media_level(latest_levels(fixture, settings), 7, false);
 	CHECK(!indicator(fixture).visible);
 	volume_gesture(fixture, false, KEY_VOLUMEDOWN);
 	CHECK(indicator(fixture).visible &&
 	      indicator(fixture).level.value == 6);
-	setting(fixture, settings, "volume_preview", "");
-	wait_message(fixture, settings, FPLINUX_UI_SESSION_SETTING, "volume");
+	send_setting(fixture, settings,
+		     (struct fplinux_ui_setting){
+			     .kind = FPLINUX_UI_SETTING_VOLUME_PREVIEW,
+			     .operation = FPLINUX_UI_SETTING_CANCEL });
+	wait_setting(fixture, settings, FPLINUX_UI_SESSION_SETTING,
+		     FPLINUX_UI_SETTING_VOLUME);
 	CHECK(indicator(fixture).visible &&
 	      indicator(fixture).level.value == 10);
 	fixture->now_ms += 1500;
@@ -3891,12 +4082,12 @@ static void test_volume_keys_pending(struct fixture *fixture)
 	expect_file(fixture->settings,
 		    "screen_off_seconds=30\nauto_lock_seconds=0\n"
 		    "locale=en\ninput_locale=en\ntheme=light\nbrightness=7\n");
-	CHECK(!take_message(launcher, FPLINUX_UI_SESSION_SETTING, "volume",
-			    &response));
+	CHECK(!take_setting(launcher, FPLINUX_UI_SESSION_SETTING,
+			    FPLINUX_UI_SETTING_VOLUME, &response));
 	acknowledge_audio(fixture);
-	response = wait_message(fixture, launcher, FPLINUX_UI_SESSION_SETTING,
-				"volume");
-	CHECK(!strcmp(response.value, "8") && response.applied &&
+	response = wait_setting(fixture, launcher, FPLINUX_UI_SESSION_SETTING,
+				FPLINUX_UI_SETTING_VOLUME);
+	CHECK(response.setting.value.level == 8 && response.applied &&
 	      response.storage_state == FPLINUX_STORAGE_DURABLE);
 	CHECK(fixture->audio_volume == 8);
 	const struct fplinux_audio_control *last =
@@ -3914,8 +4105,9 @@ static void test_volume_keys_preview(struct fixture *fixture)
 	struct fplinux_ui_session_message preview = {
 		.type = FPLINUX_UI_SESSION_SETTING,
 		.serial = 81,
-		.name = "volume_preview",
-		.value = "7",
+		.setting = { .kind = FPLINUX_UI_SETTING_VOLUME_PREVIEW,
+			     .operation = FPLINUX_UI_SETTING_PREVIEW,
+			     .value.level = 7 },
 	};
 
 	set_quick_settings_view(fixture, launcher, true);
@@ -3924,13 +4116,13 @@ static void test_volume_keys_preview(struct fixture *fixture)
 	volume_gesture(fixture, false, KEY_VOLUMEDOWN);
 	CHECK(audio_ack_is(fixture, FPLINUX_AUDIO_MEDIA, 7));
 	acknowledge_audio(fixture);
-	response = wait_message(fixture, launcher, FPLINUX_UI_SESSION_SETTING,
-				"volume_preview");
-	CHECK(response.serial == 81 && !strcmp(response.value, "6"));
+	response = wait_setting(fixture, launcher, FPLINUX_UI_SESSION_SETTING,
+				FPLINUX_UI_SETTING_VOLUME_PREVIEW);
+	CHECK(response.serial == 81 && response.setting.value.level == 6);
 	volume_gesture(fixture, true, KEY_VOLUMEUP);
-	response = wait_message(fixture, launcher, FPLINUX_UI_SESSION_SETTING,
-				"volume_preview");
-	CHECK(response.serial == 81 && !strcmp(response.value, "7") &&
+	response = wait_setting(fixture, launcher, FPLINUX_UI_SESSION_SETTING,
+				FPLINUX_UI_SETTING_VOLUME_PREVIEW);
+	CHECK(response.serial == 81 && response.setting.value.level == 7 &&
 	      fixture->audio_volume == 7);
 	volume_key(fixture, false, KEY_VOLUMEDOWN, true);
 	pump(fixture, 10);
@@ -3952,8 +4144,9 @@ static void test_volume_keys_during_save(struct fixture *fixture)
 	struct fplinux_ui_session_message save = {
 		.type = FPLINUX_UI_SESSION_SETTING,
 		.serial = 91,
-		.name = "volume",
-		.value = "7",
+		.setting = { .kind = FPLINUX_UI_SETTING_VOLUME,
+			     .operation = FPLINUX_UI_SETTING_SET,
+			     .value.level = 7 },
 	};
 
 	set_quick_settings_view(fixture, launcher, true);
@@ -3963,12 +4156,12 @@ static void test_volume_keys_during_save(struct fixture *fixture)
 	volume_gesture(fixture, true, KEY_VOLUMEDOWN);
 	CHECK(audio_ack_is(fixture, FPLINUX_AUDIO_MEDIA, 7));
 	acknowledge_audio(fixture);
-	response = wait_message(fixture, launcher, FPLINUX_UI_SESSION_SETTING,
-				"volume");
-	CHECK(response.serial == 91 && !strcmp(response.value, "7"));
-	response = wait_message(fixture, launcher, FPLINUX_UI_SESSION_SETTING,
-				"volume");
-	CHECK(!response.serial && !strcmp(response.value, "5"));
+	response = wait_setting(fixture, launcher, FPLINUX_UI_SESSION_SETTING,
+				FPLINUX_UI_SETTING_VOLUME);
+	CHECK(response.serial == 91 && response.setting.value.level == 7);
+	response = wait_setting(fixture, launcher, FPLINUX_UI_SESSION_SETTING,
+				FPLINUX_UI_SETTING_VOLUME);
+	CHECK(!response.serial && response.setting.value.level == 5);
 	CHECK(fixture->audio_volume == 5);
 	expect_saved_volume(fixture, "5");
 }
@@ -3980,8 +4173,9 @@ static void test_volume_save_after_home(struct fixture *fixture)
 	struct fplinux_ui_session_message request = {
 		.type = FPLINUX_UI_SESSION_SETTING,
 		.serial = 92,
-		.name = "volume",
-		.value = "7",
+		.setting = { .kind = FPLINUX_UI_SETTING_VOLUME,
+			     .operation = FPLINUX_UI_SETTING_SET,
+			     .value.level = 7 },
 	};
 	struct fplinux_ui_session_message response;
 	const struct fplinux_session_process *process;
@@ -3997,8 +4191,8 @@ static void test_volume_save_after_home(struct fixture *fixture)
 	pump(fixture, 10);
 
 	expect_saved_volume(fixture, "7");
-	CHECK(!take_message(settings, FPLINUX_UI_SESSION_SETTING, "volume",
-			    &response));
+	CHECK(!take_setting(settings, FPLINUX_UI_SESSION_SETTING,
+			    FPLINUX_UI_SETTING_VOLUME, &response));
 }
 
 static void test_volume_keys_repeat(struct fixture *fixture)
@@ -4048,9 +4242,13 @@ static void test_volume_keys_power(struct fixture *fixture)
 	struct peer *app = show_app(fixture, launcher, TEST_SETTINGS);
 
 	/* An ordinary screen-off gesture only wakes, including duplicate presses. */
-	setting(fixture, app, "auto_lock_seconds", "off");
-	wait_message(fixture, app, FPLINUX_UI_SESSION_SETTING,
-		     "auto_lock_seconds");
+	send_setting(fixture, app,
+		     (struct fplinux_ui_setting){
+			     .kind = FPLINUX_UI_SETTING_AUTO_LOCK,
+			     .operation = FPLINUX_UI_SETTING_SET,
+			     .value.seconds = -1 });
+	wait_setting(fixture, app, FPLINUX_UI_SESSION_SETTING,
+		     FPLINUX_UI_SETTING_AUTO_LOCK);
 	fixture->now_ms += 30000;
 	pump(fixture, 4);
 	volume_key(fixture, false, KEY_VOLUMEDOWN, true);
@@ -4060,9 +4258,13 @@ static void test_volume_keys_power(struct fixture *fixture)
 	CHECK(fixture->audio_volume == 10);
 	volume_gesture(fixture, false, KEY_VOLUMEDOWN);
 	CHECK(fixture->audio_volume == 9);
-	setting(fixture, app, "auto_lock_seconds", "0");
-	wait_message(fixture, app, FPLINUX_UI_SESSION_SETTING,
-		     "auto_lock_seconds");
+	send_setting(fixture, app,
+		     (struct fplinux_ui_setting){
+			     .kind = FPLINUX_UI_SETTING_AUTO_LOCK,
+			     .operation = FPLINUX_UI_SETTING_SET,
+			     .value.seconds = 0 });
+	wait_setting(fixture, app, FPLINUX_UI_SESSION_SETTING,
+		     FPLINUX_UI_SETTING_AUTO_LOCK);
 	fixture->now_ms += 30000;
 	pump(fixture, 4);
 	CHECK(fplinux_session_is_locked(fixture->session));
@@ -4096,8 +4298,8 @@ static void test_volume_keys_timeout(struct fixture *fixture)
 	      indicator(fixture).level.value == 10);
 	fixture->now_ms += 1001;
 	pump(fixture, 10);
-	response = wait_message(fixture, launcher, FPLINUX_UI_SESSION_ERROR,
-				"volume");
+	response = wait_setting(fixture, launcher, FPLINUX_UI_SESSION_ERROR,
+				FPLINUX_UI_SETTING_VOLUME);
 	CHECK(!response.applied && !strcmp(response.reason, "unavailable"));
 	CHECK(indicator(fixture).visible && indicator(fixture).warning &&
 	      indicator(fixture).level.value == 10);
@@ -4125,76 +4327,92 @@ static void test_volume_error_serials(struct fixture *fixture)
 	struct fplinux_ui_session_message request = {
 		.type = FPLINUX_UI_SESSION_SETTING,
 		.serial = 81,
-		.name = "volume_preview",
-		.value = "11",
+		.setting = { .kind = FPLINUX_UI_SETTING_VOLUME_PREVIEW,
+			     .operation = FPLINUX_UI_SETTING_PREVIEW,
+			     .value.level = 11 },
 	};
 	struct fplinux_ui_session_message response;
 
 	request.serial = 80;
 	issue(fixture, launcher, &request);
-	response = wait_message(fixture, launcher, FPLINUX_UI_SESSION_ERROR,
-				"volume_preview");
+	response = wait_setting(fixture, launcher, FPLINUX_UI_SESSION_ERROR,
+				FPLINUX_UI_SETTING_VOLUME_PREVIEW);
 	CHECK(response.serial == 80 &&
 	      !strcmp(response.reason, "not-foreground"));
 	set_quick_settings_view(fixture, launcher, true);
 	request.serial = 81;
 	issue(fixture, launcher, &request);
-	response = wait_message(fixture, launcher, FPLINUX_UI_SESSION_ERROR,
-				"volume_preview");
+	response = wait_setting(fixture, launcher, FPLINUX_UI_SESSION_ERROR,
+				FPLINUX_UI_SETTING_VOLUME_PREVIEW);
 	CHECK(response.serial == 81 &&
 	      !strcmp(response.reason, "invalid-value"));
 	request.serial = 82;
-	strcpy(request.name, "volume");
-	strcpy(request.value, "7");
+	request.setting =
+		(struct fplinux_ui_setting){ .kind = FPLINUX_UI_SETTING_VOLUME,
+					     .operation =
+						     FPLINUX_UI_SETTING_SET,
+					     .value.level = 7 };
 	fixture->hold_audio_ack = true;
 	issue(fixture, launcher, &request);
 	request.serial = 83;
-	strcpy(request.name, "volume_preview");
-	strcpy(request.value, "6");
+	request.setting = (struct fplinux_ui_setting){
+		.kind = FPLINUX_UI_SETTING_VOLUME_PREVIEW,
+		.operation = FPLINUX_UI_SETTING_PREVIEW,
+		.value.level = 6
+	};
 	issue(fixture, launcher, &request);
-	response = wait_message(fixture, launcher, FPLINUX_UI_SESSION_ERROR,
-				"volume_preview");
+	response = wait_setting(fixture, launcher, FPLINUX_UI_SESSION_ERROR,
+				FPLINUX_UI_SETTING_VOLUME_PREVIEW);
 	CHECK(response.serial == 83 && !strcmp(response.reason, "busy"));
 	acknowledge_audio(fixture);
-	response = wait_message(fixture, launcher, FPLINUX_UI_SESSION_SETTING,
-				"volume");
-	CHECK(response.serial == 82 && !strcmp(response.value, "7"));
+	response = wait_setting(fixture, launcher, FPLINUX_UI_SESSION_SETTING,
+				FPLINUX_UI_SETTING_VOLUME);
+	CHECK(response.serial == 82 && response.setting.value.level == 7);
 	fixture->hold_audio_ack = true;
 	request.serial = 84;
 	issue(fixture, launcher, &request);
 	fixture->now_ms += 1001;
 	pump(fixture, 10);
-	response = wait_message(fixture, launcher, FPLINUX_UI_SESSION_ERROR,
-				"volume_preview");
+	response = wait_setting(fixture, launcher, FPLINUX_UI_SESSION_ERROR,
+				FPLINUX_UI_SETTING_VOLUME_PREVIEW);
 	CHECK(response.serial == 84 && !strcmp(response.reason, "unavailable"));
 	request.serial = 85;
-	strcpy(request.name, "volume");
-	request.value[0] = '\0';
+	request.setting = (struct fplinux_ui_setting){
+		.kind = FPLINUX_UI_SETTING_VOLUME,
+		.operation = FPLINUX_UI_SETTING_GET,
+	};
 	issue(fixture, launcher, &request);
-	response = wait_message(fixture, launcher, FPLINUX_UI_SESSION_ERROR,
-				"volume");
+	response = wait_setting(fixture, launcher, FPLINUX_UI_SESSION_ERROR,
+				FPLINUX_UI_SETTING_VOLUME);
 	CHECK(response.serial == 85 && !strcmp(response.reason, "unavailable"));
 	request.serial = 86;
-	strcpy(request.name, "volume_preview");
-	strcpy(request.value, "6");
+	request.setting = (struct fplinux_ui_setting){
+		.kind = FPLINUX_UI_SETTING_VOLUME_PREVIEW,
+		.operation = FPLINUX_UI_SETTING_PREVIEW,
+		.value.level = 6
+	};
 	issue(fixture, launcher, &request);
-	response = wait_message(fixture, launcher, FPLINUX_UI_SESSION_ERROR,
-				"volume_preview");
+	response = wait_setting(fixture, launcher, FPLINUX_UI_SESSION_ERROR,
+				FPLINUX_UI_SETTING_VOLUME_PREVIEW);
 	CHECK(response.serial == 86 && !strcmp(response.reason, "unavailable"));
 	request.serial = 87;
-	strcpy(request.name, "volume_step");
-	strcpy(request.value, "-2");
+	request.setting = (struct fplinux_ui_setting){
+		.kind = FPLINUX_UI_SETTING_VOLUME_STEP,
+		.operation = FPLINUX_UI_SETTING_INVALID
+	};
 	issue(fixture, launcher, &request);
-	response = wait_message(fixture, launcher, FPLINUX_UI_SESSION_ERROR,
-				"volume_step");
+	response = wait_setting(fixture, launcher, FPLINUX_UI_SESSION_ERROR,
+				FPLINUX_UI_SETTING_VOLUME_STEP);
 	CHECK(response.serial == 87 &&
 	      !strcmp(response.reason, "invalid-value"));
 	request.serial = 88;
-	strcpy(request.name, "volume_commit");
-	strcpy(request.value, "7");
+	request.setting = (struct fplinux_ui_setting){
+		.kind = FPLINUX_UI_SETTING_VOLUME_COMMIT,
+		.operation = FPLINUX_UI_SETTING_INVALID
+	};
 	issue(fixture, launcher, &request);
-	response = wait_message(fixture, launcher, FPLINUX_UI_SESSION_ERROR,
-				"volume_commit");
+	response = wait_setting(fixture, launcher, FPLINUX_UI_SESSION_ERROR,
+				FPLINUX_UI_SETTING_VOLUME_COMMIT);
 	CHECK(response.serial == 88 &&
 	      !strcmp(response.reason, "invalid-value"));
 }
@@ -4205,8 +4423,9 @@ static void test_volume_relative_steps(struct fixture *fixture)
 	struct fplinux_ui_session_message request = {
 		.type = FPLINUX_UI_SESSION_SETTING,
 		.serial = 91,
-		.name = "volume_step",
-		.value = "-1",
+		.setting = { .kind = FPLINUX_UI_SETTING_VOLUME_STEP,
+			     .operation = FPLINUX_UI_SETTING_STEP,
+			     .value.step = -1 },
 	};
 	struct fplinux_ui_session_message response;
 
@@ -4218,17 +4437,19 @@ static void test_volume_relative_steps(struct fixture *fixture)
 	volume_gesture(fixture, false, KEY_VOLUMEDOWN);
 	CHECK(audio_ack_is(fixture, FPLINUX_AUDIO_MEDIA, 9));
 	acknowledge_audio(fixture);
-	response = wait_message(fixture, launcher, FPLINUX_UI_SESSION_SETTING,
-				"volume_preview");
-	CHECK(response.serial == 92 && !strcmp(response.value, "7"));
+	response = wait_setting(fixture, launcher, FPLINUX_UI_SESSION_SETTING,
+				FPLINUX_UI_SETTING_VOLUME_PREVIEW);
+	CHECK(response.serial == 92 && response.setting.value.level == 7);
 	CHECK(fixture->audio_volume == 7);
 	request.serial = 93;
-	strcpy(request.name, "volume_commit");
-	request.value[0] = '\0';
+	request.setting = (struct fplinux_ui_setting){
+		.kind = FPLINUX_UI_SETTING_VOLUME_COMMIT,
+		.operation = FPLINUX_UI_SETTING_COMMIT,
+	};
 	issue(fixture, launcher, &request);
-	response = wait_message(fixture, launcher, FPLINUX_UI_SESSION_SETTING,
-				"volume");
-	CHECK(response.serial == 93 && !strcmp(response.value, "7"));
+	response = wait_setting(fixture, launcher, FPLINUX_UI_SESSION_SETTING,
+				FPLINUX_UI_SETTING_VOLUME);
+	CHECK(response.serial == 93 && response.setting.value.level == 7);
 	expect_saved_volume(fixture, "7");
 }
 
@@ -4237,89 +4458,116 @@ static void test_volume_controls(struct fixture *fixture, const char *scenario)
 	struct fplinux_ui_session_message response;
 	struct peer *launcher = start_launcher(fixture);
 
-	select_launcher_view(fixture, launcher, "home", "grid");
-	expect_setting_refused(fixture, launcher, "volume", "0");
+	select_launcher_view(fixture, launcher, FPLINUX_UI_LAUNCHER_VIEW_HOME,
+			     FPLINUX_UI_LAUNCHER_CATALOGUE_GRID);
+	expect_setting_refused(fixture, launcher,
+			       (struct fplinux_ui_setting){
+				       .kind = FPLINUX_UI_SETTING_VOLUME,
+				       .operation = FPLINUX_UI_SETTING_SET,
+				       .value.level = 0 });
 	set_quick_settings_view(fixture, launcher, true);
-	setting(fixture, launcher, "volume", "");
-	response = wait_message(fixture, launcher, FPLINUX_UI_SESSION_SETTING,
-				"volume");
+	query_setting(fixture, launcher, FPLINUX_UI_SETTING_VOLUME);
+	response = wait_setting(fixture, launcher, FPLINUX_UI_SESSION_SETTING,
+				FPLINUX_UI_SETTING_VOLUME);
 	if (!strcmp(scenario, "volume-loaded")) {
-		CHECK(!strcmp(response.value, "4"));
+		CHECK(response.setting.value.level == 4);
 		return;
 	}
-	CHECK(!strcmp(response.value, "10"));
+	CHECK(response.setting.value.level == 10);
 	fixture->hold_audio_ack = true;
-	setting(fixture, launcher, "volume_preview", "0");
+	send_setting(fixture, launcher,
+		     (struct fplinux_ui_setting){
+			     .kind = FPLINUX_UI_SETTING_VOLUME_PREVIEW,
+			     .operation = FPLINUX_UI_SETTING_PREVIEW,
+			     .value.level = 0 });
 	CHECK(audio_ack_is(fixture, FPLINUX_AUDIO_MEDIA, 0));
-	CHECK(!take_message(launcher, FPLINUX_UI_SESSION_SETTING,
-			    "volume_preview", &response));
+	CHECK(!take_setting(launcher, FPLINUX_UI_SESSION_SETTING,
+			    FPLINUX_UI_SETTING_VOLUME_PREVIEW, &response));
 	if (!strcmp(scenario, "volume-cancel-pending")) {
 		set_quick_settings_view(fixture, launcher, false);
 		acknowledge_audio(fixture);
 		pump(fixture, 30);
 		set_quick_settings_view(fixture, launcher, true);
-		setting(fixture, launcher, "volume", "");
-		response = wait_message(fixture, launcher,
-					FPLINUX_UI_SESSION_SETTING, "volume");
-		CHECK(!strcmp(response.value, "10"));
-		CHECK(!take_message(launcher, FPLINUX_UI_SESSION_SETTING,
-				    "volume_preview", &response));
+		query_setting(fixture, launcher, FPLINUX_UI_SETTING_VOLUME);
+		response = wait_setting(fixture, launcher,
+					FPLINUX_UI_SESSION_SETTING,
+					FPLINUX_UI_SETTING_VOLUME);
+		CHECK(response.setting.value.level == 10);
+		CHECK(!take_setting(launcher, FPLINUX_UI_SESSION_SETTING,
+				    FPLINUX_UI_SETTING_VOLUME_PREVIEW,
+				    &response));
 		return;
 	}
 	if (!strcmp(scenario, "volume-timeout")) {
 		fixture->now_ms += 1001;
 		pump(fixture, 10);
-		response = wait_message(fixture, launcher,
+		response = wait_setting(fixture, launcher,
 					FPLINUX_UI_SESSION_ERROR,
-					"volume_preview");
+					FPLINUX_UI_SETTING_VOLUME_PREVIEW);
 		CHECK(!response.applied &&
 		      !strcmp(response.reason, "unavailable"));
 		fixture->hold_audio_ack = false;
 		fixture->now_ms += 200;
 		pump(fixture, 30);
-		setting(fixture, launcher, "volume", "");
-		response = wait_message(fixture, launcher,
-					FPLINUX_UI_SESSION_SETTING, "volume");
-		CHECK(!strcmp(response.value, "10"));
+		query_setting(fixture, launcher, FPLINUX_UI_SETTING_VOLUME);
+		response = wait_setting(fixture, launcher,
+					FPLINUX_UI_SESSION_SETTING,
+					FPLINUX_UI_SETTING_VOLUME);
+		CHECK(response.setting.value.level == 10);
 		return;
 	}
 	acknowledge_audio(fixture);
-	response = wait_message(fixture, launcher, FPLINUX_UI_SESSION_SETTING,
-				"volume_preview");
-	CHECK(!strcmp(response.value, "0"));
+	response = wait_setting(fixture, launcher, FPLINUX_UI_SESSION_SETTING,
+				FPLINUX_UI_SETTING_VOLUME_PREVIEW);
+	CHECK(response.setting.value.level == 0);
 	if (!strcmp(scenario, "volume-cancel-repreview")) {
 		fixture->hold_audio_ack = true;
-		setting(fixture, launcher, "volume_preview", "");
+		send_setting(fixture, launcher,
+			     (struct fplinux_ui_setting){
+				     .kind = FPLINUX_UI_SETTING_VOLUME_PREVIEW,
+				     .operation = FPLINUX_UI_SETTING_CANCEL });
 		CHECK(audio_ack_is(fixture, FPLINUX_AUDIO_MEDIA, 10));
-		setting(fixture, launcher, "volume_preview", "5");
+		send_setting(fixture, launcher,
+			     (struct fplinux_ui_setting){
+				     .kind = FPLINUX_UI_SETTING_VOLUME_PREVIEW,
+				     .operation = FPLINUX_UI_SETTING_PREVIEW,
+				     .value.level = 5 });
 		CHECK(audio_ack_is(fixture, FPLINUX_AUDIO_MEDIA, 10));
 		acknowledge_audio(fixture);
-		response = wait_message(fixture, launcher,
+		response = wait_setting(fixture, launcher,
 					FPLINUX_UI_SESSION_SETTING,
-					"volume_preview");
-		CHECK(!strcmp(response.value, "5") &&
+					FPLINUX_UI_SETTING_VOLUME_PREVIEW);
+		CHECK(response.setting.value.level == 5 &&
 		      fixture->audio_volume == 5);
-		setting(fixture, launcher, "volume_preview", "");
-		response = wait_message(fixture, launcher,
-					FPLINUX_UI_SESSION_SETTING, "volume");
-		CHECK(!strcmp(response.value, "10") &&
+		send_setting(fixture, launcher,
+			     (struct fplinux_ui_setting){
+				     .kind = FPLINUX_UI_SETTING_VOLUME_PREVIEW,
+				     .operation = FPLINUX_UI_SETTING_CANCEL });
+		response = wait_setting(fixture, launcher,
+					FPLINUX_UI_SESSION_SETTING,
+					FPLINUX_UI_SETTING_VOLUME);
+		CHECK(response.setting.value.level == 10 &&
 		      fixture->audio_volume == 10);
 		return;
 	}
 	if (!strcmp(scenario, "volume-save-fails"))
 		sync_fails = true;
-	setting(fixture, launcher, "volume", "0");
-	response = wait_message(fixture, launcher,
+	send_setting(fixture, launcher,
+		     (struct fplinux_ui_setting){
+			     .kind = FPLINUX_UI_SETTING_VOLUME,
+			     .operation = FPLINUX_UI_SETTING_SET,
+			     .value.level = 0 });
+	response = wait_setting(fixture, launcher,
 				sync_fails ? FPLINUX_UI_SESSION_ERROR :
 					     FPLINUX_UI_SESSION_SETTING,
-				"volume");
+				FPLINUX_UI_SETTING_VOLUME);
 	if (sync_fails) {
-		CHECK(response.applied && !strcmp(response.value, "0") &&
+		CHECK(response.applied && response.setting.value.level == 0 &&
 		      !strcmp(response.reason, "save-failed"));
 		sync_fails = false;
 		return;
 	}
-	CHECK(response.applied && !strcmp(response.value, "0") &&
+	CHECK(response.applied && response.setting.value.level == 0 &&
 	      response.storage_state == FPLINUX_STORAGE_DURABLE);
 	expect_file(fixture->settings,
 		    "screen_off_seconds=30\nauto_lock_seconds=0\n"
@@ -4337,39 +4585,56 @@ static void test_wireless_controls(struct fixture *fixture, bool supported)
 	struct fplinux_ui_session_message response;
 	struct peer *launcher = start_launcher(fixture);
 
-	select_launcher_view(fixture, launcher, "home", "grid");
-	expect_setting_refused(fixture, launcher, "wifi", "1");
+	select_launcher_view(fixture, launcher, FPLINUX_UI_LAUNCHER_VIEW_HOME,
+			     FPLINUX_UI_LAUNCHER_CATALOGUE_GRID);
+	expect_setting_refused(fixture, launcher,
+			       (struct fplinux_ui_setting){
+				       .kind = FPLINUX_UI_SETTING_WIFI,
+				       .operation = FPLINUX_UI_SETTING_SET,
+				       .value.enabled = true });
 	set_quick_settings_view(fixture, launcher, true);
-	setting(fixture, launcher, "wifi", "");
-	response = wait_message(fixture, launcher,
+	query_setting(fixture, launcher, FPLINUX_UI_SETTING_WIFI);
+	response = wait_setting(fixture, launcher,
 				supported ? FPLINUX_UI_SESSION_SETTING :
 					    FPLINUX_UI_SESSION_ERROR,
-				"wifi");
+				FPLINUX_UI_SETTING_WIFI);
 	if (!supported) {
 		CHECK(!strcmp(response.reason, "unsupported"));
 		return;
 	}
-	CHECK(!strcmp(response.value, "0"));
+	CHECK(!response.setting.value.enabled);
 	hold_wireless_result = true;
-	setting(fixture, launcher, "wifi", "1");
-	CHECK(!take_message(launcher, FPLINUX_UI_SESSION_SETTING, "wifi",
-			    &response));
+	send_setting(fixture, launcher,
+		     (struct fplinux_ui_setting){
+			     .kind = FPLINUX_UI_SETTING_WIFI,
+			     .operation = FPLINUX_UI_SETTING_SET,
+			     .value.enabled = true });
+	CHECK(!take_setting(launcher, FPLINUX_UI_SESSION_SETTING,
+			    FPLINUX_UI_SETTING_WIFI, &response));
 	finish_test_wireless(0);
-	response = wait_message(fixture, launcher, FPLINUX_UI_SESSION_SETTING,
-				"wifi");
-	CHECK(!strcmp(response.value, "1"));
-	setting(fixture, launcher, "wifi", "0");
+	response = wait_setting(fixture, launcher, FPLINUX_UI_SESSION_SETTING,
+				FPLINUX_UI_SETTING_WIFI);
+	CHECK(response.setting.value.enabled);
+	send_setting(fixture, launcher,
+		     (struct fplinux_ui_setting){
+			     .kind = FPLINUX_UI_SETTING_WIFI,
+			     .operation = FPLINUX_UI_SETTING_SET,
+			     .value.enabled = false });
 	finish_test_wireless(EIO);
-	response = wait_message(fixture, launcher, FPLINUX_UI_SESSION_ERROR,
-				"wifi");
-	CHECK(!response.applied && !strcmp(response.value, "0") &&
+	response = wait_setting(fixture, launcher, FPLINUX_UI_SESSION_ERROR,
+				FPLINUX_UI_SETTING_WIFI);
+	CHECK(!response.applied && !response.setting.value.enabled &&
 	      !strcmp(response.reason, "unavailable"));
-	setting(fixture, launcher, "wifi", "0");
+	send_setting(fixture, launcher,
+		     (struct fplinux_ui_setting){
+			     .kind = FPLINUX_UI_SETTING_WIFI,
+			     .operation = FPLINUX_UI_SETTING_SET,
+			     .value.enabled = false });
 	set_quick_settings_view(fixture, launcher, false);
 	finish_test_wireless(EIO);
 	pump(fixture, 20);
-	CHECK(!take_message(launcher, FPLINUX_UI_SESSION_ERROR, "wifi",
-			    &response));
+	CHECK(!take_setting(launcher, FPLINUX_UI_SESSION_ERROR,
+			    FPLINUX_UI_SETTING_WIFI, &response));
 }
 
 static void test_wifi_station_requests(struct fixture *fixture)
@@ -4486,9 +4751,13 @@ static void test_wake_stays_dark_before_presentation(struct fixture *fixture)
 	struct peer *launcher = start_launcher(fixture);
 	struct peer *settings = show_app(fixture, launcher, TEST_SETTINGS);
 
-	setting(fixture, settings, "auto_lock_seconds", "0");
-	wait_message(fixture, settings, FPLINUX_UI_SESSION_SETTING,
-		     "auto_lock_seconds");
+	send_setting(fixture, settings,
+		     (struct fplinux_ui_setting){
+			     .kind = FPLINUX_UI_SETTING_AUTO_LOCK,
+			     .operation = FPLINUX_UI_SETTING_SET,
+			     .value.seconds = 0 });
+	wait_setting(fixture, settings, FPLINUX_UI_SESSION_SETTING,
+		     FPLINUX_UI_SETTING_AUTO_LOCK);
 	fplinux_session_home(fixture->session);
 	struct fplinux_ui_session_message home =
 		active_for(fixture, launcher, "");
@@ -4761,21 +5030,29 @@ static void test_light_effect_policy(struct fixture *fixture)
 	CHECK(latest_levels(fixture, app)
 		      .level[FPLINUX_SYSTEM_LEVEL_BRIGHTNESS]
 		      .value == 7);
-	setting(fixture, app, "brightness", "4");
-	response = wait_message(fixture, app, FPLINUX_UI_SESSION_SETTING,
-				"brightness");
-	CHECK(!strcmp(response.value, "4"));
+	send_setting(fixture, app,
+		     (struct fplinux_ui_setting){
+			     .kind = FPLINUX_UI_SETTING_BRIGHTNESS,
+			     .operation = FPLINUX_UI_SETTING_SET,
+			     .value.level = 4 });
+	response = wait_setting(fixture, app, FPLINUX_UI_SESSION_SETTING,
+				FPLINUX_UI_SETTING_BRIGHTNESS);
+	CHECK(response.setting.value.level == 4);
 	expect_number(fixture->brightness_effective, 2);
 	expect_number(fixture->brightness_level, 4);
 	CHECK(latest_levels(fixture, app)
 		      .level[FPLINUX_SYSTEM_LEVEL_BRIGHTNESS]
 		      .value == 4);
 	sync_fails = true;
-	setting(fixture, app, "brightness", "5");
-	response = wait_message(fixture, app, FPLINUX_UI_SESSION_ERROR,
-				"brightness");
+	send_setting(fixture, app,
+		     (struct fplinux_ui_setting){
+			     .kind = FPLINUX_UI_SETTING_BRIGHTNESS,
+			     .operation = FPLINUX_UI_SETTING_SET,
+			     .value.level = 5 });
+	response = wait_setting(fixture, app, FPLINUX_UI_SESSION_ERROR,
+				FPLINUX_UI_SETTING_BRIGHTNESS);
 	CHECK(response.applied && response.storage_error == EIO &&
-	      !strcmp(response.value, "5"));
+	      response.setting.value.level == 5);
 	sync_fails = false;
 	expect_number(fixture->brightness_effective, 2);
 	light_request(fixture, app, 0, 0, false, 4, 0);
@@ -4888,41 +5165,85 @@ static void test_settings_errors_time(struct fixture *fixture)
 	struct peer *launcher = start_launcher(fixture);
 	struct peer *settings = show_app(fixture, launcher, TEST_SETTINGS);
 	struct fplinux_ui_session_message reply;
+	const struct fplinux_ui_session_message unknown = {
+		.type = FPLINUX_UI_SESSION_SETTING,
+		.name = "example-setting",
+		.setting = { .kind = FPLINUX_UI_SETTING_UNKNOWN,
+			     .operation = FPLINUX_UI_SETTING_INVALID },
+	};
+	struct fplinux_ui_setting_time time;
 
-	setting(fixture, settings, "unknown", "x");
-	reply = wait_message(fixture, settings, FPLINUX_UI_SESSION_ERROR,
-			     "unknown");
-	CHECK(!strcmp(reply.reason, "unknown-setting"));
-	setting(fixture, settings, "screen_off_seconds", "17");
-	reply = wait_message(fixture, settings, FPLINUX_UI_SESSION_ERROR,
-			     "screen_off_seconds");
+	issue(fixture, settings, &unknown);
+	reply = wait_setting(fixture, settings, FPLINUX_UI_SESSION_ERROR,
+			     FPLINUX_UI_SETTING_UNKNOWN);
+	CHECK(!strcmp(reply.reason, "unknown-setting") &&
+	      !strcmp(reply.name, "example-setting"));
+	send_setting(fixture, settings,
+		     (struct fplinux_ui_setting){
+			     .kind = FPLINUX_UI_SETTING_SCREEN_OFF,
+			     .operation = FPLINUX_UI_SETTING_SET,
+			     .value.seconds = 17 });
+	reply = wait_setting(fixture, settings, FPLINUX_UI_SESSION_ERROR,
+			     FPLINUX_UI_SETTING_SCREEN_OFF);
 	CHECK(!strcmp(reply.reason, "invalid-value"));
-	setting(fixture, settings, "screen_off_seconds", "");
-	reply = wait_message(fixture, settings, FPLINUX_UI_SESSION_SETTING,
-			     "screen_off_seconds");
-	CHECK(!strcmp(reply.value, "30"));
-	setting(fixture, settings, "brightness", "4");
-	reply = wait_message(fixture, settings, FPLINUX_UI_SESSION_ERROR,
-			     "brightness");
+	query_setting(fixture, settings, FPLINUX_UI_SETTING_SCREEN_OFF);
+	reply = wait_setting(fixture, settings, FPLINUX_UI_SESSION_SETTING,
+			     FPLINUX_UI_SETTING_SCREEN_OFF);
+	CHECK(reply.setting.value.seconds == 30);
+	send_setting(fixture, settings,
+		     (struct fplinux_ui_setting){
+			     .kind = FPLINUX_UI_SETTING_BRIGHTNESS,
+			     .operation = FPLINUX_UI_SETTING_SET,
+			     .value.level = 4 });
+	reply = wait_setting(fixture, settings, FPLINUX_UI_SESSION_ERROR,
+			     FPLINUX_UI_SETTING_BRIGHTNESS);
 	CHECK(!strcmp(reply.reason, "unavailable"));
-	setting(fixture, settings, "time", "");
-	reply = wait_message(fixture, settings, FPLINUX_UI_SESSION_SETTING,
-			     "time");
-	CHECK(!strcmp(reply.value, "2025-01-01 00:00"));
-	setting(fixture, settings, "time", "2025-02-30 12:34");
-	reply = wait_message(fixture, settings, FPLINUX_UI_SESSION_ERROR,
-			     "time");
+	query_setting(fixture, settings, FPLINUX_UI_SETTING_TIME);
+	reply = wait_setting(fixture, settings, FPLINUX_UI_SESSION_SETTING,
+			     FPLINUX_UI_SETTING_TIME);
+	time = reply.setting.value.time;
+	CHECK(time.year == 2025 && time.month == 1 && time.day == 1 &&
+	      time.hour == 0 && time.minute == 0 && time.second == 0);
+	send_setting(fixture, settings,
+		     (struct fplinux_ui_setting){
+			     .kind = FPLINUX_UI_SETTING_TIME,
+			     .operation = FPLINUX_UI_SETTING_SET,
+			     .value.time = { .year = 2025,
+					     .month = 2,
+					     .day = 30,
+					     .hour = 12,
+					     .minute = 34 } });
+	reply = wait_setting(fixture, settings, FPLINUX_UI_SESSION_ERROR,
+			     FPLINUX_UI_SETTING_TIME);
 	CHECK(!strcmp(reply.reason, "invalid-value"));
 	CHECK(current_time == 1735689600);
-	setting(fixture, settings, "time", "2025-02-28 12:34");
-	reply = wait_message(fixture, settings, FPLINUX_UI_SESSION_SETTING,
-			     "time");
-	CHECK(!strcmp(reply.value, "2025-02-28 12:34"));
+	send_setting(fixture, settings,
+		     (struct fplinux_ui_setting){
+			     .kind = FPLINUX_UI_SETTING_TIME,
+			     .operation = FPLINUX_UI_SETTING_SET,
+			     .value.time = { .year = 2025,
+					     .month = 2,
+					     .day = 28,
+					     .hour = 12,
+					     .minute = 34 } });
+	reply = wait_setting(fixture, settings, FPLINUX_UI_SESSION_SETTING,
+			     FPLINUX_UI_SETTING_TIME);
+	time = reply.setting.value.time;
+	CHECK(time.year == 2025 && time.month == 2 && time.day == 28 &&
+	      time.hour == 12 && time.minute == 34 && time.second == 0);
 	CHECK(current_time == 1740746040);
 	clock_fails = true;
-	setting(fixture, settings, "time", "2025-03-01 01:02");
-	reply = wait_message(fixture, settings, FPLINUX_UI_SESSION_ERROR,
-			     "time");
+	send_setting(fixture, settings,
+		     (struct fplinux_ui_setting){
+			     .kind = FPLINUX_UI_SETTING_TIME,
+			     .operation = FPLINUX_UI_SETTING_SET,
+			     .value.time = { .year = 2025,
+					     .month = 3,
+					     .day = 1,
+					     .hour = 1,
+					     .minute = 2 } });
+	reply = wait_setting(fixture, settings, FPLINUX_UI_SESSION_ERROR,
+			     FPLINUX_UI_SETTING_TIME);
 	CHECK(!strcmp(reply.reason, "failed"));
 	CHECK(current_time == 1740746040);
 }
@@ -4932,8 +5253,7 @@ struct settings_session_context {
 	struct peer *launcher;
 	struct peer *settings;
 	size_t request_index;
-	const char *setting;
-	const char *value;
+	struct fplinux_ui_setting expected;
 	unsigned int rejected_changes;
 	bool save_failed;
 	enum fplinux_storage_state storage_state;
@@ -4942,6 +5262,23 @@ struct settings_session_context {
 	unsigned int sync_calls_after_failure;
 	uint32_t redraw_serial;
 };
+
+static bool expected_setting_value(const struct fplinux_ui_setting *actual,
+				   const struct fplinux_ui_setting *expected)
+{
+	if (actual->kind != expected->kind)
+		return false;
+	switch (actual->kind) {
+	case FPLINUX_UI_SETTING_SCREEN_OFF:
+		return actual->value.seconds == expected->value.seconds;
+	case FPLINUX_UI_SETTING_THEME:
+		return actual->value.theme == expected->value.theme;
+	case FPLINUX_UI_SETTING_LOCALE:
+		return !strcmp(actual->value.locale, expected->value.locale);
+	default:
+		return false;
+	}
+}
 
 static void flush_settings_session(void *context, struct fplinux_ui *ui)
 {
@@ -4965,16 +5302,18 @@ static void flush_settings_session(void *context, struct fplinux_ui *ui)
 				session->settings->message_count *
 					sizeof(message));
 			if (message.type == FPLINUX_UI_SESSION_ERROR &&
-			    !strcmp(message.name, session->setting) &&
-			    !strcmp(message.value, session->value)) {
+			    expected_setting_value(&message.setting,
+						   &session->expected)) {
 				CHECK(!strcmp(message.reason,
 					      session->save_failed ?
 						      "save-failed" :
 						      "not-foreground"));
 				if (session->save_failed) {
 					CHECK(message.applied);
-					if (!strcmp(message.name, "theme") ||
-					    !strcmp(message.name, "locale"))
+					if (message.setting.kind ==
+						    FPLINUX_UI_SETTING_THEME ||
+					    message.setting.kind ==
+						    FPLINUX_UI_SETTING_LOCALE)
 						CHECK(message.serial);
 					CHECK(message.storage_state ==
 						      session->storage_state &&
@@ -4986,12 +5325,14 @@ static void flush_settings_session(void *context, struct fplinux_ui *ui)
 				++session->rejected_changes;
 			}
 			if (session->sync_calls_after_failure &&
-			    !strcmp(session->setting, "screen_off_seconds") &&
-			    !strcmp(message.name, "brightness")) {
+			    session->expected.kind ==
+				    FPLINUX_UI_SETTING_SCREEN_OFF &&
+			    message.setting.kind ==
+				    FPLINUX_UI_SETTING_BRIGHTNESS) {
 				CHECK(message.type ==
 					      FPLINUX_UI_SESSION_SETTING &&
 				      message.applied &&
-				      !strcmp(message.value, "7"));
+				      message.setting.value.level == 7);
 				session->cancel_storage_state =
 					message.storage_state;
 				session->cancel_storage_error =
@@ -5031,8 +5372,8 @@ test_settings_preview_cancel_keeps_storage_retry(struct fixture *fixture,
 		.fixture = fixture,
 		.launcher = launcher,
 		.settings = settings,
-		.setting = "screen_off_seconds",
-		.value = "60",
+		.expected = { .kind = FPLINUX_UI_SETTING_SCREEN_OFF,
+			      .value.seconds = 60 },
 		.save_failed = true,
 		.storage_state = published ?
 					 FPLINUX_STORAGE_PUBLISHED_UNSYNCED :
@@ -5096,8 +5437,15 @@ static void test_settings_choice_home_before_request(struct fixture *fixture,
 		.fixture = fixture,
 		.launcher = launcher,
 		.settings = settings,
-		.setting = theme ? "theme" : "locale",
-		.value = theme ? "dark" : "fr",
+		.expected =
+			theme ?
+				(struct fplinux_ui_setting){
+					.kind = FPLINUX_UI_SETTING_THEME,
+					.value.theme =
+						FPLINUX_UI_SESSION_THEME_DARK } :
+				(struct fplinux_ui_setting){
+					.kind = FPLINUX_UI_SETTING_LOCALE,
+					.value.locale = "fr" },
 	};
 	const struct settings_session_boundary boundary = {
 		.flush = flush_settings_session,
@@ -5119,8 +5467,8 @@ test_settings_applied_error_rebuilds_before_ack(struct fixture *fixture)
 		.fixture = fixture,
 		.launcher = launcher,
 		.settings = settings,
-		.setting = "theme",
-		.value = "dark",
+		.expected = { .kind = FPLINUX_UI_SETTING_THEME,
+			      .value.theme = FPLINUX_UI_SESSION_THEME_DARK },
 		.save_failed = true,
 		.storage_state = FPLINUX_STORAGE_UNPUBLISHED,
 	};
@@ -5195,15 +5543,20 @@ static void test_appearance_waits_for_both_frames(struct fixture *fixture,
 
 	CHECK(!fixture->frame_held);
 	sync_fails = save_fails;
-	setting(fixture, settings, "theme", "dark");
+	send_setting(fixture, settings,
+		     (struct fplinux_ui_setting){
+			     .kind = FPLINUX_UI_SETTING_THEME,
+			     .operation = FPLINUX_UI_SETTING_SET,
+			     .value.theme = FPLINUX_UI_SESSION_THEME_DARK });
 	struct fplinux_ui_session_message reply =
-		wait_message(fixture, settings,
+		wait_setting(fixture, settings,
 			     save_fails ? FPLINUX_UI_SESSION_ERROR :
 					  FPLINUX_UI_SESSION_SETTING,
-			     "theme");
+			     FPLINUX_UI_SETTING_THEME);
 
 	sync_fails = false;
-	CHECK(reply.serial && !strcmp(reply.value, "dark"));
+	CHECK(reply.serial &&
+	      reply.setting.value.theme == FPLINUX_UI_SESSION_THEME_DARK);
 	CHECK(reply.applied);
 	CHECK(reply.storage_state == (save_fails ? FPLINUX_STORAGE_UNPUBLISHED :
 						   FPLINUX_STORAGE_DURABLE));
@@ -5236,10 +5589,11 @@ static void test_appearance_waits_for_both_frames(struct fixture *fixture,
 	}
 	CHECK(!fixture->frame_held);
 	CHECK(fplinux_session_focused_pid(fixture->session) == settings->pid);
-	setting(fixture, settings, "theme", "");
-	reply = wait_message(fixture, settings, FPLINUX_UI_SESSION_SETTING,
-			     "theme");
-	CHECK(!reply.serial && !strcmp(reply.value, "dark"));
+	query_setting(fixture, settings, FPLINUX_UI_SETTING_THEME);
+	reply = wait_setting(fixture, settings, FPLINUX_UI_SESSION_SETTING,
+			     FPLINUX_UI_SETTING_THEME);
+	CHECK(!reply.serial &&
+	      reply.setting.value.theme == FPLINUX_UI_SESSION_THEME_DARK);
 }
 
 static void test_appearance_leave_retains_scene(struct fixture *fixture,
@@ -5250,8 +5604,13 @@ static void test_appearance_leave_retains_scene(struct fixture *fixture,
 	pid_t previous_launcher = launcher->pid;
 
 	fixture->visible_frame = 1;
-	setting(fixture, settings, "theme", "dark");
-	wait_message(fixture, settings, FPLINUX_UI_SESSION_SETTING, "theme");
+	send_setting(fixture, settings,
+		     (struct fplinux_ui_setting){
+			     .kind = FPLINUX_UI_SETTING_THEME,
+			     .operation = FPLINUX_UI_SETTING_SET,
+			     .value.theme = FPLINUX_UI_SESSION_THEME_DARK });
+	wait_setting(fixture, settings, FPLINUX_UI_SESSION_SETTING,
+		     FPLINUX_UI_SETTING_THEME);
 	CHECK(fixture->frame_held && fixture->retained_frame == 1);
 	wait_reaped(fixture, previous_launcher);
 	launcher = wait_peer(fixture, TEST_LAUNCHER);
@@ -5266,7 +5625,8 @@ static void test_appearance_leave_retains_scene(struct fixture *fixture,
 	acknowledge(fixture, launcher, &active);
 	CHECK(fixture->frame_held);
 	if (!retain)
-		set_close_decision(fixture, settings, "");
+		set_close_decision(fixture, settings,
+				   FPLINUX_UI_SESSION_CLOSE_NONE);
 	if (retain)
 		CHECK(!phone_gesture(fixture, FPLINUX_KEY_POWER));
 	else
@@ -5281,7 +5641,8 @@ static void test_appearance_leave_retains_scene(struct fixture *fixture,
 
 		CHECK(process && !process->closing &&
 		      process->lifecycle == FPLINUX_UI_SESSION_FOREGROUND);
-		answer_close(fixture, settings, prepare.serial, "ready");
+		answer_close(fixture, settings, prepare.serial,
+			     FPLINUX_UI_SESSION_CLOSE_READY);
 	}
 	active = active_for(fixture, launcher, "");
 	CHECK(fixture->frame_held && fixture->retained_frame == 1);
@@ -5299,14 +5660,19 @@ test_close_and_appearance_require_separate_frames(struct fixture *fixture)
 	pid_t previous_launcher = launcher->pid;
 
 	present_scene(fixture, initial);
-	set_close_decision(fixture, settings, "wait");
+	set_close_decision(fixture, settings, FPLINUX_UI_SESSION_CLOSE_WAIT);
 	send_type(fixture, settings, FPLINUX_UI_SESSION_EXIT);
 	struct fplinux_ui_session_message prepare = wait_message(
 		fixture, settings, FPLINUX_UI_SESSION_PREPARE_CLOSE, NULL);
 
-	setting(fixture, settings, "theme", "dark");
-	struct fplinux_ui_session_message reply = wait_message(
-		fixture, settings, FPLINUX_UI_SESSION_SETTING, "theme");
+	send_setting(fixture, settings,
+		     (struct fplinux_ui_setting){
+			     .kind = FPLINUX_UI_SETTING_THEME,
+			     .operation = FPLINUX_UI_SETTING_SET,
+			     .value.theme = FPLINUX_UI_SESSION_THEME_DARK });
+	struct fplinux_ui_session_message reply =
+		wait_setting(fixture, settings, FPLINUX_UI_SESSION_SETTING,
+			     FPLINUX_UI_SETTING_THEME);
 
 	wait_reaped(fixture, previous_launcher);
 	launcher = wait_peer(fixture, TEST_LAUNCHER);
@@ -6068,7 +6434,7 @@ static void test_clock_locked_ring_keys(struct fixture *fixture)
 	return_home(fixture, launcher);
 	struct fplinux_ui_session_message select = {
 		.type = FPLINUX_UI_SESSION_SELECT,
-		.value = "home",
+		.launcher_view = FPLINUX_UI_LAUNCHER_VIEW_HOME,
 	};
 
 	issue(fixture, launcher, &select);
@@ -6261,32 +6627,47 @@ static void test_volume_classes(struct fixture *fixture)
 	struct fplinux_ui_session_message response;
 
 	fixture->hold_audio_ack = true;
-	setting(fixture, settings, "volume", "0");
+	send_setting(fixture, settings,
+		     (struct fplinux_ui_setting){
+			     .kind = FPLINUX_UI_SETTING_VOLUME,
+			     .operation = FPLINUX_UI_SETTING_SET,
+			     .value.level = 0 });
 	CHECK(audio_ack_is(fixture, FPLINUX_AUDIO_MEDIA, 0));
-	setting(fixture, settings, "alarm_volume", "");
-	response = wait_message(fixture, settings, FPLINUX_UI_SESSION_SETTING,
-				"alarm_volume");
-	CHECK(!strcmp(response.value, "10"));
-	CHECK(!take_message(settings, FPLINUX_UI_SESSION_SETTING, "volume",
-			    &response));
+	query_setting(fixture, settings, FPLINUX_UI_SETTING_ALARM_VOLUME);
+	response = wait_setting(fixture, settings, FPLINUX_UI_SESSION_SETTING,
+				FPLINUX_UI_SETTING_ALARM_VOLUME);
+	CHECK(response.setting.value.level == 10);
+	CHECK(!take_setting(settings, FPLINUX_UI_SESSION_SETTING,
+			    FPLINUX_UI_SETTING_VOLUME, &response));
 	acknowledge_audio(fixture);
-	response = wait_message(fixture, settings, FPLINUX_UI_SESSION_SETTING,
-				"volume");
-	CHECK(response.applied && !strcmp(response.value, "0"));
+	response = wait_setting(fixture, settings, FPLINUX_UI_SESSION_SETTING,
+				FPLINUX_UI_SETTING_VOLUME);
+	CHECK(response.applied && response.setting.value.level == 0);
 	expect_saved_volume(fixture, "0");
 	fixture->hold_audio_ack = true;
-	setting(fixture, settings, "alarm_volume_preview", "3");
+	send_setting(fixture, settings,
+		     (struct fplinux_ui_setting){
+			     .kind = FPLINUX_UI_SETTING_ALARM_VOLUME_PREVIEW,
+			     .operation = FPLINUX_UI_SETTING_PREVIEW,
+			     .value.level = 3 });
 	CHECK(audio_ack_is(fixture, FPLINUX_AUDIO_ALARM, 3));
-	setting(fixture, settings, "alarm_volume_preview", "");
+	send_setting(fixture, settings,
+		     (struct fplinux_ui_setting){
+			     .kind = FPLINUX_UI_SETTING_ALARM_VOLUME_PREVIEW,
+			     .operation = FPLINUX_UI_SETTING_CANCEL });
 	acknowledge_audio(fixture);
-	response = wait_message(fixture, settings, FPLINUX_UI_SESSION_SETTING,
-				"alarm_volume");
-	CHECK(!strcmp(response.value, "10"));
+	response = wait_setting(fixture, settings, FPLINUX_UI_SESSION_SETTING,
+				FPLINUX_UI_SETTING_ALARM_VOLUME);
+	CHECK(response.setting.value.level == 10);
 	CHECK(fixture->audio_volume == 0 && fixture->audio_alarm_volume == 10);
 	expect_saved_volume(fixture, "0");
-	setting(fixture, settings, "alarm_volume", "0");
-	response = wait_message(fixture, settings, FPLINUX_UI_SESSION_SETTING,
-				"alarm_volume");
+	send_setting(fixture, settings,
+		     (struct fplinux_ui_setting){
+			     .kind = FPLINUX_UI_SETTING_ALARM_VOLUME,
+			     .operation = FPLINUX_UI_SETTING_SET,
+			     .value.level = 0 });
+	response = wait_setting(fixture, settings, FPLINUX_UI_SESSION_SETTING,
+				FPLINUX_UI_SETTING_ALARM_VOLUME);
 	CHECK(response.applied &&
 	      response.storage_state == FPLINUX_STORAGE_DURABLE);
 	expect_file(fixture->settings,
@@ -6326,26 +6707,39 @@ static void test_media_relative_volume(struct fixture *fixture)
 	struct peer *launcher = start_launcher(fixture);
 	struct peer *app = show_app(fixture, launcher, TEST_APP);
 	struct fplinux_ui_session_message response;
+	struct fplinux_ui_session_message request = {
+		.type = FPLINUX_UI_SESSION_SETTING,
+		.serial = 41,
+		.setting = { .kind = FPLINUX_UI_SETTING_MEDIA_VOLUME_STEP,
+			     .operation = FPLINUX_UI_SETTING_STEP,
+			     .value.step = -1 },
+	};
 
-	setting(fixture, app, "media_volume_step", "-1");
-	response = wait_message(fixture, app, FPLINUX_UI_SESSION_SETTING,
-				"media_volume_step");
-	CHECK(response.serial == 0 && response.applied &&
-	      !strcmp(response.value, "9"));
+	issue(fixture, app, &request);
+	response = wait_setting(fixture, app, FPLINUX_UI_SESSION_SETTING,
+				FPLINUX_UI_SETTING_MEDIA_VOLUME_STEP);
+	CHECK(response.serial == 41 && response.applied &&
+	      response.setting.value.level == 9);
 	expect_saved_volume(fixture, "9");
-	setting(fixture, app, "volume", "");
-	response = wait_message(fixture, app, FPLINUX_UI_SESSION_SETTING,
-				"volume");
-	CHECK(!strcmp(response.value, "9"));
-	setting(fixture, app, "media_volume_step", "-2");
-	response = wait_message(fixture, app, FPLINUX_UI_SESSION_ERROR,
-				"media_volume_step");
-	CHECK(!strcmp(response.reason, "invalid-value"));
+	query_setting(fixture, app, FPLINUX_UI_SETTING_VOLUME);
+	response = wait_setting(fixture, app, FPLINUX_UI_SESSION_SETTING,
+				FPLINUX_UI_SETTING_VOLUME);
+	CHECK(response.setting.value.level == 9);
+	request.serial = 42;
+	request.setting.operation = FPLINUX_UI_SETTING_INVALID;
+	issue(fixture, app, &request);
+	response = wait_setting(fixture, app, FPLINUX_UI_SESSION_ERROR,
+				FPLINUX_UI_SETTING_MEDIA_VOLUME_STEP);
+	CHECK(response.serial == 42 &&
+	      !strcmp(response.reason, "invalid-value"));
 	return_home(fixture, launcher);
-	setting(fixture, app, "media_volume_step", "-1");
-	response = wait_message(fixture, app, FPLINUX_UI_SESSION_ERROR,
-				"media_volume_step");
-	CHECK(!strcmp(response.reason, "not-foreground") &&
+	request.serial = 43;
+	request.setting.operation = FPLINUX_UI_SETTING_STEP;
+	issue(fixture, app, &request);
+	response = wait_setting(fixture, app, FPLINUX_UI_SESSION_ERROR,
+				FPLINUX_UI_SETTING_MEDIA_VOLUME_STEP);
+	CHECK(response.serial == 43 &&
+	      !strcmp(response.reason, "not-foreground") &&
 	      fixture->audio_volume == 9);
 }
 
@@ -6357,7 +6751,7 @@ static void test_volume_keyguard_alarm(struct fixture *fixture)
 	struct fplinux_ui_session_message active;
 	struct fplinux_ui_session_message select = {
 		.type = FPLINUX_UI_SESSION_SELECT,
-		.value = "home",
+		.launcher_view = FPLINUX_UI_LAUNCHER_VIEW_HOME,
 	};
 
 	clock_request(fixture, clocks, "timer-set",
@@ -6413,6 +6807,9 @@ static void test_output_controls(struct fixture *fixture, bool headphones,
 	struct peer *launcher = start_launcher(fixture);
 	struct peer *settings = show_app(fixture, launcher, TEST_SETTINGS);
 	struct fplinux_ui_session_message response;
+	enum fplinux_audio_route route =
+		headphones ? FPLINUX_AUDIO_ROUTE_HEADPHONES :
+			     FPLINUX_AUDIO_ROUTE_SPEAKER;
 
 	if (headphones) {
 		fixture->audio_status.applied_route =
@@ -6420,30 +6817,36 @@ static void test_output_controls(struct fixture *fixture, bool headphones,
 		fixture->audio_status.speaker = false;
 		fixture->audio_status.headphones = true;
 	}
-	setting(fixture, settings, "audio_outputs", "");
-	response = wait_message(fixture, settings, FPLINUX_UI_SESSION_SETTING,
-				"audio_outputs");
-	CHECK(!strcmp(response.value,
-		      headphones ? "AUTO,HEADPHONES" : "AUTO,SPEAKER"));
-	setting(fixture, settings, "audio_output_active", "");
-	response = wait_message(fixture, settings, FPLINUX_UI_SESSION_SETTING,
-				"audio_output_active");
-	CHECK(!strcmp(response.value, headphones ? "HEADPHONES" : "SPEAKER"));
+	query_setting(fixture, settings, FPLINUX_UI_SETTING_AUDIO_OUTPUTS);
+	response = wait_setting(fixture, settings, FPLINUX_UI_SESSION_SETTING,
+				FPLINUX_UI_SETTING_AUDIO_OUTPUTS);
+	CHECK(response.setting.value.routes ==
+	      (FPLINUX_UI_AUDIO_OUTPUT(FPLINUX_AUDIO_ROUTE_AUTO) |
+	       FPLINUX_UI_AUDIO_OUTPUT(route)));
+	query_setting(fixture, settings,
+		      FPLINUX_UI_SETTING_AUDIO_OUTPUT_ACTIVE);
+	response = wait_setting(fixture, settings, FPLINUX_UI_SESSION_SETTING,
+				FPLINUX_UI_SETTING_AUDIO_OUTPUT_ACTIVE);
+	CHECK(response.setting.value.route == route);
 	fixture->fail_audio_output = failure;
-	setting(fixture, settings, "audio_output",
-		headphones ? "HEADPHONES" : "SPEAKER");
-	response = wait_message(fixture, settings,
+	send_setting(fixture, settings,
+		     (struct fplinux_ui_setting){
+			     .kind = FPLINUX_UI_SETTING_AUDIO_OUTPUT,
+			     .operation = FPLINUX_UI_SETTING_SET,
+			     .value.route = route });
+	response = wait_setting(fixture, settings,
 				failure ? FPLINUX_UI_SESSION_ERROR :
 					  FPLINUX_UI_SESSION_SETTING,
-				"audio_output");
+				FPLINUX_UI_SETTING_AUDIO_OUTPUT);
 	if (failure) {
 		CHECK(!response.applied &&
 		      !strcmp(response.reason, "unavailable"));
-		setting(fixture, settings, "audio_output", "");
-		response = wait_message(fixture, settings,
+		query_setting(fixture, settings,
+			      FPLINUX_UI_SETTING_AUDIO_OUTPUT);
+		response = wait_setting(fixture, settings,
 					FPLINUX_UI_SESSION_SETTING,
-					"audio_output");
-		CHECK(!strcmp(response.value, "AUTO"));
+					FPLINUX_UI_SETTING_AUDIO_OUTPUT);
+		CHECK(response.setting.value.route == FPLINUX_AUDIO_ROUTE_AUTO);
 	} else {
 		CHECK(response.applied &&
 		      response.storage_state == FPLINUX_STORAGE_DURABLE);
@@ -6844,9 +7247,13 @@ static void test_document_locked_returns_busy(struct fixture *fixture)
 	struct peer *launcher = start_launcher(fixture);
 	struct peer *settings = show_app(fixture, launcher, TEST_SETTINGS);
 
-	setting(fixture, settings, "auto_lock_seconds", "0");
-	wait_message(fixture, settings, FPLINUX_UI_SESSION_SETTING,
-		     "auto_lock_seconds");
+	send_setting(fixture, settings,
+		     (struct fplinux_ui_setting){
+			     .kind = FPLINUX_UI_SETTING_AUTO_LOCK,
+			     .operation = FPLINUX_UI_SETTING_SET,
+			     .value.seconds = 0 });
+	wait_setting(fixture, settings, FPLINUX_UI_SESSION_SETTING,
+		     FPLINUX_UI_SETTING_AUTO_LOCK);
 	struct peer *origin = show_app(fixture, launcher, TEST_APP);
 
 	fixture->now_ms += 30000;
@@ -7160,7 +7567,8 @@ test_document_closed_origin_returns_catalogue(struct fixture *fixture)
 	present_scene(fixture, handler_scene);
 	send_type(fixture, handler, FPLINUX_UI_SESSION_EXIT);
 	active = active_for(fixture, launcher, "");
-	CHECK(!active.enabled && !strcmp(active.value, "catalogue"));
+	CHECK(!active.enabled &&
+	      active.launcher_view == FPLINUX_UI_LAUNCHER_VIEW_CATALOGUE);
 	present_scene(fixture, catalogue);
 	expect_scene(fixture, handler_scene);
 	acknowledge(fixture, launcher, &active);
@@ -7272,7 +7680,7 @@ static void test_task_close_document_stays_tasks(struct fixture *fixture)
 	struct fplinux_ui_session_message snapshot =
 		query_tasks(fixture, launcher);
 
-	set_close_decision(fixture, handler, "wait");
+	set_close_decision(fixture, handler, FPLINUX_UI_SESSION_CLOSE_WAIT);
 	task_action(fixture, launcher, FPLINUX_UI_SESSION_CLOSE_TASK,
 		    "org.example.handler",
 		    task_record(&snapshot, "org.example.handler")->token);
@@ -7283,7 +7691,8 @@ static void test_task_close_document_stays_tasks(struct fixture *fixture)
 	acknowledge(fixture, launcher, &active);
 	acknowledge_close(fixture, handler, prepare.serial);
 	clear_messages(fixture, origin);
-	answer_close(fixture, handler, prepare.serial, "ready");
+	answer_close(fixture, handler, prepare.serial,
+		     FPLINUX_UI_SESSION_CLOSE_READY);
 	active = active_for(fixture, launcher, "");
 	CHECK(active.tasks_view);
 	acknowledge(fixture, launcher, &active);
@@ -7339,7 +7748,8 @@ static void test_document_self_return(struct fixture *fixture,
 	document = wait_message(fixture, handler, FPLINUX_UI_SESSION_DOCUMENT,
 				NULL);
 	if (outcome == SELF_RESTART || outcome == SELF_RESTART_CANCEL) {
-		set_close_decision(fixture, handler, "wait");
+		set_close_decision(fixture, handler,
+				   FPLINUX_UI_SESSION_CLOSE_WAIT);
 		answer_document(fixture, handler, document.serial,
 				FPLINUX_UI_DOCUMENT_RESTART_REQUIRED, 0);
 		result = wait_message(fixture, handler,
@@ -7347,7 +7757,9 @@ static void test_document_self_return(struct fixture *fixture,
 		if (outcome == SELF_RESTART_CANCEL)
 			cancelled_close_serial = result.serial;
 		answer_close(fixture, handler, result.serial,
-			     outcome == SELF_RESTART ? "ready" : "cancel");
+			     outcome == SELF_RESTART ?
+				     FPLINUX_UI_SESSION_CLOSE_READY :
+				     FPLINUX_UI_SESSION_CLOSE_CANCEL);
 		if (outcome == SELF_RESTART_CANCEL) {
 			result = wait_message(
 				fixture, handler,
@@ -7391,7 +7803,8 @@ opened:
 		CHECK(process && !process->closing && process->shown);
 		CHECK(fplinux_session_focused_pid(fixture->session) ==
 		      handler_pid);
-		set_close_decision(fixture, handler, "ready");
+		set_close_decision(fixture, handler,
+				   FPLINUX_UI_SESSION_CLOSE_READY);
 	}
 	clear_messages(fixture, launcher);
 	if (origin)
@@ -7452,7 +7865,7 @@ static void test_document_wait_restart(struct fixture *fixture, bool restart)
 		      result.document_error == EINVAL);
 		return;
 	}
-	set_close_decision(fixture, handler, "wait");
+	set_close_decision(fixture, handler, FPLINUX_UI_SESSION_CLOSE_WAIT);
 	answer_document(fixture, handler, document.serial,
 			FPLINUX_UI_DOCUMENT_RESTART_REQUIRED, 0);
 	result = wait_message(fixture, handler,
@@ -7460,7 +7873,8 @@ static void test_document_wait_restart(struct fixture *fixture, bool restart)
 	pump(fixture, 20);
 	CHECK(!fplinux_session_find_process(fixture->session, original_pid)
 		       ->closing);
-	answer_close(fixture, handler, result.serial, "ready");
+	answer_close(fixture, handler, result.serial,
+		     FPLINUX_UI_SESSION_CLOSE_READY);
 	wait_reaped(fixture, original_pid);
 	handler = wait_peer(fixture, "org.example.handler");
 	CHECK(handler->pid != original_pid);

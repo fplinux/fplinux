@@ -55,11 +55,9 @@ def music_app(
         yield directory
 
 
-@pytest.mark.parametrize("size", [(128, 128), (128, 160), (176, 220), (240, 320), (320, 240)])
-@pytest.mark.parametrize("locale", ["en", "ru"])
-def test_music_options_open_repeat_choices_and_save_selected_mode(
-    music_app: Path, size: tuple[int, int], locale: str, tmp_path: Path
-) -> None:
+def _exercise_music_app(
+    music_app: Path, tmp_path: Path, *, size: tuple[int, int], scene: str, locale: str
+) -> Path:
     width, height = size
     state = tmp_path / "state"
     run_process(
@@ -71,11 +69,11 @@ def test_music_options_open_repeat_choices_and_save_selected_mode(
             str(width),
             str(height),
             "light",
-            "repeat",
+            scene,
             locale,
             str(SCREENS.parent.parent / "screens/keypad.xkb"),
         ],
-        name=f"select queue repeat in Music at {width}x{height} ({locale})",
+        name=f"exercise Music {scene} at {width}x{height} ({locale})",
         env={
             "HOME": str(tmp_path),
             "XDG_STATE_HOME": str(state),
@@ -85,8 +83,23 @@ def test_music_options_open_repeat_choices_and_save_selected_mode(
         timeout=15,
         check=True,
     )
+    return state
+
+
+@pytest.mark.parametrize("size", [(128, 128), (128, 160), (176, 220), (240, 320), (320, 240)])
+@pytest.mark.parametrize("locale", ["en", "ru"])
+def test_music_options_open_repeat_choices_and_save_selected_mode(
+    music_app: Path, size: tuple[int, int], locale: str, tmp_path: Path
+) -> None:
+    state = _exercise_music_app(music_app, tmp_path, size=size, scene="repeat", locale=locale)
     preferences = state / "fplinux/org.fplinux.music/preferences"
     assert "repeat=1" in preferences.read_text(encoding="utf-8").splitlines()
+
+
+def test_music_volume_warning_follows_current_media_step_reply(
+    music_app: Path, tmp_path: Path
+) -> None:
+    _exercise_music_app(music_app, tmp_path, size=(240, 320), scene="volume", locale="en")
 
 
 @pytest.mark.parametrize("size", [(128, 128), (128, 160), (176, 220), (240, 320), (320, 240)])
