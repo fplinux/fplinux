@@ -9,7 +9,9 @@
 #define BF30A2_MODE_XCLK_HZ 24000000UL
 
 struct clk;
+struct dev_pm_ops;
 struct device;
+struct i2c_client;
 struct regulator;
 
 struct bf30a2_reg {
@@ -42,6 +44,8 @@ struct bf30a2_variant {
 	int (*power_off)(struct bf30a2_power *power);
 };
 
-extern const struct bf30a2_variant nokia110_bf30a2_variant;
+int bf30a2_probe(struct i2c_client *client);
+void bf30a2_remove(struct i2c_client *client);
+extern const struct dev_pm_ops bf30a2_pm_ops;
 
 #endif

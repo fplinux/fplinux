@@ -330,6 +330,26 @@ def _compile_target_dtb(tmp_path: Path, target: str, *, profile: str | None = No
     return dtb
 
 
+@pytest.mark.parametrize(
+    ("target", "compatible", "control", "absent_control"),
+    [
+        ("nokia-110-4g", b"nokia,110-4g-bf30a2\0", "front-powerdown-gpios", "camera-core-supply"),
+        ("inoi-244-modern-4g", b"byd,bf30a2\0", "camera-core-supply", "front-powerdown-gpios"),
+    ],
+)
+def test_bf30a2_compiled_nodes_keep_power_controls_for_their_driver(
+    tmp_path: Path, target: str, compatible: bytes, control: str, absent_control: str
+) -> None:
+    """The Nokia driver receives its extra GPIO and the ordinary sensor its core supply."""
+    dtb = _compile_target_dtb(tmp_path, target)
+    path = "/soc/i2c@70500000/camera@6e"
+    sensor = exact_path_properties(dtb, (path,))[path]
+    assert sensor["compatible"] == compatible
+    assert control in sensor
+    assert absent_control not in sensor
+    assert {"avdd-supply", "iovdd-supply", "powerdown-gpios", "reset-gpios"} <= sensor.keys()
+
+
 def test_bq_compiled_audio_supplies_external_speaker_waveform(tmp_path: Path) -> None:
     """The BQ audio node supplies its route and the exact active-high control delays."""
     dtb = _compile_target_dtb(tmp_path, "bq-2830l-tank-connect-max")
@@ -340,6 +360,79 @@ def test_bq_compiled_audio_supplies_external_speaker_waveform(tmp_path: Path) ->
     assert audio["speaker-enable-gpios"][4:] == bytes.fromhex("00000072 00000000")
     assert audio["fplinux,speaker-enable-delays-us"] == b"\0\0\0\2" * 7
     assert audio["fplinux,speaker-off-delay-us"] == bytes.fromhex("000003e8")
+
+
+@pytest.fixture(scope="module")
+def display_bindings(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """Process the shared display contract and both current and PWM bindings."""
+    platform = ROOT / "platforms/ums9117/linux/overlay/Documentation/devicetree/bindings/display"
+    konrow = (
+        ROOT
+        / "targets/konrow-senior-280-plus/linux/overlay/Documentation/devicetree/bindings/display"
+    )
+    work = tmp_path_factory.mktemp("display-bindings")
+    display = work / "display"
+    display.mkdir()
+    bindings = (
+        platform / "fplinux,ums9117-fb-common.yaml",
+        platform / "fplinux,ums9117-fb.yaml",
+        konrow / "fplinux,ums9117-konrow-senior-280-plus-lcm-fb.yaml",
+    )
+    schemas = [str(shutil.copy2(binding, display)) for binding in bindings]
+    processed = work / "processed-schema.json"
+    for command in (
+        ["dt-doc-validate", *schemas],
+        ["dt-mk-schema", "-j", "-o", str(processed), *schemas],
+    ):
+        result = run_process(command, name="process LCDC bindings", timeout=30, check=True)
+        assert result.stdout + result.stderr == ""
+    return processed
+
+
+@pytest.mark.parametrize(
+    ("target", "schema", "property_name", "invalid_values"),
+    [
+        (
+            "konrow-senior-280-plus",
+            "fplinux,ums9117-konrow-senior-280-plus-lcm-fb.yaml",
+            "sprd,wled-current-levels",
+            ["1", "0", "0", "34"],
+        ),
+        ("inoi-244-modern-4g", "fplinux,ums9117-fb.yaml", "sprd,wled-default-level", ["255"]),
+        ("nokia-110-4g", "fplinux,ums9117-fb.yaml", "sprd,wled-default-level", ["255"]),
+    ],
+)
+def test_compiled_display_applies_the_board_brightness_policy(
+    tmp_path: Path,
+    display_bindings: Path,
+    target: str,
+    schema: str,
+    property_name: str,
+    invalid_values: list[str],
+) -> None:
+    """Validate real DBI and SPI trees and reject a setting in the wrong backlight mode."""
+    dtb = _compile_target_dtb(tmp_path, target)
+    command = [
+        "dt-validate",
+        "-s",
+        str(display_bindings),
+        "-l",
+        "fplinux,ums9117-fb.yaml:fplinux,ums9117-konrow-senior-280-plus-lcm-fb.yaml",
+        str(dtb),
+    ]
+    valid = run_process(command, name=f"validate {target} display", timeout=30, check=True)
+    assert valid.stdout + valid.stderr == ""
+
+    run_process(
+        ["fdtput", "-t", "u", str(dtb), "/soc/display@20800000", property_name, *invalid_values],
+        name=f"replace {target} brightness property",
+        timeout=15,
+        check=True,
+    )
+    invalid = run_process(command, name=f"reject invalid {target} display", timeout=30, check=True)
+    diagnostics = invalid.stdout + invalid.stderr
+    assert schema in diagnostics
+    assert property_name in diagnostics
 
 
 @pytest.mark.parametrize(

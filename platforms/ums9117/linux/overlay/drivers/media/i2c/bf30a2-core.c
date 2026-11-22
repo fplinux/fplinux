@@ -427,7 +427,7 @@ static const struct v4l2_subdev_internal_ops bf30a2_internal_ops = {
 	.init_state = bf30a2_init_state,
 };
 
-static int bf30a2_probe(struct i2c_client *client)
+int bf30a2_probe(struct i2c_client *client)
 {
 	struct device *dev = &client->dev;
 	struct v4l2_fwnode_device_properties props;
@@ -451,6 +451,7 @@ static int bf30a2_probe(struct i2c_client *client)
 	sensor->variant = variant;
 	power = &sensor->power;
 	v4l2_i2c_subdev_init(&sensor->sd, client, &bf30a2_subdev_ops);
+	v4l2_i2c_subdev_set_name(&sensor->sd, client, "bf30a2", NULL);
 	sensor->sd.internal_ops = &bf30a2_internal_ops;
 
 	power->xclk = devm_clk_get(dev, "xclk");
@@ -581,8 +582,9 @@ ctrls_cleanup:
 	v4l2_ctrl_handler_free(&sensor->ctrls);
 	return ret;
 }
+EXPORT_SYMBOL_GPL(bf30a2_probe);
 
-static void bf30a2_remove(struct i2c_client *client)
+void bf30a2_remove(struct i2c_client *client)
 {
 	struct v4l2_subdev *sd = i2c_get_clientdata(client);
 	struct bf30a2 *sensor = to_bf30a2(sd);
@@ -596,20 +598,18 @@ static void bf30a2_remove(struct i2c_client *client)
 	media_entity_cleanup(&sd->entity);
 	v4l2_ctrl_handler_free(sd->ctrl_handler);
 }
+EXPORT_SYMBOL_GPL(bf30a2_remove);
 
 static const struct of_device_id bf30a2_of_match[] = {
 	{ .compatible = "byd,bf30a2", .data = &bf30a2_variant },
 	{ .compatible = "byd,bf3a01", .data = &bf3a01_variant },
-#ifdef CONFIG_MACH_NOKIA_110_4G
-	{ .compatible = "nokia,110-4g-bf30a2",
-	  .data = &nokia110_bf30a2_variant },
-#endif
 	{}
 };
 MODULE_DEVICE_TABLE(of, bf30a2_of_match);
 
-static const struct dev_pm_ops bf30a2_pm_ops = { RUNTIME_PM_OPS(
+const struct dev_pm_ops bf30a2_pm_ops = { RUNTIME_PM_OPS(
 	bf30a2_runtime_suspend, bf30a2_runtime_resume, NULL) };
+EXPORT_SYMBOL_GPL(bf30a2_pm_ops);
 
 static struct i2c_driver bf30a2_i2c_driver = {
 	.driver = {

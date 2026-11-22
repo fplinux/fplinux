@@ -10,85 +10,18 @@ maintainers:
   - FPLinux contributors <313246064+fplinux-dev@users.noreply.github.com>
 
 allOf:
-  - $ref: /schemas/media/video-interface-devices.yaml#
-  - if:
-      properties:
-        compatible:
-          const: nokia,110-4g-bf30a2
-    then:
-      properties:
-        camera-core-supply: false
-      required:
-        - front-powerdown-gpios
-    else:
-      properties:
-        front-powerdown-gpios: false
-      required:
-        - camera-core-supply
+  - $ref: byd,bf30a2-common.yaml#
 
 properties:
   compatible:
     enum:
       - byd,bf30a2
       - byd,bf3a01
-      - nokia,110-4g-bf30a2
-
-  reg:
-    const: 0x6e
-
-  clocks:
-    maxItems: 1
-
-  clock-names:
-    const: xclk
 
   camera-core-supply: true
-  avdd-supply: true
-  iovdd-supply: true
-
-  reset-gpios:
-    maxItems: 1
-
-  powerdown-gpios:
-    maxItems: 1
-
-  front-powerdown-gpios:
-    maxItems: 1
-    description: Additional board camera control line.
-
-  pinctrl-names:
-    const: default
-
-  pinctrl-0: true
-
-  rotation: true
-
-  port:
-    $ref: /schemas/graph.yaml#/$defs/port-base
-    additionalProperties: false
-    properties:
-      endpoint:
-        $ref: /schemas/graph.yaml#/$defs/endpoint-base
-        unevaluatedProperties: false
-        properties:
-          sprd,serial-g0-data-width:
-            const: 1
-            description: One data line on the UMS9117 serial G0 camera input.
-        required:
-          - remote-endpoint
-          - sprd,serial-g0-data-width
-    required:
-      - endpoint
 
 required:
   - compatible
-  - reg
-  - clocks
-  - clock-names
-  - avdd-supply
-  - iovdd-supply
-  - reset-gpios
-  - powerdown-gpios
-  - port
+  - camera-core-supply
 
-additionalProperties: false
+unevaluatedProperties: false

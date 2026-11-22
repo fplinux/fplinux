@@ -3,6 +3,9 @@
 #include <linux/delay.h>
 #include <linux/device.h>
 #include <linux/gpio/consumer.h>
+#include <linux/i2c.h>
+#include <linux/module.h>
+#include <linux/pm_runtime.h>
 #include <linux/regulator/consumer.h>
 
 #include "bf30a2-internal.h"
@@ -123,7 +126,7 @@ avdd_off:
 	return ret;
 }
 
-const struct bf30a2_variant nokia110_bf30a2_variant = {
+static const struct bf30a2_variant nokia110_bf30a2_variant = {
 	.mode_regs = nokia110_mode_regs,
 	.num_mode_regs = ARRAY_SIZE(nokia110_mode_regs),
 	.avdd_uv = 2800000,
@@ -136,3 +139,24 @@ const struct bf30a2_variant nokia110_bf30a2_variant = {
 	.power_on = nokia110_power_on,
 	.power_off = nokia110_power_off,
 };
+
+static const struct of_device_id nokia110_bf30a2_of_match[] = {
+	{ .compatible = "nokia,110-4g-bf30a2",
+	  .data = &nokia110_bf30a2_variant },
+	{}
+};
+MODULE_DEVICE_TABLE(of, nokia110_bf30a2_of_match);
+
+static struct i2c_driver nokia110_bf30a2_driver = {
+	.driver = {
+		.name = "nokia110-bf30a2",
+		.of_match_table = nokia110_bf30a2_of_match,
+		.pm = pm_ptr(&bf30a2_pm_ops),
+	},
+	.probe = bf30a2_probe,
+	.remove = bf30a2_remove,
+};
+module_i2c_driver(nokia110_bf30a2_driver);
+
+MODULE_DESCRIPTION("Nokia 110 4G BF30A2 camera sensor");
+MODULE_LICENSE("GPL");
