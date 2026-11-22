@@ -8,6 +8,7 @@
 typedef struct lv_obj_t lv_obj_t;
 typedef struct lv_font_t lv_font_t;
 typedef struct lv_draw_buf_t lv_draw_buf_t;
+typedef struct lv_image_dsc lv_image_dsc_t;
 typedef uint32_t lv_color_t;
 typedef uint8_t lv_opa_t;
 typedef struct lv_timer_t lv_timer_t;

@@ -12,7 +12,6 @@ import subprocess
 import sys
 import tarfile
 import zipfile
-from itertools import pairwise
 from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
@@ -274,48 +273,21 @@ def test_release_delivers_a_loadable_nand_corrector_with_license_and_source(
 
 
 @pytest.mark.parametrize("archive_inputs", ["konrow-senior-280-plus"], indirect=True)
-def test_release_konrow_starts_the_ram_loader_without_optional_phone_data(
+@pytest.mark.usefixtures("ecc_source_download")
+def test_release_konrow_supplies_its_parallel_nand_preparation(
     archive_inputs: ArchiveInputs,
 ) -> None:
-    root, bundle = _materialize(archive_inputs, "linux")
+    _root, bundle = _materialize(archive_inputs, "linux")
     runtime = json.loads((bundle / "runtime-manifest.json").read_bytes())
-    assert runtime["device_data"]["required_groups"] == []
-    assert runtime["device_data"]["originals_parser"] == (
-        "targets/konrow-senior-280-plus/konrow280plus_device_data.py"
-    )
-    work = archive_inputs.root / "optional-boot"
-    work.mkdir()
-    result = run_process(
-        [
-            sys.executable,
-            "-B",
-            "-I",
-            str(_PEERS / "konrow_optional_boot.py"),
-            str(root),
-            str(work),
-        ],
-        name="launch Konrow from Linux ZIP with an empty phone store",
-        cwd=work,
-        env={"FPLINUX_DATA_DIR": str(archive_inputs.root / "recipient-data")},
-        timeout=10,
-        check=True,
-    )
-    assert "Starting FPLinux..." in result.stdout
-    arguments = json.loads((work / "loader-arguments.json").read_bytes())
-    assert Path(arguments[0]).name == "spd_dump"
-    assert [Path(path).name for flag, path in pairwise(arguments) if flag == "fdl"] == [
-        "t117_fdl1.bin",
-        "ramboot.bin",
-    ]
-    events = [json.loads(line) for line in (work / "events.jsonl").read_bytes().splitlines()]
-    assert [event["event"] for event in events] == [
-        "waiting-for-device",
-        "device-found",
-        "ram-loader-start",
-        "failure",
-    ]
-    assert all(event["target"] == "konrow-senior-280-plus" for event in events)
-    assert not (work / "phone-store/phone").exists()
+    assert runtime["nand"]["id"] == 0xBA98
+    assert runtime["nand"]["raw_page_bytes"] == 1088
+    assert runtime["nand"]["ecc_format"] == "ums9117-bch12"
+    assert runtime["device_data"]["required_groups"] == ["audio-profile"]
+    parser = "targets/konrow-senior-280-plus/konrow280plus_device_data.py"
+    assert runtime["device_data"]["parser"] == parser
+    assert runtime["device_data"]["originals_parser"] == parser
+    assert (bundle / parser).is_file()
+    assert (bundle / "host/ums9117-nand-ecc").read_bytes() == b"prepared BCH decoder"
 
 
 @pytest.mark.parametrize(
