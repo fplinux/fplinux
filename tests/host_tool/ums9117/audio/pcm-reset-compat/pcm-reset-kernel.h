@@ -10,7 +10,6 @@
 #include <linux/errno.h>
 #include <linux/types.h>
 
-#define CONFIG_SND_UMS9117_HEADPHONE_FED_SPEAKER 0
 #define CONFIG_SND_UMS9117_SPEAKER_VIBRATOR 0
 #define IS_ENABLED(option) (option)
 #define BIT(bit) (1UL << (bit))

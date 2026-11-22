@@ -4,6 +4,10 @@
 #include <string.h>
 
 #include <linux/err.h>
+#include <linux/gpio/consumer.h>
+#include <linux/irqflags.h>
+#include <linux/preempt.h>
+#include <linux/property.h>
 #include <linux/regmap.h>
 
 #include "host.h"
@@ -14,6 +18,22 @@ static struct regmap registers;
 static struct clk xtal;
 static void (*release_action)(void *);
 static void *allocation;
+static bool preempt_disabled;
+static bool irqs_disabled;
+static unsigned int pulse_delays[7];
+static size_t delay_count;
+static unsigned int off_waits;
+
+struct gpio_desc {
+	int value;
+	unsigned int requests;
+	unsigned int fail_at;
+	unsigned int attempts;
+	int levels[7];
+	size_t level_count;
+};
+
+static struct gpio_desc speaker;
 
 void *devm_kzalloc(struct device *dev, size_t size, int flags)
 {
@@ -61,8 +81,101 @@ struct regmap *syscon_regmap_lookup_by_phandle(void *node, const char *name)
 
 bool device_property_read_bool(struct device *dev, const char *name)
 {
+	if (!strcmp(name, "fplinux,headphone-fed-speaker"))
+		return dev->headphone_fed_speaker;
 	assert(!strcmp(name, "fplinux,headphones-only"));
 	return dev->headphones_only;
+}
+
+int device_property_count_u32(struct device *dev, const char *name)
+{
+	assert(!strcmp(name, "fplinux,speaker-enable-delays-us"));
+	return dev->speaker_enable_edges;
+}
+
+int device_property_read_u32_array(struct device *dev, const char *name,
+				   u32 *values, size_t count)
+{
+	assert(!strcmp(name, "fplinux,speaker-enable-delays-us"));
+	assert(count == (size_t)dev->speaker_enable_edges);
+	memcpy(values, dev->speaker_enable_delays_us, count * sizeof(*values));
+	return 0;
+}
+
+int device_property_read_u32(struct device *dev, const char *name, u32 *value)
+{
+	assert(!strcmp(name, "fplinux,speaker-off-delay-us"));
+	if (!dev->speaker_off_delay_us)
+		return -EINVAL;
+	*value = dev->speaker_off_delay_us;
+	return 0;
+}
+
+struct gpio_desc *devm_gpiod_get(struct device *dev, const char *name,
+				 enum gpiod_flags flags)
+{
+	assert(dev->headphone_fed_speaker);
+	assert(!strcmp(name, "speaker-enable"));
+	assert(flags == GPIOD_ASIS);
+	speaker.requests++;
+	return &speaker;
+}
+
+bool gpiod_cansleep(struct gpio_desc *gpio)
+{
+	assert(gpio == &speaker);
+	return false;
+}
+
+int gpiod_direction_output(struct gpio_desc *gpio, int value)
+{
+	return gpiod_set_value_cansleep(gpio, value);
+}
+
+int gpiod_set_value(struct gpio_desc *gpio, int value)
+{
+	assert(gpio == &speaker);
+	assert(irqs_disabled && preempt_disabled);
+	assert((registers.words[0x0728 / 4] & 0x0340) == 0x0300);
+	if (++gpio->attempts == gpio->fail_at)
+		return -EIO;
+	assert(gpio->level_count < ARRAY_SIZE(gpio->levels));
+	gpio->levels[gpio->level_count++] = value;
+	gpio->value = value;
+	return 0;
+}
+
+int gpiod_set_value_cansleep(struct gpio_desc *gpio, int value)
+{
+	assert(gpio == &speaker && value == 0);
+	assert(!irqs_disabled && !preempt_disabled);
+	gpio->value = value;
+	return 0;
+}
+
+void preempt_disable(void)
+{
+	assert(!preempt_disabled);
+	preempt_disabled = true;
+}
+
+void preempt_enable(void)
+{
+	assert(preempt_disabled && !irqs_disabled);
+	preempt_disabled = false;
+}
+
+unsigned long codec_playback_irq_save(void)
+{
+	assert(preempt_disabled && !irqs_disabled);
+	irqs_disabled = true;
+	return 0;
+}
+
+void codec_playback_irq_restore(unsigned long flags)
+{
+	assert(flags == 0 && irqs_disabled);
+	irqs_disabled = false;
 }
 
 void dev_err(struct device *dev, const char *format, ...)
@@ -74,12 +187,19 @@ void dev_err(struct device *dev, const char *format, ...)
 
 void udelay(unsigned int microseconds)
 {
-	(void)microseconds;
+	if (irqs_disabled) {
+		assert(preempt_disabled &&
+		       delay_count < ARRAY_SIZE(pulse_delays));
+		pulse_delays[delay_count++] = microseconds;
+	}
 }
 
 void usleep_range(unsigned long minimum, unsigned long maximum)
 {
 	assert(minimum <= maximum);
+	assert(!irqs_disabled && !preempt_disabled);
+	if (minimum == 1000 && maximum == 1100)
+		off_waits++;
 }
 
 void msleep(unsigned int milliseconds)
@@ -166,9 +286,72 @@ static void test_headphones_only_policy_rejects_speaker_routes(void)
 	release_codec();
 }
 
+static void test_amplifier_stays_low_during_idle_capture_and_failed_enable(void)
+{
+	const u32 mode4_delays[] = { 2, 2, 2, 2, 2, 2, 2 };
+	const int mode4_levels[] = { 1, 0, 1, 0, 1, 0, 1 };
+	struct device dev = {
+		.headphone_fed_speaker = true,
+		.speaker_enable_delays_us = mode4_delays,
+		.speaker_enable_edges = ARRAY_SIZE(mode4_delays),
+		.speaker_off_delay_us = 1000,
+	};
+	struct ums9117_sc2720_codec *codec = create_codec(&dev);
+
+	assert(ums9117_sc2720_codec_has_speaker(codec));
+	assert(speaker.requests == 1 && speaker.value == 0 && off_waits == 1);
+	assert(!ums9117_sc2720_codec_prepare(
+		codec, UMS9117_SC2720_OUTPUT_SPEAKER, 0x0a));
+	assert(ums9117_sc2720_codec_set_speaker_mute(codec, false) >= 0);
+	assert(!ums9117_sc2720_codec_enable(codec));
+	assert(!ums9117_sc2720_codec_prepare_capture(
+		codec, UMS9117_SC2720_CAPTURE_INTERNAL));
+	assert(!ums9117_sc2720_codec_enable_capture(codec));
+	assert(speaker.value == 0 && speaker.attempts == 0);
+	assert(!ums9117_sc2720_codec_disable_capture(codec));
+
+	speaker.fail_at = 2;
+	assert(ums9117_sc2720_codec_set_playback_active(codec, true) == -EIO);
+	assert(speaker.value == 0 && off_waits == 2);
+	assert(speaker.level_count == 2 && speaker.levels[0] == 1 &&
+	       speaker.levels[1] == 0);
+	assert(!irqs_disabled && !preempt_disabled);
+
+	speaker.level_count = 0;
+	delay_count = 0;
+	assert(!ums9117_sc2720_codec_set_playback_active(codec, true));
+	assert(speaker.value == 1 && speaker.level_count == 7);
+	assert(!memcmp(speaker.levels, mode4_levels, sizeof(mode4_levels)));
+	assert(delay_count == 7 &&
+	       !memcmp(pulse_delays, mode4_delays, sizeof(mode4_delays)));
+	assert(!ums9117_sc2720_codec_set_playback_active(codec, false));
+	assert(speaker.value == 0 && off_waits == 3);
+	assert(!ums9117_sc2720_codec_disable(codec));
+	release_codec();
+}
+
+static void test_incomplete_amplifier_configuration_rejects_gpio_access(void)
+{
+	const u32 unfinished_pulse[] = { 2, 2 };
+	struct device dev = {
+		.headphone_fed_speaker = true,
+		.speaker_enable_delays_us = unfinished_pulse,
+		.speaker_enable_edges = ARRAY_SIZE(unfinished_pulse),
+		.speaker_off_delay_us = 1000,
+	};
+
+	memset(&speaker, 0, sizeof(speaker));
+	assert(PTR_ERR(ums9117_sc2720_codec_create(&dev)) == -EINVAL);
+	assert(speaker.requests == 0);
+	free(allocation);
+	allocation = NULL;
+}
+
 int main(void)
 {
 	test_headphones_only_policy_rejects_speaker_routes();
-	puts("codec headphone-only board policy: ok");
+	test_amplifier_stays_low_during_idle_capture_and_failed_enable();
+	test_incomplete_amplifier_configuration_rejects_gpio_access();
+	puts("codec playback routes: ok");
 	return 0;
 }

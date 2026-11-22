@@ -114,9 +114,7 @@ properties:
     description: |
       The loudspeaker uses the headphone codec output and an external
       amplifier. The integrated speaker amplifier is not used. This topology
-      shares the codec signal between the jack and loudspeaker. Loudspeaker
-      playback requires fplinux,speaker-mode4-pulse-us; otherwise the external
-      amplifier is held disabled.
+      shares the codec signal between the jack and loudspeaker.
 
   fplinux,headfree-headphones-only:
     type: boolean
@@ -133,14 +131,21 @@ properties:
       Active-high external amplifier control for a headphone-fed loudspeaker.
       Headphone-only playback keeps this GPIO low.
 
-  fplinux,speaker-mode4-pulse-us:
-    minimum: 1
-    maximum: 10
+  fplinux,speaker-enable-delays-us:
+    minItems: 1
+    maxItems: 7
+    items:
+      minimum: 1
+      maximum: 10
     description: |
-      Board-selected high and low delays in microseconds for external amplifier
-      mode4. Enabling emits three high/low pulses, then holds high. Disabling
-      drives low and waits one millisecond. The GPIO must allow non-sleeping
-      value updates. Seven bounded delays run without IRQ or preemption gaps.
+      Delay in microseconds after each level change for amplifier mode
+      selection. Levels alternate, starting high and ending high, so the
+      number of delays is odd. The GPIO must allow non-sleeping value updates.
+
+  fplinux,speaker-off-delay-us:
+    minimum: 1
+    maximum: 1000
+    description: Delay in microseconds with the amplifier control held low.
 
   hp-det-gpios:
     maxItems: 1
@@ -164,9 +169,13 @@ required:
 
 dependencies:
   wakeup-source: [hp-det-gpios]
-  fplinux,headphone-fed-speaker: [speaker-enable-gpios]
+  fplinux,headphone-fed-speaker:
+    - speaker-enable-gpios
+    - fplinux,speaker-enable-delays-us
+    - fplinux,speaker-off-delay-us
   speaker-enable-gpios: ["fplinux,headphone-fed-speaker"]
-  fplinux,speaker-mode4-pulse-us: ["fplinux,headphone-fed-speaker"]
+  fplinux,speaker-enable-delays-us: ["fplinux,headphone-fed-speaker"]
+  fplinux,speaker-off-delay-us: ["fplinux,headphone-fed-speaker"]
 
 additionalProperties: false
 

@@ -598,6 +598,12 @@ int ums9117_sc2720_codec_set_outputs(struct ums9117_sc2720_codec *instance,
 	return 0;
 }
 
+int ums9117_sc2720_codec_set_playback_active(
+	struct ums9117_sc2720_codec *instance, bool active)
+{
+	return 0;
+}
+
 int ums9117_sc2720_codec_set_speaker_mute(struct ums9117_sc2720_codec *instance,
 					  bool mute)
 {

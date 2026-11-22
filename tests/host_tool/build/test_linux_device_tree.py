@@ -243,6 +243,7 @@ def _write_peripheral_binding_stubs(include: Path) -> None:
         "KEY_UNKNOWN": 240,
         "KEY_VOLUMEDOWN": 114,
         "KEY_VOLUMEUP": 115,
+        "KEY_CAMERA": 212,
     }
     bindings = {
         "interrupt-controller/arm-gic.h": (
@@ -327,6 +328,18 @@ def _compile_target_dtb(tmp_path: Path, target: str, *, profile: str | None = No
         check=True,
     )
     return dtb
+
+
+def test_bq_compiled_audio_supplies_external_speaker_waveform(tmp_path: Path) -> None:
+    """The BQ audio node supplies its route and the exact active-high control delays."""
+    dtb = _compile_target_dtb(tmp_path, "bq-2830l-tank-connect-max")
+    path = "/soc/audio@40000000"
+    audio = exact_path_properties(dtb, (path,))[path]
+    assert audio["fplinux,headphone-fed-speaker"] == b""
+    assert audio["fplinux,external-fm"] == b""
+    assert audio["speaker-enable-gpios"][4:] == bytes.fromhex("00000072 00000000")
+    assert audio["fplinux,speaker-enable-delays-us"] == b"\0\0\0\2" * 7
+    assert audio["fplinux,speaker-off-delay-us"] == bytes.fromhex("000003e8")
 
 
 @pytest.mark.parametrize(

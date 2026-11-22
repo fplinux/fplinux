@@ -114,16 +114,6 @@ static const struct snd_pcm_hardware ums9117_capture_hardware = {
 	.fifo_size = SPRD_VBC_FIFO_FRAMES,
 };
 
-static bool ums9117_pcm_headphone_fed_speaker(const struct ums9117_pcm *audio)
-{
-#if IS_ENABLED(CONFIG_SND_UMS9117_HEADPHONE_FED_SPEAKER)
-	return audio->speaker_from_headphones;
-#else
-	(void)audio;
-	return false;
-#endif
-}
-
 /* The hardware lifecycle mutex is held when inspecting the stream lease. */
 static bool ums9117_pcm_capture_open(struct ums9117_pcm *audio)
 {
@@ -209,7 +199,7 @@ static int ums9117_pcm_set_codec_volume_locked(struct ums9117_pcm *audio,
 				     audio->profile.codec_volume;
 
 	/* The speaker and jack share this codec signal on headphone-fed boards. */
-	if (ums9117_pcm_headphone_fed_speaker(audio) &&
+	if (audio->speaker_from_headphones &&
 	    (audio->outputs & UMS9117_SC2720_OUTPUT_SPEAKER)) {
 		if (audio->speaker_volume)
 			left = right = 1;
@@ -496,7 +486,7 @@ static int ums9117_pcm_apply_output_levels_locked(struct ums9117_pcm *audio)
 			return ret;
 	}
 	spin_lock_irqsave(&audio->fifo_lock, flags);
-	audio->halve_samples = !ums9117_pcm_headphone_fed_speaker(audio) &&
+	audio->halve_samples = !audio->speaker_from_headphones &&
 			       (outputs & UMS9117_SC2720_OUTPUT_SPEAKER);
 	spin_unlock_irqrestore(&audio->fifo_lock, flags);
 	return 0;
@@ -971,7 +961,7 @@ static int ums9117_pcm_route_outputs_locked(struct ums9117_pcm *audio)
 {
 	int ret;
 
-	if (ums9117_pcm_headphone_fed_speaker(audio)) {
+	if (audio->speaker_from_headphones) {
 		ret = ums9117_sc2720_codec_set_speaker_mute(audio->codec, true);
 		if (ret < 0)
 			return ret;
@@ -1125,7 +1115,7 @@ static int ums9117_speaker_volume_put(struct snd_kcontrol *kcontrol,
 		}
 		audio->speaker_volume = level;
 		ums9117_pcm_apply_output_gain(audio);
-		if (ums9117_pcm_headphone_fed_speaker(audio)) {
+		if (audio->speaker_from_headphones) {
 			ret = ums9117_pcm_set_codec_volume_locked(
 				audio, audio->volume_left, audio->volume_right);
 			if (ret < 0) {
@@ -1140,7 +1130,7 @@ static int ums9117_speaker_volume_put(struct snd_kcontrol *kcontrol,
 			if (ret < 0) {
 				audio->speaker_volume = old_level;
 				ums9117_pcm_apply_output_gain(audio);
-				if (ums9117_pcm_headphone_fed_speaker(audio)) {
+				if (audio->speaker_from_headphones) {
 					restore_ret =
 						ums9117_pcm_set_codec_volume_locked(
 							audio,
@@ -2043,7 +2033,6 @@ static int ums9117_pcm_probe(struct platform_device *pdev)
 				     "headphone-only output cannot vibrate\n");
 	audio->headfree_headphones_only = device_property_read_bool(
 		&pdev->dev, "fplinux,headfree-headphones-only");
-#if IS_ENABLED(CONFIG_SND_UMS9117_HEADPHONE_FED_SPEAKER)
 	audio->speaker_from_headphones = device_property_read_bool(
 		&pdev->dev, "fplinux,headphone-fed-speaker");
 	if (audio->speaker_from_headphones && audio->speaker_vibration)
@@ -2053,13 +2042,6 @@ static int ums9117_pcm_probe(struct platform_device *pdev)
 		return dev_err_probe(
 			&pdev->dev, -EINVAL,
 			"headphone-fed speaker cannot use headphone-only Headfree\n");
-#else
-	if (device_property_present(&pdev->dev,
-				    "fplinux,headphone-fed-speaker"))
-		return dev_err_probe(
-			&pdev->dev, -EOPNOTSUPP,
-			"headphone-fed speaker support is disabled\n");
-#endif
 	ret = ums9117_audio_profile_load(audio->dev, audio->headphones_only,
 					 audio->speaker_vibration,
 					 &audio->profile);
@@ -2108,7 +2090,7 @@ static int ums9117_pcm_probe(struct platform_device *pdev)
 			  snd_ctl_new1(&ums9117_idle_silence_control, audio));
 	if (ret)
 		return snd_card_free_on_error(&pdev->dev, ret);
-	if (!ums9117_pcm_headphone_fed_speaker(audio) || audio->external_fm) {
+	if (!audio->speaker_from_headphones || audio->external_fm) {
 		ret = snd_ctl_add(card,
 				  snd_ctl_new1(&ums9117_fm_playback_control,
 					       audio));

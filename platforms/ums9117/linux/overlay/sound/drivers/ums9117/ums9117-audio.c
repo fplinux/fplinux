@@ -952,16 +952,11 @@ int ums9117_audio_prepare_fm(struct ums9117_audio *audio, bool external)
 	unsigned int i;
 	int ret;
 
-#if IS_ENABLED(CONFIG_SND_UMS9117_HEADPHONE_FED_SPEAKER)
 	if (external) {
 		source = UMS9117_VBC_IIS_ADC01_EXTERNAL_FM;
 		matrix_mask = UMS9117_IIS_MATRIX_INF1 | UMS9117_IIS_MATRIX_INF2;
 		matrix_value = FIELD_PREP(UMS9117_IIS_MATRIX_INF1, 2);
 	}
-#else
-	if (external)
-		return -EOPNOTSUPP;
-#endif
 
 	if (audio->capture_prepared || audio->playback_prepared)
 		return -EBUSY;
@@ -991,13 +986,6 @@ int ums9117_audio_prepare_fm(struct ums9117_audio *audio, bool external)
 struct ums9117_audio *ums9117_audio_create(struct platform_device *pdev)
 {
 	struct ums9117_audio *audio;
-
-#if !IS_ENABLED(CONFIG_SND_UMS9117_HEADPHONE_FED_SPEAKER)
-	if (device_property_read_bool(&pdev->dev, "fplinux,external-fm"))
-		return ERR_PTR(
-			dev_err_probe(&pdev->dev, -EOPNOTSUPP,
-				      "external FM support is disabled\n"));
-#endif
 
 	audio = devm_kzalloc(&pdev->dev, sizeof(*audio), GFP_KERNEL);
 	if (!audio)

@@ -11,7 +11,9 @@
 	fplinux,card-longname = "BQ 2830L audio";
 	fplinux,external-fm;
 	fplinux,microphone-capture;
-	fplinux,speaker-mode4-pulse-us = <2>;
+	/* Mode 4 starts with three high/low pulses and then holds high. */
+	fplinux,speaker-enable-delays-us = <2 2 2 2 2 2 2>;
+	fplinux,speaker-off-delay-us = <1000>;
 
 	status = "okay";
 };

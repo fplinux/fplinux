@@ -73,9 +73,7 @@ struct ums9117_pcm {
 	bool codec_prepared;
 	bool digital_prepared;
 	bool capture_supported;
-#if IS_ENABLED(CONFIG_SND_UMS9117_HEADPHONE_FED_SPEAKER)
 	bool speaker_from_headphones;
-#endif
 	bool speaker_supported;
 	bool headphones_only;
 	bool headfree_headphones_only;

@@ -23,7 +23,7 @@ enum ums9117_sc2720_capture_source {
 
 /* The PCM owner serializes every operation and quiesces before devm release. */
 struct ums9117_sc2720_codec *ums9117_sc2720_codec_create(struct device *dev);
-/* Board policy and headphone-fed mode-control support gate speaker playback. */
+/* Board policy gates speaker playback. */
 bool ums9117_sc2720_codec_has_speaker(const struct ums9117_sc2720_codec *codec);
 /*
  * Power the headset detector that drives the jack insert EIC. Call it before
@@ -50,19 +50,8 @@ int ums9117_sc2720_codec_prepare(struct ums9117_sc2720_codec *codec,
 int ums9117_sc2720_codec_set_outputs(struct ums9117_sc2720_codec *codec,
 				     unsigned int outputs, u16 pa_word);
 /* Only PCM or a supported FM source may enable a headphone-fed amplifier. */
-#if IS_ENABLED(CONFIG_SND_UMS9117_HEADPHONE_FED_SPEAKER)
 int ums9117_sc2720_codec_set_playback_active(struct ums9117_sc2720_codec *codec,
 					     bool active);
-#else
-static inline int
-ums9117_sc2720_codec_set_playback_active(struct ums9117_sc2720_codec *codec,
-					 bool active)
-{
-	(void)codec;
-	(void)active;
-	return 0;
-}
-#endif
 /* A muted speaker has its PA disabled; transitions may sleep for 30 ms. */
 int ums9117_sc2720_codec_set_speaker_mute(struct ums9117_sc2720_codec *codec,
 					  bool mute);

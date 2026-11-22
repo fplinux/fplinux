@@ -28,7 +28,6 @@ def test_headphone_only_headfree_preserves_single_outputs_and_default_policy(
                 "-Wall",
                 "-Wextra",
                 "-Werror",
-                "-DCONFIG_SND_UMS9117_HEADPHONE_FED_SPEAKER=0",
                 f"-I{compat / 'audio'}",
                 f"-I{compat / 'codec'}",
                 f"-I{audio}",

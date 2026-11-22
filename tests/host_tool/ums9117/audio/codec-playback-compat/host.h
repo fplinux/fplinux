@@ -21,6 +21,10 @@
 struct device {
 	void *of_node;
 	bool headphones_only;
+	bool headphone_fed_speaker;
+	const u32 *speaker_enable_delays_us;
+	int speaker_enable_edges;
+	u32 speaker_off_delay_us;
 };
 
 struct clk {
@@ -39,7 +43,6 @@ struct clk *devm_clk_get(struct device *dev, const char *name);
 int clk_prepare_enable(struct clk *clock);
 void clk_disable_unprepare(struct clk *clock);
 struct regmap *syscon_regmap_lookup_by_phandle(void *node, const char *name);
-bool device_property_read_bool(struct device *dev, const char *name);
 void udelay(unsigned int microseconds);
 
 #endif
