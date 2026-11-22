@@ -169,8 +169,26 @@ static enum fplinux_multitap_emit_result emit_character(void *context,
 		       FPLINUX_MULTITAP_EMIT_REJECTED;
 }
 
+static void hide_held_digit(struct fplinux_ui_text_model *model)
+{
+	if (!model->held_digit_visible_until_ms)
+		return;
+	model->held_digit_visible_until_ms = 0;
+	model->dirty = true;
+}
+
+static void show_held_digit(struct fplinux_ui_text_model *model,
+			    uint64_t now_ms)
+{
+	if (!model->password)
+		return;
+	model->held_digit_visible_until_ms =
+		now_ms + FPLINUX_TEXT_INPUT_COMMIT_MS;
+}
+
 static void commit_pending(struct fplinux_ui_text_model *model)
 {
+	hide_held_digit(model);
 	model->phone_zero_held = false;
 	fplinux_text_input_cancel_held(&model->input);
 	if (!fplinux_multitap_pending(&model->input.compose))
@@ -181,6 +199,7 @@ static void commit_pending(struct fplinux_ui_text_model *model)
 
 static void cancel_pending(struct fplinux_ui_text_model *model)
 {
+	hide_held_digit(model);
 	model->phone_zero_held = false;
 	fplinux_text_input_cancel(&model->input);
 	model->dirty = true;
@@ -199,6 +218,7 @@ static char *put_bullets(char *out, size_t count)
 static void refresh_masked(struct fplinux_ui_text_model *model,
 			   const char *pending, size_t size)
 {
+	bool show_digit = model->held_digit_visible_until_ms != 0;
 	size_t before = count_characters(model->text, model->cursor);
 	size_t after = model->characters - before;
 	size_t bytes = model->characters * BULLET_BYTES + size + 1;
@@ -218,7 +238,9 @@ static void refresh_masked(struct fplinux_ui_text_model *model,
 		model->masked = buffer;
 		model->masked_capacity = bytes;
 	}
-	out = put_bullets(model->masked, before);
+	out = put_bullets(model->masked, before - show_digit);
+	if (show_digit)
+		*out++ = model->text[model->cursor - 1];
 	memcpy(out, pending, size);
 	out = put_bullets(out + size, after);
 	*out = '\0';
@@ -393,6 +415,7 @@ static enum fplinux_multitap_emit_result erase_character(void *context)
 {
 	struct fplinux_ui_text_model *model = context;
 
+	hide_held_digit(model);
 	delete_backward(model);
 	return model->cursor ? FPLINUX_MULTITAP_EMIT_ACCEPTED :
 			       FPLINUX_MULTITAP_EMIT_REJECTED;
@@ -708,11 +731,15 @@ static void release_key(struct fplinux_ui_text_model *model,
 			emit_character, model);
 		model->dirty = true;
 	}
-	if (key->code >= KEY_NUMERIC_0 && key->code <= KEY_NUMERIC_9)
-		fplinux_text_input_release(
+	if (key->code >= KEY_NUMERIC_0 && key->code <= KEY_NUMERIC_9) {
+		enum fplinux_multitap_result result = fplinux_text_input_release(
 			&model->input,
 			(unsigned char)('0' + key->code - KEY_NUMERIC_0),
 			now_ms, emit_character, model);
+
+		if (result == FPLINUX_MULTITAP_COMMITTED)
+			show_held_digit(model, now_ms);
+	}
 	if (key->code == KEY_NUMERIC_0) {
 		hold_phone_zero(model, now_ms);
 		model->phone_zero_held = false;
@@ -777,6 +804,7 @@ fplinux_ui_text_model_key(struct fplinux_ui_text_model *model,
 	}
 	if (model->read_only)
 		return FPLINUX_UI_TEXT_MODEL_IGNORED;
+	hide_held_digit(model);
 	if (key->keyboard)
 		result = keyboard_key(model, key);
 	else
@@ -792,11 +820,20 @@ void fplinux_ui_text_model_tick(struct fplinux_ui_text_model *model,
 				uint64_t now_ms)
 {
 	bool had_pending = fplinux_multitap_pending(&model->input.compose);
+	bool holding_digit = model->input.held_digit != 0;
+	bool clear_due = model->input.clearing &&
+			 now_ms >= model->input.clear_ms;
 	const char *indicator = fplinux_text_input_indicator(&model->input);
+	enum fplinux_multitap_result result;
 
+	if (now_ms >= model->held_digit_visible_until_ms)
+		hide_held_digit(model);
 	hold_phone_zero(model, now_ms);
-	fplinux_text_input_tick(&model->input, now_ms, emit_character,
-				erase_character, model);
+	result = fplinux_text_input_tick(&model->input, now_ms, emit_character,
+					 erase_character, model);
+	/* Clear repeats run after the hold and can erase the new digit. */
+	if (holding_digit && !clear_due && result == FPLINUX_MULTITAP_COMMITTED)
+		show_held_digit(model, now_ms);
 	if (had_pending != fplinux_multitap_pending(&model->input.compose) ||
 	    indicator != fplinux_text_input_indicator(&model->input))
 		model->dirty = true;
@@ -805,6 +842,7 @@ void fplinux_ui_text_model_tick(struct fplinux_ui_text_model *model,
 
 void fplinux_ui_text_model_cancel_held(struct fplinux_ui_text_model *model)
 {
+	hide_held_digit(model);
 	if (model->input.picker_open)
 		model->dirty = true;
 	model->phone_zero_held = false;
@@ -822,6 +860,11 @@ bool fplinux_ui_text_model_deadline(const struct fplinux_ui_text_model *model,
 	    (!scheduled ||
 	     model->phone_zero_ms + FPLINUX_TEXT_INPUT_HOLD_MS < deadline)) {
 		deadline = model->phone_zero_ms + FPLINUX_TEXT_INPUT_HOLD_MS;
+		scheduled = true;
+	}
+	if (model->held_digit_visible_until_ms &&
+	    (!scheduled || model->held_digit_visible_until_ms < deadline)) {
+		deadline = model->held_digit_visible_until_ms;
 		scheduled = true;
 	}
 	if (scheduled)
@@ -927,6 +970,7 @@ void fplinux_ui_text_model_set_password(struct fplinux_ui_text_model *model,
 {
 	if (model->password == password)
 		return;
+	hide_held_digit(model);
 	model->password = password;
 	fplinux_text_input_set_sentence_case(&model->input, !password);
 	model->dirty = true;

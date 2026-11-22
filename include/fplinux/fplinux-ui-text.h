@@ -25,9 +25,9 @@ struct fplinux_ui_text;
  *            (p pauses dialling, w waits); holding 0 types +.
  *
  * An external keyboard types the same characters; - toggles the minus.
- * PASSWORD may be added to any type with |: the field shows a dot for every
- * committed character and keeps the pending multi-tap character readable
- * until it is committed; it does not capitalize letters on its own.
+ * PASSWORD may be added to any type with |. It shows the pending multi-tap
+ * character and briefly shows a digit entered by holding a multi-tap key.
+ * Other characters are masked. It does not capitalize letters on its own.
  * UNEDITABLE may be added too: the field shows its text, still focusable,
  * without caret, mode, counter or symbol picker, and takes no typing, Clear
  * or OK, so the right soft key stays the application's (Back). A single line

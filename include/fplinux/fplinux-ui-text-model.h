@@ -73,13 +73,11 @@ struct fplinux_ui_text_model {
 	bool separator_typed;
 	unsigned int separator_revision;
 	uint64_t separator_ms;
-	/*
-	 * A password shows a dot for every committed character; the pending
-	 * one stays readable until it is committed.
-	 */
 	bool password;
 	char *masked;
 	size_t masked_capacity;
+	/* A committed hold digit just before the caret is briefly readable. */
+	uint64_t held_digit_visible_until_ms;
 	/* A typed 0 in PHONE waits for its field-specific replacement by +. */
 	bool phone_zero_held;
 	uint64_t phone_zero_ms;
@@ -111,7 +109,7 @@ enum fplinux_ui_text_model_result
 fplinux_ui_text_model_key(struct fplinux_ui_text_model *model,
 			  const struct fplinux_ui_text_model_key *key,
 			  uint64_t now_ms);
-/* Runs the commit, long-press and Clear repeat deadlines due at now_ms. */
+/* Runs the input and password masking deadlines due at now_ms. */
 void fplinux_ui_text_model_tick(struct fplinux_ui_text_model *model,
 				uint64_t now_ms);
 /* Stops phone gestures without committing or replacing pending text. */
@@ -165,8 +163,8 @@ bool fplinux_ui_text_model_is_empty(const struct fplinux_ui_text_model *model);
 bool fplinux_ui_text_model_takes_newline(
 	const struct fplinux_ui_text_model *model);
 /*
- * The text to draw: display, or for a password a dot for every committed
- * character around the readable pending one. Character indices match.
+ * The text to draw, with password masking except for a pending character
+ * or a briefly visible hold digit. Character indices match.
  */
 const char *
 fplinux_ui_text_model_view(const struct fplinux_ui_text_model *model);

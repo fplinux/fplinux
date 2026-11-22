@@ -1307,6 +1307,42 @@ static void verify_password_masking(void)
 	fplinux_ui_text_model_cleanup(&model);
 }
 
+static void verify_password_held_digits(void)
+{
+	struct fplinux_ui_text_model model;
+	uint64_t deadline;
+
+	init(&model, false, 0, LOWER);
+	fplinux_ui_text_model_set_password(&model, true);
+	assert(fplinux_ui_text_model_set_text(&model, "éя"));
+	fplinux_ui_text_model_set_caret(&model, 1);
+	tap(&model, KEY_NUMERIC_2, 100);
+	phone(&model, KEY_NUMERIC_2, true, 200);
+	fplinux_ui_text_model_tick(&model, 700);
+	/* The preceding letter is committed too, but only the digit is shown. */
+	shows_view(&model, "éa2я", "••2•");
+	shows(&model, "éa2я", 3);
+	assert(!pending_at(&model, 2));
+	assert(fplinux_ui_text_model_deadline(&model, &deadline));
+	assert(deadline == 1700);
+	phone(&model, KEY_NUMERIC_2, false, 900);
+	fplinux_ui_text_model_tick(&model, 1699);
+	shows_view(&model, "éa2я", "••2•");
+	fplinux_ui_text_model_tick(&model, 1700);
+	shows_view(&model, "éa2я", "••••");
+	assert(!fplinux_ui_text_model_deadline(&model, &deadline));
+
+	/* A release handled ahead of the timer can resolve the hold itself. */
+	hold(&model, KEY_NUMERIC_9, 1800);
+	shows_view(&model, "éa29я", "•••9•");
+	assert(fplinux_ui_text_model_deadline(&model, &deadline));
+	assert(deadline == 3300);
+	fplinux_ui_text_model_set_focused(&model, false);
+	shows_view(&model, "éa29я", "•••••");
+	assert(!fplinux_ui_text_model_deadline(&model, &deadline));
+	fplinux_ui_text_model_cleanup(&model);
+}
+
 struct input_sink {
 	uint32_t characters[8];
 	size_t count;
@@ -1589,6 +1625,7 @@ int main(int argc, char **argv)
 	verify_phone_keys();
 	verify_number_and_phone_lines();
 	verify_password_masking();
+	verify_password_held_digits();
 	verify_shared_input_blocked_events_can_be_retried();
 	verify_shared_clear_deadlines_preserve_blocked_repeat();
 	verify_shared_release_preserves_blocked_and_rejected_emission();
