@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: GPL-2.0-only
 #define _GNU_SOURCE
 
+#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <ftw.h>
+#include <limits.h>
 #include <signal.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -11,6 +13,7 @@
 #include <string.h>
 #include <sys/mount.h>
 #include <sys/stat.h>
+#include <sys/sysmacros.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -20,6 +23,7 @@
 
 #define ARRAY_SIZE(array) (sizeof(array) / sizeof((array)[0]))
 #define FPLINUX_QUAKE_CARD_MOUNT "/mnt/card"
+#define FPLINUX_QUAKE_SYS_BLOCK "/sys/class/block"
 #define FPLINUX_QUAKE_GAME_DATA FPLINUX_QUAKE_CARD_MOUNT "/fplinux/quake/id1"
 #define FPLINUX_QUAKE_LOCK_PATH "/tmp/fplinux-quake.lock"
 /* Kibibytes the engine reserves for its own allocator. The default suits a
@@ -133,20 +137,102 @@ static bool card_is_mounted(void)
 	return false;
 }
 
+static bool sd_disk(const char *name)
+{
+	const char *digits;
+	char path[PATH_MAX], type[8];
+	FILE *file;
+	bool is_sd;
+
+	if (strncmp(name, "mmcblk", 6))
+		return false;
+	digits = name + 6;
+	if (!*digits || digits[strspn(digits, "0123456789")])
+		return false;
+	snprintf(path, sizeof(path), FPLINUX_QUAKE_SYS_BLOCK "/%s/device/type",
+		 name);
+	file = fopen(path, "re");
+	if (!file) {
+		if (errno == ENOENT)
+			return false;
+		die_errno("cannot read SD card device type");
+	}
+	is_sd = fgets(type, sizeof(type), file) && !strcmp(type, "SD\n");
+	if (ferror(file))
+		die_errno("cannot read SD card device type");
+	fclose(file);
+	return is_sd;
+}
+
+static void select_sd_disk(char disk[NAME_MAX + 1])
+{
+	DIR *directory = opendir(FPLINUX_QUAKE_SYS_BLOCK);
+	struct dirent *entry;
+
+	if (!directory)
+		die_errno("cannot enumerate SD cards");
+	for (;;) {
+		errno = 0;
+		entry = readdir(directory);
+		if (!entry) {
+			if (errno)
+				die_errno("cannot enumerate SD cards");
+			break;
+		}
+		if (!sd_disk(entry->d_name))
+			continue;
+		if (disk[0])
+			die("multiple microSD devices are present");
+		strcpy(disk, entry->d_name);
+	}
+	closedir(directory);
+	if (!disk[0])
+		die("microSD is unavailable; insert it before boot");
+}
+
+static bool disk_holds_path(const char *disk, const char *mountpoint)
+{
+	char path[PATH_MAX], device[PATH_MAX];
+	struct stat status;
+	size_t length = strlen(disk);
+
+	if (stat(mountpoint, &status) < 0) {
+		if (errno == ENOENT && strcmp(mountpoint, "/"))
+			return false;
+		die_errno("cannot inspect the system filesystem");
+	}
+	snprintf(path, sizeof(path), "/sys/dev/block/%u:%u",
+		 major(status.st_dev), minor(status.st_dev));
+	if (!realpath(path, device)) {
+		if (errno == ENOENT)
+			return false;
+		die_errno("cannot resolve the system filesystem device");
+	}
+	return !strncmp(device, disk, length) &&
+	       (device[length] == '/' || device[length] == '\0');
+}
+
 static void mount_card(void)
 {
-	const char *source;
+	char disk[NAME_MAX + 1] = "";
+	char path[PATH_MAX], sys_disk[PATH_MAX], source[PATH_MAX];
 
 	if (mkdir(FPLINUX_QUAKE_CARD_MOUNT, 0755) < 0 && errno != EEXIST)
 		die_errno("cannot create " FPLINUX_QUAKE_CARD_MOUNT);
 	if (card_is_mounted())
 		return;
+	select_sd_disk(disk);
+	snprintf(path, sizeof(path), FPLINUX_QUAKE_SYS_BLOCK "/%s", disk);
+	if (!realpath(path, sys_disk))
+		die_errno("cannot resolve the selected SD card");
+	if (disk_holds_path(sys_disk, "/") ||
+	    disk_holds_path(sys_disk, "/run/fplinux-card"))
+		die("cannot mount the system card as game data");
 
-	if (path_is_block_device("/dev/mmcblk0p1"))
-		source = "/dev/mmcblk0p1";
-	else if (path_is_block_device("/dev/mmcblk0"))
-		source = "/dev/mmcblk0";
-	else
+	snprintf(source, sizeof(source), "/dev/%sp1", disk);
+	if (!path_is_block_device(source))
+		snprintf(source, sizeof(source), "/dev/%s", disk);
+	if (!path_is_block_device(source))
 		die("microSD is unavailable; insert it before boot");
 
 	if (mount(source, FPLINUX_QUAKE_CARD_MOUNT, "vfat",

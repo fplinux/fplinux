@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 #define _GNU_SOURCE
 
+#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <signal.h>
@@ -9,7 +10,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/mount.h>
 #include <sys/stat.h>
+#include <sys/sysmacros.h>
 #include <unistd.h>
 
 extern char **environ;
@@ -21,6 +24,8 @@ int __real_stat(const char *path, struct stat *status);
 int __real_access(const char *path, int mode);
 int __real_symlink(const char *target, const char *path);
 FILE *__real_fopen(const char *path, const char *mode);
+DIR *__real_opendir(const char *path);
+char *__real_realpath(const char *path, char *resolved);
 
 static void fixture_path(char *path, size_t size, const char *name)
 {
@@ -94,18 +99,85 @@ int __wrap_mkdir(const char *path, mode_t mode)
 FILE *__wrap_fopen(const char *path, const char *mode)
 {
 	static char mountinfo[] = "1 0 0:1 / /mnt/card ro - vfat fixture ro\n";
+	char replacement[4096];
 
 	if (!strcmp(path, "/proc/self/mountinfo")) {
 		record_resource_access();
+		if (getenv("FPLINUX_QUAKE_TEST_UNMOUNTED")) {
+			fixture_path(replacement, sizeof(replacement),
+				     "mountinfo");
+			return __real_fopen(replacement, mode);
+		}
 		return fmemopen(mountinfo, sizeof(mountinfo) - 1, "r");
 	}
+	if (!strncmp(path, "/sys/", 5)) {
+		fixture_path(replacement, sizeof(replacement), path + 1);
+		return __real_fopen(replacement, mode);
+	}
 	return __real_fopen(path, mode);
+}
+
+DIR *__wrap_opendir(const char *path)
+{
+	char replacement[4096];
+
+	if (!strncmp(path, "/sys/", 5)) {
+		fixture_path(replacement, sizeof(replacement), path + 1);
+		return __real_opendir(replacement);
+	}
+	return __real_opendir(path);
+}
+
+char *__wrap_realpath(const char *path, char *resolved)
+{
+	char replacement[4096];
+
+	if (!strncmp(path, "/sys/", 5)) {
+		fixture_path(replacement, sizeof(replacement), path + 1);
+		return __real_realpath(replacement, resolved);
+	}
+	return __real_realpath(path, resolved);
+}
+
+int __wrap_mount(const char *source, const char *target, const char *filesystem,
+		 unsigned long flags, const void *data)
+{
+	char path[4096];
+	FILE *record;
+
+	if (strcmp(target, "/mnt/card") || strcmp(filesystem, "vfat") ||
+	    flags != (MS_RDONLY | MS_NODEV | MS_NOSUID | MS_NOEXEC) || !data ||
+	    strcmp(data, "utf8=1"))
+		_exit(125);
+	fixture_path(path, sizeof(path), "mounted-device");
+	record = __real_fopen(path, "w");
+	if (!record || fprintf(record, "%s\n", source) < 0 ||
+	    fclose(record) < 0)
+		_exit(125);
+	return 0;
 }
 
 int __wrap_stat(const char *path, struct stat *status)
 {
 	char replacement[4096];
 
+	if (!strcmp(path, "/") && getenv("FPLINUX_QUAKE_TEST_SYSTEM_CARD")) {
+		if (__real_stat(path, status) < 0)
+			return -1;
+		status->st_dev = makedev(179, 10);
+		return 0;
+	}
+	if (!strcmp(path, "/run/fplinux-card")) {
+		errno = ENOENT;
+		return -1;
+	}
+	if (!strncmp(path, "/dev/mmcblk", 11)) {
+		fixture_path(replacement, sizeof(replacement), path + 1);
+		if (__real_stat(replacement, status) < 0)
+			return -1;
+		status->st_mode = (status->st_mode & ~S_IFMT) | S_IFBLK;
+		return 0;
+	}
 	if (!is_card_pak(path))
 		return __real_stat(path, status);
 	record_resource_access();

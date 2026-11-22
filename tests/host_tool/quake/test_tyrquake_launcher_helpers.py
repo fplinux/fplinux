@@ -151,6 +151,9 @@ def quake_launcher(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
                 "-Wl,--wrap=open",
                 "-Wl,--wrap=mkdir",
                 "-Wl,--wrap=fopen",
+                "-Wl,--wrap=opendir",
+                "-Wl,--wrap=realpath",
+                "-Wl,--wrap=mount",
                 "-Wl,--wrap=stat",
                 "-Wl,--wrap=access",
                 "-Wl,--wrap=symlink",
@@ -341,6 +344,61 @@ class TyrQuakeLauncherCliTests:
 
 class TyrQuakeLauncherProcessTests:
     """Observe engine handoff and session ownership with host-only card and executable peers."""
+
+    @pytest.mark.parametrize(
+        ("layout", "expected"),
+        [
+            ("partition", "/dev/mmcblk1p1"),
+            ("whole", "/dev/mmcblk1"),
+            ("multiple", "multiple microSD devices are present"),
+            ("system", "cannot mount the system card as game data"),
+        ],
+    )
+    def test_unmounted_game_card_is_selected_by_sd_type(
+        self,
+        quake_launcher: Path,
+        quake_engine_environment: dict[str, str],
+        tmp_path: Path,
+        layout: str,
+        expected: str,
+    ) -> None:
+        """Skip internal eMMC and keep ambiguous or active system SD unmounted."""
+        block = tmp_path / "sys/class/block"
+        (tmp_path / "dev").mkdir()
+        disks = {"mmcblk0": "MMC", "mmcblk1": "SD"}
+        if layout == "multiple":
+            disks["mmcblk2"] = "SD"
+        for name, kind in disks.items():
+            device = block / name / "device"
+            device.mkdir(parents=True)
+            (device / "type").write_text(f"{kind}\n")
+            (tmp_path / "dev" / name).touch()
+        (tmp_path / "dev/mmcblk0p1").touch()
+        if layout != "whole":
+            (tmp_path / "dev/mmcblk1p1").touch()
+        environment = quake_engine_environment | {"FPLINUX_QUAKE_TEST_UNMOUNTED": "1"}
+        (tmp_path / "mountinfo").write_text("1 0 0:1 / / rw - tmpfs root rw\n")
+        if layout == "system":
+            device = block / "mmcblk1/mmcblk1p2"
+            device.mkdir()
+            by_number = tmp_path / "sys/dev/block"
+            by_number.mkdir(parents=True)
+            (by_number / "179:10").symlink_to(device)
+            environment["FPLINUX_QUAKE_TEST_SYSTEM_CARD"] = "1"
+        result = run_process(
+            [str(quake_launcher)],
+            name=f"select unmounted Quake card ({layout})",
+            timeout=5,
+            env=environment,
+        )
+        mounted = tmp_path / "mounted-device"
+        if layout in {"partition", "whole"}:
+            assert result.returncode == 23, result.stderr
+            assert mounted.read_text() == f"{expected}\n"
+        else:
+            assert result.returncode == 1
+            assert expected in result.stderr
+            assert not mounted.exists()
 
     @pytest.mark.parametrize("arguments", [(), ("--renderer=auto",)])
     def test_auto_without_the_gpu_engine_runs_software_and_removes_runtime(
