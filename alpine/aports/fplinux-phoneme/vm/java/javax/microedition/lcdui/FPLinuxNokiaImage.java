@@ -19,6 +19,17 @@ public final class FPLinuxNokiaImage {
         return image != null && image.getImageData().hasAlpha();
     }
 
+    public static void setARGBColor(Graphics graphics, int argb) {
+        synchronized (graphics) {
+            graphics.setColor(argb & 0xffffff);
+            graphics.setAlpha(argb >>> 24);
+        }
+    }
+
+    public static int alpha(Graphics graphics) {
+        return graphics.getAlpha();
+    }
+
     public static int width(Graphics graphics) {
         return graphics.targetWidth();
     }

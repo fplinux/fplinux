@@ -6,9 +6,11 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.util.Vector;
 import javax.microedition.media.Control;
+import javax.microedition.media.Manager;
 import javax.microedition.media.MediaException;
 import javax.microedition.media.Player;
 import javax.microedition.media.PlayerListener;
+import javax.microedition.media.TimeBase;
 import javax.microedition.media.control.ToneControl;
 import javax.microedition.media.control.VolumeControl;
 
@@ -517,6 +519,24 @@ public final class PlatformPlayer implements Player {
         loopCount = count;
         loopsLeft = count;
         loopActive = false;
+    }
+
+    public synchronized TimeBase getTimeBase() {
+        checkOpen();
+        if (state < REALIZED) {
+            throw new IllegalStateException("Player is not realized");
+        }
+        return Manager.getSystemTimeBase();
+    }
+
+    public synchronized void setTimeBase(TimeBase master) throws MediaException {
+        checkOpen();
+        if (state < REALIZED || state == STARTED) {
+            throw new IllegalStateException("Player is not realized or is started");
+        }
+        if (master != null && master != Manager.getSystemTimeBase()) {
+            throw new MediaException("Unsupported time base");
+        }
     }
 
     public void addPlayerListener(PlayerListener listener) {

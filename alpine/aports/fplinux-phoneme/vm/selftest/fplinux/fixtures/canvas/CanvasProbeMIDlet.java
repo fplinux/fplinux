@@ -104,6 +104,8 @@ public class CanvasProbeMIDlet extends MIDlet implements Runnable {
         nokiaPixels();
         nokiaDecodedImage();
         nokiaShapes();
+        nokiaTextValidation();
+        vodafoneTypes();
         mascotPixels();
         mascotTexturedPixels();
         say(M3gProbe.check());
@@ -481,6 +483,44 @@ public class CanvasProbeMIDlet extends MIDlet implements Runnable {
             pixels[1] == (short) 0x8f00 && pixels[2] == (short) 0xf0f0;
         say("nokia decoded image alpha=" + decoded + " written=" + written
             + " mutableOnlyOnNokia=" + (image.isMutable() && !immutable.isMutable()));
+    }
+
+    private void nokiaTextValidation() {
+        Image image = Image.createImage(2, 2);
+        Graphics graphics = image.getGraphics();
+        DirectGraphics direct = DirectUtils.getDirectGraphics(graphics);
+        direct.setARGBColor(0);
+        boolean range = false;
+        try {
+            graphics.drawChars(new char[] { 'x' }, -1, 1, 0, 0, Graphics.TOP | Graphics.LEFT);
+        } catch (ArrayIndexOutOfBoundsException expected) {
+            range = true;
+        }
+        direct.setARGBColor(0x80000000);
+        boolean anchor = false;
+        try {
+            graphics.drawString("x", -10, -10, Graphics.VCENTER | Graphics.LEFT);
+        } catch (IllegalArgumentException expected) {
+            anchor = true;
+        }
+        say("nokia text range=" + range + " clippedAnchor=" + anchor);
+    }
+
+    private void vodafoneTypes() {
+        com.vodafone.v10.graphics.j3d.AffineTrans transform =
+            new com.vodafone.v10.graphics.j3d.AffineTrans();
+        com.vodafone.v10.graphics.j3d.FigureLayout layout =
+            new com.vodafone.v10.graphics.j3d.FigureLayout(transform, 512, 512, 0, 0);
+        com.vodafone.v10.graphics.j3d.Vector3D direction =
+            new com.vodafone.v10.graphics.j3d.Vector3D(1, 2, 3);
+        com.vodafone.v10.graphics.j3d.Light light =
+            new com.vodafone.v10.graphics.j3d.Light(direction, 4096, 0);
+        com.vodafone.v10.graphics.j3d.Effect3D effect =
+            new com.vodafone.v10.graphics.j3d.Effect3D();
+        effect.setLight(light);
+        say("vodafone layout=" + (layout.getAffineTrans() == transform)
+            + " light=" + (effect.getLight() == light)
+            + " direction=" + (light.getDirection().z == 3));
     }
 
     private void nokiaShapes() {

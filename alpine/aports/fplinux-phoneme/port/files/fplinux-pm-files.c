@@ -44,14 +44,24 @@ struct file_stream {
 
 static struct file_stream *streams;
 static struct fplinux_volume_snapshot volumes;
+static bool refresh_requested;
 
 void fplinux_pm_files_volumes(const struct fplinux_volume_snapshot *snapshot)
 {
 	volumes = *snapshot;
 }
 
+bool fplinux_pm_files_take_refresh_request(void)
+{
+	bool requested = refresh_requested;
+
+	refresh_requested = false;
+	return requested;
+}
+
 void fplinux_pm_files_cleanup(void)
 {
+	refresh_requested = false;
 	while (streams) {
 		struct file_stream *stream = streams;
 
@@ -59,6 +69,13 @@ void fplinux_pm_files_cleanup(void)
 		close(stream->fd);
 		free(stream);
 	}
+}
+
+KNIEXPORT KNI_RETURNTYPE_VOID
+KNIDECL(javax_microedition_io_file_FileSystemRegistry_requestRootRefresh0)
+{
+	refresh_requested = true;
+	KNI_ReturnVoid();
 }
 
 static bool string_path(jstring string, char path[PATH_MAX])

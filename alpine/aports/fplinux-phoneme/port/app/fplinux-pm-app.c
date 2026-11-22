@@ -483,6 +483,10 @@ static void run_slice(struct pm_app *app)
 	fplinux_pm_lifecycle_slice_begin(&app->lifecycle);
 	result = fplinux_pm_vm_slice();
 	app->in_slice = false;
+	if (fplinux_pm_files_take_refresh_request() && app->lifecycle.visible &&
+	    !app->storage_request && !app->picker)
+		app->storage_request = fplinux_ui_storage_request(
+			app->ui, FPLINUX_VOLUME_REFRESH, 0);
 	if (app->lifecycle.phase == FPLINUX_PM_PHASE_HIDING)
 		now_ms = fplinux_ui_now_ms();
 	apply(app, fplinux_pm_lifecycle_slice(&app->lifecycle, result, now_ms),

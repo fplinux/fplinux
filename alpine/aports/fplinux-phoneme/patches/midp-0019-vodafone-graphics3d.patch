@@ -1,0 +1,30 @@
+Let Graphics draw Vodafone j3d figures.
+
+Games use the Graphics3D interface of the MIDP graphics context to draw
+figures. Implement the interface and pass the figure, layout and effect
+to the renderer bound to that context.
+
+--- a/midp/src/lowlevelui/graphics_api/gxapi_native/classes/javax/microedition/lcdui/Graphics.java
++++ b/midp/src/lowlevelui/graphics_api/gxapi_native/classes/javax/microedition/lcdui/Graphics.java
+@@ -444,7 +444,7 @@
+  * @since MIDP 1.0
+  */
+ 
+-public class Graphics {
++public class Graphics implements com.vodafone.v10.graphics.j3d.Graphics3D {
+ 
+     // SYNC NOTE: the main Graphics class is entirely unlocked.  There is only
+     // one instance of Graphics (created in Display) and it is only ever legal
+@@ -454,6 +454,12 @@
+     // were to read or modify global state, locking would need to be done in
+     // those cases.)
+ 
++    public void drawFigure(com.vodafone.v10.graphics.j3d.Figure figure, int x, int y,
++            com.vodafone.v10.graphics.j3d.FigureLayout layout,
++            com.vodafone.v10.graphics.j3d.Effect3D effect) {
++        com.vodafone.v10.graphics.j3d.FigureDrawing.draw(this, figure, x, y, layout, effect);
++    }
++
+     /**
+      * Constant for centering text and images horizontally
+      * around the anchor point

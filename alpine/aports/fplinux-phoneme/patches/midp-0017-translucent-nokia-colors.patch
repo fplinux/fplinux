@@ -1,0 +1,722 @@
+Blend Graphics primitives drawn with a translucent color.
+
+Graphics ignored the alpha of the color that a Nokia game sets through
+DirectGraphics.setARGBColor(), so translucent panels covered the picture
+below them. Graphics now keeps the alpha of its current color, 255 being
+opaque; the setColor() methods and a reset of the context restore 255.
+
+A primitive with a color below 255 is blended once over the pixels that it
+covers, clipped and translated like an opaque one. The primitive is drawn in
+black on a white image of its bounding box. Gray pixels in the mask carry
+the fractional glyph coverage. The pixels below are read back, composited
+using the product of coverage and color alpha, and written without
+further alpha processing, because drawRGB() weakens the alpha on RGB565
+targets. Alpha 0 draws nothing. Opaque primitives still call the natives
+directly.
+
+The natives that draw the lines, rectangles, rounded rectangles, arcs,
+triangles and text become private methods with a trailing 0 so that the public
+methods can choose between them.
+
+--- a/midp/src/lowlevelui/graphics_api/gxapi_native/classes/javax/microedition/lcdui/Graphics.java
++++ b/midp/src/lowlevelui/graphics_api/gxapi_native/classes/javax/microedition/lcdui/Graphics.java
+@@ -664,6 +664,7 @@
+             throw new IllegalArgumentException("Value out of range");
+         }
+ 
++        alpha = 255;
+         rgbColor = (red << 16) | (green << 8) | blue;
+         gray = grayVal(red, green, blue);
+         pixel = getPixel(rgbColor, gray, false);
+@@ -684,6 +685,7 @@
+      * @see #getColor
+      */
+     public synchronized void setColor(int RGB) {
++        alpha = 255;
+         if (pixel == -1 || (RGB & 0x00ffffff) != rgbColor) {
+             int red   = (RGB >> 16) & 0xff;
+             int green = (RGB >> 8)  & 0xff;
+@@ -711,6 +713,7 @@
+             throw new IllegalArgumentException("Gray value out of range");
+         }
+ 
++        alpha = 255;
+         if (pixel == -1 || gray != value) {
+             rgbColor = (value << 16) | (value << 8) | value;
+             gray = value;
+@@ -1059,7 +1062,21 @@
+      * @param x2 the x coordinate of the end of the line
+      * @param y2 the y coordinate of the end of the line
+      */
+-    public native void drawLine(int x1, int y1, int x2, int y2);
++    public void drawLine(int x1, int y1, int x2, int y2) {
++        if (alpha == 255) {
++            drawLine0(x1, y1, x2, y2);
++        } else if (alpha != 0) {
++            Graphics mask = coverage(Math.min(x1, x2), Math.min(y1, y2),
++                                     (long) Math.max(x1, x2) + 1,
++                                     (long) Math.max(y1, y2) + 1);
++            if (mask != null) {
++                mask.drawLine0(x1, y1, x2, y2);
++                blend(mask);
++            }
++        }
++    }
++
++    private native void drawLine0(int x1, int y1, int x2, int y2);
+ 
+     /**
+      * Fills the specified rectangle with the current color.
+@@ -1071,7 +1088,19 @@
+      * @param height the height of the rectangle to be filled
+      * @see #drawRect(int, int, int, int)
+      */
+-    public native void fillRect(int x, int y, int width, int height);
++    public void fillRect(int x, int y, int width, int height) {
++        if (alpha == 255) {
++            fillRect0(x, y, width, height);
++        } else if (alpha != 0 && width > 0 && height > 0) {
++            int[] region = visibleRegion(x, y, (long) x + width,
++                                         (long) y + height);
++            if (region != null) {
++                blendRegion(region[0], region[1], region[2], region[3], null);
++            }
++        }
++    }
++
++    private native void fillRect0(int x, int y, int width, int height);
+ 
+     /**
+      * Draws the outline of the specified rectangle using the current
+@@ -1086,7 +1115,20 @@
+      * @param height the height of the rectangle to be drawn
+      * @see #fillRect(int, int, int, int)
+      */
+-    public native void drawRect(int x, int y, int width, int height);
++    public void drawRect(int x, int y, int width, int height) {
++        if (alpha == 255) {
++            drawRect0(x, y, width, height);
++        } else if (alpha != 0 && width >= 0 && height >= 0) {
++            Graphics mask = coverage(x, y, (long) x + width + 1,
++                                     (long) y + height + 1);
++            if (mask != null) {
++                mask.drawRect0(x, y, width, height);
++                blend(mask);
++            }
++        }
++    }
++
++    private native void drawRect0(int x, int y, int width, int height);
+ 
+     /**
+      * Draws the outline of the specified rounded corner rectangle
+@@ -1104,8 +1146,22 @@
+      * @param arcHeight the vertical diameter of the arc at the four corners
+      * @see #fillRoundRect(int, int, int, int, int, int)
+      */
+-    public native void drawRoundRect(int x, int y, int width, int height,
+-                                     int arcWidth, int arcHeight);
++    public void drawRoundRect(int x, int y, int width, int height,
++                              int arcWidth, int arcHeight) {
++        if (alpha == 255) {
++            drawRoundRect0(x, y, width, height, arcWidth, arcHeight);
++        } else if (alpha != 0 && width >= 0 && height >= 0) {
++            Graphics mask = coverage(x, y, (long) x + width + 1,
++                                     (long) y + height + 1);
++            if (mask != null) {
++                mask.drawRoundRect0(x, y, width, height, arcWidth, arcHeight);
++                blend(mask);
++            }
++        }
++    }
++
++    private native void drawRoundRect0(int x, int y, int width, int height,
++                                       int arcWidth, int arcHeight);
+ 
+     /**
+      * Fills the specified rounded corner rectangle with the current color.
+@@ -1120,8 +1176,22 @@
+      * @param arcHeight the vertical diameter of the arc at the four corners
+      * @see #drawRoundRect(int, int, int, int, int, int)
+      */
+-    public native void fillRoundRect(int x, int y, int width, int height,
+-                                     int arcWidth, int arcHeight);
++    public void fillRoundRect(int x, int y, int width, int height,
++                              int arcWidth, int arcHeight) {
++        if (alpha == 255) {
++            fillRoundRect0(x, y, width, height, arcWidth, arcHeight);
++        } else if (alpha != 0 && width > 0 && height > 0) {
++            Graphics mask = coverage(x, y, (long) x + width,
++                                     (long) y + height);
++            if (mask != null) {
++                mask.fillRoundRect0(x, y, width, height, arcWidth, arcHeight);
++                blend(mask);
++            }
++        }
++    }
++
++    private native void fillRoundRect0(int x, int y, int width, int height,
++                                       int arcWidth, int arcHeight);
+ 
+     /**
+      * Fills a circular or elliptical arc covering the specified rectangle.
+@@ -1169,8 +1239,22 @@
+      * relative to the start angle.
+      * @see #drawArc(int, int, int, int, int, int)
+      */
+-    public native void fillArc(int x, int y, int width, int height,
+-                               int startAngle, int arcAngle);
++    public void fillArc(int x, int y, int width, int height,
++                        int startAngle, int arcAngle) {
++        if (alpha == 255) {
++            fillArc0(x, y, width, height, startAngle, arcAngle);
++        } else if (alpha != 0 && width > 0 && height > 0) {
++            Graphics mask = coverage(x, y, (long) x + width,
++                                     (long) y + height);
++            if (mask != null) {
++                mask.fillArc0(x, y, width, height, startAngle, arcAngle);
++                blend(mask);
++            }
++        }
++    }
++
++    private native void fillArc0(int x, int y, int width, int height,
++                                 int startAngle, int arcAngle);
+ 
+     /**
+      * Draws the outline of a circular or elliptical arc
+@@ -1214,8 +1298,22 @@
+      * the start angle
+      * @see #fillArc(int, int, int, int, int, int)
+      */
+-    public native void drawArc(int x, int y, int width, int height,
+-                               int startAngle, int arcAngle);
++    public void drawArc(int x, int y, int width, int height,
++                        int startAngle, int arcAngle) {
++        if (alpha == 255) {
++            drawArc0(x, y, width, height, startAngle, arcAngle);
++        } else if (alpha != 0 && width >= 0 && height >= 0) {
++            Graphics mask = coverage(x, y, (long) x + width + 1,
++                                     (long) y + height + 1);
++            if (mask != null) {
++                mask.drawArc0(x, y, width, height, startAngle, arcAngle);
++                blend(mask);
++            }
++        }
++    }
++
++    private native void drawArc0(int x, int y, int width, int height,
++                                 int startAngle, int arcAngle);
+ 
+     /**
+      * Draws the specified <code>String</code> using the current font and color.
+@@ -1229,8 +1327,27 @@
+      * @throws IllegalArgumentException if anchor is not a legal value
+      * @see #drawChars(char[], int, int, int, int, int)
+      */
+-    public native void drawString(java.lang.String str,
+-                                  int x, int y, int anchor);
++    public void drawString(java.lang.String str, int x, int y, int anchor) {
++        if (alpha == 255) {
++            drawString0(str, x, y, anchor);
++            return;
++        }
++        if (str == null) {
++            throw new NullPointerException();
++        }
++        checkTextAnchor(anchor);
++        if (alpha == 0) {
++            return;
++        }
++        Graphics mask = textCoverage(x, y, currentFont.stringWidth(str));
++        if (mask != null) {
++            mask.drawString0(str, x, y, anchor);
++            blend(mask);
++        }
++    }
++
++    private native void drawString0(java.lang.String str,
++                                    int x, int y, int anchor);
+ 
+     /**
+      * Draws the specified <code>String</code> using the current font and color.
+@@ -1260,8 +1377,30 @@
+      * is not a legal value
+      * @throws NullPointerException if <code>str</code> is <code>null</code>
+      */
+-    public native void drawSubstring(String str, int offset, int len,
+-                                     int x, int y, int anchor);
++    public void drawSubstring(String str, int offset, int len,
++                              int x, int y, int anchor) {
++        if (alpha == 255) {
++            drawSubstring0(str, offset, len, x, y, anchor);
++            return;
++        }
++        int strLength = str.length();
++        if (offset < 0 || len < 0 || offset > strLength - len) {
++            throw new StringIndexOutOfBoundsException();
++        }
++        checkTextAnchor(anchor);
++        if (alpha == 0 || len == 0) {
++            return;
++        }
++        Graphics mask = textCoverage(x, y,
++            currentFont.substringWidth(str, offset, len));
++        if (mask != null) {
++            mask.drawSubstring0(str, offset, len, x, y, anchor);
++            blend(mask);
++        }
++    }
++
++    private native void drawSubstring0(String str, int offset, int len,
++                                       int x, int y, int anchor);
+ 
+     /**
+      * Draws the specified character using the current font and color.
+@@ -1277,7 +1416,23 @@
+      * @see #drawString(java.lang.String, int, int, int)
+      * @see #drawChars(char[], int, int, int, int, int)
+      */
+-    public native void drawChar(char character, int x, int y, int anchor);
++    public void drawChar(char character, int x, int y, int anchor) {
++        if (alpha == 255) {
++            drawChar0(character, x, y, anchor);
++            return;
++        }
++        checkTextAnchor(anchor);
++        if (alpha == 0) {
++            return;
++        }
++        Graphics mask = textCoverage(x, y, currentFont.charWidth(character));
++        if (mask != null) {
++            mask.drawChar0(character, x, y, anchor);
++            blend(mask);
++        }
++    }
++
++    private native void drawChar0(char character, int x, int y, int anchor);
+ 
+     /**
+      * Draws the specified characters using the current font and color.
+@@ -1307,8 +1462,30 @@
+      *
+      * @see #drawString(java.lang.String, int, int, int)
+      */
+-    public native void drawChars(char[] data, int offset, int length,
+-                                 int x, int y, int anchor);
++    public void drawChars(char[] data, int offset, int length,
++                          int x, int y, int anchor) {
++        if (alpha == 255) {
++            drawChars0(data, offset, length, x, y, anchor);
++            return;
++        }
++        int arrayLength = data.length;
++        if (offset < 0 || length < 0 || offset > arrayLength - length) {
++            throw new ArrayIndexOutOfBoundsException();
++        }
++        checkTextAnchor(anchor);
++        if (alpha == 0 || length == 0) {
++            return;
++        }
++        Graphics mask = textCoverage(x, y,
++            currentFont.charsWidth(data, offset, length));
++        if (mask != null) {
++            mask.drawChars0(data, offset, length, x, y, anchor);
++            blend(mask);
++        }
++    }
++
++    private native void drawChars0(char[] data, int offset, int length,
++                                   int x, int y, int anchor);
+ 
+     /**
+      * Draws the specified image by using the anchor point.
+@@ -1551,9 +1728,23 @@
+      * @param y3 the y coordinate of the third vertex of the triangle
+      *
+      */
+-    public native void fillTriangle(int x1, int y1,
+-                                    int x2, int y2,
+-                                    int x3, int y3);
++    public void fillTriangle(int x1, int y1, int x2, int y2, int x3, int y3) {
++        if (alpha == 255) {
++            fillTriangle0(x1, y1, x2, y2, x3, y3);
++        } else if (alpha != 0) {
++            Graphics mask = coverage(Math.min(x1, Math.min(x2, x3)),
++                                     Math.min(y1, Math.min(y2, y3)),
++                                     (long) Math.max(x1, Math.max(x2, x3)) + 1,
++                                     (long) Math.max(y1, Math.max(y2, y3)) + 1);
++            if (mask != null) {
++                mask.fillTriangle0(x1, y1, x2, y2, x3, y3);
++                blend(mask);
++            }
++        }
++    }
++
++    private native void fillTriangle0(int x1, int y1, int x2, int y2,
++                                      int x3, int y3);
+ 
+     /**
+      * Native implementation of CopyArea method.
+@@ -1754,6 +1945,135 @@
+     }
+ 
+     /**
++     * Opacity of the current color, 255 being opaque. Only the Nokia bridge
++     * lowers it; every color setter restores it.
++     */
++    private int alpha = 255;
++
++    void setAlpha(int alpha) {
++        this.alpha = alpha;
++    }
++
++    int getAlpha() {
++        return alpha;
++    }
++
++    /**
++     * Intersects a rectangle with the clip.
++     *
++     * @return the x, y, width and height of the result, or null if it is empty
++     */
++    private int[] visibleRegion(long left, long top, long right, long bottom) {
++        long x1 = Math.max(left, getClipX());
++        long y1 = Math.max(top, getClipY());
++        long x2 = Math.min(right, (long) getClipX() + getClipWidth());
++        long y2 = Math.min(bottom, (long) getClipY() + getClipHeight());
++        if (x2 <= x1 || y2 <= y1) {
++            return null;
++        }
++        return new int[] { (int) x1, (int) y1, (int) (x2 - x1), (int) (y2 - y1) };
++    }
++
++    /**
++     * Prepares a white image over the visible part of a bounding box, in the
++     * coordinates of this Graphics. A primitive drawn on it in black marks
++     * the pixels that it covers. The box is widened by one pixel on each side
++     * so that the native primitives cannot reach past it.
++     *
++     * @return the Graphics of that image, or null if nothing is visible
++     */
++    private Graphics coverage(long left, long top, long right, long bottom) {
++        int[] region = visibleRegion(left - 1, top - 1, right + 1, bottom + 1);
++        if (region == null) {
++            return null;
++        }
++        Graphics mask = Image.createImage(region[2], region[3]).getGraphics();
++        mask.setColor(0xffffff);
++        mask.fillRect0(0, 0, region[2], region[3]);
++        mask.setColor(0);
++        mask.translate(-region[0], -region[1]);
++        mask.style = style;
++        mask.currentFont = currentFont;
++        return mask;
++    }
++
++    private static void checkTextAnchor(int anchor) {
++        int horizontal = anchor & (LEFT | HCENTER | RIGHT);
++        int vertical = anchor & (TOP | BASELINE | BOTTOM);
++        if (anchor != 0 &&
++                (anchor != (horizontal | vertical) ||
++                 (horizontal != LEFT && horizontal != HCENTER &&
++                  horizontal != RIGHT) ||
++                 (vertical != TOP && vertical != BASELINE && vertical != BOTTOM))) {
++            throw new IllegalArgumentException();
++        }
++    }
++
++    /**
++     * Prepares the coverage of a text. Whatever the anchor, it lies within one
++     * text width and one line height of the anchor point.
++     */
++    private Graphics textCoverage(int x, int y, int width) {
++        int height = currentFont.getHeight();
++        return coverage((long) x - width, (long) y - height,
++                        (long) x + width, (long) y + height);
++    }
++
++    private void blend(Graphics mask) {
++        blendRegion(-mask.transX, -mask.transY, mask.maxWidth, mask.maxHeight,
++                    mask.img);
++    }
++
++    /**
++     * Blends the current color over a region that lies within the clip. The
++     * pixels are read back, blended once and written without further alpha
++     * processing, because the native alpha drawing weakens the alpha.
++     *
++     * @param coverage black for full coverage, white for none and gray in
++     * between, or null for full coverage throughout
++     */
++    private void blendRegion(int x, int y, int width, int height,
++                             Image coverage) {
++        synchronized (this) {
++            int[] pixels = new int[width * height];
++            FPLinuxNokiaImage.read(this, pixels, 0, width, x, y, width, height);
++            int[] covered = null;
++            if (coverage != null) {
++                covered = new int[pixels.length];
++                coverage.getRGB(covered, 0, width, 0, 0, width, height);
++            }
++            for (int i = 0; i < pixels.length; i++) {
++                int opacity = alpha;
++                if (covered != null) {
++                    // Green has the highest precision in the RGB565 mask.
++                    int amount = 255 - ((covered[i] >>> 8) & 255);
++                    opacity = (alpha * amount + 127) / 255;
++                }
++                if (opacity != 0) {
++                    pixels[i] = sourceOver(rgbColor, opacity, pixels[i]);
++                }
++            }
++            FPLinuxNokiaImage.writeComposited(this, pixels, 0, width,
++                x + transX, y + transY, width, height);
++        }
++    }
++
++    /**
++     * Composites a color of the given alpha over an ARGB pixel.
++     */
++    private static int sourceOver(int rgb, int alpha, int below) {
++        int weight = (below >>> 24) * (255 - alpha);
++        int total = alpha * 255 + weight;
++        int result = 0;
++        for (int shift = 16; shift >= 0; shift -= 8) {
++            int channel = (((rgb >> shift) & 255) * alpha * 255 +
++                           ((below >> shift) & 255) * weight + total / 2) / total;
++            result |= channel << shift;
++        }
++        return ((total + 127) / 255) << 24 | result;
++    }
++
++    /**
+      * Retrieve the Graphics context for the given Image
+      *
+      * @param img The Image to get a Graphics context for
+@@ -1874,6 +2194,7 @@
+     void resetGC() {
+         currentFont = Font.getDefaultFont();
+         style       = SOLID;
++        alpha       = 255;
+         rgbColor    = gray = 0;
+         pixel       = getPixel(rgbColor, gray, true);
+     }
+--- a/midp/src/lowlevelui/graphics_api/gxapi_native/native/gxapi_graphics_kni.c
++++ b/midp/src/lowlevelui/graphics_api/gxapi_native/native/gxapi_graphics_kni.c
+@@ -85,7 +85,7 @@
+  * <p>
+  * Java declaration:
+  * <pre>
+- *     drawLine(IIII)V
++ *     drawLine0(IIII)V
+  * </pre>
+  *
+  * @param x1 The x coordinate of the start of the line
+@@ -94,7 +94,7 @@
+  * @param y2 The y coordinate of the end of the line
+  */
+ KNIEXPORT KNI_RETURNTYPE_VOID
+-KNIDECL(javax_microedition_lcdui_Graphics_drawLine) {
++KNIDECL(javax_microedition_lcdui_Graphics_drawLine0) {
+     int y2 = KNI_GetParameterAsInt(4);
+     int x2 = KNI_GetParameterAsInt(3);
+     int y1 = KNI_GetParameterAsInt(2);
+@@ -132,7 +132,7 @@
+  * <p>
+  * Java declaration:
+  * <pre>
+- *     drawRect(IIII)V
++ *     drawRect0(IIII)V
+  * </pre>
+  *
+  * @param x The x coordinate of the rectangle to be drawn
+@@ -141,7 +141,7 @@
+  * @param height The height of the rectangle to be drawn
+  */
+ KNIEXPORT KNI_RETURNTYPE_VOID
+-KNIDECL(javax_microedition_lcdui_Graphics_drawRect) {
++KNIDECL(javax_microedition_lcdui_Graphics_drawRect0) {
+     int h = KNI_GetParameterAsInt(4);
+     int w = KNI_GetParameterAsInt(3);
+     int y = KNI_GetParameterAsInt(2);
+@@ -185,7 +185,7 @@
+  * <p>
+  * Java declaration:
+  * <pre>
+- *     fillRect(IIII)V
++ *     fillRect0(IIII)V
+  * </pre>
+  *
+  * @param x The x coordinate of the rectangle to be drawn
+@@ -194,7 +194,7 @@
+  * @param height The height of the rectangle to be drawn
+  */
+ KNIEXPORT KNI_RETURNTYPE_VOID
+-KNIDECL(javax_microedition_lcdui_Graphics_fillRect) {
++KNIDECL(javax_microedition_lcdui_Graphics_fillRect0) {
+     int h = KNI_GetParameterAsInt(4);
+     int w = KNI_GetParameterAsInt(3);
+     int y = KNI_GetParameterAsInt(2);
+@@ -238,7 +238,7 @@
+  * <p>
+  * Java declaration:
+  * <pre>
+- *     drawRoundRect(IIIIII)V
++ *     drawRoundRect0(IIIIII)V
+  * </pre>
+  *
+  * @param x The x coordinate of the rectangle to be drawn
+@@ -249,7 +249,7 @@
+  * @param arcHeight The vertical diameter of the arc at the four corners
+  */
+ KNIEXPORT KNI_RETURNTYPE_VOID
+-KNIDECL(javax_microedition_lcdui_Graphics_drawRoundRect) {
++KNIDECL(javax_microedition_lcdui_Graphics_drawRoundRect0) {
+     int arcHeight = KNI_GetParameterAsInt(6);
+     int  arcWidth = KNI_GetParameterAsInt(5);
+     int         h = KNI_GetParameterAsInt(4);
+@@ -294,7 +294,7 @@
+  * <p>
+  * Java declaration:
+  * <pre>
+- *     fillRoundRect(IIIIII)V
++ *     fillRoundRect0(IIIIII)V
+  * </pre>
+  *
+  * @param x The x coordinate of the rectangle to be drawn
+@@ -305,7 +305,7 @@
+  * @param arcHeight The vertical diameter of the arc at the four corners
+  */
+ KNIEXPORT KNI_RETURNTYPE_VOID
+-KNIDECL(javax_microedition_lcdui_Graphics_fillRoundRect) {
++KNIDECL(javax_microedition_lcdui_Graphics_fillRoundRect0) {
+     int arcHeight = KNI_GetParameterAsInt(6);
+     int  arcWidth = KNI_GetParameterAsInt(5);
+     int         h = KNI_GetParameterAsInt(4);
+@@ -351,7 +351,7 @@
+  * <p>
+  * Java declaration:
+  * <pre>
+- *     drawArc(IIIIII)V
++ *     drawArc0(IIIIII)V
+  * </pre>
+  *
+  * @param x The x coordinate of the upper-left corner of the arc
+@@ -365,7 +365,7 @@
+  *                 <tt>startAngle</tt>
+  */
+ KNIEXPORT KNI_RETURNTYPE_VOID
+-KNIDECL(javax_microedition_lcdui_Graphics_drawArc) {
++KNIDECL(javax_microedition_lcdui_Graphics_drawArc0) {
+     int   arcAngle = KNI_GetParameterAsInt(6);
+     int startAngle = KNI_GetParameterAsInt(5);
+     int          h = KNI_GetParameterAsInt(4);
+@@ -426,7 +426,7 @@
+  * <p>
+  * Java declaration:
+  * <pre>
+- *     fillArc(IIIIII)V
++ *     fillArc0(IIIIII)V
+  * </pre>
+  *
+  * @param x The x coordinate of the upper-left corner of the arc
+@@ -440,7 +440,7 @@
+  *                 <tt>startAngle</tt>
+  */
+ KNIEXPORT KNI_RETURNTYPE_VOID
+-KNIDECL(javax_microedition_lcdui_Graphics_fillArc) {
++KNIDECL(javax_microedition_lcdui_Graphics_fillArc0) {
+     int   arcAngle = KNI_GetParameterAsInt(6);
+     int startAngle = KNI_GetParameterAsInt(5);
+     int          h = KNI_GetParameterAsInt(4);
+@@ -493,7 +493,7 @@
+  * <p>
+  * Java declaration:
+  * <pre>
+- *     fillTriangle(IIIIII)V
++ *     fillTriangle0(IIIIII)V
+  * </pre>
+  *
+  * @param x1 The x coordinate of the first vertices
+@@ -504,7 +504,7 @@
+  * @param y3 The y coordinate of the third vertices
+  */
+ KNIEXPORT KNI_RETURNTYPE_VOID
+-KNIDECL(javax_microedition_lcdui_Graphics_fillTriangle) {
++KNIDECL(javax_microedition_lcdui_Graphics_fillTriangle0) {
+     int         y3 = KNI_GetParameterAsInt(6);
+     int         x3 = KNI_GetParameterAsInt(5);
+     int         y2 = KNI_GetParameterAsInt(4);
+@@ -542,7 +542,7 @@
+  * <p>
+  * Java declaration:
+  * <pre>
+- *     drawString(Ljava/lang/String;III)V
++ *     drawString0(Ljava/lang/String;III)V
+  * </pre>
+  *
+  * @param str The <tt>String</tt> to be drawn
+@@ -551,7 +551,7 @@
+  * @param anchor The anchor point for positioning the text
+  */
+ KNIEXPORT KNI_RETURNTYPE_VOID
+-KNIDECL(javax_microedition_lcdui_Graphics_drawString) {
++KNIDECL(javax_microedition_lcdui_Graphics_drawString0) {
+     int anchor = KNI_GetParameterAsInt(4);
+     int      y = KNI_GetParameterAsInt(3);
+     int      x = KNI_GetParameterAsInt(2);
+@@ -607,7 +607,7 @@
+  * <p>
+  * Java declaration:
+  * <pre>
+- *     drawSubstring(Ljava/lang/String;III)V
++ *     drawSubstring0(Ljava/lang/String;III)V
+  * </pre>
+  *
+  * @param str The <tt>String</tt> to be drawn
+@@ -618,7 +618,7 @@
+  * @param anchor The anchor point for positioning the text
+  */
+ KNIEXPORT KNI_RETURNTYPE_VOID
+-KNIDECL(javax_microedition_lcdui_Graphics_drawSubstring) {
++KNIDECL(javax_microedition_lcdui_Graphics_drawSubstring0) {
+     int anchor = KNI_GetParameterAsInt(6);
+     int      y = KNI_GetParameterAsInt(5);
+     int      x = KNI_GetParameterAsInt(4);
+@@ -683,7 +683,7 @@
+  * <p>
+  * Java declaration:
+  * <pre>
+- *     drawChar(CIII)V
++ *     drawChar0(CIII)V
+  * </pre>
+  *
+  * @param ch The character to be drawn
+@@ -692,7 +692,7 @@
+  * @param anchor The anchor point for positioning the text
+  */
+ KNIEXPORT KNI_RETURNTYPE_VOID
+-KNIDECL(javax_microedition_lcdui_Graphics_drawChar) {
++KNIDECL(javax_microedition_lcdui_Graphics_drawChar0) {
+     int anchor = KNI_GetParameterAsInt(4);
+     int      y = KNI_GetParameterAsInt(3);
+     int      x = KNI_GetParameterAsInt(2);
+@@ -736,7 +736,7 @@
+  * <p>
+  * Java declaration:
+  * <pre>
+- *     drawChars([CIIIII)V
++ *     drawChars0([CIIIII)V
+  * </pre>
+  *
+  * @param data The array of characters to be drawn
+@@ -747,7 +747,7 @@
+  * @param anchor The anchor point for positioning the text
+  */
+ KNIEXPORT KNI_RETURNTYPE_VOID
+-KNIDECL(javax_microedition_lcdui_Graphics_drawChars) {
++KNIDECL(javax_microedition_lcdui_Graphics_drawChars0) {
+     int anchor = KNI_GetParameterAsInt(6);
+     int      y = KNI_GetParameterAsInt(5);
+     int      x = KNI_GetParameterAsInt(4);

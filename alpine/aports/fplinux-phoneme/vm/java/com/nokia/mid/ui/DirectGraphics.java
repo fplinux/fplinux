@@ -19,6 +19,17 @@ public interface DirectGraphics {
 
     void drawImage(Image image, int x, int y, int anchor, int manipulation);
 
+    /**
+     * Sets the color and alpha of the underlying Graphics. Primitives and
+     * text blend over the pixels inside the clip. Alpha 255 uses regular
+     * drawing and alpha 0 leaves the target untouched. The Graphics color
+     * setters restore alpha 255.
+     */
+    void setARGBColor(int argbColor);
+
+    /** Returns the current color alpha of the underlying Graphics. */
+    int getAlphaComponent();
+
     void drawTriangle(int x1, int y1, int x2, int y2, int x3, int y3, int argbColor);
 
     void fillTriangle(int x1, int y1, int x2, int y2, int x3, int y3, int argbColor);

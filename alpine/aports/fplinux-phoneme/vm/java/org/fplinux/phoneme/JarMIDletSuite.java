@@ -192,6 +192,23 @@ final class JarMIDletSuite implements MIDletSuite {
     }
 
     public boolean isRegistered(String midletClassName) {
+        String entry;
+        for (int number = 1;
+             (entry = getProperty("MIDlet-" + number)) != null; number++) {
+            int first = entry.indexOf(',');
+            int last = entry.lastIndexOf(',');
+            if (first < 1 || first == last ||
+                entry.substring(0, first).trim().length() == 0) {
+                return false;
+            }
+            String className = entry.substring(last + 1).trim();
+            if (className.length() == 0) {
+                return false;
+            }
+            if (className.equals(midletClassName)) {
+                return true;
+            }
+        }
         return false;
     }
 

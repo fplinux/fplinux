@@ -1,0 +1,14 @@
+Expose the MMAPI time base methods on the Player interface.
+
+--- a/midp/src/media/reference/classes/javax/microedition/media/Player.java
++++ b/midp/src/media/reference/classes/javax/microedition/media/Player.java
+@@ -104,3 +104,9 @@
+     // JAVADOC COMMENT ELIDED
+     void removePlayerListener(PlayerListener playerListener);
++
++    // JAVADOC COMMENT ELIDED
++    void setTimeBase(TimeBase master) throws MediaException;
++
++    // JAVADOC COMMENT ELIDED
++    TimeBase getTimeBase();
+ }

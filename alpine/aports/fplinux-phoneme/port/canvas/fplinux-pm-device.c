@@ -21,6 +21,7 @@
 #include <anc_indicators.h>
 #include <anc_vibrate.h>
 
+#include <fplinux/fplinux-ui-audio.h>
 #include <fplinux/fplinux-ui-lights.h>
 #include <fplinux/fplinux-ui-session.h>
 #include <fplinux/fplinux-ui-vibration.h>
@@ -163,6 +164,28 @@ KNIDECL(com_nokia_mid_ui_DeviceControl_setBacklight0)
 	device.requested_level = requested ? (requested + 9) / 10 : 1;
 	apply_requested_level();
 	KNI_ReturnVoid();
+}
+
+KNIEXPORT KNI_RETURNTYPE_BOOLEAN
+KNIDECL(com_sun_midp_lcdui_DisplayDeviceAccess_isAudioSupported)
+{
+	struct fplinux_ui *ui = fplinux_pm_canvas_ui();
+
+	KNI_ReturnBoolean(ui && fplinux_ui_audio_supported(ui));
+}
+
+KNIEXPORT KNI_RETURNTYPE_BOOLEAN
+KNIDECL(com_sun_midp_lcdui_DisplayDeviceAccess_isBacklightSupported)
+{
+	KNI_ReturnBoolean(fplinux_pm_canvas_ui() != NULL);
+}
+
+KNIEXPORT KNI_RETURNTYPE_BOOLEAN
+KNIDECL(com_sun_midp_lcdui_DisplayDeviceAccess_isVibrationSupported)
+{
+	struct fplinux_ui *ui = fplinux_pm_canvas_ui();
+
+	KNI_ReturnBoolean(ui && fplinux_ui_vibration_supported(ui));
 }
 
 /* private static native boolean vibrate1(int duration); */

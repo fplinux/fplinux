@@ -1,0 +1,7 @@
+MIDlet-1: JSR APIs, , fplinux.fixtures.jsr.JsrMIDlet
+MIDlet-2: Declared, , fplinux.fixtures.jsr.JsrMIDlet$Declared
+MIDlet-Name: PM JSR APIs
+MIDlet-Vendor: FPLinux
+MIDlet-Version: 1.0.0
+MicroEdition-Configuration: CLDC-1.1
+MicroEdition-Profile: MIDP-2.0

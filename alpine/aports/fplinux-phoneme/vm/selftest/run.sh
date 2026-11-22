@@ -239,6 +239,35 @@ if ! grep -qx 'PM-FILES c:/ create list read rewrite rename truncate delete' \
 	cat "${work}/files-card.txt" >&2
 	fail "FileConnection mounted-card behavior differs"
 fi
+
+HOME="${files_home}" "${qemu_arm}" -L / "${sysroot}/lib/ld-musl-armhf.so.1" \
+	--library-path "${sysroot}/lib:${sysroot}/usr/lib" "${headless}" \
+	--system-classes "${classes}" --timeout-ms 15000 --card-dir "${files_card}" \
+	"${work}/files.jar" fplinux.fixtures.files.FileListenerMIDlet \
+	>"${work}/files-listener.txt" 2>&1 &
+listener_pid=$!
+for expected in ready removed; do
+	attempt=0
+	until grep -qx "PM-FILE-LISTENER ${expected}" "${work}/files-listener.txt"; do
+		if ! kill -0 "${listener_pid}" 2>/dev/null || [ "${attempt}" -ge 100 ]; then
+			kill "${listener_pid}" 2>/dev/null || true
+			wait "${listener_pid}" || true
+			cat "${work}/files-listener.txt" >&2
+			fail "File system listener did not report ${expected}"
+		fi
+		attempt=$((attempt + 1))
+		sleep 0.05
+	done
+	case "${expected}" in
+		ready) mv "${files_card}" "${files_card}.removed" ;;
+		removed) mv "${files_card}.removed" "${files_card}" ;;
+	esac
+done
+wait "${listener_pid}" &&
+	grep -qx 'PM-FILE-LISTENER pass' "${work}/files-listener.txt" || {
+		cat "${work}/files-listener.txt" >&2
+		fail "File system listener did not report the restored root"
+	}
 rmdir "${files_card}" "${files_home}/Files" "${files_home}"
 
 # Canvas port headless: sizes of the modes, sizeChanged after a mode change,
@@ -327,6 +356,30 @@ build_jar bluetooth "${here}/bluetooth.mf"
 	--timeout-ms 30000 "${work}/bluetooth.jar" >"${work}/bluetooth.txt"
 grep -qx 'PM-BLUETOOTH local device unavailable' "${work}/bluetooth.txt" ||
 	fail "Bluetooth availability check differs (${work}/bluetooth.txt)"
+
+for api in wireless jsr; do
+	build_jar "${api}" "${here}/${api}.mf"
+	"${qemu_arm}" -L "${sysroot}" "${headless}" --system-classes "${classes}" \
+		--timeout-ms 30000 "${work}/${api}.jar" >"${work}/${api}-log.txt" 2>&1
+	grep '^PM-' "${work}/${api}-log.txt" >"${work}/${api}.txt" || true
+	if ! cmp -s "${here}/${api}.expected" "${work}/${api}.txt"; then
+		cat "${work}/${api}-log.txt" >&2
+		fail "${api} API compatibility check differs"
+	fi
+done
+
+build_jar vendor "${here}/vendor.mf"
+mkdir -p "${work}/vendor-resources"
+for asset in pixel.png tone.mid; do
+	base64 -d "${here}/vendor-resources/${asset}.base64" >"${work}/vendor-resources/${asset}"
+done
+"${jdk}/bin/jar" uf "${work}/vendor.jar" -C "${work}/vendor-resources" .
+"${qemu_arm}" -L "${sysroot}" "${headless}" --system-classes "${classes}" \
+	--timeout-ms 30000 "${work}/vendor.jar" >"${work}/vendor-log.txt" 2>&1
+if ! grep -qx 'PM-VENDOR checks=ok' "${work}/vendor-log.txt"; then
+	cat "${work}/vendor-log.txt" >&2
+	fail "vendor API compatibility check differs"
+fi
 
 # Model a host wake before the existing Java deadline, with no event that
 # would make another Java thread runnable.

@@ -17,6 +17,12 @@ public class DisplayDeviceAccess {
     public DisplayDeviceAccess() {
     }
 
+    public static native boolean isAudioSupported();
+
+    public static native boolean isBacklightSupported();
+
+    public static native boolean isVibrationSupported();
+
     /**
      * Display.flashBacklight(): keeps the display on for duration ms; 0
      * ends an earlier request. Display has checked that the duration is

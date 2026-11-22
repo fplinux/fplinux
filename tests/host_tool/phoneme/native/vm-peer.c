@@ -61,6 +61,11 @@ void fplinux_pm_files_volumes(const struct fplinux_volume_snapshot *snapshot)
 	(void)snapshot;
 }
 
+bool fplinux_pm_files_take_refresh_request(void)
+{
+	return false;
+}
+
 enum fplinux_pm_vm_state fplinux_pm_vm_get_state(void)
 {
 	return state;

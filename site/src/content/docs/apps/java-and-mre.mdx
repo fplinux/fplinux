@@ -41,7 +41,7 @@ If a program came with a JAD descriptor, keep it beside the JAR and open the JAD
 
 When a suite contains several MIDlets, choose the one to run. Opening another suite asks to close the current program. Choose **Cancel** to keep it running.
 
-Java programs using FileConnection access My files as `c:/` and a mounted data card as `e:/`. PhoneME supports listing, reading and writing files in these folders. A program that depends on notifications when a storage root is added or removed may need to be reopened to find the card.
+Java programs using FileConnection access My files as `c:/` and a mounted data card as `e:/`. PhoneME supports listing, reading and writing files in these folders. A running program can register a `FileSystemListener` to receive notifications when `e:/` becomes available or is removed. The card must be mounted before it becomes available to Java.
 
 Java record stores remain after closing and reopening phoneME. Programs with the same **MIDlet-Vendor** and **MIDlet-Name** share their records across version updates and moves to another folder. A program missing either field uses its JAR path instead: moving it gives it a separate store. Different suites keep separate records.
 
@@ -69,3 +69,7 @@ MRE currently ends a program after 15 minutes, or after it uses two minutes of C
 Support depends on the APIs each program uses. A JAR or VXP extension alone does not establish compatibility. A program that needs unsupported APIs can fail to open or stop while running. Neither runtime installs or modifies the phone's original firmware.
 
 PhoneME supports common Nokia drawing and sound operations, AMR-NB speech effects through MMAPI, MascotCapsule micro3D v3 rendering, and a subset of JSR 184 Mobile 3D Graphics (M3G). M3G support covers cameras, textured meshes with one texture per surface, animated bones, morphing vertex positions and normals, and camera-facing sprites. Compatibility and frame rate vary by game.
+
+Selected Samsung, Sprint and Vodafone audio methods play supported formats through MMAPI. Vendor vibration and backlight calls use the available device feedback services. The Samsung MMF format is unavailable. Siemens image helpers decode images through MIDP.
+
+PhoneME provides Bluetooth UUID and SDP value types and the JSR 120 messaging interfaces. MIDlets receive the standard unavailable errors for Bluetooth connections or discovery, SMS and cell broadcasts. The compatibility APIs for background push, serial ports, video, PIM and sensors report those services as unavailable to Java.

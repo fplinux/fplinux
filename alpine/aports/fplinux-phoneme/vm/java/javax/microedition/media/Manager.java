@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 package javax.microedition.media;
 
+import com.sun.cldchi.jvm.JVM;
 import java.io.IOException;
 import java.io.InputStream;
 import org.fplinux.phoneme.media.PlatformPlayer;
@@ -10,6 +11,11 @@ public final class Manager {
     public static final String TONE_DEVICE_LOCATOR = "device://tone";
 
     private Manager() {
+    }
+
+    /** Returns the shared time base used by players. */
+    public static TimeBase getSystemTimeBase() {
+        return SystemTimeBase.INSTANCE;
     }
 
     public static String[] getSupportedContentTypes(String protocol) {
@@ -55,5 +61,14 @@ public final class Manager {
             throw new IllegalArgumentException("Invalid tone");
         }
         PlatformPlayer.playTone(note, duration, volume);
+    }
+
+    private static final class SystemTimeBase implements TimeBase {
+        private static final TimeBase INSTANCE = new SystemTimeBase();
+        private final long originMillis = JVM.monotonicTimeMillis();
+
+        public long getTime() {
+            return (JVM.monotonicTimeMillis() - originMillis) * 1000L;
+        }
     }
 }

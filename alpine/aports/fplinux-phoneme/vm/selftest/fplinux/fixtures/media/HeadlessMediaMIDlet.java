@@ -7,6 +7,7 @@ import javax.microedition.media.Manager;
 import javax.microedition.media.MediaException;
 import javax.microedition.media.Player;
 import javax.microedition.media.PlayerListener;
+import javax.microedition.media.TimeBase;
 import javax.microedition.midlet.MIDlet;
 
 /** Exercises the native media bridge without a UI audio provider. */
@@ -33,6 +34,7 @@ public final class HeadlessMediaMIDlet extends MIDlet implements PlayerListener 
             } catch (MediaException expected) {
             }
             nokiaSound();
+            timeBase();
             closeBeforePreparation();
             System.out.println("PM-MEDIA headless failure honest");
         } catch (Throwable failure) {
@@ -43,6 +45,26 @@ public final class HeadlessMediaMIDlet extends MIDlet implements PlayerListener 
                 player.close();
             }
             notifyDestroyed();
+        }
+    }
+
+    private void timeBase() throws Exception {
+        Player player = Manager.createPlayer(Manager.TONE_DEVICE_LOCATOR);
+        try {
+            try {
+                player.getTimeBase();
+                throw new RuntimeException("Unrealized time base accepted");
+            } catch (IllegalStateException expected) {
+            }
+            player.realize();
+            TimeBase timeBase = Manager.getSystemTimeBase();
+            AudioMIDlet.require(player.getTimeBase() == timeBase, "Player time base differs");
+            player.setTimeBase(null);
+            long before = timeBase.getTime();
+            Thread.sleep(30);
+            AudioMIDlet.require(timeBase.getTime() > before, "System time base stopped");
+        } finally {
+            player.close();
         }
     }
 
