@@ -168,7 +168,7 @@ SHARED_APORT_SOURCES = {
     "fplinux-cpuclock": CLI_SOURCES,
     "fplinux-debug-tools": (*DRM_SESSION_SOURCES, *CLI_SOURCES, *GPU_OUTPUT_SOURCES),
     "fplinux-example-apidemo": CLI_SOURCES,
-    "fplinux-files": (*CLI_SOURCES, "include/fplinux/fplinux-storage.h"),
+    "fplinux-files": (*CLI_SOURCES, *DESKTOP_ENTRY_SOURCES, "include/fplinux/fplinux-storage.h"),
     "fplinux-fm": (
         *CLI_SOURCES,
         *AUDIO_RADIO_SOURCES,
@@ -250,7 +250,7 @@ SHARED_APORT_SOURCES = {
         "alpine/aports/fplinux-mesa/NOTICE",
     ),
     "fplinux-notes": CLI_SOURCES,
-    "fplinux-phoneme": CLI_SOURCES,
+    "fplinux-phoneme": (*CLI_SOURCES, *UTF8_SOURCES),
     "fplinux-present": (
         *DRM_SESSION_SOURCES,
         *CLI_SOURCES,

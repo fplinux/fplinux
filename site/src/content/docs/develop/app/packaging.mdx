@@ -48,6 +48,7 @@ Install the file under `/usr/share/applications/` with mode `0644` and normal pa
 | `Icon` | Optional simple icon name, without a path or extension |
 | `Categories` | Optional semicolon-separated categories used to group the entry |
 | `X-FPLinux-FileExtensions` | Optional semicolon-terminated extension list, such as `jar;`; matching ignores ASCII letter case |
+| `X-FPLinux-FileIcon` | Optional absolute path to a program that generates a file icon |
 | `NoDisplay=true` | Hide the catalog entry while allowing it to open registered file types |
 | `Hidden=true` | Disable both catalog launch and file handling |
 
@@ -64,6 +65,12 @@ A handler installs a callback with `fplinux_ui_set_document_handler()`. Both a n
 Return `FPLINUX_UI_DOCUMENT_ACCEPTED` after accepting the file and preparing its screen. The UI runtime sends that result after the new frame is committed and synchronized; the previous application frame cannot acknowledge a new document. WAIT allows a decision dialog to appear without declaring success. Cancel preserves the handler's existing work. After a successful open, ordinary foreground Close resumes the live initiating task; Home keeps its usual meaning.
 
 `FPLINUX_UI_DOCUMENT_RESTART_REQUIRED` serves handlers whose execution engine cannot be reused in the same process. It enters the existing [close handshake](/fplinux/develop/app/lifecycle/): Cancel keeps the task, while Ready closes it and starts the same installed handler with the pending document. A request can restart the handler once. Do not use this response to bypass a save or close decision.
+
+### File icons
+
+Files can use `X-FPLinux-FileIcon` when exactly one installed application handles the extension. Install the provider as a regular executable owned by the package owner, with mode `0755`. Files passes the absolute file path as the sole argument and runs the provider under the application account. Read the file without modifying it. Write one PNG to standard output and exit with status 0. The PNG may use up to 64 KiB, with dimensions from 1 to 128 pixels and up to 8 bits per channel. Exit with status 1 and empty output when the file has no usable icon.
+
+Files requests icons for visible rows while the user browses. Providers have a deadline and can be cancelled when the view closes or storage is removed. The application's `Icon` or the generic file icon covers rows until a preview is available.
 
 ## Icons
 

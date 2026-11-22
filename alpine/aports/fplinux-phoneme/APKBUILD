@@ -22,6 +22,8 @@ _mascot_commit=@version:phoneme_mascotme@
 source="
 	fplinux-cli.c
 	fplinux-cli.h
+	fplinux-utf8.c
+	fplinux-utf8.h
 	@source:phoneme@
 	@source:phoneme_mascotme@
 	@source:phoneme_host_musl@
@@ -239,6 +241,13 @@ _build_app() {
 	msgfmt --check --output-file="$srcdir/ru.mo" "$startdir/port/app/ru.po"
 }
 
+_build_file_icon() {
+	"$CC" $CPPFLAGS $CFLAGS -Os -std=c11 -Wall -Wextra -Werror \
+		-I"$srcdir" "$startdir/vm/fplinux-pm-file-icon.c" \
+		"$startdir/vm/fplinux-pm-jar.c" "$srcdir/fplinux-utf8.c" \
+		$LDFLAGS -lz -o "$srcdir/fplinux-phoneme-file-icon"
+}
+
 build() {
 	_build_qemu
 	_setup_tools
@@ -247,6 +256,7 @@ build() {
 	_build_midp_java
 	_build_vm
 	_build_app
+	_build_file_icon
 
 	local cldc="$srcdir/cldc-build/linux_arm_vfp"
 	FPLINUX_PM_JDK="$_jdk" \
@@ -261,6 +271,8 @@ build() {
 
 package() {
 	install -Dm755 "$srcdir/fplinux-phoneme" "$pkgdir/usr/bin/fplinux-phoneme"
+	install -Dm755 "$srcdir/fplinux-phoneme-file-icon" \
+		"$pkgdir/usr/libexec/fplinux-phoneme-file-icon"
 	install -Dm644 "$startdir/port/app/org.fplinux.phoneme.desktop" \
 		"$pkgdir/usr/share/applications/org.fplinux.phoneme.desktop"
 	install -Dm644 "$srcdir/ru.mo" \
@@ -280,4 +292,6 @@ package() {
 sha512sums="
 60be1ccccf0215ea13bc64fd442a0498e7db203234ce74f92cec502295e8ac703a089438848b9a1850102836855537f561e9bd8313751574a069eb0ec6dcf31a  fplinux-cli.c
 9677a324ea1cbcca154f472c83eb0660badfa11c2b444116f27080bd839dee2ab9ea6ef3b0c495f6074207559b813c843f284786f8b1e3c89023121b5aacb453  fplinux-cli.h
+0ded6f822b59d68de21ce64d03e892f27e2f190366ff39f154b88a73b0c7c3627c2787ddf37817ad85cc8206a20243b3f3c13b039d3d06955392a6b5a70e1bcd  fplinux-utf8.c
+8143f656608c63e42016da2003174d6fb2ac043daaad07e63e006bf3dc76544e76e820ae52a9c50f5559d58757c44aeded2b1cd4b01b4665938a7e88b4bc1d43  fplinux-utf8.h
 "

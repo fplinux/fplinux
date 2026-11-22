@@ -2,6 +2,8 @@
 #define _GNU_SOURCE
 #include "files-core.h"
 #include "files-job.h"
+#include "files-preview-catalog.h"
+#include "files-preview.h"
 #include "fplinux-cli.h"
 
 #include <fplinux/fplinux-gettext.h>
@@ -110,6 +112,13 @@ struct files_app {
 	struct fplinux_ui_screen *busy;
 	struct fplinux_ui_screen *name_box;
 	struct fplinux_ui_screen *decision;
+	struct files_preview_catalog *preview_catalog;
+	struct files_preview *preview;
+	struct fplinux_ui_screen *preview_screen;
+	lv_timer_t *preview_timer;
+	lv_image_dsc_t preview_image;
+	char preview_icon_path[PATH_MAX];
+	uint32_t preview_eject;
 	struct files_folder *folder;
 	struct files_folder *origin;
 	/* The folder being read, shown at its target when the wait ends. */
@@ -172,6 +181,22 @@ static void start_mutation(struct files_app *app,
 static bool request_storage(struct files_app *app,
 			    enum fplinux_volume_operation operation,
 			    uint32_t id);
+
+static void clear_preview_view(struct files_app *app)
+{
+	if (app->preview)
+		files_preview_reset(app->preview);
+	app->preview_screen = NULL;
+}
+
+static void reload_preview_catalog(struct files_app *app)
+{
+	clear_preview_view(app);
+	if (app->preview_catalog)
+		files_preview_catalog_close(app->preview_catalog);
+	app->preview_catalog =
+		files_preview_catalog_open("/usr/share/applications", 0);
+}
 
 static const char *base_name(const char *path)
 {
@@ -477,6 +502,10 @@ static void free_folder(struct files_folder *folder)
 {
 	if (!folder)
 		return;
+	if (folder->app->preview_screen &&
+	    (folder->app->preview_screen == folder->screen ||
+	     folder->app->preview_screen == folder->results_screen))
+		clear_preview_view(folder->app);
 	fplinux_files_directory_free(&folder->directory);
 	if (folder->descriptor >= 0)
 		close(folder->descriptor);
@@ -591,8 +620,49 @@ static void focused(struct fplinux_ui *ui, struct fplinux_ui_screen *screen,
 	}
 }
 
-static bool render_row(struct files_folder *folder, size_t index,
-		       struct fplinux_ui_virtual_row *out)
+static void set_file_icon(struct files_folder *folder,
+			  struct fplinux_ui_screen *screen, size_t row,
+			  const char *name, struct fplinux_ui_virtual_row *out)
+{
+	struct files_app *app = folder->app;
+	const struct files_preview_handler *handler =
+		app->preview_catalog ?
+			files_preview_catalog_find(app->preview_catalog, name) :
+			NULL;
+	int size = fplinux_ui_metrics(app->ui)->app_icon_size;
+	char path[FPLINUX_FILES_PATH_MAX];
+
+	if (!handler)
+		return;
+	if (handler->icon &&
+	    snprintf(app->preview_icon_path, sizeof(app->preview_icon_path),
+		     "/usr/share/icons/hicolor/%dx%d/apps/%s.png", size, size,
+		     handler->icon) < (int)sizeof(app->preview_icon_path) &&
+	    access(app->preview_icon_path, R_OK) == 0)
+		out->icon = app->preview_icon_path;
+	if (handler->program && app->preview && app->preview_screen == screen &&
+	    fplinux_files_child_path(folder->path, name, path, sizeof(path)) ==
+		    0) {
+		const struct files_preview_image *image = files_preview_request(
+			app->preview, row, handler->program, path);
+
+		if (image) {
+			app->preview_image = (lv_image_dsc_t){
+				.header = { .magic = LV_IMAGE_HEADER_MAGIC,
+					    .cf = LV_COLOR_FORMAT_RAW_ALPHA,
+					    .w = image->width,
+					    .h = image->height },
+				.data_size = image->bytes,
+				.data = image->data,
+			};
+			out->preview = &app->preview_image;
+		}
+	}
+}
+
+static bool render_row(struct files_folder *folder,
+		       struct fplinux_ui_screen *screen, size_t row,
+		       size_t index, struct fplinux_ui_virtual_row *out)
 {
 	const struct fplinux_files_entry *entry;
 
@@ -605,6 +675,8 @@ static bool render_row(struct files_folder *folder, size_t index,
 		folder->app->ui,
 		entry->kind == FPLINUX_FILES_KIND_DIRECTORY ? "folder" : "file",
 		FPLINUX_UI_GLYPH_ROW);
+	if (entry->kind == FPLINUX_FILES_KIND_FILE && !folder->system)
+		set_file_icon(folder, screen, row, entry->name, out);
 	return true;
 }
 
@@ -615,8 +687,7 @@ static bool folder_row(struct fplinux_ui *ui, struct fplinux_ui_screen *screen,
 	struct files_folder *folder = context;
 
 	(void)ui;
-	(void)screen;
-	return render_row(folder,
+	return render_row(folder, screen, row,
 			  row < folder->count ? folder->rows[row] : SIZE_MAX,
 			  out);
 }
@@ -628,8 +699,7 @@ static bool filtered_row(struct fplinux_ui *ui,
 	struct files_folder *folder = context;
 
 	(void)ui;
-	(void)screen;
-	return render_row(folder,
+	return render_row(folder, screen, row,
 			  row < folder->match_count ? folder->matches[row] :
 						      SIZE_MAX,
 			  out);
@@ -806,6 +876,7 @@ static void open_folder(struct files_app *app, const char *path,
 			bool system, const char *focus,
 			enum folder_target target)
 {
+	clear_preview_view(app);
 	if (!begin_wait(app, _("Reading folder"), _("Please wait…"), true)) {
 		show_error(app, errno);
 		return;
@@ -821,6 +892,7 @@ static void refresh_folder(struct files_app *app)
 {
 	struct files_folder *folder = app->folder;
 
+	reload_preview_catalog(app);
 	open_folder(app, folder->path, folder->root, folder->volume_id,
 		    folder->read_only, folder->system, NULL, FOLDER_REFRESH);
 }
@@ -830,6 +902,7 @@ static void leave_folder(struct files_app *app)
 	struct files_folder *folder = app->folder;
 	char parent[FPLINUX_FILES_PATH_MAX];
 
+	clear_preview_view(app);
 	/* A folder opened without its parents reads the parent when left. */
 	if (!folder->parent && strcmp(folder->path, folder->root)) {
 		fplinux_files_parent_path(folder->path, parent, sizeof(parent));
@@ -1540,6 +1613,15 @@ static void change_volume(struct files_app *app,
 {
 	const char *progress = _("Connecting…");
 
+	if (operation == FPLINUX_VOLUME_EJECT && app->preview &&
+	    files_preview_busy(app->preview)) {
+		clear_preview_view(app);
+		if (files_preview_busy(app->preview)) {
+			app->preview_eject = volume->id;
+			lv_timer_set_period(app->preview_timer, 25);
+			return;
+		}
+	}
 	if (!request_storage(app, operation, volume->id))
 		return;
 	if (operation == FPLINUX_VOLUME_EJECT)
@@ -1547,6 +1629,46 @@ static void change_volume(struct files_app *app,
 							 _("Ejecting…");
 	app->storage_waiting = begin_wait(
 		app, volume_name(volume->shared_system_files), progress, false);
+}
+
+static void preview_tick(lv_timer_t *timer)
+{
+	struct files_app *app = lv_timer_get_user_data(timer);
+	struct files_folder *folder = app->folder;
+	struct fplinux_ui_screen *current = fplinux_ui_current(app->ui);
+	struct fplinux_ui_screen *view = NULL;
+	size_t count = 0;
+	size_t completed;
+	bool busy;
+
+	if (folder && !folder->system && fplinux_ui_is_visible(app->ui)) {
+		if (current == folder->screen) {
+			view = current;
+			count = folder->count;
+		} else if (current == folder->results_screen) {
+			view = current;
+			count = folder->match_count;
+		}
+	}
+	if (view != app->preview_screen) {
+		clear_preview_view(app);
+		app->preview_screen = view;
+		if (view)
+			fplinux_ui_list_invalidate(view, 0, count);
+	}
+	if (files_preview_poll(app->preview, &completed) && view &&
+	    completed < count)
+		fplinux_ui_list_invalidate(view, completed, 1);
+	busy = files_preview_busy(app->preview);
+	if (app->preview_eject && !busy) {
+		const struct fplinux_volume *volume =
+			mounted_volume(app, app->preview_eject);
+
+		app->preview_eject = 0;
+		if (volume && places_current(app))
+			change_volume(app, FPLINUX_VOLUME_EJECT, volume);
+	}
+	lv_timer_set_period(timer, busy ? 25 : 150);
 }
 
 static void places_command(struct fplinux_ui *ui,
@@ -1562,6 +1684,7 @@ static void places_command(struct fplinux_ui *ui,
 	} else if (id == COMMAND_HELP) {
 		show_help(app);
 	} else if (id == COMMAND_REFRESH) {
+		reload_preview_catalog(app);
 		request_storage(app, FPLINUX_VOLUME_REFRESH, 0);
 	} else if (id == COMMAND_SYSTEM) {
 		open_folder(app, "/", "/", 0, true, true, NULL, FOLDER_CHILD);
@@ -1685,6 +1808,7 @@ static void show_places(struct files_app *app)
 			 volume	     ? volume->id :
 				       0;
 
+	reload_preview_catalog(app);
 	if (app->places)
 		pop_to(app, app->places);
 	free_folders(app->folder);
@@ -1878,6 +2002,7 @@ static void folder_command(struct fplinux_ui *ui,
 		return;
 	if (id == COMMAND_BACK) {
 		if (screen == folder->results_screen) {
+			clear_preview_view(app);
 			folder->results_screen = NULL;
 			folder->command_screen = NULL;
 			fplinux_ui_go_back(ui);
@@ -2097,8 +2222,12 @@ static void app_event(struct fplinux_ui *ui,
 	struct files_app *app = context;
 
 	if (event->type == FPLINUX_UI_EVENT_CLOSE) {
+		clear_preview_view(app);
 		fplinux_files_job_cancel(&app->job);
 		fplinux_ui_quit(ui);
+	} else if (event->type == FPLINUX_UI_EVENT_VISIBILITY &&
+		   !fplinux_ui_is_visible(ui)) {
+		clear_preview_view(app);
 	} else if (event->type == FPLINUX_UI_EVENT_SESSION &&
 		   event->session->type == FPLINUX_UI_SESSION_BLUETOOTH_READY) {
 		struct fplinux_ui_screen *screen = fplinux_ui_current(ui);
@@ -2186,6 +2315,9 @@ int main(int argc, char **argv)
 		fplinux_files_job_close(&app.job);
 		return 1;
 	}
+	app.preview = files_preview_new();
+	if (app.preview)
+		app.preview_timer = lv_timer_create(preview_tick, 150, &app);
 	show_places(&app);
 	request_storage(&app, FPLINUX_VOLUME_REFRESH, 0);
 	result = fplinux_ui_run(app.ui);
@@ -2195,9 +2327,15 @@ int main(int argc, char **argv)
 	fplinux_files_job_close(&app.job);
 	if (app.places_update)
 		lv_timer_delete(app.places_update);
+	if (app.preview_timer)
+		lv_timer_delete(app.preview_timer);
 	fplinux_ui_close(app.ui);
 	free_folders(app.folder);
 	free_folders(app.origin);
 	free_folder(app.pending);
+	if (app.preview)
+		files_preview_free(app.preview);
+	if (app.preview_catalog)
+		files_preview_catalog_close(app.preview_catalog);
 	return result < 0;
 }

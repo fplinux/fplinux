@@ -16,9 +16,21 @@ source="
 	files-core.h
 	files-job.c
 	files-job.h
+	files-preview.c
+	files-preview.h
+	files-preview-catalog.c
+	files-preview-catalog.h
 	fplinux-cli.c
 	fplinux-cli.h
 	fplinux-storage.h
+	fplinux-desktop-entry.c
+	fplinux-desktop-entry.h
+	fplinux-ui-session.h
+	fplinux-system-levels.h
+	fplinux-ui-document.h
+	fplinux-volumes.h
+	fplinux-ui-vibration.h
+	fplinux-ui-lights.h
 	org.fplinux.files.desktop
 	ru.po
 "
@@ -29,7 +41,8 @@ build() {
 	export PKG_CONFIG_LIBDIR="$CBUILDROOT/usr/lib/pkgconfig:$CBUILDROOT/usr/share/pkgconfig"
 	"$CC" $CPPFLAGS $CFLAGS -Os -std=c11 -Wall -Wextra -Werror -pthread \
 		$(pkg-config --cflags fplinux-ui) \
-		fplinux-files.c files-core.c files-job.c fplinux-cli.c \
+		fplinux-files.c files-core.c files-job.c files-preview.c \
+		files-preview-catalog.c fplinux-desktop-entry.c fplinux-cli.c \
 		$(pkg-config --libs fplinux-ui) $LDFLAGS \
 		-Wl,--gc-sections -o fplinux-files
 	msgfmt --check --output-file=ru.mo ru.po
@@ -44,14 +57,26 @@ package() {
 }
 
 sha512sums="
-0e2bb9e2e98193701d5ce53b3b7154a4c6f90e2cafb253c30598a0645cb976d96681e4c453961da9157443356b5e72956c1ae0fc2c647191dc309a57ccae624a  fplinux-files.c
+3f2555f08b3048f00825ad023e4d674b9f96a0346eea979260754930aea142ad3e5fa7173a3a5e5148957e71eb225312f42cbb54d018eaa7bd601e82fbdd5176  fplinux-files.c
 e349669c7680201c0e9ce078a1d0bb75e39cbcd5d8d2e95bf78f2a0d1780f348aeea1384b56c44a85c9d6d0f1f802cb98593eb12397b336eb856b3f86679ecf4  files-core.c
 2b3b16ef50a733c2e11bec3f3dc8806b44b2f1db07cee9998e559ba853d3f32aeabcd37edc2a557e7e48be1b42f60bf3638394ae7ee15e566d9b6d8d2f0dc5c5  files-core.h
 48d8933cd751a3b945b70811193347fbedde9af45fa9374f8bdf66c7a198bacc5c0160e56a62cdf037dfb7f9723a936bc42ca4c015db47334813168a71c7da4f  files-job.c
 51b32493ea1d543ec4ca7738d82a181578d9a22de3cd0dac55facc9b47177ecf905b6a95adb5f86f4379808cb665ebbcfe4b3a803f5fe7d021182d08d3e321bc  files-job.h
+e21651b4c4a9b6ee93193fc3c7f2ee5cd752750815a92f0f10349ffd5f8b251402bfd1175a78962607c271fb34348678b973bc58fccafc7bb87792f36ec50e3b  files-preview.c
+74a151f3a9afbc8056f23b2f15f7e2c15e524e0fd0b74ad843e43a89f5f5ac28763911e59f9deeae4ae60129fad9435b33247eac089deacc603b9016d0c7be5b  files-preview.h
+860d87f2035a43db523205dfe8c72587fb765801360bb6e61ef3936b3f6b25d623b007d81561a3747cfb36de39aa9265b7e1895cf7fa525b4b36f079a9089727  files-preview-catalog.c
+542034550b200b99efe7bff06070cddfc42cf88bd1902da579cfd3c250a02df4200d53f5d4cbe13f77048c4275e7c44f8f96847470eb230a11ca5836d32104a0  files-preview-catalog.h
 60be1ccccf0215ea13bc64fd442a0498e7db203234ce74f92cec502295e8ac703a089438848b9a1850102836855537f561e9bd8313751574a069eb0ec6dcf31a  fplinux-cli.c
 9677a324ea1cbcca154f472c83eb0660badfa11c2b444116f27080bd839dee2ab9ea6ef3b0c495f6074207559b813c843f284786f8b1e3c89023121b5aacb453  fplinux-cli.h
 c2a1a77ae236231200f2b037f320a513380957aaf44396c9b6fa889e1a6d249324e2b270cef183593134d55d5a3fef36ddce2485d6e759512f4888058d52839b  fplinux-storage.h
+f306b2d14c6f47dc3c3c63ff7cd17e90bb6fec9f8b1a6f4cdf5a0fd7d12ce911653ba8bcf9f62153a10bfbbe1e5afc9a386400281b8a03f48428ea6166d1577b  fplinux-desktop-entry.c
+946193dbcfbd8ad088f89542ce7bdbda8ccf01ab50a41e86c1851086bfdbc620389bc8485f4c5c95e5923939a191ee1a2dc773284099f09c2c1572791a811402  fplinux-desktop-entry.h
+f7b16825ceef209336241f170a1546acf5407e92e2fdc177470dfcb18f44cc94a922e19b6d75399590562e3c6886bcde4c34814a0b81aa44a4857f08b3864b4e  fplinux-ui-session.h
+2c0d70040a37dd0dd19cc53c7a89a5b28ae17366b499643c60195e1bbbf38f2200461f010222928c3619d693fad85c67b7efc93feedd2be2b46d06098b1bd12f  fplinux-system-levels.h
+1d6917155297e1c24ce09c34e6629404976e6d9f9e0fccba75f274702bdb4eb757167149b3eff1e56304c23703fb383f56b795ce9b73c64581bc8da9123890d1  fplinux-ui-document.h
+c7e9660c4ed21c49ba670ccbd7f7ec53c5359052875968024fe1d7f7380312a490814114d81c875e46e9c398450fcf08a8478359d415e94a23b274d7a590983d  fplinux-volumes.h
+fb71d098944d301398925f41659bd758c1ec616af5dc5fc080173191b4fd7f12f711caa1763e1b576cc52bd3cb3d41801c557acb8fde7f51cf76eb6e95338e1c  fplinux-ui-vibration.h
+13123de01cdb077ea9bed30daf64bf74ea9f129e640595df0560d5b6f5272fa80f857cd933aa10815d5f6b0367d73860a63cc1454e183032eb407edfaf302371  fplinux-ui-lights.h
 82242d24937f7d87a48c087a77670b4892d170e1f5b26ab074cb5c248cb4020a8ad664b0de8db38485ee8d1bd198b38f64ed68560f21592a578db97b11d2ece2  org.fplinux.files.desktop
 ff77d2392de7540ce8fd2820eaee7949152ac04ffcddeef785f9c4b6a62b42157b3084e4c854ca2a388f054d42abe691b70d16855a5bb4300c415e68ced03aab  ru.po
 "

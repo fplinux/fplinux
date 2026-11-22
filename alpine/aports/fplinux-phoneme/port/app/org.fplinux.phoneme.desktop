@@ -8,3 +8,4 @@ Categories=Game;
 X-FPLinux-Mode=integrated
 X-FPLinux-LightEffects=true
 X-FPLinux-FileExtensions=jar;jad;
+X-FPLinux-FileIcon=/usr/libexec/fplinux-phoneme-file-icon

@@ -19,8 +19,10 @@ ui_host_prepare "$root" "$work" "$3"
 mkdir -p "$work/locale/ru/LC_MESSAGES"
 msgfmt --check --output-file="$work/locale/ru/LC_MESSAGES/org.fplinux.files.mo" "$aport/ru.po"
 msgfmt --check --output-file="$work/locale/ru/LC_MESSAGES/fplinux-ui.mo" "$root/alpine/aports/fplinux-ui/ru.po"
-ui_host_build_application -pthread -I"$aport" \
+ui_host_build_application -pthread -I"$aport" -I"$root/include/fplinux" \
 	"$aport/fplinux-files.c" "$aport/files-core.c" "$aport/files-job.c" \
+	"$aport/files-preview.c" "$aport/files-preview-catalog.c" \
+	"$root/lib/fplinux-shared/fplinux-desktop-entry.c" \
 	"$peer/observer.c" "$screens/native-glyph-resources.c" \
 	-Wl,--wrap=fplinux_ui_open -Wl,--wrap=fplinux_ui_menu_open \
 	-Wl,--wrap=fplinux_language_load -Wl,--wrap=libintl_bindtextdomain \

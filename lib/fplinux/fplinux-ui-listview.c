@@ -1416,11 +1416,16 @@ static void bind_slot(struct fplinux_ui_listview *list, size_t slot)
 	}
 	if (!list->row_cb(list, index, &data, list->row_context) || !data.text)
 		data = (struct fplinux_ui_virtual_row){ .text = "" };
-	if (data.icon && (data.icon_kind == FPLINUX_UI_LIST_ICON_IMAGE ||
-			  data.icon_kind == FPLINUX_UI_LIST_ICON_APP_TILE)) {
+	if (data.icon_kind == FPLINUX_UI_LIST_ICON_IMAGE ||
+	    data.icon_kind == FPLINUX_UI_LIST_ICON_APP_TILE) {
 		int size = list->spec->row_icon_size;
 
-		icon = fplinux_ui_image_decode(data.icon, size, size, false);
+		if (data.preview)
+			icon = fplinux_ui_image_decode_preview(data.preview,
+							       size, size);
+		if (!icon && data.icon)
+			icon = fplinux_ui_image_decode(data.icon, size, size,
+						       false);
 		if (icon && !list->icons)
 			use_icons(list);
 	}

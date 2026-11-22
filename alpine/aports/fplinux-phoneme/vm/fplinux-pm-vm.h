@@ -160,6 +160,7 @@ struct fplinux_pm_suite {
 	char *name; /* MIDlet-Name; "" when absent */
 	char *vendor; /* MIDlet-Vendor; "" when absent */
 	char *version; /* MIDlet-Version; "" when absent */
+	char *icon; /* MIDlet-Icon; "" when absent */
 	/* MIDlet-1, MIDlet-2, ... up to the first missing number. */
 	size_t midlet_count;
 	struct fplinux_pm_midlet *midlets;

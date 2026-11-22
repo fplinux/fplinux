@@ -354,6 +354,8 @@ struct fplinux_ui_virtual_row {
 	bool marked;
 	/* IMAGE by default; APP_TILE adds the focused tile ring. */
 	enum fplinux_ui_list_icon_kind icon_kind;
+	/* Optional small PNG preview. The row uses icon if it is unavailable. */
+	const lv_image_dsc_t *preview;
 };
 
 /* Fills row for index; returns false to show an empty row. */

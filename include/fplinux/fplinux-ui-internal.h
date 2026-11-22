@@ -126,6 +126,8 @@ FPLINUX_UI_INTERNAL void fplinux_ui_marquee_changed(struct fplinux_ui *ui,
  */
 FPLINUX_UI_INTERNAL lv_draw_buf_t *
 fplinux_ui_image_decode(const void *src, int width, int height, bool alpha);
+lv_draw_buf_t *fplinux_ui_image_decode_preview(const lv_image_dsc_t *src,
+					       int width, int height);
 
 /* Fit without enlarging; area scaling returns a new buffer owned by the caller. */
 FPLINUX_UI_INTERNAL void

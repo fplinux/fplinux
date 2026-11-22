@@ -398,6 +398,7 @@ struct manifest_attributes {
 	struct text name;
 	struct text vendor;
 	struct text version;
+	struct text icon;
 	struct text midlets[FPLINUX_PM_JAR_MIDLETS_MAX + 1]; /* by <n> */
 };
 
@@ -491,6 +492,8 @@ static void store_attribute(struct manifest_attributes *attributes,
 		attributes->vendor = value;
 	else if (name_is(line.start, name_length, "MIDlet-Version"))
 		attributes->version = value;
+	else if (name_is(line.start, name_length, "MIDlet-Icon"))
+		attributes->icon = value;
 	else if ((number = midlet_number(line.start, name_length)))
 		attributes->midlets[number] = value;
 }
@@ -605,6 +608,7 @@ static bool parse_descriptor(struct descriptor *descriptor)
 	}
 	while (next_line(&cursor, start + descriptor->size, &line)) {
 		const char *colon = memchr(line.start, ':', line.length);
+		struct text name;
 		struct text *field;
 
 		if (!trim(line.start, line.length).length)
@@ -618,16 +622,20 @@ static bool parse_descriptor(struct descriptor *descriptor)
 			    strchr("()<>@,;\"'/[]?={}\\", c))
 				return false;
 		}
-		field = descriptor_field(
-			descriptor,
-			(struct text){ line.start,
-				       (size_t)(colon - line.start) });
+		name = (struct text){ line.start,
+				      (size_t)(colon - line.start) };
+		if (text_is(name, "MIDlet-Icon")) {
+			/* This optional field has no effect on JAD validity. */
+			descriptor->attributes.icon =
+				trim(colon + 1, line.length - name.length - 1);
+			continue;
+		}
+		field = descriptor_field(descriptor, name);
 		if (!field)
 			continue;
 		if (field->start)
 			return false;
-		*field = trim(colon + 1,
-			      line.length - (size_t)(colon + 1 - line.start));
+		*field = trim(colon + 1, line.length - name.length - 1);
 	}
 	return true;
 }
@@ -793,7 +801,8 @@ build_suite(const struct manifest_attributes *attributes,
 	suite->name = copy_text(attributes->name);
 	suite->vendor = copy_text(attributes->vendor);
 	suite->version = copy_text(attributes->version);
-	if (suite->name && suite->vendor && suite->version)
+	suite->icon = copy_text(attributes->icon);
+	if (suite->name && suite->vendor && suite->version && suite->icon)
 		return FPLINUX_PM_JAR_OK;
 no_memory:
 	fplinux_pm_suite_cleanup(suite);
@@ -845,6 +854,8 @@ read_suite_at(int directory, const char *jar_name,
 			status = FPLINUX_PM_JAR_BAD_DESCRIPTOR;
 			goto cleanup;
 		}
+		if (jad->icon.start)
+			attributes.icon = jad->icon;
 		for (size_t i = 1; i <= FPLINUX_PM_JAR_MIDLETS_MAX; ++i)
 			if (jad->midlets[i].start)
 				attributes.midlets[i] = jad->midlets[i];
@@ -972,6 +983,7 @@ void fplinux_pm_suite_cleanup(struct fplinux_pm_suite *suite)
 	free(suite->name);
 	free(suite->vendor);
 	free(suite->version);
+	free(suite->icon);
 	free(suite->jar_path);
 	free(suite->descriptor);
 	memset(suite, 0, sizeof(*suite));

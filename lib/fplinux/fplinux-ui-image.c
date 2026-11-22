@@ -131,8 +131,34 @@ static lv_draw_buf_t *draw_image(const void *src,
 	return buffer;
 }
 
+static unsigned int decode_preview_png(const lv_image_dsc_t *source,
+				       unsigned char **decoded,
+				       unsigned int *width,
+				       unsigned int *height)
+{
+	LodePNGState state;
+	unsigned int error;
+
+	lodepng_state_init(&state);
+	state.info_raw.colortype = LCT_RGBA;
+	state.info_raw.bitdepth = 8;
+	/* Four bytes per pixel and one filter byte per row in each pass. */
+	state.decoder.zlibsettings.max_output_size =
+		4U * source->header.w * source->header.h +
+		7U * source->header.h;
+#ifdef LODEPNG_COMPILE_ANCILLARY_CHUNKS
+	state.decoder.read_text_chunks = 0;
+	state.decoder.max_icc_size = 64U * 1024U;
+#endif
+	error = lodepng_decode(decoded, width, height, &state, source->data,
+			       source->data_size);
+	lodepng_state_cleanup(&state);
+	return error;
+}
+
 static lv_draw_buf_t *decode_image(const lv_image_dsc_t *source,
-				   const lv_image_header_t *header)
+				   const lv_image_header_t *header,
+				   bool preview)
 {
 	bool png =
 		source->header.cf == LV_COLOR_FORMAT_RAW ||
@@ -150,8 +176,10 @@ static lv_draw_buf_t *decode_image(const lv_image_dsc_t *source,
 			errno = ENOMEM;
 		return buffer;
 	}
-	error = lodepng_decode32(&decoded, &width, &height, source->data,
-				 source->data_size);
+	error = preview ?
+			decode_preview_png(source, &decoded, &width, &height) :
+			lodepng_decode32(&decoded, &width, &height,
+					 source->data, source->data_size);
 	buffer = (lv_draw_buf_t *)decoded;
 	if (error) {
 		if (buffer)
@@ -345,8 +373,8 @@ static bool is_symbolic(const char *path)
  * down with its proportions kept and never up; NULL with errno. A system
  * glyph, an alpha-only source or a "-symbolic.png" file gives an A8 mask.
  */
-lv_draw_buf_t *fplinux_ui_image_decode(const void *src, int width, int height,
-				       bool alpha)
+static lv_draw_buf_t *image_decode(const void *src, int width, int height,
+				   bool alpha, bool preview)
 {
 	lv_image_dsc_t file_image;
 	lv_image_header_t header;
@@ -384,7 +412,7 @@ lv_draw_buf_t *fplinux_ui_image_decode(const void *src, int width, int height,
 		fplinux_ui_image_fit_size(&header, (uint32_t)width,
 					  (uint32_t)height, &fit_width,
 					  &fit_height);
-		buffer = decode_image(src, &header);
+		buffer = decode_image(src, &header, preview);
 		if (buffer &&
 		    (fit_width != header.w || fit_height != header.h)) {
 			lv_draw_buf_t *full = buffer;
@@ -406,6 +434,29 @@ lv_draw_buf_t *fplinux_ui_image_decode(const void *src, int width, int height,
 			errno = ENOMEM;
 	}
 	return buffer;
+}
+
+lv_draw_buf_t *fplinux_ui_image_decode(const void *src, int width, int height,
+				       bool alpha)
+{
+	return image_decode(src, width, height, alpha, false);
+}
+
+lv_draw_buf_t *fplinux_ui_image_decode_preview(const lv_image_dsc_t *src,
+					       int width, int height)
+{
+	const uint8_t *png = src->data;
+
+	if (!png || src->data_size < 33 || src->data_size > 64U * 1024U ||
+	    memcmp(png, png_signature, sizeof(png_signature)) ||
+	    read_be32(png + 8) != 13 || memcmp(png + 12, "IHDR", 4) ||
+	    !src->header.w || src->header.w > 128 || !src->header.h ||
+	    src->header.h > 128 || read_be32(png + 16) != src->header.w ||
+	    read_be32(png + 20) != src->header.h || png[24] > 8) {
+		errno = EINVAL;
+		return NULL;
+	}
+	return image_decode(src, width, height, false, true);
 }
 
 lv_draw_buf_t *fplinux_ui_image_load(const void *src, int width, int height)
