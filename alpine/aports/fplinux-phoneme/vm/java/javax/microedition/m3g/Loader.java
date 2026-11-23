@@ -437,14 +437,20 @@ public final class Loader {
         }
         Reader palette = reader.slice(reader.length());
         Reader pixels = reader.slice(reader.length());
+        int paletteStart = palette.offset;
+        int paletteLength = palette.remaining();
+        int stride = format == Image2D.RGB ? 3 :
+            format == Image2D.RGBA ? 4 : format == Image2D.LUMINANCE_ALPHA ? 2 : 1;
         int[] argb = new int[width * height];
         for (int i = 0; i < argb.length; i++) {
             Reader source = pixels;
-            if (palette.remaining() != 0) {
-                int stride = format == Image2D.RGB ? 3 :
-                    format == Image2D.RGBA ? 4 : format == Image2D.LUMINANCE_ALPHA ? 2 : 1;
+            if (paletteLength != 0) {
                 int index = pixels.byteValue() * stride;
-                source = new Reader(palette.data, palette.offset + index, palette.end);
+                if (index > paletteLength) {
+                    throw new IOException("M3G object range");
+                }
+                palette.offset = paletteStart + index;
+                source = palette;
             }
             if (format == Image2D.RGB) {
                 argb[i] = 0xff000000 | source.rgb();

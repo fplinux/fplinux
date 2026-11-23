@@ -49,6 +49,17 @@ final class M3gProbe {
         101, 110, 100,
     };
 
+    // A 2x2 RGB Image2D with red and green palette entries and indices 1, 0, 0, 1.
+    private static final byte[] PALETTE_IMAGE = {
+        -85, 74, 83, 82, 49, 56, 52, -69, 13, 10, 26, 10,
+        0, 30, 0, 0, 0, 17, 0, 0, 0, 0, 12, 0, 0, 0,
+        1, 0, 0, 100, 0, 0, 0, 100, 0, 0, 0, 0, 5, 1, -79, 10,
+        0, 58, 0, 0, 0, 45, 0, 0, 0, 10, 40, 0, 0, 0,
+        7, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 99, 0,
+        2, 0, 0, 0, 2, 0, 0, 0, 6, 0, 0, 0, -1, 0, 0, 0, -1, 0,
+        4, 0, 0, 0, 1, 0, 0, 1, 18, 3, 60, 66,
+    };
+
     private M3gProbe() {}
 
     static String check() throws IOException {
@@ -115,6 +126,7 @@ final class M3gProbe {
             " poseAndTexture=" + poseAndTexture() + " textureFilters=" + textureFilters() +
             " picking=" + picking() + " lightColor=" + lightColor(renderer, pixels) +
             " imageData=" + imageData(renderer, pixels) +
+            " paletteLoader=" + paletteLoader(renderer, pixels) +
             " mutableImage=" + mutableImage(renderer, pixels) +
             " vertexColors=" + vertexColors(renderer, pixels) +
             " pickRay=" + pickRay() + " pickCamera=" + pickCamera() +
@@ -236,6 +248,30 @@ final class M3gProbe {
             return false;
         } catch (IllegalArgumentException expected) {
             return true;
+        }
+    }
+
+    private static boolean paletteLoader(Graphics3D renderer, int[] pixels) throws IOException {
+        Object3D[] images = Loader.load(PALETTE_IMAGE, 0);
+        if (images.length != 1 || !(images[0] instanceof Image2D)) {
+            return false;
+        }
+        Image target = DirectUtils.createImage(10, 10, 0);
+        renderMesh(renderer, target, texturedQuad((Image2D) images[0]), pixels);
+        boolean colors = pixels[11] == 0xff00ff00 && pixels[18] == 0xffff0000 &&
+            pixels[81] == 0xffff0000 && pixels[88] == 0xff00ff00;
+
+        byte[] invalid = new byte[PALETTE_IMAGE.length];
+        System.arraycopy(PALETTE_IMAGE, 0, invalid, 0, invalid.length);
+        // Change the first index to 3 and update the image section checksum.
+        invalid[92] = 3;
+        invalid[96] = 20;
+        invalid[98] = 68;
+        try {
+            Loader.load(invalid, 0);
+            return false;
+        } catch (IOException expected) {
+            return colors && "M3G object range".equals(expected.getMessage());
         }
     }
 
