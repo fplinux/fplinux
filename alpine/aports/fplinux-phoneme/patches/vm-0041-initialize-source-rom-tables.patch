@@ -1,0 +1,28 @@
+Initialize symbol and string tables for source ROM images when constant-pool
+rewriting is disabled. The source writer emits standalone hash tables in
+this mode.
+
+--- a/cldc/src/vm/share/ROM/ROMOptimizer.cpp
++++ b/cldc/src/vm/share/ROM/ROMOptimizer.cpp
+@@ -251,6 +251,10 @@
+         *embedded_table_holder() = hashtab_mgr.embedded_table_holder();
+         _embedded_symbols_offset = hashtab_mgr.embedded_symbols_offset();
+         _embedded_strings_offset = hashtab_mgr.embedded_strings_offset();
++      } else if (USE_SOURCE_IMAGE_GENERATOR) {
++        // The source image still needs standalone symbol and string tables.
++        initialize_hashtables(SymbolTable::current(), StringTable::current()
++                              JVM_CHECK);
+       }
+       set_next_state();
+       break;
+--- a/cldc/src/vm/share/ROM/ROMOptimizer.hpp
++++ b/cldc/src/vm/share/ROM/ROMOptimizer.hpp
+@@ -51,6 +51,8 @@
+   ROMHashtableManager() {
+     _string_count = 0;
+     _symbol_count = 0;
++    _embedded_symbols_offset = 0;
++    _embedded_strings_offset = 0;
+   }
+   void initialize(ObjArray* symbol_table, ObjArray* string_table JVM_TRAPS);
+   ReturnOop init_symbols(ObjArray* symbol_table JVM_TRAPS);
