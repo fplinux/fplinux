@@ -1,0 +1,28 @@
+Match native class names without interning names on each lookup.
+
+The class being loaded already has an interned name. The static native
+table only needs to match that name before registering its methods and
+fixed entries. Compare the lengths and bytes without consulting the symbol
+table for every entry.
+
+--- a/cldc/src/vm/share/natives/Natives.cpp
++++ b/cldc/src/vm/share/natives/Natives.cpp
+@@ -1606,14 +1606,15 @@
+ void Natives::register_natives_for(InstanceClass* c JVM_TRAPS) {
+   UsingFastOops fast_oops;
+   Symbol::Fast class_name = c->name();
+-  Symbol::Fast name;
+ 
+ #if (!ROMIZING) || (!defined(PRODUCT))
++  const jushort length = class_name().length();
++  const char* const name = class_name().base_address();
+   for (const JvmNativesTable* table= jvm_natives_table; table->name!= NULL;
+        table++) {
+-    name = SymbolTable::symbol_for(table->name JVM_CHECK);
+-    if (class_name.equals(&name)) {
++    if (jvm_strlen(table->name) == length &&
++        jvm_memcmp(table->name, name, length) == 0) {
+       if (table->natives != NULL) {
+         register_function(c, table->natives, true JVM_CHECK);
+       }
+       if (table->entries != NULL) {
