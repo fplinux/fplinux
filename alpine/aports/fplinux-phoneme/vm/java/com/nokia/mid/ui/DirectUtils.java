@@ -25,6 +25,10 @@ public class DirectUtils {
         return new ImageGraphics(graphics);
     }
 
+    private static native boolean draw4444(Graphics graphics, short[] pixels,
+                                           int offset, int stride, int x, int y,
+                                           int width, int height, boolean alpha);
+
     private static final class ImageGraphics implements DirectGraphics {
         // One row per counterclockwise quarter turn. Columns select the flips
         // applied after rotation: none, horizontal, vertical, both.
@@ -120,6 +124,12 @@ public class DirectUtils {
             int count = NokiaPixels.checkRegion(pixels.length, offset, stride,
                                                 width, height);
             if (count == 0) {
+                return;
+            }
+            if (format == TYPE_USHORT_4444_ARGB && transform == Sprite.TRANS_NONE &&
+                    !FPLinuxNokiaImage.hasAlpha(graphics) &&
+                    draw4444(graphics, pixels, offset, stride, x, y, width, height,
+                             transparency)) {
                 return;
             }
             int[] argb = NokiaPixels.fromShorts(pixels, offset, stride, width,

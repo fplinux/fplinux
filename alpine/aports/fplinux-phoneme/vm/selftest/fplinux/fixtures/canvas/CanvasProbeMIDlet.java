@@ -345,8 +345,21 @@ public class CanvasProbeMIDlet extends MIDlet implements Runnable {
             (raw[1] & 0xff808080) == 0xff808080 &&
             (raw[2] & 0xff808080) == 0xff800000 &&
             (raw[3] & 0xff808080) == 0xff000080;
+        Image packed = Image.createImage(3, 1);
+        DirectUtils.getDirectGraphics(packed.getGraphics()).drawPixels(new short[] {
+            0x00f0, (short) 0x8f08, (short) 0xf00f
+        }, true, 0, 3, 0, 0, 3, 1, 0, DirectGraphics.TYPE_USHORT_4444_ARGB);
+        Image reference = Image.createImage(3, 1);
+        reference.getGraphics().drawRGB(new int[] {
+            0x0000ff00, 0x88ff0088, 0xff0000ff
+        }, 0, 3, 0, 0, 3, 1, true);
+        int[] expected = new int[3];
+        reference.getRGB(expected, 0, 3, 0, 0, 3, 1);
+        packed.getRGB(raw, 0, 3, 0, 0, 3, 1);
+        boolean packedOpaque = raw[0] == expected[0] && raw[1] == expected[1] &&
+            raw[2] == expected[2];
         say("nokia pixels short=" + shortPixels + " literal=" + literal +
-            " int=" + intPixels + " backwards=" + backwards);
+            " int=" + intPixels + " backwards=" + backwards + " packedOpaque=" + packedOpaque);
     }
 
     private void mascotPixels() {

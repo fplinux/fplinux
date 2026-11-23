@@ -40,7 +40,7 @@ PM-CANVAS nokia size=240x320 clip=320 commandRejected=true listenerRejected=true
 PM-CANVAS image opaque pixels are white=true
 PM-CANVAS nokia image transform=true blit=true partial=true replaced=true
 PM-CANVAS region transforms=true keyed=true clipped=true
-PM-CANVAS nokia pixels short=true literal=true int=true backwards=true
+PM-CANVAS nokia pixels short=true literal=true int=true backwards=true packedOpaque=true
 PM-CANVAS nokia decoded image alpha=true written=true mutableOnlyOnNokia=true
 PM-CANVAS nokia shapes corner=true transparent=true evenOdd=true segment=true opaqueBlend=true colorPreserved=true
 PM-CANVAS nokia text range=true clippedAnchor=true
