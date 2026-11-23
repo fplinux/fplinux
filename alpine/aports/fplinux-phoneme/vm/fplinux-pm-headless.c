@@ -4,7 +4,7 @@
  * interface without the graphical session. System.out goes to stdout. It is
  * a development tool for the VM, not the phoneME app.
  *
- * usage: fplinux-phoneme-headless [--system-classes PATH] [--heap-kib N]
+ * usage: fplinux-phoneme-headless [--heap-kib N]
  *            [--timeout-ms N] [--keys SCRIPT] [--storage-dir PATH]
  *            [--canvas-size SIZE] [--card-dir PATH]
  *            SUITE [MIDLET-CLASS]
@@ -297,9 +297,6 @@ static bool run_vm(unsigned int timeout_ms)
 int main(int argc, char **argv)
 {
 	struct fplinux_cli_option options[] = {
-		{ .name = "system-classes",
-		  .metavar = "PATH",
-		  .help = "Preverified system classes" },
 		{ .name = "heap-kib",
 		  .metavar = "N",
 		  .help = "Java heap size in KiB; zero uses the default" },
@@ -337,22 +334,22 @@ int main(int argc, char **argv)
 
 	if (parsed != FPLINUX_CLI_READY)
 		return parsed;
-	if (options[1].value &&
-	    !fplinux_cli_unsigned(options[1].value, 0, UINT_MAX, &heap_kib))
+	if (options[0].value &&
+	    !fplinux_cli_unsigned(options[0].value, 0, UINT_MAX, &heap_kib))
 		return fplinux_cli_error(&cli, "invalid heap size");
-	if (options[2].value &&
-	    !fplinux_cli_unsigned(options[2].value, 0, UINT_MAX, &timeout_ms))
+	if (options[1].value &&
+	    !fplinux_cli_unsigned(options[1].value, 0, UINT_MAX, &timeout_ms))
 		return fplinux_cli_error(&cli, "invalid timeout");
-	if (options[3].value && !parse_keys(options[3].value))
+	if (options[2].value && !parse_keys(options[2].value))
 		return fplinux_cli_error(&cli, "invalid key script");
-	if (options[5].value &&
-	    !fplinux_pm_canvas_preset_parse(options[5].value, &canvas_preset))
+	if (options[4].value &&
+	    !fplinux_pm_canvas_preset_parse(options[4].value, &canvas_preset))
 		return fplinux_cli_error(&cli, "invalid Canvas size");
-	if (options[6].value && !use_card_directory(options[6].value))
+	if (options[5].value && !use_card_directory(options[5].value))
 		return fplinux_cli_error(&cli, "invalid card directory");
-	const char *path = options[7].value;
+	const char *path = options[6].value;
 	struct fplinux_pm_suite suite = { 0 };
-	const char *midlet_class = options[8].value;
+	const char *midlet_class = options[7].value;
 	enum fplinux_pm_jar_status status =
 		fplinux_pm_suite_open(path, &suite, NULL);
 
@@ -371,7 +368,7 @@ int main(int argc, char **argv)
 	}
 
 	char temporary_storage[] = "/tmp/fplinux-phoneme-headless.XXXXXX";
-	const char *storage_dir = options[4].value;
+	const char *storage_dir = options[3].value;
 
 	if (!storage_dir && mkdtemp(temporary_storage) == NULL) {
 		perror("fplinux-phoneme-headless: mkdtemp");
@@ -388,7 +385,6 @@ int main(int argc, char **argv)
 		.descriptor = suite.descriptor,
 		.descriptor_size = suite.descriptor_size,
 		.midlet_class = midlet_class,
-		.system_classes = options[0].value,
 		.heap_kib = heap_kib,
 		.storage_dir = storage_dir,
 		.wakeup = wakeup,
@@ -410,7 +406,7 @@ int main(int argc, char **argv)
 		"fplinux-phoneme-headless: exit %d after %lld ms, "
 		"max RSS %ld KiB\n",
 		exit_status, monotonic_ms() - started_ms, usage_data.ru_maxrss);
-	if (!options[4].value)
+	if (!options[3].value)
 		nftw(temporary_storage, remove_entry, 16, FTW_DEPTH | FTW_PHYS);
 	fplinux_pm_suite_cleanup(&suite);
 	return exit_status;

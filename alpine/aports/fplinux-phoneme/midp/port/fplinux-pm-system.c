@@ -8,7 +8,7 @@
  *   (upstream stubs: events/eventqueue_port/stubs/native, which warn);
  * - the Configurator property callouts getLocalTimeZone (CLDC TimeZoneImpl)
  *   and getLocalHostName;
- * - the CLDC fallback socket protocol of classes.zip
+ * - the CLDC fallback socket protocol
  *   (com.sun.cldc.io.j2me.socket) gets natives that throw IOException; the
  *   MIDP GCF socket/http protocols use the PCSL port. These replace CLDC's
  *   BSDSocket.o, whose

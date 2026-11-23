@@ -119,12 +119,11 @@ _setup_tools() {
 	export PKG_CONFIG_LIBDIR="$CBUILDROOT/usr/lib/pkgconfig:$CBUILDROOT/usr/share/pkgconfig"
 }
 
-_build_cldc() {
-	mkdir -p "$srcdir/cldc-build"
-	# The top-level CLDC targets share outputs: run them in order and
-	# parallelize only inside each one (PARALLEL_ARGS).
+_make_cldc() {
+	local make_dir="$1" romizing="$2"
+	shift 2
 	MAKEFLAGS= JVMWorkSpace="$builddir/cldc" JVMBuildSpace="$srcdir/cldc-build" \
-		make -j1 -C cldc/build/linux_arm_vfp \
+		make -j1 -C "$make_dir" \
 		JDK_DIR="$_jdk" \
 		PREVERIFY_ORIGINAL="$builddir/preverifier/build/linux/preverify" \
 		GNU_TOOLS_DIR="$_armtools" \
@@ -135,11 +134,12 @@ _build_cldc() {
 		LOOP_GEN_FLAGS="+GenerateGNUCode -TraceNativeCalls" \
 		ENABLE_JNI=false \
 		ENABLE_STATIC_LINK=true \
-		ROMIZING=false \
+		ROMIZING="$romizing" \
+		ENABLE_SEGMENTED_ROM_TEXT_BLOCK=false \
 		SUPPORTS_MONOTONIC_CLOCK=true \
 		USER_CFLAGS="-fno-delete-null-pointer-checks" \
 		PARALLEL_ARGS="-j${JOBS:-1}" \
-		product
+		"$@"
 }
 
 # CLDC + MIDP system classes and the C sources generated from them.
@@ -155,15 +155,32 @@ _build_midp_java() {
 		--extra-java "$srcdir/MascotME-$_mascot_commit/src" \
 		--lf "$startdir/midp/lf" \
 		--out "$srcdir/midp-build"
-	# MIDP natives read object layouts from ROMStructs.h even without a
-	# romized image; the generated ROM image itself is not used.
+	# Preserve names used by native field lookup and initialize Java state at runtime.
 	mkdir -p "$srcdir/romstructs"
 	(
 		cd "$srcdir/romstructs"
+		printf '%s\n' 'HiddenPackage = com.sun.cldchi.jvm' > rom.cfg
 		"$cldc/dist/bin/romgen" =HeapCapacity256M \
-			-cp "$srcdir/midp-build/classes.zip" +GenerateROMStructs -romize
+			-cp "$srcdir/midp-build/classes.zip" -romconfig rom.cfg \
+			-RemoveDeadMethods -EnableROMCompilation -RemoveROMUnusedStaticFields \
+			-RemoveUnusedSymbols -CompactROMBytecodes -SimpleROMInliner \
+			-RemoveDuplicatedROMStackmaps +GenerateROMStructs -romize
 	)
 	cp "$srcdir/romstructs/ROMStructs.h" "$srcdir/midp-build/c/"
+}
+
+_build_rom_product() {
+	local cldc="$srcdir/cldc-build/linux_arm_vfp"
+	# The standalone CLDC executable in dist/bin is used by the VM vectors.
+	# Rebuild the target objects so all of them use the source ROM configuration.
+	mv "$cldc/target" "$cldc/non-rom-target"
+	install -Dm644 "$srcdir/romstructs/ROMImage.cpp" "$cldc/target/generated/ROMImage.cpp"
+	install -Dm644 "$srcdir/romstructs/ROMLog.txt" "$cldc/target/generated/ROMLog.txt"
+	# Only the app and headless link have the combined MIDP native table.
+	_make_cldc cldc/build/linux_arm_vfp true GENERATE_EXECUTABLE=false _product
+	_make_cldc "$cldc/target/product" true GENERATE_EXECUTABLE=false \
+		ROM_GEN_CLASSPATH="$srcdir/midp-build/classes.zip" ROMImage.o jvmspi.o
+	cmp "$srcdir/romstructs/ROMImage.cpp" "$cldc/target/generated/ROMImage.cpp"
 }
 
 _build_vm() {
@@ -211,9 +228,6 @@ _build_vm() {
 		"$cldc/dist/lib/libcldc_vm.a" \
 		-Wl,--end-group \
 		$(pkg-config --libs fplinux-ui fplinux-runtime-media) -lz -lm
-	if readelf -d "$srcdir/fplinux-phoneme-headless" | grep -q TEXTREL; then
-		die "the VM needs text relocations, which musl cannot load"
-	fi
 }
 
 # The app shell (port/app/) with the VM: /usr/bin/fplinux-phoneme.
@@ -252,11 +266,20 @@ build() {
 	_build_qemu
 	_setup_tools
 	make -C preverifier/build/linux
-	_build_cldc
+	mkdir -p "$srcdir/cldc-build"
+	_make_cldc cldc/build/linux_arm_vfp false product
 	_build_midp_java
+	_build_rom_product
 	_build_vm
 	_build_app
 	_build_file_icon
+
+	local executable
+	for executable in fplinux-phoneme fplinux-phoneme-headless; do
+		if readelf -d "$srcdir/$executable" | grep -q TEXTREL; then
+			die "$executable needs text relocations, which musl cannot load"
+		fi
+	done
 
 	local cldc="$srcdir/cldc-build/linux_arm_vfp"
 	FPLINUX_PM_JDK="$_jdk" \
@@ -277,8 +300,6 @@ package() {
 		"$pkgdir/usr/share/applications/org.fplinux.phoneme.desktop"
 	install -Dm644 "$srcdir/ru.mo" \
 		"$pkgdir/usr/share/locale/ru/LC_MESSAGES/org.fplinux.phoneme.mo"
-	install -Dm644 "$srcdir/midp-build/classes.zip" \
-		"$pkgdir/usr/share/fplinux-phoneme/classes.zip"
 	local notice
 	for notice in license.txt copyright.txt thirdpartylicensereadme.txt; do
 		install -Dm644 "$builddir/legal/$notice" \

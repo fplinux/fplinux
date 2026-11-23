@@ -26,8 +26,7 @@ final class JarMIDletSuite implements MIDletSuite {
     private Hashtable descriptor;
 
     /**
-     * Reads /META-INF/MANIFEST.MF from the classpath: the MIDlet JAR is the
-     * only entry with a manifest, since classes.zip is built without one.
+     * Reads the manifest from the MIDlet JAR on the classpath.
      */
     void loadManifest() throws IOException {
         InputStream in = getClass().getResourceAsStream("/META-INF/MANIFEST.MF");

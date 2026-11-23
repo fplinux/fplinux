@@ -18,8 +18,6 @@
 extern "C" {
 #endif
 
-/* Installed CLDC and MIDP system classes, preverified. */
-#define FPLINUX_PM_VM_SYSTEM_CLASSES "/usr/share/fplinux-phoneme/classes.zip"
 /* Java heap used when the configuration leaves heap_kib at 0. */
 #define FPLINUX_PM_VM_HEAP_KIB_DEFAULT 4096u
 /* Maximum size of a local JAD passed to the VM. */
@@ -34,15 +32,13 @@ extern "C" {
 typedef void (*fplinux_pm_vm_wakeup_fn)(void *context);
 
 struct fplinux_pm_vm_config {
-	/* MIDlet suite JAR; it becomes the classpath after the system classes. */
+	/* MIDlet suite JAR. System classes are linked into the VM image. */
 	const char *jar_path;
 	/* Optional validated local JAD bytes, copied at start. */
 	const unsigned char *descriptor;
 	size_t descriptor_size;
 	/* MIDlet class from a MIDlet-<n> attribute, e.g. "com.example.Game". */
 	const char *midlet_class;
-	/* NULL selects FPLINUX_PM_VM_SYSTEM_CLASSES (tests pass a build path). */
-	const char *system_classes;
 	/* Java heap size; 0 selects FPLINUX_PM_VM_HEAP_KIB_DEFAULT. */
 	unsigned int heap_kib;
 	/* Use JIT unless FPLINUX_PHONEME_JIT overrides this setting. */

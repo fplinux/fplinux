@@ -101,9 +101,7 @@ static bool config_is_valid(const struct fplinux_pm_vm_config *config)
 	       config->midlet_class[0] != '\0' && config->wakeup != NULL &&
 	       config->descriptor_size <= FPLINUX_PM_JAD_MAX &&
 	       (!config->descriptor_size || config->descriptor) &&
-	       strchr(config->jar_path, ':') == NULL &&
-	       (config->system_classes == NULL ||
-		strchr(config->system_classes, ':') == NULL);
+	       strchr(config->jar_path, ':') == NULL;
 }
 
 bool fplinux_pm_vm_start(const struct fplinux_pm_vm_config *config)
@@ -117,9 +115,6 @@ bool fplinux_pm_vm_start(const struct fplinux_pm_vm_config *config)
 		return false;
 	}
 
-	const char *system_classes = config->system_classes != NULL ?
-					     config->system_classes :
-					     FPLINUX_PM_VM_SYSTEM_CLASSES;
 	unsigned int heap_kib = config->heap_kib != 0 ?
 					config->heap_kib :
 					FPLINUX_PM_VM_HEAP_KIB_DEFAULT;
@@ -127,9 +122,7 @@ bool fplinux_pm_vm_start(const struct fplinux_pm_vm_config *config)
 		fputs("fplinux-phoneme: Java heap size is too large\n", stderr);
 		return false;
 	}
-	size_t classpath_size =
-		strlen(system_classes) + strlen(config->jar_path) + 2;
-	vm_classpath = malloc(classpath_size);
+	vm_classpath = strdup(config->jar_path);
 	vm_main_class = strdup(RUNNER_CLASS);
 	vm_arguments[0] = strdup(config->midlet_class);
 	vm_descriptor_size = config->descriptor_size;
@@ -143,9 +136,6 @@ bool fplinux_pm_vm_start(const struct fplinux_pm_vm_config *config)
 	}
 	if (vm_descriptor_size)
 		memcpy(vm_descriptor, config->descriptor, vm_descriptor_size);
-	snprintf(vm_classpath, classpath_size, "%s:%s", system_classes,
-		 config->jar_path);
-
 	vm_wakeup = config->wakeup;
 	vm_wakeup_context = config->wakeup_context;
 	fplinux_pm_media_set_wakeup(vm_wakeup, vm_wakeup_context);

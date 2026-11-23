@@ -50,7 +50,7 @@ run_jit_fixture() (
 	log=$3
 	shift 3
 	if ! FPLINUX_PHONEME_JIT=${jit_mode} FPLINUX_PHONEME_JIT_TRACE=${jit_trace} \
-		"${qemu_arm}" -L "${sysroot}" "${headless}" --system-classes "${classes}" \
+		"${qemu_arm}" -L "${sysroot}" "${headless}" \
 		--timeout-ms 30000 "${work}/jit.jar" "$@" >"${log}" 2>&1; then
 		cat "${log}" >&2
 		fail "JIT fixture failed with JIT=${jit_mode} trace=${jit_trace}"
@@ -204,7 +204,7 @@ fi
 cmp -s "${work}/vectors-expected.txt" "${work}/vectors-vm.txt" ||
 	fail "CLDC vectors on the bare VM differ (${work}/vectors-vm.txt)"
 
-"${qemu_arm}" -L "${sysroot}" "${headless}" --system-classes "${classes}" \
+"${qemu_arm}" -L "${sysroot}" "${headless}" \
 	--timeout-ms 60000 "${work}/vectors.jar" >"${work}/vectors-midlet-log.txt"
 # The LCDUI stub logs the MIDlet's screen changes to System.out.
 grep -v '^\[lcdui\] ' "${work}/vectors-midlet-log.txt" \
@@ -212,7 +212,7 @@ grep -v '^\[lcdui\] ' "${work}/vectors-midlet-log.txt" \
 cmp -s "${work}/vectors-expected.txt" "${work}/vectors-midlet.txt" ||
 	fail "CLDC vectors as a MIDlet differ (${work}/vectors-midlet.txt)"
 
-"${qemu_arm}" -L "${sysroot}" "${headless}" --system-classes "${classes}" \
+"${qemu_arm}" -L "${sysroot}" "${headless}" \
 	--timeout-ms 30000 "${work}/hello.jar" >"${work}/hello.txt"
 grep -qx 'PM-HELLO start' "${work}/hello.txt" &&
 	grep -qx 'PM-HELLO done' "${work}/hello.txt" ||
@@ -221,7 +221,7 @@ grep -qx 'PM-HELLO start' "${work}/hello.txt" &&
 # Query the actual MIDlet API before and after supplying a local descriptor.
 build_jar jad "${here}/jad.mf"
 cp "${work}/jad.jar" "${work}/jad-standalone.jar"
-"${qemu_arm}" -L "${sysroot}" "${headless}" --system-classes "${classes}" \
+"${qemu_arm}" -L "${sysroot}" "${headless}" \
 	--timeout-ms 30000 "${work}/jad-standalone.jar" >"${work}/jad-standalone.txt"
 grep -qx 'PM-JAD custom=null' "${work}/jad-standalone.txt" &&
 	grep -qx 'PM-JAD override=manifest' "${work}/jad-standalone.txt" ||
@@ -237,7 +237,7 @@ jar_size=$(stat -c %s "${work}/jad.jar")
 } >"${work}/jad.jad"
 for selection in jad jar; do
 	output="${work}/jad-from-${selection}.txt"
-	"${qemu_arm}" -L "${sysroot}" "${headless}" --system-classes "${classes}" \
+	"${qemu_arm}" -L "${sysroot}" "${headless}" \
 		--timeout-ms 30000 "${work}/jad.${selection}" >"${output}"
 	grep -qx 'PM-JAD custom=1:2' "${output}" &&
 		grep -qx 'PM-JAD override=descriptor' "${output}" &&
@@ -250,19 +250,19 @@ done
 # The same file-backed store must survive a complete VM process exit.
 build_jar rms "${here}/rms.mf"
 rms_storage=$(mktemp -d "${work}/rms-storage.XXXXXX")
-"${qemu_arm}" -L "${sysroot}" "${headless}" --system-classes "${classes}" \
+"${qemu_arm}" -L "${sysroot}" "${headless}" \
 	--storage-dir "${rms_storage}" --timeout-ms 30000 \
 	"${work}/rms.jar" >"${work}/rms-write.txt"
 grep -qx 'PM-RMS write 1 2' "${work}/rms-write.txt" &&
 	! grep -q '^PM-RMS error ' "${work}/rms-write.txt" ||
 	fail "RMS first run differs (${work}/rms-write.txt)"
-"${qemu_arm}" -L "${sysroot}" "${headless}" --system-classes "${classes}" \
+"${qemu_arm}" -L "${sysroot}" "${headless}" \
 	--storage-dir "${rms_storage}" --timeout-ms 30000 \
 	"${work}/rms.jar" >"${work}/rms-read.txt"
 grep -qx 'PM-RMS read 1 2 next 3' "${work}/rms-read.txt" &&
 	! grep -q '^PM-RMS error ' "${work}/rms-read.txt" ||
 	fail "RMS second run differs (${work}/rms-read.txt)"
-"${qemu_arm}" -L "${sysroot}" "${headless}" --system-classes "${classes}" \
+"${qemu_arm}" -L "${sysroot}" "${headless}" \
 	--storage-dir /dev/null/blocked --timeout-ms 30000 \
 	"${work}/rms.jar" fplinux.fixtures.rms.RmsErrorMIDlet >"${work}/rms-error.txt"
 grep -qx 'PM-RMS storage-error' "${work}/rms-error.txt" ||
@@ -275,7 +275,7 @@ files_home=$(mktemp -d "${work}/files-home.XXXXXX")
 files_card=$(mktemp -d "${work}/files-card.XXXXXX")
 HOME="${files_home}" "${qemu_arm}" -L / "${sysroot}/lib/ld-musl-armhf.so.1" \
 	--library-path "${sysroot}/lib:${sysroot}/usr/lib" "${headless}" \
-	--system-classes "${classes}" --timeout-ms 30000 \
+	--timeout-ms 30000 \
 	"${work}/files.jar" >"${work}/files.txt" 2>&1
 if ! grep -qx 'PM-FILES c:/ create list read rewrite rename truncate delete' \
 	"${work}/files.txt" || ! grep -qx 'PM-FILES e:/ absent' "${work}/files.txt"; then
@@ -284,7 +284,7 @@ if ! grep -qx 'PM-FILES c:/ create list read rewrite rename truncate delete' \
 fi
 HOME="${files_home}" "${qemu_arm}" -L / "${sysroot}/lib/ld-musl-armhf.so.1" \
 	--library-path "${sysroot}/lib:${sysroot}/usr/lib" "${headless}" \
-	--system-classes "${classes}" --timeout-ms 30000 --card-dir "${files_card}" \
+	--timeout-ms 30000 --card-dir "${files_card}" \
 	"${work}/files.jar" >"${work}/files-card.txt" 2>&1
 if ! grep -qx 'PM-FILES c:/ create list read rewrite rename truncate delete' \
 	"${work}/files-card.txt" || ! grep -qx 'PM-FILES e:/ create list read rewrite rename truncate delete' \
@@ -295,7 +295,7 @@ fi
 
 HOME="${files_home}" "${qemu_arm}" -L / "${sysroot}/lib/ld-musl-armhf.so.1" \
 	--library-path "${sysroot}/lib:${sysroot}/usr/lib" "${headless}" \
-	--system-classes "${classes}" --timeout-ms 15000 --card-dir "${files_card}" \
+	--timeout-ms 15000 --card-dir "${files_card}" \
 	"${work}/files.jar" fplinux.fixtures.files.FileListenerMIDlet \
 	>"${work}/files-listener.txt" 2>&1 &
 listener_pid=$!
@@ -326,7 +326,7 @@ rmdir "${files_card}" "${files_home}/Files" "${files_home}"
 # Canvas port headless: sizes of the modes, sizeChanged after a mode change,
 # game actions, key names and codes, GameCanvas draw-call smoke, font metrics.
 build_jar canvas "${here}/canvas.mf"
-"${qemu_arm}" -L "${sysroot}" "${headless}" --system-classes "${classes}" \
+"${qemu_arm}" -L "${sysroot}" "${headless}" \
 	--timeout-ms 60000 "${work}/canvas.jar" >"${work}/canvas-log.txt"
 grep '^PM-CANVAS ' "${work}/canvas-log.txt" >"${work}/canvas.txt" || true
 if ! cmp -s "${here}/canvas.expected" "${work}/canvas.txt"; then
@@ -336,7 +336,7 @@ fi
 
 # The arrow releases before its numeric alias, then a quick fire tap
 # switches to a plain Canvas and back.
-"${qemu_arm}" -L "${sysroot}" "${headless}" --system-classes "${classes}" \
+"${qemu_arm}" -L "${sysroot}" "${headless}" \
 	--timeout-ms 10000 --keys '1800:-1:260,1910:50:380,2400:53:40' \
 	"${work}/canvas.jar" fplinux.fixtures.canvas.GameCanvasKeysMIDlet \
 	>"${work}/canvas-keys.txt"
@@ -349,7 +349,7 @@ done
 
 # Each selected virtual size is stable across fullscreen mode changes.
 for size in 128x128 128x160 176x208 176x220 240x320 320x240; do
-	"${qemu_arm}" -L "${sysroot}" "${headless}" --system-classes "${classes}" \
+	"${qemu_arm}" -L "${sysroot}" "${headless}" \
 		--canvas-size "${size}" --timeout-ms 30000 "${work}/canvas.jar" \
 		fplinux.fixtures.canvas.CanvasSizeMIDlet >"${work}/canvas-size-${size}.txt"
 	grep -qx "PM-SIZE shown ${size}" "${work}/canvas-size-${size}.txt" &&
@@ -361,7 +361,7 @@ done
 # Form look and feel headless: the MIDP model of every Form item and TextBox
 # through the real LF classes (no native peers without a runtime).
 build_jar lfform "${here}/lfform.mf"
-"${qemu_arm}" -L "${sysroot}" "${headless}" --system-classes "${classes}" \
+"${qemu_arm}" -L "${sysroot}" "${headless}" \
 	--timeout-ms 60000 "${work}/lfform.jar" >"${work}/lfform-log.txt"
 grep '^PM-LFFORM ' "${work}/lfform-log.txt" >"${work}/lfform.txt" || true
 if ! cmp -s "${here}/lfform.expected" "${work}/lfform.txt"; then
@@ -385,7 +385,7 @@ lfscreens_script="${lfscreens_script};0:wait:Info 2;0:dump;0:cmd:OK;0:wait:Menu"
 lfscreens_script="${lfscreens_script};0:cmd:Edit;0:rows:4;0:dump;0:cmd:Drop;0:rows:3"
 lfscreens_script="${lfscreens_script};0:dump;0:cmd:Exit"
 FPLINUX_PM_LF_TRACE=1 FPLINUX_PM_LF_SCRIPT="${lfscreens_script}" \
-	"${qemu_arm}" -L "${sysroot}" "${headless}" --system-classes "${classes}" \
+	"${qemu_arm}" -L "${sysroot}" "${headless}" \
 	--timeout-ms 60000 "${work}/lfscreens.jar" >"${work}/lfscreens-log.txt"
 awk -f "${here}/lfscreens-trace.awk" "${work}/lfscreens-log.txt" >"${work}/lfscreens.txt"
 if ! cmp -s "${here}/lfscreens.expected" "${work}/lfscreens.txt"; then
@@ -396,7 +396,7 @@ fi
 # The native playback path must fail honestly without a UI audio provider.
 # The same JAR's default AudioMIDlet requires a UI and is run separately.
 build_jar media "${here}/media.mf"
-"${qemu_arm}" -L "${sysroot}" "${headless}" --system-classes "${classes}" \
+"${qemu_arm}" -L "${sysroot}" "${headless}" \
 	--timeout-ms 30000 "${work}/media.jar" \
 	fplinux.fixtures.media.HeadlessMediaMIDlet >"${work}/media-headless.txt"
 grep -qx 'PM-MEDIA headless failure honest' "${work}/media-headless.txt" &&
@@ -405,7 +405,7 @@ grep -qx 'PM-MEDIA headless failure honest' "${work}/media-headless.txt" &&
 
 # MIDlets probing Bluetooth can catch the initialization failure and continue.
 build_jar bluetooth "${here}/bluetooth.mf"
-"${qemu_arm}" -L "${sysroot}" "${headless}" --system-classes "${classes}" \
+"${qemu_arm}" -L "${sysroot}" "${headless}" \
 	--timeout-ms 30000 "${work}/bluetooth.jar" >"${work}/bluetooth.txt"
 grep -qx 'PM-BLUETOOTH local device unavailable' "${work}/bluetooth.txt" ||
 	fail "Bluetooth availability check differs (${work}/bluetooth.txt)"
@@ -426,7 +426,7 @@ for jar in jardir jardir-flat; do
 	for jit in '' 1; do
 		log="${work}/${jar}-log-${jit:-0}.txt"
 		if ! FPLINUX_PHONEME_JIT=${jit} "${qemu_arm}" -L "${sysroot}" "${headless}" \
-			--system-classes "${classes}" --timeout-ms 30000 "${work}/${jar}.jar" \
+			--timeout-ms 30000 "${work}/${jar}.jar" \
 			>"${log}" 2>&1; then
 			cat "${log}" >&2
 			fail "${jar} resource fixture failed (JIT=${jit:-off})"
@@ -441,7 +441,7 @@ done
 
 for api in wireless jsr; do
 	build_jar "${api}" "${here}/${api}.mf"
-	"${qemu_arm}" -L "${sysroot}" "${headless}" --system-classes "${classes}" \
+	"${qemu_arm}" -L "${sysroot}" "${headless}" \
 		--timeout-ms 30000 "${work}/${api}.jar" >"${work}/${api}-log.txt" 2>&1
 	grep '^PM-' "${work}/${api}-log.txt" >"${work}/${api}.txt" || true
 	if ! cmp -s "${here}/${api}.expected" "${work}/${api}.txt"; then
@@ -456,7 +456,7 @@ for asset in pixel.png tone.mid; do
 	base64 -d "${here}/vendor-resources/${asset}.base64" >"${work}/vendor-resources/${asset}"
 done
 "${jdk}/bin/jar" uf "${work}/vendor.jar" -C "${work}/vendor-resources" .
-"${qemu_arm}" -L "${sysroot}" "${headless}" --system-classes "${classes}" \
+"${qemu_arm}" -L "${sysroot}" "${headless}" \
 	--timeout-ms 30000 "${work}/vendor.jar" >"${work}/vendor-log.txt" 2>&1
 if ! grep -qx 'PM-VENDOR checks=ok' "${work}/vendor-log.txt"; then
 	cat "${work}/vendor-log.txt" >&2
@@ -467,7 +467,7 @@ fi
 # would make another Java thread runnable.
 build_jar scheduler "${here}/scheduler.mf"
 FPLINUX_PHONEME_JIT=1 FPLINUX_PM_VM_TEST_EARLY=1 \
-	"${qemu_arm}" -L "${sysroot}" "${headless}" --system-classes "${classes}" \
+	"${qemu_arm}" -L "${sysroot}" "${headless}" \
 	--timeout-ms 30000 "${work}/scheduler.jar" >"${work}/scheduler-log.txt" 2>&1
 grep -E '^(PM-VM forced-early |PM-SLEEP )' "${work}/scheduler-log.txt"
 awk '
@@ -500,7 +500,7 @@ for heap in 4096 8192; do
 	for mode in '' 1; do
 		output="${work}/gc-${heap}-${mode:-0}.txt"
 		if ! FPLINUX_PHONEME_JIT=${mode} "${qemu_arm}" -L "${sysroot}" "${headless}" \
-			--system-classes "${classes}" --heap-kib "${heap}" --timeout-ms 30000 \
+			--heap-kib "${heap}" --timeout-ms 30000 \
 			"${work}/gc.jar" >"${output}" 2>&1; then
 			cat "${output}" >&2
 			fail "System.gc() fixture failed with heap ${heap} KiB and JIT=${mode:-0}"
@@ -518,7 +518,7 @@ done
 # A clock wait keeps its deadline and allows a runnable peer to progress.
 build_jar clock "${here}/clock.mf"
 FPLINUX_PHONEME_JIT=1 "${qemu_arm}" -L "${sysroot}" "${headless}" \
-	--system-classes "${classes}" --timeout-ms 30000 "${work}/clock.jar" \
+	--timeout-ms 30000 "${work}/clock.jar" \
 	>"${work}/clock-log.txt" 2>&1
 grep -E '^PM-CLOCK ' "${work}/clock-log.txt"
 grep -qx 'PM-CLOCK backwards=0' "${work}/clock-log.txt" &&
@@ -544,7 +544,7 @@ grep -qx 'PM-CLOCK backwards=0' "${work}/clock-log.txt" &&
 	fail "clock wait loops missed a deadline, went backwards or starved a thread"
 }
 FPLINUX_PHONEME_JIT=1 "${qemu_arm}" -L "${sysroot}" "${headless}" \
-	--system-classes "${classes}" --timeout-ms 30000 "${work}/clock.jar" \
+	--timeout-ms 30000 "${work}/clock.jar" \
 	fplinux.fixtures.clock.ClockSpinMIDlet >"${work}/clock-spin.txt" 2>&1
 grep -Eq '^PM-CLOCK spin late-max=[0-5] backwards=0$' "${work}/clock-spin.txt" || {
 	cat "${work}/clock-spin.txt" >&2

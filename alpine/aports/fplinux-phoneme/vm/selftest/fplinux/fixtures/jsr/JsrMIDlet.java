@@ -6,6 +6,7 @@ import java.io.IOException;
 import javax.microedition.io.CommConnection;
 import javax.microedition.io.ConnectionNotFoundException;
 import javax.microedition.io.Connector;
+import javax.microedition.io.HttpConnection;
 import javax.microedition.io.PushRegistry;
 import javax.microedition.media.Manager;
 import javax.microedition.media.MediaException;
@@ -29,6 +30,9 @@ public class JsrMIDlet extends MIDlet {
 
     protected void startApp() {
         try {
+            require(Class.forName("javax.microedition.io.HttpConnection") == HttpConnection.class,
+                    "HTTP interface lookup differs");
+            System.out.println("PM-JSR HTTP interface resolves");
             push();
             mediaAndSerial();
             pim();
